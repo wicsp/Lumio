@@ -16,8 +16,8 @@ export * from "./secrets.ts";
 
 import { Actor } from "./actor.ts";
 import { ApiError, OperationRequest, OperationResult } from "./api.ts";
-import { Asset, Experiment, Idea, Paper, Post, Project, Source, Task } from "./entities.ts";
-import { Job } from "./job.ts";
+import { Asset, Experiment, Idea, Paper, Post, Project, Routine, Source, Task } from "./entities.ts";
+import { Job, JobResult, JobSpec, RuntimeAck, RuntimeHeartbeat, RuntimeInfo, RuntimeRegistration, RuntimeSync } from "./job.ts";
 import { Operation } from "./operation.ts";
 import { Proposal } from "./proposal.ts";
 import { CheckResult, LinksResult, NoteDetail, SearchResult } from "./query.ts";
@@ -28,11 +28,19 @@ export const CONTRACTS = {
   idea: Idea,
   project: Project,
   task: Task,
+  routine: Routine,
   experiment: Experiment,
   source: Source,
   post: Post,
   asset: Asset,
   job: Job,
+  "job-spec": JobSpec,
+  "job-result": JobResult,
+  "runtime-registration": RuntimeRegistration,
+  "runtime-info": RuntimeInfo,
+  "runtime-heartbeat": RuntimeHeartbeat,
+  "runtime-sync": RuntimeSync,
+  "runtime-ack": RuntimeAck,
   "search-result": SearchResult,
   "links-result": LinksResult,
   "note-detail": NoteDetail,

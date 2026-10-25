@@ -7,7 +7,8 @@ const fixture = fileURLToPath(new URL("../../../fixtures/layout-vault", import.m
 test("the layout map covers every entity type exactly once (ADR 0012)", () => {
   const types = VAULT_LAYOUT.map((e) => e.type);
   expect(new Set(types).size).toBe(types.length);
-  expect([...types].sort()).toEqual(["asset", "experiment", "idea", "paper", "post", "project", "source", "task"]);
+  expect([...types].sort()).toEqual(["asset", "experiment", "idea", "paper", "post", "project", "routine", "source", "task"]);
+  expect(entityDirectory("routine")).toBe("plan/routines"); // ADR 0019
   expect(entityDirectory("paper")).toBe("library/papers");
   expect(entityDirectory("asset")).toBe("life/assets");
   expect(isPrivateType("asset")).toBe(true);

@@ -17,6 +17,7 @@ export const VAULT_LAYOUT = [
   { dir: "research/experiments", type: "experiment", private: false },
   { dir: "plan/projects", type: "project", private: false },
   { dir: "plan/tasks", type: "task", private: false },
+  { dir: "plan/routines", type: "routine", private: false },
   { dir: "create/posts", type: "post", private: false },
   { dir: "life/assets", type: "asset", private: true },
 ] as const satisfies readonly { dir: string; type: EntityType; private: boolean }[];

@@ -7,7 +7,7 @@ import { Citekey } from "./entities.ts";
  * AI 通过 skill 依赖这些结构，修改即为契约变更。
  */
 
-export const NOTE_TYPES = ["paper", "idea", "project", "task", "experiment", "source", "post", "asset"] as const;
+export const NOTE_TYPES = ["paper", "idea", "project", "task", "routine", "experiment", "source", "post", "asset"] as const;
 
 /** 一篇笔记的简要信息，出现在搜索结果和链接列表中。 */
 export const NoteRef = z.strictObject({

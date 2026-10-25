@@ -9,7 +9,7 @@
 **目标**：在一个地方管理论文笔记、外部资料、想法、项目与任务、实验结果、发布内容和个人资产；
 把想法通过链接串成报告；把工作派给 Mac 或服务器上的 AI，并支持定时工作流。
 
-**非目标**（至少在 P3 之前）：自己写编辑器、自己写 agent 循环、多用户与托管服务、完整的 AI 权限系统
+**非目标**（至少在 P3 之前）：自己写编辑器、自己写 agent 循环（以后会做，作为执行器的一种引擎，ADR 0019）、多用户与托管服务、完整的 AI 权限系统
 （只预留接口，见第 5 节）、与飞书双向同步正文、同步第二份 vault。
 
 ## 1. 总体结构
@@ -21,14 +21,14 @@
 │ CLI │ 飞书 Bot │ Web/插件  │─API─▶│ Hub（程序写入的唯一裁判）       │
 └──────────────────────────┘令牌  │  校验 → 执行 AI 边界 → 写文件   │
                                     │  监听文件变化 → 补全与索引      │
-                                    │  提议队列 · job 队列 · 搜索     │
-                                    └───────┬───────────┬───────────┘
-            Tailscale（或 HTTPS 反向代理）  │           │ 自动提交
+                                    │  任务与轮次 · 例行任务 · 搜索   │
+                                    └───────▲───────────┬───────────┘
+      执行器主动轮询（Tailscale）           │           │ 自动提交
                    ┌────────────────────────┘           ▼
-            ┌──────▼───────┐                 vault 的 git（只做历史与备份，
-            │ Runtime@设备 │ 领取 job，       .git 在同步目录之外）
-            │ 调用 agent   │ 结果经 Hub 写回
-            └──────────────┘
+            ┌──────┴────────┐                vault 的 git（只做历史与备份，
+            │ 执行器@每台设备 │ 本地队列、定时、  .git 在同步目录之外）
+            │ 调用 agent CLI │ 待交回的结果
+            └───────────────┘
 ```
 
 - **vault 是知识的唯一事实来源**：Markdown + YAML frontmatter，就是 Obsidian vault，当前放在 iCloud（ADR 0001、0007）。
@@ -62,7 +62,7 @@
 ```
 library/   papers/ → paper     sources/ → source     refs.bib（生成物）
 research/  ideas/ → idea       experiments/ → experiment     reports/（暂不扫描）
-plan/      projects/ → project tasks/ → task
+plan/      projects/ → project tasks/ → task  routines/ → routine
 create/    posts/ → post
 life/      assets/ → asset（私密）
 files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是实体，不扫描
@@ -83,7 +83,8 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 | source | `src` | 网页、视频、播客、课程、书；`kind`、`url`、`author`、`site` |
 | idea | `idea` | `status`；可关联 `project` |
 | project | `prj` | `status`、`goal`、`repo`、`deadline` |
-| task | `task` | `status`、`assignee`（人或某个 agent）、`due`、`job` |
+| task | `task` | `status`（todo/active/waiting/paused/done/cancelled，只由人改）、`turn`（human/agent）、`assignee`、`due`；派给 AI 时的 `workdir`、`model`、`gpus`、`timeout_minutes`（ADR 0019） |
+| routine | `rtn` | 例行任务：`schedule`（5 段 cron）、`assignee`（agent）、`context`（none/previous）与执行配置；每次结果追加在笔记里（ADR 0019） |
 | experiment | `exp` | `project` 必填；`hypothesis`、`metrics`、`artifacts` |
 | post | `post` | `format` 必填（无默认值）；`media` 按角色命名；`targets` 每个平台一个，发布结果由程序写入 |
 | asset | `ast` | `kind` 必填；订阅、卡、账户、域名、保险、证件等；**私密**；禁止存完整卡号、CVV、密码、余额、证件号 |
@@ -158,13 +159,23 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 - 所有地址可配置；只信任配置过的反向代理传来的客户端信息。
 - 飞书 Bot 用官方 SDK 的长连接，不需要公网回调地址。
 
-### 4.6 给 AI 派活（P2，ADR 0005）
-- 区分 Job 与 Attempt，每次尝试有递增的 fencing 编号，过期的尝试不能覆盖新结果。
-- 进程退出码为 0 不等于成功，输出要通过结果 schema 校验。
-- 重启后状态不明的尝试标为 `unknown`，Job 标为 `needs_attention`，交给人；只有声明可重试且无副作用的失败才自动重试。
-- engine（claude-code、codex、pi、script）与 transport（local、ssh、远端）分开；适配器锁定验证过的 CLI 版本。
-- 不经过 shell，只执行登记过的程序；密钥在执行节点上才解析。
-- Agent 不自己实现，Runtime 调用现成的 agent CLI。
+### 4.6 给 AI 派活（P2，ADR 0005、0019）
+- **Hub 是中心，每台设备上一个执行器**（`lumio-runtime`）。执行器登记能力（agent 及版本、隔离级别、标签如 `gpu:4`），
+  **主动轮询 Hub**；只有 Hub 能派活。执行器的身份角色是 `runtime`：只能领活、回报、登记，不能查询笔记库。
+- **一个任务很多轮**：一轮（Job）= 让某个 agent 执行一次，**只执行一次，不自动重试**；重试由人派出新的一轮。
+- **派下一轮**：在笔记里把 `turn` 改成 `agent`（笔记安静 30 秒后派），或 `lumio task continue`；都走操作 `task.dispatch`。
+  任务已有一轮在执行时不再派。AI 有问题时这一轮以"等你回答"结束，人回答后接着同一个会话继续。
+- **上下文**：能接上原会话时只发人新写的部分；接不上时发人写的部分加最近一轮的汇报。
+- **记录分开**：笔记里是每一轮的汇报摘要（AI 区块）；Hub 数据库里是每一轮的完整记录（配置、状态、时间、退出码、
+  会话编号、开始与结束时的 git 提交、完整汇报）；完整日志在执行器本地。
+- **断开后能接上**：执行器先把 Job 写进本地队列再确认；确认后这一轮归它负责，失联时 Hub 不转给别人。
+  结果先存"待交回"，Hub 确认后才删；重复交回只记一次。Hub 只接受被指派的执行器、带着当前 lease 的回报。
+  执行器重启时，执行到一半的标为 `unknown`，`turn` 改回 `human`。
+- **例行任务**（`plan/routines/`）：计划同步给执行器，到点由执行器自己触发（Hub 离线也照常）；每次是独立的新会话；
+  结果追加到这篇笔记里；`routine followup` 从某一次开出普通任务。
+- **适配器**：`codex exec`、`claude -p`、`pi -p` 的非交互模式；锁定验证过的版本；如实声明隔离级别（`os`/`none`）。
+  不经过 shell；command 类型只执行登记过的程序；密钥在执行节点上才解析。
+- **不做**：跨设备调用工具、每一轮单独的权限、上下文管理、模型路由；留给以后自研的 agent（作为执行器里的一种引擎接入）。
 
 ## 5. AI 协作与权限（ADR 0014、0016、0018）
 
@@ -183,6 +194,8 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 - **错误带决策信息**：错误响应统一为 `ApiError`（代码、说明、被拒绝的操作、原因、提议 ID），AI 据此向人解释。
 - **审计**：每次授权与执行都记入 `hub.sqlite`；Hub 执行的操作立即单独提交，提交信息带 `Lumio-Actor`，
   经提议执行的还带 `Lumio-Proposal`、`Lumio-Approved-By`。自动保存的提交不带身份。
+- **执行器**（ADR 0019）：身份角色 `runtime`，只能领取派给自己的活、回报结果、登记能力；看不到笔记库，只看到 Job 里带的内容。
+- **AI 的汇报只是资料**：不能改 `turn`、不能派新活、不能改状态；`turn` 只能由人改成 `agent`、由 Hub 改成 `human`。
 - **私密实体**（`life/` 下）：默认不出现在任何查询结果中；`agent` 令牌在任何情况下都拿不到；
   `human` 令牌须显式加 `--include-private`。`refs.bib`、报告等不得引用私密实体（ADR 0012、0014）。
 - **局限**：不经过 Hub、直接读文件的 AI 拦不住，需要在 agent 的沙箱配置里排除 `life/`。
@@ -196,6 +209,11 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 - **`life/` 只放记录和提醒**；真正敏感的内容（密码、完整卡号、证件号）放在密码管理器里，不进 vault。
 - **密钥**：代码和配置里只写占位符（如 `${secret:openai}`），由运行时注入；令牌不进日志（AGENTS.md、ADR 0007）。
 - vault 的 `.gitignore` 排除 Obsidian 插件设置文件（可能含明文密钥）。
+- **派活的安全底线**（ADR 0019）：
+  - 执行器用普通账号运行，不用 root；工作目录不能在笔记库里；能用 agent 自带沙箱的就打开，每一轮记录隔离级别。
+  - 高权限命令只能经 `lumio sudo` 发起，成为需要批准的操作 `exec.privileged`；审批模型（P3）只看命令和人写的要求。
+  - AI 汇报写回笔记前检查疑似卡号和常见密钥格式，命中的不写入。
+  - 每一轮有最长运行时间（默认 2 小时）；取消时杀掉整个进程组；`gpus` 只暴露指定的 GPU。
 
 ## 7. 流程
 
@@ -213,6 +231,6 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 | P0 | `lumio new paper`、`lumio new idea`、`lumio sync`；vault 目录结构；source / post / asset 契约 | ✅ |
 | P0-7 | 迁移真实 vault 到新目录 | ✅ |
 | P1 | 本地查询与 `export bib`；Hub（身份与令牌、查询 API、监听、自动提交、操作与提议框架）；按引用导出与断链检查；skill | ✅（pi 验收待补） |
-| P2 | 任务与实验；Runtime 与 job 派发；Python 实验 SDK；Chrome 插件入库 | |
-| P3 | 飞书 Bot、多维表格镜像、定时工作流（含资产到期提醒） | |
+| P2 | 执行器与派活（P2-1 至 P2-6）：执行器登记、可靠的派活核心、三种 agent 适配器、任务笔记里的一问一答、例行任务、`lumio sudo` 审批的门 | 下一步 |
+| P3 | 飞书 Bot（派活、批准、通知）、审批模型、资产到期提醒、多维表格镜像；Chrome 插件入库论文 | |
 | P4 | Web Dashboard、Docker / Nix、对外 SDK、手机端 | |
