@@ -17,7 +17,7 @@
 | [P1-3](P1-3-watch-autosave.md) ✅ | 文件监听、自动补全、自动提交 | 后端（Codex） | P1-2 |
 | [P1-4](P1-4-proposals.md) ✅ | 操作与提议框架（链接部分已由 ADR 0018 取代） | 后端（Codex） | P1-3 |
 | [P1-5](P1-5-cite-check-backup.md) ✅ | 按引用导出 BibTeX、断链检查、Hub 备份 | 后端（Codex） | P1-4 |
-| [P1-6](P1-6-skill.md) ✅ | `skills/lumio/SKILL.md`（三种 agent 的试用待人类执行） | Claude | P1-5 |
+| [P1-6](P1-6-skill.md) ✅ | `skills/lumio/SKILL.md`（Claude Code 已通过自动验收；Codex、pi 待在 Mac 上运行 `skills/lumio/eval/run.sh`） | Claude | P1-5 |
 
 P1 的设计决定见 ADR 0014、0016、0017、0018；契约见 `packages/schema/src/` 中的 `query.ts`、`actor.ts`、`operation.ts`、`proposal.ts`、`api.ts`。
 
