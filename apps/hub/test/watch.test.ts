@@ -211,6 +211,8 @@ test("real recursive fs.watch completes a new note in seconds and its own write 
   const hub = await start({ clock: undefined, watch, onProcess: () => { processed++; }, syncOptions: {
     writeFile: async (...args) => { const changed = await writeFileAtomic(...args); written += Number(changed); return changed; },
   } });
+  // Linux 的递归监听在启动后要一点时间才挂到各个子目录上；这段空档由启动时的全量补全覆盖（不是这个用例要测的）。
+  await Bun.sleep(500);
   const path = join(vault, "research/ideas/x.md"); await cp(fixture, path);
   // 要保证的是"补全只写一次、不循环"。Hub 自己写回后是否还会收到一次事件、何时收到，取决于系统和负载，
   // 不作为断言条件（原来要求恰好处理两次，机器繁忙时会偶发失败）。
