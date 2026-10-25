@@ -11,7 +11,9 @@ export const NOTE_TYPES = ["paper", "idea", "project", "task", "experiment", "so
 
 /** 一篇笔记的简要信息，出现在搜索结果和链接列表中。 */
 export const NoteRef = z.strictObject({
-  id: Id,
+  id: Id.optional().describe(
+    "缺失表示这篇笔记还没有 ID（运行 lumio sync 或由 Hub 补全）；这时只能按文件名引用它。不会用其他值代替",
+  ),
   type: z.enum(NOTE_TYPES),
   title: z.string(),
   path: z.string().describe("相对 vault 根目录的路径，如 library/papers/He_2020_LightGCN.md"),

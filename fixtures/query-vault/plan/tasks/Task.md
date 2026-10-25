@@ -1,0 +1,8 @@
+---
+id: task_00000000000000000000000012
+title: Task
+created: 2026-01-01T00:00:00Z
+updated: 2026-01-01T00:00:00Z
+type: task
+---
+task content

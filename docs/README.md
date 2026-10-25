@@ -10,7 +10,7 @@
 
 ## 现在在哪一步（2026-10-25）
 
-P0 与 P0-7（真实 vault 迁移）已完成；下一步是 **P1-1：本地索引与查询**。阶段表见 [`DESIGN.md`](DESIGN.md) 第 8 节。
+P0 与 P0-7（真实 vault 迁移）已完成；P1-1（本地索引与查询）已完成；下一步是 **P1-2：Hub 骨架**。阶段表见 [`DESIGN.md`](DESIGN.md) 第 8 节。
 
 ## 文档各管什么
 
@@ -49,7 +49,7 @@ P0 与 P0-7（真实 vault 迁移）已完成；下一步是 **P1-1：本地索�
 |---|---|---|
 | [0005](adr/0005-runtime-execution-semantics.md) | 给 AI 派活不怕中断：状态不明就交给人，不自动重试 | Accepted（P2） |
 | [0007](adr/0007-hub-as-single-writer.md) | Hub 是程序写入的唯一裁判；git 只做备份；只讲 HTTP | 部分实现 |
-| [0014](adr/0014-hub-and-ai-access.md) | Hub 的存放、链接、搜索、写入路径、自动提交 | Accepted（P1） |
+| [0014](adr/0014-hub-and-ai-access.md) | Hub 的存放、链接、搜索、写入路径、自动提交 | 部分实现（第 4、5 节） |
 | [0016](adr/0016-operations-actors-authorization.md) | 每次修改都是一个操作，统一授权；审计与 git trailer | Accepted（P1） |
 | [0017](adr/0017-single-machine-deployment.md) | Hub 与 vault 同机、只有一份；单用户单机；远程用 Tailscale | Accepted（P1） |
 

@@ -17,3 +17,6 @@ export * from "./citekey.ts";
 export * from "./bibtex.ts";
 export * from "./paper.ts";
 export * from "./arxiv.ts";
+export * from "./index/query.ts";
+export type { IndexOptions } from "./index/store.ts";
+export * from "./export-bib.ts";
