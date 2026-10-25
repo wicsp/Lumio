@@ -10,7 +10,7 @@
 
 ## 现在在哪一步（2026-10-25）
 
-P0 与 P0-7（真实 vault 迁移）已完成；P1-1 至 P1-4 已完成（P1-4 的链接部分由 ADR 0018 取代）；P1-5（按引用导出、断链检查、Hub 备份）已完成；P1 已完成（skill 在 Claude Code、Codex 上验收通过，pi 待补）；下一步是规划 P2。阶段表见 [`DESIGN.md`](DESIGN.md) 第 8 节。
+P0 与 P0-7（真实 vault 迁移）已完成；P1-1 至 P1-4 已完成（P1-4 的链接部分由 ADR 0018 取代）；P1-5（按引用导出、断链检查、Hub 备份）已完成；P1 已完成（skill 在 Claude Code、Codex 上验收通过，pi 待补）；P2 已设计完（ADR 0019），下一步是 **P2-1：执行器骨架**。阶段表见 [`DESIGN.md`](DESIGN.md) 第 8 节。
 
 ## 文档各管什么
 
@@ -48,7 +48,8 @@ P0 与 P0-7（真实 vault 迁移）已完成；P1-1 至 P1-4 已完成（P1-4 �
 **Hub 与运行**
 | 编号 | 一句话 | 状态 |
 |---|---|---|
-| [0005](adr/0005-runtime-execution-semantics.md) | 给 AI 派活不怕中断：状态不明就交给人，不自动重试 | Accepted（P2） |
+| [0005](adr/0005-runtime-execution-semantics.md) | 给 AI 派活不怕中断：一轮只执行一次，状态不明就交给人 | Accepted（P2） |
+| [0019](adr/0019-hub-runtimes-tasks-rounds.md) | Hub 与执行器；任务的 status/turn；一个任务很多轮；例行任务；派活的安全底线 | Accepted（P2） |
 | [0007](adr/0007-hub-as-single-writer.md) | Hub 是程序写入的唯一裁判；git 只做备份；只讲 HTTP | 部分实现 |
 | [0014](adr/0014-hub-and-ai-access.md) | Hub 的存放、链接、搜索、写入路径、自动提交 | 部分实现（第 4、5 节） |
 | [0016](adr/0016-operations-actors-authorization.md) | 每次修改都是一个操作，统一授权；审计与 git trailer | Implemented |
@@ -61,6 +62,7 @@ P0 与 P0-7（真实 vault 迁移）已完成；P1-1 至 P1-4 已完成（P1-4 �
 | [0014](adr/0014-hub-and-ai-access.md) | AI 只能提议；入口是 CLI + skill；两种令牌 | Accepted（P1） |
 | [0016](adr/0016-operations-actors-authorization.md) | 身份与令牌分开；允许 / 拒绝 / 需要批准；错误带决策信息 | Implemented |
 | [0018](adr/0018-links-in-body-ai-recommends.md) | 链接写在正文里；AI 只推荐不写链接；`related` 弃用 | Implemented |
+| [0019](adr/0019-hub-runtimes-tasks-rounds.md) | 执行器只能领活和回报；AI 的汇报不能派活；`lumio sudo` 需要批准 | Accepted（P2） |
 
 **安全**
 | 编号 | 一句话 | 状态 |

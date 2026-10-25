@@ -6,7 +6,11 @@ import { Timestamp, idOf } from "./common.ts";
  * 令牌只是身份的凭证，一个身份可以有多个令牌，令牌可以单独吊销；提议、审计记录里存的是身份 ID，不是令牌。
  * 身份存放在 Hub 的 hub.sqlite 中，不在 vault 里。P1 中身份只有名称和角色。
  */
-export const ActorRole = z.enum(["human", "agent"]);
+/**
+ * human：人；agent：AI；runtime：执行器（ADR 0019 第 4 节），只能领取派给自己的活、回报结果、登记能力，
+ * 不能查询笔记库。
+ */
+export const ActorRole = z.enum(["human", "agent", "runtime"]);
 
 export const Actor = z.strictObject({
   id: idOf("act"),

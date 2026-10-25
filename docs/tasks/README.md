@@ -18,8 +18,15 @@
 | [P1-4](P1-4-proposals.md) ✅ | 操作与提议框架（链接部分已由 ADR 0018 取代） | 后端（Codex） | P1-3 |
 | [P1-5](P1-5-cite-check-backup.md) ✅ | 按引用导出 BibTeX、断链检查、Hub 备份 | 后端（Codex） | P1-4 |
 | [P1-6](P1-6-skill.md) ✅ | `skills/lumio/SKILL.md`（Claude Code、Codex 自动验收 6 项通过；pi 见待办） | Claude | P1-5 |
+| [P2-0](P2-0-design.md) ✅ | P2 的设计与契约（ADR 0019） | Claude 起草，人类批准 | P1 |
+| [P2-1](P2-1-runtime-register.md) | 执行器骨架：登记、能力、在线情况 | 后端（Codex） | P2-0 |
+| [P2-2](P2-2-dispatch-core.md) | 派活的可靠核心（只跑普通命令） | 后端（Codex） | P2-1 |
+| [P2-3](P2-3-agent-adapters.md) | 接上 codex、claude、pi | 后端（Codex） | P2-2 |
+| [P2-4](P2-4-task-rounds.md) | 任务笔记里的一问一答（做完即可日常使用） | 后端（Codex） | P2-3 |
+| [P2-5](P2-5-routines.md) | 例行任务 | 后端（Codex） | P2-4 |
+| [P2-6](P2-6-sudo-gate.md) | `lumio sudo`：高权限命令的审批门 | 后端（Codex） | P2-4 |
 
-P1 的设计决定见 ADR 0014、0016、0017、0018；契约见 `packages/schema/src/` 中的 `query.ts`、`actor.ts`、`operation.ts`、`proposal.ts`、`api.ts`。
+P1 的设计决定见 ADR 0014、0016、0017、0018；P2 见 ADR 0019 与修订后的 ADR 0005；契约见 `packages/schema/src/` 中的 `query.ts`、`actor.ts`、`operation.ts`、`proposal.ts`、`api.ts`。
 
 ## 待办（尚未排期，到时再写成任务说明）
 
@@ -27,11 +34,14 @@ P1 的设计决定见 ADR 0014、0016、0017、0018；契约见 `packages/schema
 |---|---|---|
 | 论文笔记半手动补全：手写的笔记里有 `arxiv` 或 `doi` 时，联网取元数据补齐其余字段 | P1 之后 | 联网放在 CLI 或 Hub，不进 core |
 | 语义搜索 / RAG：按意思找笔记，方便按想法引用论文 | P2 之后 | 向量和 `index.sqlite` 放在一起；本地模型还是 API 到时再定 |
-| 测试能否调用真实 AI | P2 | 未决定 |
+| 测试能否调用真实 AI | P2 | 未决定；P2-3、P2-4 的自动测试一律用假的 agent，真实 agent 只做人工验证 |
+| Python 实验 SDK | 不做 | 实验结果怎么记由各项目自己的 `AGENTS.md` 决定（ADR 0019 背景） |
 | 完整的 AI 权限系统与 Agent 身份生命周期 | P3 之后 | 接在 ADR 0016 预留的 `authorize`、操作、提议上 |
+| 自研 agent 执行框架（每轮权限、上下文管理、模型路由、跨设备工具） | P3 之后 | ADR 0019 第 7 节：作为执行器的一种引擎接入 |
+| 审批模型、飞书批准 | P3 | ADR 0019 第 7 节 |
 | 服务器模式下 Obsidian 怎么用 | 上服务器时 | ADR 0017 第 5 节的三个备选 |
 | 改名操作 `note.rename`：自己的客户端经 Hub 改名并同步更新所有引用 | 做自己的客户端时 | ADR 0018 第 4 节 |
-| 删除 `related` 字段与 `link.add` 操作 | P2 引入第一个真实写操作时 | ADR 0018 第 3 节 |
+| 删除 `related` 字段与 `link.add` 操作 | P2-4 | ADR 0018 第 3 节；已写进 P2-4 |
 | pi 验收：在 Codex 里嵌套运行 `run.sh pi` 时，pi 调用命令后被 SIGKILL（137）；单独 `pi -p` 正常 | 人类回到 Mac 时 | 先在自己的终端直接运行 `skills/lumio/eval/run.sh pi`，区分是嵌套环境问题还是 pi 的 bug |
 | 多进程并发索引测试在 macOS 上偶发失败过一次（Linux、Mac 上各跑几十次未复现） | 再出现时 | 保留失败输出再查 |
 

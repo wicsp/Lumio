@@ -14,6 +14,7 @@ export const ID_PREFIXES = {
   job: "job",
   proposal: "prop",
   actor: "act",
+  routine: "rtn",
 } as const;
 
 const ULID = "[0-9A-HJKMNP-TV-Z]{26}";
