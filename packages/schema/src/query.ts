@@ -47,6 +47,21 @@ export const LinksResult = z.strictObject({
   incoming: z.array(Link.extend({ note: NoteRef }).describe("反向链接：哪些笔记链接到了这里")),
 });
 
+/**
+ * `lumio check` 的结果：vault 中所有悬空链接（ADR 0018）。改名造成的断链由人修复，Lumio 只负责列出。
+ * 私密笔记中的链接，以及指向私密笔记的链接是否可见，规则与 `links` 相同。
+ */
+export const CheckResult = z.strictObject({
+  dangling: z.array(
+    z.strictObject({
+      from: NoteRef.describe("链接所在的笔记"),
+      source: LinkSource,
+      target: z.string().describe("原始链接目标"),
+    }),
+  ),
+  total: z.number().int().nonnegative(),
+});
+
 /** `lumio show` 的结果。 */
 export const NoteDetail = z.strictObject({
   note: NoteRef,
@@ -60,3 +75,4 @@ export type SearchResult = z.infer<typeof SearchResult>;
 export type Link = z.infer<typeof Link>;
 export type LinksResult = z.infer<typeof LinksResult>;
 export type NoteDetail = z.infer<typeof NoteDetail>;
+export type CheckResult = z.infer<typeof CheckResult>;

@@ -33,6 +33,6 @@ bun run schema:export  # 把契约导出为 JSON Schema（packages/schema/json/�
 ## 当前阶段
 
 P0 已完成：`lumio new paper`、`lumio new idea`、`lumio sync`，以及新的 vault 目录结构（ADR 0012）。
-真实 vault 已迁移到新目录（P0-7）。下一步：P1（Hub 与查询），从 P1-1 开始。
+真实 vault 已迁移到新目录（P0-7）。P1-1 至 P1-4 已完成：本地查询、Hub、文件监听与自动提交、操作与提议框架。下一步：P1-5、P1-6。
 
 文档入口：[`docs/README.md`](docs/README.md)。

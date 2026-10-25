@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import {
   Actor,
+  CheckResult,
   ApiError,
   CONTRACTS,
   Id,
@@ -31,6 +32,12 @@ describe("query contracts", () => {
     });
     expect(parsed.outgoing[0]?.note).toBeUndefined();
     expect(LinksResult.safeParse({ note: ref, outgoing: [], incoming: [{ source: "related", target: "x", dangling: true }] }).success).toBe(false);
+  });
+
+  test("check result lists dangling links with their source note", () => {
+    const parsed = CheckResult.parse({ dangling: [{ from: ref, source: "wikilink", target: "Old_2020_Name" }], total: 1 });
+    expect(parsed.dangling[0]?.target).toBe("Old_2020_Name");
+    expect(CheckResult.safeParse({ dangling: [{ from: ref, source: "wikilink", target: "x", note: ref }], total: 1 }).success).toBe(false);
   });
 
   test("query contracts are strict", () => {

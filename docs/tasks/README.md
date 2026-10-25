@@ -15,10 +15,11 @@
 | [P1-1](P1-1-index-query.md) ✅ | 本地索引与查询：`search`/`show`/`links`/`export bib` | 后端（Codex） | P0-7 |
 | [P1-2](P1-2-hub-server.md) ✅ | Hub 骨架：配置、令牌、查询 API、CLI 远程模式 | 后端（Codex） | P1-1 |
 | [P1-3](P1-3-watch-autosave.md) ✅ | 文件监听、自动补全、自动提交 | 后端（Codex） | P1-2 |
-| [P1-4](P1-4-proposals.md) | 提议队列 | 后端（Codex） | P1-3 |
-| [P1-5](P1-5-skill.md) | `skills/lumio/SKILL.md` | Claude | P1-4 |
+| [P1-4](P1-4-proposals.md) ✅ | 操作与提议框架（链接部分已由 ADR 0018 取代） | 后端（Codex） | P1-3 |
+| [P1-5](P1-5-cite-check-backup.md) | 按引用导出 BibTeX、断链检查、Hub 备份 | 后端（Codex） | P1-4 |
+| [P1-6](P1-6-skill.md) | `skills/lumio/SKILL.md` | Claude | P1-5 |
 
-P1 的设计决定见 ADR 0014、0016、0017；契约见 `packages/schema/src/` 中的 `query.ts`、`actor.ts`、`operation.ts`、`proposal.ts`、`api.ts`。
+P1 的设计决定见 ADR 0014、0016、0017、0018；契约见 `packages/schema/src/` 中的 `query.ts`、`actor.ts`、`operation.ts`、`proposal.ts`、`api.ts`。
 
 ## 待办（尚未排期，到时再写成任务说明）
 
@@ -29,6 +30,8 @@ P1 的设计决定见 ADR 0014、0016、0017；契约见 `packages/schema/src/` 
 | 测试能否调用真实 AI | P2 | 未决定 |
 | 完整的 AI 权限系统与 Agent 身份生命周期 | P3 之后 | 接在 ADR 0016 预留的 `authorize`、操作、提议上 |
 | 服务器模式下 Obsidian 怎么用 | 上服务器时 | ADR 0017 第 5 节的三个备选 |
+| 改名操作 `note.rename`：自己的客户端经 Hub 改名并同步更新所有引用 | 做自己的客户端时 | ADR 0018 第 4 节 |
+| 删除 `related` 字段与 `link.add` 操作 | P2 引入第一个真实写操作时 | ADR 0018 第 3 节 |
 
 已完成（✅）的任务说明保留当时的原文，其中的 vault 路径（如 `papers/`）以 ADR 0012 的新目录为准。
 

@@ -10,7 +10,7 @@
 
 ## 现在在哪一步（2026-10-25）
 
-P0 与 P0-7（真实 vault 迁移）已完成；P1-1 至 P1-3（本地查询、Hub 骨架、文件监听与自动提交）已完成；P1-3 的 iPad 实测已通过；下一步是 **P1-4：操作与提议**。阶段表见 [`DESIGN.md`](DESIGN.md) 第 8 节。
+P0 与 P0-7（真实 vault 迁移）已完成；P1-1 至 P1-4 已完成（P1-4 的链接部分由 ADR 0018 取代）；下一步是 **P1-5：按引用导出、断链检查、Hub 备份**，然后 P1-6 skill。阶段表见 [`DESIGN.md`](DESIGN.md) 第 8 节。
 
 ## 文档各管什么
 
@@ -43,6 +43,7 @@ P0 与 P0-7（真实 vault 迁移）已完成；P1-1 至 P1-3（本地查询、H
 | [0008](adr/0008-null-means-absent.md) | frontmatter 里留空的字段视为没填 | Implemented |
 | [0009](adr/0009-lumio-owns-metadata.md) | 元数据由 Lumio 补全；只补缺的，不改已有的 | 部分实现 |
 | [0012](adr/0012-vault-layout-sources-posts-assets.md) | vault 六个大类；外部资料、发布内容、资产三种新类型 | 部分实现 |
+| [0018](adr/0018-links-in-body-ai-recommends.md) | 链接只写在正文；改名只在受控环境；导出时从正文找引用 | Accepted |
 
 **Hub 与运行**
 | 编号 | 一句话 | 状态 |
@@ -50,7 +51,7 @@ P0 与 P0-7（真实 vault 迁移）已完成；P1-1 至 P1-3（本地查询、H
 | [0005](adr/0005-runtime-execution-semantics.md) | 给 AI 派活不怕中断：状态不明就交给人，不自动重试 | Accepted（P2） |
 | [0007](adr/0007-hub-as-single-writer.md) | Hub 是程序写入的唯一裁判；git 只做备份；只讲 HTTP | 部分实现 |
 | [0014](adr/0014-hub-and-ai-access.md) | Hub 的存放、链接、搜索、写入路径、自动提交 | 部分实现（第 4、5 节） |
-| [0016](adr/0016-operations-actors-authorization.md) | 每次修改都是一个操作，统一授权；审计与 git trailer | Accepted（P1） |
+| [0016](adr/0016-operations-actors-authorization.md) | 每次修改都是一个操作，统一授权；审计与 git trailer | Implemented |
 | [0017](adr/0017-single-machine-deployment.md) | Hub 与 vault 同机、只有一份；单用户单机；远程用 Tailscale | Accepted（P1） |
 
 **AI 协作与权限**
@@ -58,7 +59,8 @@ P0 与 P0-7（真实 vault 迁移）已完成；P1-1 至 P1-3（本地查询、H
 |---|---|---|
 | [0012](adr/0012-vault-layout-sources-posts-assets.md) | AI 内容写在标记区块里；`life/` 私密 | 部分实现 |
 | [0014](adr/0014-hub-and-ai-access.md) | AI 只能提议；入口是 CLI + skill；两种令牌 | Accepted（P1） |
-| [0016](adr/0016-operations-actors-authorization.md) | 身份与令牌分开；允许 / 拒绝 / 需要批准；错误带决策信息 | Accepted（P1） |
+| [0016](adr/0016-operations-actors-authorization.md) | 身份与令牌分开；允许 / 拒绝 / 需要批准；错误带决策信息 | Implemented |
+| [0018](adr/0018-links-in-body-ai-recommends.md) | 链接写在正文里；AI 只推荐不写链接；`related` 弃用 | Accepted |
 
 **安全**
 | 编号 | 一句话 | 状态 |
