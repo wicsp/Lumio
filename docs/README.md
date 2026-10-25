@@ -50,12 +50,15 @@ P0 已完成；下一步是 **P0-7：把真实 vault 迁移到新目录**；之�
 | [0005](adr/0005-runtime-execution-semantics.md) | 给 AI 派活不怕中断：状态不明就交给人，不自动重试 | Accepted（P2） |
 | [0007](adr/0007-hub-as-single-writer.md) | Hub 是程序写入的唯一裁判；git 只做备份；只讲 HTTP | 部分实现 |
 | [0014](adr/0014-hub-and-ai-access.md) | Hub 的存放、链接、搜索、写入路径、自动提交 | Accepted（P1） |
+| [0016](adr/0016-operations-actors-authorization.md) | 每次修改都是一个操作，统一授权；审计与 git trailer | Accepted（P1） |
+| [0017](adr/0017-single-machine-deployment.md) | Hub 与 vault 同机、只有一份；单用户单机；远程用 Tailscale | Accepted（P1） |
 
 **AI 协作与权限**
 | 编号 | 一句话 | 状态 |
 |---|---|---|
 | [0012](adr/0012-vault-layout-sources-posts-assets.md) | AI 内容写在标记区块里；`life/` 私密 | 部分实现 |
 | [0014](adr/0014-hub-and-ai-access.md) | AI 只能提议；入口是 CLI + skill；两种令牌 | Accepted（P1） |
+| [0016](adr/0016-operations-actors-authorization.md) | 身份与令牌分开；允许 / 拒绝 / 需要批准；错误带决策信息 | Accepted（P1） |
 
 **安全**
 | 编号 | 一句话 | 状态 |
@@ -63,6 +66,7 @@ P0 已完成；下一步是 **P0-7：把真实 vault 迁移到新目录**；之�
 | [0007](adr/0007-hub-as-single-writer.md) | 所有请求都要令牌；HTTPS 交给反向代理 | 部分实现 |
 | [0012](adr/0012-vault-layout-sources-posts-assets.md) | 禁存卡号；卡号写法 + Luhn 校验 | 部分实现 |
 | [0014](adr/0014-hub-and-ai-access.md) | 含卡号的文件不提交、不索引；私密由令牌角色执行 | Accepted（P1） |
+| [0017](adr/0017-single-machine-deployment.md) | Hub 只监听本机，远程访问经 `tailscale serve` | Accepted（P1） |
 
 **流程**
 | 编号 | 一句话 | 状态 |

@@ -18,7 +18,17 @@
 | [P1-4](P1-4-proposals.md) | 提议队列 | 后端（Codex） | P1-3 |
 | [P1-5](P1-5-skill.md) | `skills/lumio/SKILL.md` | Claude | P1-4 |
 
-P1 的设计决定见 ADR 0014；契约见 `packages/schema/src/query.ts` 与 `proposal.ts`。
+P1 的设计决定见 ADR 0014、0016、0017；契约见 `packages/schema/src/` 中的 `query.ts`、`actor.ts`、`operation.ts`、`proposal.ts`、`api.ts`。
+
+## 待办（尚未排期，到时再写成任务说明）
+
+| 内容 | 大约在 | 备注 |
+|---|---|---|
+| 论文笔记半手动补全：手写的笔记里有 `arxiv` 或 `doi` 时，联网取元数据补齐其余字段 | P1 之后 | 联网放在 CLI 或 Hub，不进 core |
+| 语义搜索 / RAG：按意思找笔记，方便按想法引用论文 | P2 之后 | 向量和 `index.sqlite` 放在一起；本地模型还是 API 到时再定 |
+| 测试能否调用真实 AI | P2 | 未决定 |
+| 完整的 AI 权限系统与 Agent 身份生命周期 | P3 之后 | 接在 ADR 0016 预留的 `authorize`、操作、提议上 |
+| 服务器模式下 Obsidian 怎么用 | 上服务器时 | ADR 0017 第 5 节的三个备选 |
 
 已完成（✅）的任务说明保留当时的原文，其中的 vault 路径（如 `papers/`）以 ADR 0012 的新目录为准。
 

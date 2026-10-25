@@ -8,13 +8,19 @@ export * from "./common.ts";
 export * from "./entities.ts";
 export * from "./job.ts";
 export * from "./query.ts";
+export * from "./actor.ts";
+export * from "./operation.ts";
 export * from "./proposal.ts";
+export * from "./api.ts";
 export * from "./secrets.ts";
 
+import { Actor } from "./actor.ts";
+import { ApiError, OperationRequest, OperationResult } from "./api.ts";
 import { Asset, Experiment, Idea, Paper, Post, Project, Source, Task } from "./entities.ts";
 import { Job } from "./job.ts";
+import { Operation } from "./operation.ts";
+import { Proposal } from "./proposal.ts";
 import { LinksResult, NoteDetail, SearchResult } from "./query.ts";
-import { NewProposal, Proposal } from "./proposal.ts";
 
 /** 需要导出为 JSON Schema 的全部契约，键名即输出文件名。 */
 export const CONTRACTS = {
@@ -30,6 +36,10 @@ export const CONTRACTS = {
   "search-result": SearchResult,
   "links-result": LinksResult,
   "note-detail": NoteDetail,
+  actor: Actor,
+  operation: Operation,
+  "operation-request": OperationRequest,
+  "operation-result": OperationResult,
   proposal: Proposal,
-  "new-proposal": NewProposal,
+  "api-error": ApiError,
 } as const;
