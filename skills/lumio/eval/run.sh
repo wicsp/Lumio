@@ -28,10 +28,12 @@ for _ in $(seq 1 50); do curl -sf "http://127.0.0.1:$port/health" >/dev/null && 
 
 export PATH="$work/bin:$PATH" LUMIO_HUB_URL="http://127.0.0.1:$port" LUMIO_TOKEN="$token"
 cd "$work/cwd"
+# stdin 一律接 /dev/null：codex exec、pi -p 都会等待标准输入，不关掉就会一直挂着。
+# 测试目录不是 git 仓库，codex exec 需要 --skip-git-repo-check。
 case "$agent" in
-  claude) claude -p "$prompt" --allowedTools Bash >"$work/out.txt" ;;
-  codex)  codex exec -c sandbox_workspace_write.network_access=true "$prompt" >"$work/out.txt" ;;
-  pi)     pi -p "$prompt" >"$work/out.txt" ;;
+  claude) claude -p "$prompt" --allowedTools Bash </dev/null >"$work/out.txt" ;;
+  codex)  codex exec --skip-git-repo-check -c sandbox_workspace_write.network_access=true "$prompt" </dev/null >"$work/out.txt" ;;
+  pi)     pi -p "$prompt" </dev/null >"$work/out.txt" ;;
   *) echo "未知 agent：$agent" >&2; exit 2 ;;
 esac
 
