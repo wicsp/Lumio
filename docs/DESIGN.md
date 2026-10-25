@@ -212,7 +212,7 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 |---|---|---|
 | P0 | `lumio new paper`、`lumio new idea`、`lumio sync`；vault 目录结构；source / post / asset 契约 | ✅ |
 | P0-7 | 迁移真实 vault 到新目录 | ✅ |
-| P1 | 本地查询与 `export bib`；Hub（身份与令牌、查询 API、监听、自动提交、操作与提议框架）；按引用导出与断链检查；skill | 进行中 |
+| P1 | 本地查询与 `export bib`；Hub（身份与令牌、查询 API、监听、自动提交、操作与提议框架）；按引用导出与断链检查；skill | ✅（pi 验收待补） |
 | P2 | 任务与实验；Runtime 与 job 派发；Python 实验 SDK；Chrome 插件入库 | |
 | P3 | 飞书 Bot、多维表格镜像、定时工作流（含资产到期提醒） | |
 | P4 | Web Dashboard、Docker / Nix、对外 SDK、手机端 | |
