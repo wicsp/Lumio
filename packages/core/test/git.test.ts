@@ -75,3 +75,23 @@ test("an unborn repository can make its first autosave commit", async () => {
   expect(git("rev-list", "--count", "HEAD").trim()).toBe("1");
   expect(await repo.changedFiles()).toEqual([]);
 });
+
+test("operation commits carry actor/proposal/approver trailers and only the selected snapshot", async () => {
+  const repo = (await openVaultGit(vault))!;
+  const path = "note.md";
+  await cp(new URL("../../../fixtures/query-vault/research/ideas/Literal.md", import.meta.url), join(vault, path));
+  await repo.add(path);
+  const trailers = { "Lumio-Actor": "act_00000000000000000000000001", "Lumio-Proposal": "prop_00000000000000000000000001", "Lumio-Approved-By": "act_00000000000000000000000002" };
+  await repo.commit([path], "lumio: link.add Literal → Paper", trailers);
+  expect(git("show", "-s", "--format=%B")).toContain(Object.entries(trailers).map(([key, value]) => `${key}: ${value}`).join("\n"));
+  expect(git("show", "--format=", "--name-only", "HEAD").trim()).toBe(path);
+});
+
+test("committing a snapshot already in HEAD is a no-op", async () => {
+  const repo = (await openVaultGit(vault))!;
+  await cp(new URL("../../../fixtures/query-vault/research/ideas/Literal.md", import.meta.url), join(vault, "note.md"));
+  await repo.add("note.md"); await repo.commit(["note.md"], "first");
+  const head = git("rev-parse", "HEAD");
+  await repo.add("note.md"); await repo.commit(["note.md"], "unchanged");
+  expect(git("rev-parse", "HEAD")).toBe(head);
+});

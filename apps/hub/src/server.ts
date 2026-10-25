@@ -4,6 +4,7 @@ import { CoreError, noteLinks, searchNotes, showNote, type SearchOptions } from 
 import { ApiError, NOTE_TYPES, type ApiErrorCode } from "@lumio/schema";
 import { version } from "../package.json";
 import { startVaultWatch, type WatchOptions } from "./watch.ts";
+import { handleOperation, type OperationOptions } from "./operations.ts";
 import { authorize } from "./authorize.ts";
 import type { HubConfig } from "./config.ts";
 import { HubError } from "./errors.ts";
@@ -11,6 +12,11 @@ import { HubStore, type Identity } from "./store.ts";
 
 // Routes share authentication, authorization and logging before dispatch.
 export const ROUTES = [
+  { operation: "operations", method: "POST", pattern: /^\/v1\/operations$/ },
+  { operation: "actors", method: "GET", pattern: /^\/v1\/actors$/ },
+  { operation: "proposals", method: "GET", pattern: /^\/v1\/proposals$/ },
+  { operation: "proposal.accept", method: "POST", pattern: /^\/v1\/proposals\/([^/]+)\/accept$/ },
+  { operation: "proposal.reject", method: "POST", pattern: /^\/v1\/proposals\/([^/]+)\/reject$/ },
   { operation: "status", pattern: /^\/v1\/status$/ },
   { operation: "health", pattern: /^\/health$/ },
   { operation: "search", pattern: /^\/v1\/search$/ },
@@ -23,6 +29,7 @@ export async function startHub(config: HubConfig, options: {
   log?: (line: string) => void;
   authorize?: typeof authorize;
   watch?: WatchOptions;
+  operations?: OperationOptions;
 } = {}) {
   if (!(await stat(config.vault)).isDirectory()) throw new HubError("INVALID", "LUMIO_VAULT 必须是目录");
   const store = await HubStore.open(config.stateDir);
@@ -41,9 +48,11 @@ export async function startHub(config: HubConfig, options: {
         let identity: Identity | null = null;
         let status = 500;
         // Logging uses route templates, so references (or secrets in a URL) cannot leak.
-        const route = ROUTES.find((route) => request.method === "GET" && route.pattern.test(url.pathname));
+        const route = ROUTES.find((route) => request.method === ("method" in route ? route.method : "GET") && route.pattern.test(url.pathname));
         const path = route?.operation === "status" ? "/v1/status" : route?.operation === "health" ? "/health" : route?.operation === "search" ? "/v1/search"
-          : route?.operation === "show" ? "/v1/notes/<reference>" : route?.operation === "links" ? "/v1/notes/<reference>/links" : "<unmatched>";
+          : route?.operation === "show" ? "/v1/notes/<reference>" : route?.operation === "links" ? "/v1/notes/<reference>/links" : route?.operation === "operations" ? "/v1/operations"
+            : route?.operation === "actors" ? "/v1/actors" : route?.operation === "proposals" ? "/v1/proposals"
+              : route?.operation === "proposal.accept" ? "/v1/proposals/<id>/accept" : route?.operation === "proposal.reject" ? "/v1/proposals/<id>/reject" : "<unmatched>";
         let clientIp = server.requestIP(request)?.address ?? null;
         if (config.trustedProxy && clientIp === config.trustedProxy) {
           const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
@@ -55,6 +64,13 @@ export async function startHub(config: HubConfig, options: {
             if (!identity) throw new HubError("UNAUTHENTICATED", "需要有效的 Bearer 令牌");
           }
           if (!route) throw new HubError("NOT_FOUND", "找不到端点");
+          if (route.operation === "operations" || route.operation === "actors" || route.operation === "proposals" || route.operation === "proposal.accept" || route.operation === "proposal.reject") {
+            const response = await vaultWatch!.exclusive(() => handleOperation(request,
+              route.operation,
+              route.pattern.exec(url.pathname)?.[1], identity!, store, config, decide, options.operations));
+            status = response.status;
+            return response;
+          }
           const privateValue = url.searchParams.get("include_private");
           const includePrivate = privateValue === "true";
           const decision = decide(identity?.actor ?? null, { operation: route.operation, includePrivate: route.operation === "health" ? false : includePrivate });
@@ -87,13 +103,14 @@ export async function startHub(config: HubConfig, options: {
           return Response.json(result);
         } catch (cause) {
           let code: ApiErrorCode = "INTERNAL", message = "Hub 无法处理请求";
-          if (cause instanceof HubError) { code = cause.code; message = cause.message; }
+          let details: Omit<ApiError["error"], "code" | "message"> = {};
+          if (cause instanceof HubError) { code = cause.code; message = cause.message; details = cause.details; }
           else if (cause instanceof CoreError) {
             if (cause.code === "NOTE_NOT_FOUND") { code = "NOT_FOUND"; message = cause.message; }
             else if (["INVALID_QUERY", "INVALID_LIMIT", "AMBIGUOUS_REFERENCE"].includes(cause.code)) { code = "INVALID"; message = cause.message; }
           }
           status = STATUS[code];
-          return Response.json(ApiError.parse({ error: { code, message } }), { status });
+          return Response.json(ApiError.parse({ error: { code, message, ...details } }), { status });
         } finally {
           log(JSON.stringify({ time, actor_id: identity?.actor.id ?? null, token_label: identity?.label ?? null,
             method: request.method, path, status, duration_ms: performance.now() - start, client_ip: clientIp }));

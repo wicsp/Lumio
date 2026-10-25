@@ -45,12 +45,16 @@ test("default binding is loopback; public health and every registered route call
   expect(readConfig({ LUMIO_VAULT: vault }).hostname).toBe("127.0.0.1");
   expect(readConfig({ LUMIO_VAULT: vault }).port).toBe(7420);
   expect(hub!.server.hostname).toBe("127.0.0.1");
-  const paths = { status: "/v1/status", health: "/health", search: "/v1/search?q=index", show: "/v1/notes/Main", links: "/v1/notes/Main/links" };
+  const first = hub!.store.createProposal({ op: "link.add", args: { from: "idea_00000000000000000000000004", to: "idea_00000000000000000000000015" } }, "fixture", hub!.store.actors()[0]!.id);
+  const second = hub!.store.createProposal({ op: "link.add", args: { from: "idea_00000000000000000000000015", to: "idea_00000000000000000000000004" } }, "fixture", hub!.store.actors()[0]!.id);
+  const paths = { actors: "/v1/actors", proposals: "/v1/proposals", operations: "/v1/operations", "proposal.accept": `/v1/proposals/${first.id}/accept`, "proposal.reject": `/v1/proposals/${second.id}/reject`, status: "/v1/status", health: "/health", search: "/v1/search?q=index", show: "/v1/notes/Main", links: "/v1/notes/Main/links" };
   for (const route of ROUTES) {
-    const response = await request(paths[route.operation], route.operation === "health" ? undefined : human);
+    const response = route.operation === "operations"
+      ? await fetch(`${base()}/v1/operations`, { method: "POST", headers: { Authorization: `Bearer ${human}`, "Content-Type": "application/json" }, body: JSON.stringify({ operation: { op: "link.add", args: { from: "idea_00000000000000000000000015", to: "pap_00000000000000000000000001" } } }) })
+      : await request(paths[route.operation], route.operation === "health" ? undefined : human, {}, "method" in route ? route.method : "GET");
     expect(response.status).toBe(200);
     if (route.operation === "health") expect(await response.json()).toEqual({ ok: true, version: "0.0.0" });
-    expect(decisions.at(-1)?.operation).toBe(route.operation);
+    expect(decisions.at(-1)?.operation).toBe(route.operation === "operations" ? "link.add" : route.operation);
   }
   expect(decisions).toHaveLength(ROUTES.length);
 });
@@ -144,12 +148,14 @@ test("only configured proxy can supply a valid forwarded IP", async () => {
 });
 
 test("authorization table is exhaustively checked, including private=false", () => {
-  expect(AUTHORIZATION_RULES).toHaveLength(17);
+  expect(AUTHORIZATION_RULES).toHaveLength(27);
   for (const rule of AUTHORIZATION_RULES) {
     const actor = rule.role === null ? null : Actor.parse({ id: "act_00000000000000000000000001", name: "test", role: rule.role, created: "2026-01-01T00:00:00Z" });
     const decision = authorize(actor, { operation: rule.operation, includePrivate: rule.includePrivate });
     expect(decision).toEqual(rule.decision);
-    expect(decision.result).toBe(rule.role === "agent" && rule.includePrivate ? "deny" : "allow");
+    const expected = rule.role !== "agent" ? "allow" : rule.operation === "link.add" ? "needs_approval"
+      : rule.includePrivate || rule.operation.startsWith("proposal.") ? "deny" : "allow";
+    expect(decision.result).toBe(expected);
   }
   expect(authorize(null, { operation: "search" }).result).toBe("deny");
 });

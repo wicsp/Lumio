@@ -3,7 +3,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { chmod, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { newId } from "@lumio/core";
-import { Actor, type ActorRole } from "@lumio/schema";
+import { Actor, Proposal, type Operation, type ProposalStatus, type ActorRole } from "@lumio/schema";
 import type { QueryOperation } from "./authorize.ts";
 import { HubError } from "./errors.ts";
 
@@ -21,6 +21,8 @@ export class HubStore {
         CREATE TABLE IF NOT EXISTS actors (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, role TEXT NOT NULL, created TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS tokens (label TEXT PRIMARY KEY, actor_id TEXT NOT NULL REFERENCES actors(id), hash TEXT NOT NULL UNIQUE,
           created TEXT NOT NULL, revoked TEXT);
+        CREATE TABLE IF NOT EXISTS proposals (id TEXT PRIMARY KEY, operation TEXT NOT NULL, reason TEXT NOT NULL,
+          author TEXT NOT NULL REFERENCES actors(id), status TEXT NOT NULL, created TEXT NOT NULL, decided TEXT, decided_by TEXT REFERENCES actors(id));
         CREATE TABLE IF NOT EXISTS audit (time TEXT NOT NULL, actor_id TEXT NOT NULL REFERENCES actors(id), token_label TEXT NOT NULL,
           operation TEXT NOT NULL, authorization TEXT NOT NULL, proposal_id TEXT, execution_result TEXT);
       `);
@@ -76,6 +78,41 @@ export class HubStore {
   auditDenied(identity: Identity, operation: QueryOperation): void {
     this.db.query("INSERT INTO audit VALUES (?, ?, ?, ?, 'deny', NULL, NULL)")
       .run(new Date().toISOString(), identity.actor.id, identity.label, operation);
+  }
+
+  proposals(status: ProposalStatus, author?: string): Proposal[] {
+    return this.db.query<{ id: string }, [string, string | null, string | null]>(
+      "SELECT id FROM proposals WHERE status=? AND (? IS NULL OR author=?) ORDER BY created DESC, id DESC",
+    ).all(status, author ?? null, author ?? null).map((row) => this.proposal(row.id)!);
+  }
+
+  proposal(id: string): Proposal | undefined {
+    const row = this.db.query<{ id: string; operation: string; reason: string; author: string; status: string; created: string; decided: string | null; decided_by: string | null }, [string]>(
+      "SELECT * FROM proposals WHERE id=?",
+    ).get(id);
+    return row ? Proposal.parse({ ...row, operation: JSON.parse(row.operation), decided: row.decided ?? undefined, decided_by: row.decided_by ?? undefined }) : undefined;
+  }
+
+  createProposal(operation: Operation, reason: string, author: string): Proposal {
+    const duplicate = this.proposals("pending").find((p) => p.operation.op === operation.op
+      && p.operation.args.from === operation.args.from && p.operation.args.to === operation.args.to);
+    if (duplicate) throw new HubError("CONFLICT", "已有相同的待批准提议", { operation, proposal: duplicate.id });
+    const now = new Date();
+    const proposal = Proposal.parse({ id: newId("prop", now, randomBytes), operation, reason, author, status: "pending", created: now.toISOString() });
+    this.db.query("INSERT INTO proposals VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)")
+      .run(proposal.id, JSON.stringify(operation), reason, author, proposal.status, proposal.created);
+    return proposal;
+  }
+
+  decideProposal(id: string, status: "accepted" | "rejected", actor: string): Proposal {
+    this.db.query("UPDATE proposals SET status=?, decided=?, decided_by=? WHERE id=? AND status='pending'")
+      .run(status, new Date().toISOString(), actor, id);
+    return this.proposal(id)!;
+  }
+
+  audit(identity: Identity, operation: string, authorization: string, proposal?: string, execution?: string): void {
+    this.db.query("INSERT INTO audit VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(new Date().toISOString(), identity.actor.id, identity.label, operation, authorization, proposal ?? null, execution ?? null);
   }
 
   close(): void { this.db.close(); }

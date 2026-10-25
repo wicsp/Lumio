@@ -160,6 +160,12 @@ export async function startVaultWatch(config: { vault: string; stateDir: string;
   } catch (cause) { watcher?.close(); throw cause; }
 
   return {
+    // Serialize operation commits with autosave and metadata completion.
+    exclusive<T>(action: () => Promise<T>): Promise<T> {
+      const result = queue.then(action);
+      queue = result.then(() => {}, () => {});
+      return result;
+    },
     notify,
     async drain() { await queue; },
     async status(includePrivate = false): Promise<HubStatus> {

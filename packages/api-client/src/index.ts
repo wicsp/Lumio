@@ -1,4 +1,4 @@
-import { ApiError, LinksResult, NoteDetail, SearchResult, type ApiErrorCode, type NoteRef } from "@lumio/schema";
+import { Actor, OperationRequest, OperationResult, Proposal, ProposalStatus, ApiError, LinksResult, NoteDetail, SearchResult, type ApiErrorCode, type NoteRef } from "@lumio/schema";
 
 export class ApiClientError extends Error {
   readonly code: ApiErrorCode;
@@ -20,33 +20,47 @@ export interface SearchOptions extends QueryOptions { type?: NoteRef["type"]; li
 export function createClient(options: { url: string; token: string; fetch?: typeof globalThis.fetch }) {
   const fetcher = options.fetch ?? globalThis.fetch;
   const base = options.url.replace(/\/+$/, "");
-  async function get<T>(path: string, params: Record<string, string>, schema: { parse(value: unknown): T }): Promise<T> {
+  async function request<T>(path: string, params: Record<string, string>, schema: { parse(value: unknown): T }, body?: unknown): Promise<T> {
     try {
       const url = new URL(`${base}${path}`);
       for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
-      const response = await fetcher(url, { headers: { Authorization: `Bearer ${options.token}` }, redirect: "error" });
-      const body: unknown = await response.json();
-      if (!response.ok) throw new ApiClientError(ApiError.parse(body).error, response.status);
-      return schema.parse(body);
+      const response = await fetcher(url, {
+        method: body === undefined ? "GET" : "POST",
+        headers: { Authorization: `Bearer ${options.token}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }), redirect: "error",
+      });
+      const responseBody: unknown = await response.json();
+      if (!response.ok) throw new ApiClientError(ApiError.parse(responseBody).error, response.status);
+      return schema.parse(responseBody);
     } catch (cause) {
       if (cause instanceof ApiClientError) throw cause;
       // Fetch/schema errors can contain request URLs or response data. Do not expose them.
       throw new ApiClientError({ code: "INTERNAL", message: "无法调用 Hub，或 Hub 返回了不合法的响应" });
     }
   }
+  function validate<T>(schema: { safeParse(value: unknown): { success: true; data: T } | { success: false } }, value: unknown): T {
+    const parsed = schema.safeParse(value);
+    if (!parsed.success) throw new ApiClientError({ code: "INVALID", message: "请求参数不合法" });
+    return parsed.data;
+  }
   const queryParams = (options: QueryOptions): Record<string, string> => options.includePrivate === undefined ? {} : { include_private: String(options.includePrivate) };
   return {
+    actors() { return request("/v1/actors", {}, Actor.array()); },
+    operation(input: OperationRequest) { return request("/v1/operations", {}, OperationResult, validate(OperationRequest, input)); },
+    proposals(status: ProposalStatus = "pending") { return request("/v1/proposals", { status: validate(ProposalStatus, status) }, Proposal.array()); },
+    acceptProposal(id: string) { return request(`/v1/proposals/${encodeURIComponent(id)}/accept`, {}, Proposal, {}); },
+    rejectProposal(id: string) { return request(`/v1/proposals/${encodeURIComponent(id)}/reject`, {}, Proposal, {}); },
     search(query: string, options: SearchOptions = {}) {
-      return get("/v1/search", { q: query, ...queryParams(options),
+      return request("/v1/search", { q: query, ...queryParams(options),
         ...(options.type !== undefined ? { type: options.type } : {}),
         ...(options.limit !== undefined ? { limit: String(options.limit) } : {}),
       }, SearchResult);
     },
     show(reference: string, options: QueryOptions = {}) {
-      return get(`/v1/notes/${encodeURIComponent(reference)}`, queryParams(options), NoteDetail);
+      return request(`/v1/notes/${encodeURIComponent(reference)}`, queryParams(options), NoteDetail);
     },
     links(reference: string, options: QueryOptions = {}) {
-      return get(`/v1/notes/${encodeURIComponent(reference)}/links`, queryParams(options), LinksResult);
+      return request(`/v1/notes/${encodeURIComponent(reference)}/links`, queryParams(options), LinksResult);
     },
   };
 }
