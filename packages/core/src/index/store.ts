@@ -28,6 +28,17 @@ export function noteRef(row: NoteRow): NoteRef {
   };
 }
 
+/**
+ * 另一个进程可能同时在建表：先拿写锁（BEGIN IMMEDIATE，配合 busy_timeout 等待），
+ * 拿到后再确认一次还是空库才建。否则后到的进程会报"表已存在"，并被误当成索引损坏而删库重建。
+ */
+function initializeOnce(db: Database, root: string): void {
+  db.transaction(() => {
+    const count = db.query<{ n: number }, []>("SELECT count(*) AS n FROM sqlite_master WHERE type='table'").get()!.n;
+    if (!count) initialize(db, root);
+  }).immediate();
+}
+
 function initialize(db: Database, root: string): void {
   db.exec(`
     CREATE TABLE metadata (version INTEGER NOT NULL, vault TEXT NOT NULL);
@@ -45,12 +56,25 @@ function initialize(db: Database, root: string): void {
   db.query("INSERT INTO metadata VALUES (?, ?)").run(VERSION, root);
 }
 
+/**
+ * Hub 与本地 CLI 可能同时打开同一个索引（两个进程）。遇到锁时等待而不是立刻失败；
+ * WAL 让读取不被写入挡住。
+ */
+function connect(path: string): Database {
+  const db = new Database(path, { create: true, strict: true });
+  try {
+    db.exec("PRAGMA busy_timeout = 5000");
+    db.exec("PRAGMA journal_mode = WAL");
+    return db;
+  } catch (cause) { db.close(); throw cause; }
+}
+
 async function openStore(path: string, root: string): Promise<Database> {
   let db: Database | undefined;
   try {
-    db = new Database(path, { create: true, strict: true });
+    db = connect(path);
     const tables = db.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type='table'").all();
-    if (!tables.length) { initialize(db, root); return db; }
+    if (!tables.length) { initializeOnce(db, root); return db; }
     const metadata = tables.some((t) => t.name === "metadata")
       ? db.query<{ version: number; vault: string }, []>("SELECT * FROM metadata").get() : null;
     const healthy = Object.values(db.query("PRAGMA quick_check").get() ?? {})[0] === "ok";
@@ -67,9 +91,12 @@ async function openStore(path: string, root: string): Promise<Database> {
     }
   }
   db?.close();
-  await unlink(path);
-  const fresh = new Database(path, { create: true, strict: true });
-  try { initialize(fresh, root); return fresh; }
+  // 连同 WAL 的辅助文件一起删掉，否则新索引可能读到旧数据。
+  for (const file of [path, `${path}-wal`, `${path}-shm`]) await unlink(file).catch((cause) => {
+    if ((cause as { code?: string }).code !== "ENOENT") throw cause;
+  });
+  const fresh = connect(path);
+  try { initializeOnce(fresh, root); return fresh; }
   catch (cause) { fresh.close(); throw cause; }
 }
 
@@ -112,14 +139,18 @@ export async function withIndex<T>(root: string, options: IndexOptions, query: (
       changes.push(change);
     }
     const database = db;
-    database.transaction(() => {
+    const removed = [...previous.keys()].filter((path) => !current.has(path));
+    // 没有变化时不开写事务，免得每次查询都去抢写锁。
+    // 有变化时用 IMMEDIATE：一开始就拿写锁（会按 busy_timeout 等待）。默认的延迟事务在 WAL 下
+    // 由读升级为写时若别的进程刚写过，会直接报 "database is locked"，不会等待。
+    if (changes.length || removed.length) database.transaction(() => {
       const remove = (path: string) => {
         database.query("DELETE FROM fulltext WHERE rowid IN (SELECT rowid FROM notes WHERE path=?)").run(path);
         database.query("DELETE FROM notes WHERE path=?").run(path);
         database.query("DELETE FROM links WHERE from_path=?").run(path);
         database.query("DELETE FROM files WHERE path=?").run(path);
       };
-      for (const path of previous.keys()) if (!current.has(path)) remove(path);
+      for (const path of removed) remove(path);
       for (const change of changes) {
         remove(change.path);
         database.query("INSERT INTO files VALUES (?, ?, ?, ?)").run(change.path, change.mtime, change.size, Number(!change.note));
@@ -133,12 +164,12 @@ export async function withIndex<T>(root: string, options: IndexOptions, query: (
           database.query("INSERT INTO links VALUES (?, ?, ?, NULL)").run(n.path, link.source, link.target);
         }
       }
-      if (changes.length || previous.size !== current.size) {
+      {
         database.exec(`UPDATE links SET resolved_path = CASE source
           WHEN 'related' THEN (SELECT min(path) FROM notes WHERE id=links.target HAVING count(*)=1)
           ELSE (SELECT min(path) FROM notes WHERE filename=links.target HAVING count(*)=1) END`);
       }
-    })();
+    }).immediate();
     return query(database);
   } catch (cause) {
     if (cause instanceof CoreError) throw cause;

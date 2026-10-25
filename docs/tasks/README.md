@@ -13,7 +13,7 @@
 | [P0-6](P0-6-vault-layout.md) ✅ | vault 目录分组与路径映射 | 后端 | P0-5 |
 | P0-7 ✅ | 迁移真实 vault 到新目录（清单见 P0-6 末尾） | 人类 + Claude | P0-6 |
 | [P1-1](P1-1-index-query.md) ✅ | 本地索引与查询：`search`/`show`/`links`/`export bib` | 后端（Codex） | P0-7 |
-| [P1-2](P1-2-hub-server.md) | Hub 骨架：配置、令牌、查询 API、CLI 远程模式 | 后端（Codex） | P1-1 |
+| [P1-2](P1-2-hub-server.md) ✅ | Hub 骨架：配置、令牌、查询 API、CLI 远程模式 | 后端（Codex） | P1-1 |
 | [P1-3](P1-3-watch-autosave.md) | 文件监听、自动补全、自动提交 | 后端（Codex） | P1-2 |
 | [P1-4](P1-4-proposals.md) | 提议队列 | 后端（Codex） | P1-3 |
 | [P1-5](P1-5-skill.md) | `skills/lumio/SKILL.md` | Claude | P1-4 |

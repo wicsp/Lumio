@@ -17,6 +17,7 @@
         "lumio": "./src/main.ts",
       },
       "dependencies": {
+        "@lumio/api-client": "workspace:*",
         "@lumio/core": "workspace:*",
         "@lumio/schema": "workspace:*",
       },

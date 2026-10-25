@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>io.lumio.hub</string>
+  <key>ProgramArguments</key><array><string>/ABSOLUTE/PATH/TO/lumio-hub</string></array>
+  <key>EnvironmentVariables</key><dict>
+    <key>LUMIO_VAULT</key><string>/ABSOLUTE/PATH/TO/vault</string>
+    <key>LUMIO_STATE_DIR</key><string>/ABSOLUTE/PATH/TO/lumio-state</string>
+    <key>LUMIO_HUB_LISTEN</key><string>127.0.0.1:7420</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>/ABSOLUTE/PATH/TO/lumio-state/hub.log</string>
+  <key>StandardErrorPath</key><string>/ABSOLUTE/PATH/TO/lumio-state/hub-error.log</string>
+</dict>
+</plist>

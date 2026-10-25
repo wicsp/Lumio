@@ -5,5 +5,5 @@
   "type": "module",
   "bin": { "lumio": "./src/main.ts" },
   "scripts": { "build": "bun build --compile src/main.ts --outfile dist/lumio" },
-  "dependencies": { "@lumio/core": "workspace:*", "@lumio/schema": "workspace:*" }
+  "dependencies": { "@lumio/core": "workspace:*", "@lumio/api-client": "workspace:*", "@lumio/schema": "workspace:*" }
 }

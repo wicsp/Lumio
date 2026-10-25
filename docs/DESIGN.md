@@ -143,6 +143,7 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 ### 4.4 搜索（ADR 0014）
 - SQLite FTS5 + trigram 分词；**少于 3 个字符的查询改用子串匹配**（trigram 搜不到两个汉字的词）。
 - 范围：标题、正文、作者、citekey、tags。
+- 索引用 WAL，遇到锁时等待（最多 5 秒）；Hub 与本地 CLI 可以同时使用同一个索引。
 - 没有 ID 的笔记照样能搜到，结果里**不带 `id`**，只能按文件名引用；不生成替代 ID。
 
 ### 4.5 部署（ADR 0007、0017）

@@ -4,6 +4,7 @@ import {
   createIdea, createPaper, generateCitekey, newId, parseArxivMetadata,
   parseCrossrefMetadata, parsePaperInput, resolveVault,
 } from "@lumio/core";
+import { createClient } from "@lumio/api-client";
 import { version } from "../package.json";
 import { syncVault } from "./sync.ts";
 import { fetchPaperSource, type PaperFetcher } from "./paper-source.ts";
@@ -36,11 +37,17 @@ export async function runCli(args: string[], options: CliOptions = {}): Promise<
       || (bib && (values.json !== undefined || values["include-private"] !== undefined))) {
       throw new Error("用法：lumio search <查询> [--type 类型] [--limit N] [--include-private] [--json]；lumio show|links <引用> [--include-private] [--json]；lumio export bib [--out 路径]");
     }
-    return runQuery(resolveVault(values.vault, process.env.LUMIO_VAULT), {
+    const url = process.env.LUMIO_HUB_URL;
+    const token = process.env.LUMIO_TOKEN;
+    if (query && ((url !== undefined) !== (token !== undefined) || url === "" || token === "")) {
+      throw new Error("远程查询需要同时设置非空的 LUMIO_HUB_URL 和 LUMIO_TOKEN");
+    }
+    const remote = query && url && token ? createClient({ url, token }) : undefined;
+    return runQuery(remote ? undefined : resolveVault(values.vault, process.env.LUMIO_VAULT), {
       command: bib ? "export" : command as "search" | "show" | "links", argument: positionals[1]!,
       type: values.type, limit: values.limit, out: values.out,
       includePrivate: values["include-private"], json: values.json,
-    }, log, options.warn ?? console.error);
+    }, log, options.warn ?? console.error, remote);
   }
   const sync = positionals.length === 1 && positionals[0] === "sync";
   const idea = positionals.length === 3 && positionals[0] === "new" && positionals[1] === "idea";
