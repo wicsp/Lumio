@@ -1,5 +1,5 @@
 import { lstat, open, readdir, stat } from "node:fs/promises";
-import { join, relative, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { CoreError } from "./errors.ts";
 import type { EntityType } from "./fill.ts";
 
@@ -68,6 +68,33 @@ async function isExcalidraw(path: string, name: string): Promise<boolean> {
     return match !== null && /^excalidraw-plugin\s*:/m.test(match[1]!);
   } finally {
     await handle.close();
+  }
+}
+
+/** Cheap event filter; filesystem and Excalidraw checks follow in vaultFileAt. */
+export function isVaultNotePath(path: string): boolean {
+  return !isAbsolute(path) && path.endsWith(".md") && !path.toLowerCase().endsWith(EXCALIDRAW_SUFFIX)
+    && path.split(/[\\/]/).every((part) => part !== "" && !part.startsWith("."))
+    && entityTypeOfPath(path) !== undefined;
+}
+
+export async function vaultFileAt(root: string, path: string): Promise<VaultFile | undefined> {
+  const relativePath = relative(resolve(root), resolve(root, path));
+  if (!isVaultNotePath(relativePath)) return;
+  const parts = relativePath.split(sep);
+  let target = resolve(root);
+  try {
+    for (const [index, part] of parts.entries()) {
+      target = join(target, part);
+      const info = await lstat(target);
+      if (index === parts.length - 1 ? !info.isFile() : !info.isDirectory()) return;
+    }
+    if (await isExcalidraw(target, parts.at(-1)!)) return;
+    const type = entityTypeOfPath(relativePath)!;
+    return { path: target, relativePath, type, private: isPrivateType(type) };
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw new CoreError("VAULT_READ_FAILED", "无法读取 vault 文件", { cause });
   }
 }
 

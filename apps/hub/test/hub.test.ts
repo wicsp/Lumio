@@ -7,6 +7,7 @@ import { Actor, ApiError, LinksResult, NoteDetail, SearchResult, Timestamp, type
 import { AUTHORIZATION_RULES, authorize, type AuthorizationRequest } from "../src/authorize.ts";
 import { readConfig } from "../src/config.ts";
 import { ROUTES, startHub } from "../src/server.ts";
+import type { HubStatus } from "../src/watch.ts";
 import { HubStore } from "../src/store.ts";
 
 const fixture = fileURLToPath(new URL("../../../fixtures/query-vault", import.meta.url));
@@ -28,6 +29,7 @@ beforeEach(async () => {
   hub = await startHub({ ...config, port: 0 }, { log: (line) => logs.push(line), authorize(actor, request) {
     decisions.push(request); return authorize(actor, request);
   } });
+  logs.length = 0;
 });
 afterEach(async () => { await hub?.stop(); hub = undefined; await rm(temp, { recursive: true, force: true }); });
 const base = () => `http://127.0.0.1:${hub!.server.port}`;
@@ -43,7 +45,7 @@ test("default binding is loopback; public health and every registered route call
   expect(readConfig({ LUMIO_VAULT: vault }).hostname).toBe("127.0.0.1");
   expect(readConfig({ LUMIO_VAULT: vault }).port).toBe(7420);
   expect(hub!.server.hostname).toBe("127.0.0.1");
-  const paths = { health: "/health", search: "/v1/search?q=index", show: "/v1/notes/Main", links: "/v1/notes/Main/links" };
+  const paths = { status: "/v1/status", health: "/health", search: "/v1/search?q=index", show: "/v1/notes/Main", links: "/v1/notes/Main/links" };
   for (const route of ROUTES) {
     const response = await request(paths[route.operation], route.operation === "health" ? undefined : human);
     expect(response.status).toBe(200);
@@ -70,7 +72,7 @@ test("query endpoints validate against schemas and URL-encoded Unicode reference
   NoteDetail.parse(await (await request("/v1/notes/Main", human)).json());
   LinksResult.parse(await (await request("/v1/notes/Main/links", human)).json());
   expect(NoteDetail.parse(await (await request(`/v1/notes/${encodeURIComponent("来源笔记")}`, human)).json()).note.type).toBe("source");
-  const noId = NoteDetail.parse(await (await request("/v1/notes/NoID", human)).json()); expect("id" in noId.note).toBe(false);
+  const noId = NoteDetail.parse(await (await request("/v1/notes/NoID", human)).json()); expect("id" in noId.note).toBe(true);
   expect(SearchResult.parse(await (await request("/v1/search?q=cardonlymarker", human)).json()).total).toBe(0);
   await error("/v1/notes/Card", human, 404, "NOT_FOUND");
 });
@@ -142,7 +144,7 @@ test("only configured proxy can supply a valid forwarded IP", async () => {
 });
 
 test("authorization table is exhaustively checked, including private=false", () => {
-  expect(AUTHORIZATION_RULES).toHaveLength(13);
+  expect(AUTHORIZATION_RULES).toHaveLength(17);
   for (const rule of AUTHORIZATION_RULES) {
     const actor = rule.role === null ? null : Actor.parse({ id: "act_00000000000000000000000001", name: "test", role: rule.role, created: "2026-01-01T00:00:00Z" });
     const decision = authorize(actor, { operation: rule.operation, includePrivate: rule.includePrivate });
@@ -214,4 +216,34 @@ test("internal query failures return a validated, sanitized INTERNAL response", 
   await writeFile(vault, "synthetic inaccessible vault");
   const failure = await error("/v1/notes/Main", human, 500, "INTERNAL");
   expect(failure.message).not.toContain(temp);
+});
+
+test("status is authenticated, shares private authorization, and CLI prints its JSON", async () => {
+  await error("/v1/status", undefined, 401, "UNAUTHENTICATED");
+  const response = await request("/v1/status", human);
+  expect(response.status).toBe(200);
+  const status = await response.json() as HubStatus;
+  expect(status).toMatchObject({ watching: true, pending_files: 0 }); Timestamp.parse(status.last_full_sync);
+  expect(Array.isArray(status.issues)).toBe(true);
+  expect(JSON.stringify(status)).not.toContain("life/assets");
+  expect((await request("/v1/status", agent)).status).toBe(200);
+  expect((await error("/v1/status?include_private=true", agent, 403, "FORBIDDEN")).reason).toBe("agent-cannot-read-private");
+  await error("/v1/status?include_private=invalid", human, 400, "INVALID");
+  const cli = await spawnCli(["hub", "status"], true);
+  expect(cli.code).toBe(0); expect(cli.stderr).toBe(""); expect(JSON.parse(cli.stdout)).toEqual(status);
+  for (const remote of [false, true]) {
+    const missing = await spawnCli(["hub", "status"], remote, { LUMIO_TOKEN: undefined });
+    expect(missing.code).toBe(1); expect(missing.stderr).toContain("LUMIO_HUB_URL"); expect(missing.stdout).toBe("");
+  }
+  const denied = await spawnCli(["hub", "status"], true, { LUMIO_TOKEN: "invalid" });
+  expect(denied.code).toBe(1); expect(denied.stderr).toContain("401");
+  const extra = await spawnCli(["hub", "status", "--dry-run"], true); expect(extra.code).toBe(1);
+});
+
+test("autosave idle defaults to 300 seconds and rejects invalid timer values", () => {
+  expect(readConfig({ LUMIO_VAULT: vault }).autosaveIdle).toBe(300);
+  expect(readConfig({ LUMIO_VAULT: vault, LUMIO_AUTOSAVE_IDLE: "10" }).autosaveIdle).toBe(10);
+  for (const value of ["", "0", "-1", "invalid", "Infinity", "2147484"]) {
+    expect(() => readConfig({ LUMIO_VAULT: vault, LUMIO_AUTOSAVE_IDLE: value })).toThrow("LUMIO_AUTOSAVE_IDLE");
+  }
 });

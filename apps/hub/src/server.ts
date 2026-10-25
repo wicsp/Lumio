@@ -3,6 +3,7 @@ import { isIP } from "node:net";
 import { CoreError, noteLinks, searchNotes, showNote, type SearchOptions } from "@lumio/core";
 import { ApiError, NOTE_TYPES, type ApiErrorCode } from "@lumio/schema";
 import { version } from "../package.json";
+import { startVaultWatch, type WatchOptions } from "./watch.ts";
 import { authorize } from "./authorize.ts";
 import type { HubConfig } from "./config.ts";
 import { HubError } from "./errors.ts";
@@ -10,6 +11,7 @@ import { HubStore, type Identity } from "./store.ts";
 
 // Routes share authentication, authorization and logging before dispatch.
 export const ROUTES = [
+  { operation: "status", pattern: /^\/v1\/status$/ },
   { operation: "health", pattern: /^\/health$/ },
   { operation: "search", pattern: /^\/v1\/search$/ },
   { operation: "links", pattern: /^\/v1\/notes\/([^/]+)\/links$/ },
@@ -20,13 +22,16 @@ const STATUS: Record<ApiErrorCode, number> = { INVALID: 400, UNAUTHENTICATED: 40
 export async function startHub(config: HubConfig, options: {
   log?: (line: string) => void;
   authorize?: typeof authorize;
+  watch?: WatchOptions;
 } = {}) {
   if (!(await stat(config.vault)).isDirectory()) throw new HubError("INVALID", "LUMIO_VAULT 必须是目录");
   const store = await HubStore.open(config.stateDir);
   const log = options.log ?? console.log;
   const decide = options.authorize ?? authorize;
   let server: Bun.Server<undefined>;
+  let vaultWatch: Awaited<ReturnType<typeof startVaultWatch>> | undefined;
   try {
+    vaultWatch = await startVaultWatch(config, { ...options.watch, log });
     server = Bun.serve({
       hostname: config.hostname, port: config.port,
       async fetch(request, server) {
@@ -37,7 +42,7 @@ export async function startHub(config: HubConfig, options: {
         let status = 500;
         // Logging uses route templates, so references (or secrets in a URL) cannot leak.
         const route = ROUTES.find((route) => request.method === "GET" && route.pattern.test(url.pathname));
-        const path = route?.operation === "health" ? "/health" : route?.operation === "search" ? "/v1/search"
+        const path = route?.operation === "status" ? "/v1/status" : route?.operation === "health" ? "/health" : route?.operation === "search" ? "/v1/search"
           : route?.operation === "show" ? "/v1/notes/<reference>" : route?.operation === "links" ? "/v1/notes/<reference>/links" : "<unmatched>";
         let clientIp = server.requestIP(request)?.address ?? null;
         if (config.trustedProxy && clientIp === config.trustedProxy) {
@@ -62,7 +67,9 @@ export async function startHub(config: HubConfig, options: {
           if (privateValue !== null && privateValue !== "true" && privateValue !== "false") throw new HubError("INVALID", "include_private 必须是 true 或 false");
           const queryOptions: SearchOptions = { stateDir: config.stateDir, includePrivate };
           let result: unknown;
-          if (route.operation === "search") {
+          if (route.operation === "status") {
+            result = await vaultWatch!.status(includePrivate);
+          } else if (route.operation === "search") {
             const type = url.searchParams.get("type");
             const limit = url.searchParams.get("limit");
             if (type !== null && !NOTE_TYPES.includes(type as SearchOptions["type"] & string)) throw new HubError("INVALID", "未知笔记类型");
@@ -93,6 +100,6 @@ export async function startHub(config: HubConfig, options: {
         }
       },
     });
-  } catch (cause) { store.close(); throw cause; }
-  return { server, store, async stop() { await server.stop(true); store.close(); } };
+  } catch (cause) { await vaultWatch?.stop(); store.close(); throw cause; }
+  return { server, store, async stop() { await server.stop(true); await vaultWatch?.stop(); store.close(); } };
 }

@@ -14,7 +14,12 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env) {
   if (!match || Number(match[2]) > 65535) throw new HubError("INVALID", "LUMIO_HUB_LISTEN 必须是 host:port");
   const trustedProxy = env.LUMIO_TRUSTED_PROXY || undefined;
   if (trustedProxy && !isIP(trustedProxy)) throw new HubError("INVALID", "LUMIO_TRUSTED_PROXY 必须是 IP 地址");
+  const autosaveIdle = Number(env.LUMIO_AUTOSAVE_IDLE ?? 300);
+  if (!Number.isFinite(autosaveIdle) || autosaveIdle <= 0 || autosaveIdle * 1000 > 2_147_483_647) {
+    throw new HubError("INVALID", "LUMIO_AUTOSAVE_IDLE 必须是有效的正秒数");
+  }
   return {
+    autosaveIdle,
     vault: resolve(env.LUMIO_VAULT), stateDir: stateDirectory(env),
     hostname: match[1]!.replace(/^\[|\]$/g, ""), port: Number(match[2]), trustedProxy,
   };

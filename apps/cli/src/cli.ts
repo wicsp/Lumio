@@ -28,6 +28,20 @@ export async function runCli(args: string[], options: CliOptions = {}): Promise<
     },
   });
   const command = positionals[0];
+  if (command === "hub" && positionals[1] === "status") {
+    if (positionals.length !== 2 || Object.keys(values).length) throw new Error("用法：lumio hub status");
+    const url = process.env.LUMIO_HUB_URL, token = process.env.LUMIO_TOKEN;
+    if (!url || !token) throw new Error("hub status 需要设置非空的 LUMIO_HUB_URL 和 LUMIO_TOKEN");
+    const endpoint = new URL(url);
+    if (!["http:", "https:"].includes(endpoint.protocol) || endpoint.username || endpoint.password) throw new Error("LUMIO_HUB_URL 必须是 HTTP(S) 地址");
+    endpoint.pathname = `${endpoint.pathname.replace(/\/$/, "")}/v1/status`;
+    endpoint.search = ""; endpoint.hash = "";
+    const response = await fetch(endpoint, { headers: { Authorization: `Bearer ${token}` }, redirect: "error" });
+    if (!response.ok) throw new Error(`无法获取 Hub 状态（HTTP ${response.status}）`);
+    log(JSON.stringify(await response.json()));
+    return 0;
+  }
+
   const query = command === "search" || command === "show" || command === "links";
   const bib = command === "export" && positionals[1] === "bib";
   if (query || bib) {
