@@ -1,6 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { CONTRACTS, Id, LinksResult, NewProposal, Proposal, SearchResult } from "../src/index.ts";
+import {
+  Actor,
+  ApiError,
+  CONTRACTS,
+  Id,
+  LinksResult,
+  OPERATION_NAMES,
+  Operation,
+  OperationRequest,
+  OperationResult,
+  Proposal,
+  SearchResult,
+} from "../src/index.ts";
 
 const U = "01J9Z3K8M2N4P6Q8R0S2T4V6W8";
 const now = "2026-10-23T16:30:00+08:00";
@@ -26,19 +38,54 @@ describe("query contracts", () => {
   });
 });
 
-describe("proposal contracts", () => {
-  const p = { id: `prop_${U}`, kind: "link", from: `idea_${U}`, to: `pap_${U}`, reason: "两者都讨论来源标记", author: "claude-code@mac", status: "pending", created: now };
+describe("actor, operation and proposal contracts (ADR 0016)", () => {
+  const op = { op: "link.add", args: { from: `idea_${U}`, to: `pap_${U}` } };
+  const p = { id: `prop_${U}`, operation: op, reason: "两者都讨论来源标记", author: `act_${U}`, status: "pending", created: now };
 
-  test("valid proposal", () => expect(Proposal.parse(p).status).toBe("pending"));
-  test("proposal ids use the prop prefix", () => {
+  test("actor ids use the act prefix and names are restricted", () => {
+    const a = { id: `act_${U}`, name: "claude-code@mac", role: "agent", created: now };
+    expect(Actor.parse(a).role).toBe("agent");
+    expect(Actor.safeParse({ ...a, id: `prop_${U}` }).success).toBe(false);
+    expect(Actor.safeParse({ ...a, name: "Claude Code" }).success).toBe(false);
+    expect(Actor.safeParse({ ...a, role: "admin" }).success).toBe(false);
+  });
+
+  test("operations are a closed, strict union", () => {
+    expect(Operation.parse(op).op).toBe("link.add");
+    expect(OPERATION_NAMES).toEqual(["link.add"]);
+    expect(Operation.safeParse({ op: "note.delete", args: {} }).success).toBe(false);
+    expect(Operation.safeParse({ ...op, args: { ...op.args, extra: 1 } }).success).toBe(false);
+  });
+
+  test("valid proposal stores the whole operation", () => {
+    const parsed = Proposal.parse(p);
+    expect(parsed.status).toBe("pending");
+    expect(parsed.operation.args.to).toBe(`pap_${U}`);
+  });
+  test("proposal ids use the prop prefix; author is an actor id, not a token name", () => {
     expect(Proposal.safeParse({ ...p, id: `idea_${U}` }).success).toBe(false);
+    expect(Proposal.safeParse({ ...p, author: "claude-code@mac" }).success).toBe(false);
+    expect(Proposal.safeParse({ ...p, decided_by: "wenbin" }).success).toBe(false);
     expect(Id.safeParse(`prop_${U}`).success).toBe(true);
   });
-  test("new proposal accepts only client fields", () => {
-    expect(NewProposal.parse({ kind: "link", from: p.from, to: p.to, reason: p.reason })).toBeTruthy();
-    expect(NewProposal.safeParse({ ...p }).success).toBe(false);
-  });
   test("empty reason rejected", () => expect(Proposal.safeParse({ ...p, reason: "" }).success).toBe(false));
+
+  test("operation request: reason optional, unknown fields rejected", () => {
+    expect(OperationRequest.parse({ operation: op }).reason).toBeUndefined();
+    expect(OperationRequest.safeParse({ operation: op, reason: "x", author: `act_${U}` }).success).toBe(false);
+  });
+
+  test("operation result is either applied or pending_approval", () => {
+    expect(OperationResult.parse({ status: "applied", operation: op }).status).toBe("applied");
+    expect(OperationResult.parse({ status: "pending_approval", proposal: p }).status).toBe("pending_approval");
+    expect(OperationResult.safeParse({ status: "pending_approval", operation: op }).success).toBe(false);
+  });
+
+  test("api error carries decision-support info", () => {
+    const e = { error: { code: "FORBIDDEN", message: "agent 令牌不能决定提议", operation: op, reason: "agent-cannot-decide-proposals", proposal: `prop_${U}` } };
+    expect(ApiError.parse(e).error.code).toBe("FORBIDDEN");
+    expect(ApiError.safeParse({ error: { code: "TEAPOT", message: "x" } }).success).toBe(false);
+  });
 });
 
 test("all P1 contracts export to JSON Schema", () => {

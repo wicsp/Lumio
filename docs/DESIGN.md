@@ -9,7 +9,8 @@
 **目标**：在一个地方管理论文笔记、外部资料、想法、项目与任务、实验结果、发布内容和个人资产；
 把想法通过链接串成报告；把工作派给 Mac 或服务器上的 AI，并支持定时工作流。
 
-**非目标**（至少在 P3 之前）：自己写编辑器、自己写 agent 循环、多用户与权限、与飞书双向同步正文。
+**非目标**（至少在 P3 之前）：自己写编辑器、自己写 agent 循环、多用户与托管服务、完整的 AI 权限系统
+（只预留接口，见第 5 节）、与飞书双向同步正文、同步第二份 vault。
 
 ## 1. 总体结构
 
@@ -31,6 +32,7 @@
 ```
 
 - **vault 是知识的唯一事实来源**：Markdown + YAML frontmatter，就是 Obsidian vault，当前放在 iCloud（ADR 0001、0007）。
+- **一套系统只有一个 Hub，vault 只放在 Hub 所在的机器上，没有第二份**（ADR 0017）。
 - SQLite 只是派生索引，可随时删除重建；`refs.bib` 是生成物（ADR 0007、0014）。
 
 ## 2. 工程基础
@@ -131,7 +133,7 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 
 ### 4.2 存放
 - Hub 的运行数据放在 `~/.local/share/lumio/`（可配置），**不在 vault、不在 iCloud**：
-  `index.sqlite`（派生索引，可重建）、`hub.sqlite`（令牌、提议、以后的 job，需要单独备份）（ADR 0014）。
+  `index.sqlite`（派生索引，可重建）、`hub.sqlite`（身份、令牌、提议、审计记录、以后的 job，需要单独备份）（ADR 0014、0016）。
 
 ### 4.3 自动提交（ADR 0014）
 - vault 安静 5 分钟（可配置）后自动提交一次；没有 git 仓库时跳过。
@@ -142,9 +144,12 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 - SQLite FTS5 + trigram 分词；**少于 3 个字符的查询改用子串匹配**（trigram 搜不到两个汉字的词）。
 - 范围：标题、正文、作者、citekey、tags。
 
-### 4.5 部署（ADR 0007）
-- 当前：Hub 跑在 Mac 上，数据目录是 iCloud 中的 vault；服务器上的 Runtime 经 Tailscale 访问。Mac 离线时不同步。
-- **Hub 只讲 HTTP，默认只监听 `127.0.0.1`**；上公网时由反向代理（Caddy、Cloudflare Tunnel）负责 HTTPS，代码不改。
+### 4.5 部署（ADR 0007、0017）
+- **只做单用户、单机模式**：Hub 与 vault 都在 Mac 上，Mac 开着才能用。iPad、手机经 iCloud 同步来的修改等同于人直接改文件。
+- 以后的服务器模式：Hub 与 vault 都搬到服务器上，其他设备都是客户端；**不存在两边各有一份、互相同步的模式**。
+  服务器模式下 Obsidian 怎么用尚未决定（ADR 0017 第 5 节）。
+- **远程访问用 Tailscale**：Hub 仍只监听 `127.0.0.1`，由 `tailscale serve` 转发并提供 HTTPS；服务器上的 Runtime 也这样访问。
+- **Hub 只讲 HTTP**；以后上公网时由反向代理（Caddy、Cloudflare Tunnel）负责 HTTPS，代码不改。
 - 所有地址可配置；只信任配置过的反向代理传来的客户端信息。
 - 飞书 Bot 用官方 SDK 的长连接，不需要公网回调地址。
 
@@ -156,14 +161,22 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 - 不经过 shell，只执行登记过的程序；密钥在执行节点上才解析。
 - Agent 不自己实现，Runtime 调用现成的 agent CLI。
 
-## 5. AI 协作与权限（ADR 0014）
+## 5. AI 协作与权限（ADR 0014、0016）
 
 - **AI 只能提议，链接由人建立**：AI 可以查询、新建想法和论文笔记、提议链接、重写 AI 区块；
   不能写人拥有的链接，不能改人写的正文。提议由人接受后，Hub 只写 frontmatter 的 `related`，永远不改正文。
 - **AI 的入口是 CLI + skill**：`lumio search/show/links/propose … --json`，配合 `skills/lumio/SKILL.md`；
   Claude Code、Codex、pi 共用一份。MCP 只在出现没有 shell 的客户端时，作为薄适配层再加。
-- **两种令牌**：`human` 什么都能做；`agent` 能查询和提交提议，**不能接受或拒绝提议**。
-  令牌只显示一次，Hub 只存哈希，可单独吊销；所有请求都要令牌，内网也不例外（ADR 0007）。
+- **身份与令牌分开**（ADR 0016）：人和每个 AI agent 各是一个身份（`act_<ULID>`），角色是 `human` 或 `agent`；
+  令牌只是身份的凭证，一个身份可以有多个，可单独吊销。提议、审计、日志里记身份 ID，不记令牌名称。
+  令牌只显示一次，Hub 只存哈希；所有请求都要令牌，内网也不例外（ADR 0007）。
+- **每次修改都是一个操作，只有一个入口**（ADR 0016）：程序对 vault 的修改表示为 `{ op, args }`（P1 只有 `link.add`），
+  Hub 先 `authorize(身份, 操作)` 再执行。以后的完整权限系统只替换 `authorize`。
+- **授权结果三种**：允许 → 立即执行；拒绝 → 403；**需要批准 → 生成提议**，提议里存完整的操作，人接受后 Hub 执行它。
+  P1 规则：`human` 全部允许；`agent` 查询允许（私密除外），`link.add` 需要批准，决定提议、访问私密实体拒绝。
+- **错误带决策信息**：错误响应统一为 `ApiError`（代码、说明、被拒绝的操作、原因、提议 ID），AI 据此向人解释。
+- **审计**：每次授权与执行都记入 `hub.sqlite`；Hub 执行的操作立即单独提交，提交信息带 `Lumio-Actor`，
+  经提议执行的还带 `Lumio-Proposal`、`Lumio-Approved-By`。自动保存的提交不带身份。
 - **私密实体**（`life/` 下）：默认不出现在任何查询结果中；`agent` 令牌在任何情况下都拿不到；
   `human` 令牌须显式加 `--include-private`。`refs.bib`、报告等不得引用私密实体（ADR 0012、0014）。
 - **局限**：不经过 Hub、直接读文件的 AI 拦不住，需要在 agent 的沙箱配置里排除 `life/`。
@@ -174,6 +187,7 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
   - asset 校验报错；Hub 自动提交前和建索引前检查**所有文件**，命中的不提交、不索引，提醒人删除；
   - 错误和日志里永远不出现这串数字；判定函数在 `packages/schema/src/secrets.ts`。
   - 局限：文件本身已同步到 iCloud，需要人手动删除。
+- **`life/` 只放记录和提醒**；真正敏感的内容（密码、完整卡号、证件号）放在密码管理器里，不进 vault。
 - **密钥**：代码和配置里只写占位符（如 `${secret:openai}`），由运行时注入；令牌不进日志（AGENTS.md、ADR 0007）。
 - vault 的 `.gitignore` 排除 Obsidian 插件设置文件（可能含明文密钥）。
 
