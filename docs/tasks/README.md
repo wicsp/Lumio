@@ -16,7 +16,7 @@
 | [P1-2](P1-2-hub-server.md) ✅ | Hub 骨架：配置、令牌、查询 API、CLI 远程模式 | 后端（Codex） | P1-1 |
 | [P1-3](P1-3-watch-autosave.md) ✅ | 文件监听、自动补全、自动提交 | 后端（Codex） | P1-2 |
 | [P1-4](P1-4-proposals.md) ✅ | 操作与提议框架（链接部分已由 ADR 0018 取代） | 后端（Codex） | P1-3 |
-| [P1-5](P1-5-cite-check-backup.md) | 按引用导出 BibTeX、断链检查、Hub 备份 | 后端（Codex） | P1-4 |
+| [P1-5](P1-5-cite-check-backup.md) ✅ | 按引用导出 BibTeX、断链检查、Hub 备份 | 后端（Codex） | P1-4 |
 | [P1-6](P1-6-skill.md) | `skills/lumio/SKILL.md` | Claude | P1-5 |
 
 P1 的设计决定见 ADR 0014、0016、0017、0018；契约见 `packages/schema/src/` 中的 `query.ts`、`actor.ts`、`operation.ts`、`proposal.ts`、`api.ts`。
