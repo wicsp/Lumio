@@ -10,6 +10,12 @@ bun build apps/hub/src/main.ts --compile --outfile ~/.local/bin/lumio-hub
 ```
 确认 `~/.local/bin` 在 `PATH` 里。代码更新后重新运行这两条。
 
+运行 `lumio search 测试` 试一下。如果显示 `Killed: 9`（退出码 137），说明 macOS 认为签名无效（在 agent 的沙箱里编译时会这样），
+重新签一下即可：
+```sh
+codesign --force --sign - ~/.local/bin/lumio ~/.local/bin/lumio-hub
+```
+
 ## 2. 安装 skill
 ```sh
 mkdir -p ~/.claude/skills ~/.agents/skills
