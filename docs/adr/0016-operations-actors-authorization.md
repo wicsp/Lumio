@@ -1,6 +1,6 @@
 # 0016 操作、身份与授权：为以后的 AI 权限系统预留接口
 
-- 状态：Accepted（P1 实现）
+- 状态：Accepted（部分实现：第 1 节已实现（P1-2）；第 2–5 节的查询部分已实现，写操作由 P1-4 实现）
 - 日期：2026-10-25
 - 领域：AI 协作与权限、Hub 与运行、安全
 - 影响：ADR 0014 第 1、6 节，`packages/schema`（actor、operation、proposal、api）
