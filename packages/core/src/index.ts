@@ -20,3 +20,6 @@ export * from "./arxiv.ts";
 export * from "./index/query.ts";
 export type { IndexOptions } from "./index/store.ts";
 export * from "./export-bib.ts";
+export * from "./sync.ts";
+export * from "./git.ts";
+export { updateIndex } from "./index/store.ts";

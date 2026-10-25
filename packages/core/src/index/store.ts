@@ -189,3 +189,8 @@ export function snippet(text: string, query: string): string {
   const start = Math.max(0, Array.from(plain.slice(0, Math.max(0, position))).length - 60);
   return Array.from(plain).slice(start, start + 200).join("");
 }
+
+/** Refresh the derived index without issuing a user query. */
+export async function updateIndex(root: string, options: IndexOptions = {}): Promise<void> {
+  await withIndex(root, options, () => {});
+}
