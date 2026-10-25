@@ -1,9 +1,8 @@
 import { Database } from "bun:sqlite";
-import { createHash } from "node:crypto";
 import { mkdir, readFile, stat, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import { Citekey, Id, ID_PREFIXES, textContainsCardNumber, type NoteRef } from "@lumio/schema";
+import { Citekey, Id, textContainsCardNumber, type NoteRef } from "@lumio/schema";
 import { CoreError } from "../errors.ts";
 import { parseFrontmatter } from "../frontmatter.ts";
 import { scanVault } from "../vault.ts";
@@ -21,19 +20,10 @@ export interface NoteRow {
   frontmatter: string; body: string; search_text: string;
 }
 
-/** Result-only ID: type prefix + first 128 SHA-256 bits of the relative path,
- * encoded as 26 Crockford base32 characters. Never persisted in the vault or
- * accepted as an ID reference. Renaming an ID-less note changes this value.
- */
+/** 查询结果中的笔记引用。没有 ID 的笔记不带 `id`，不生成替代值（P1-1 review）。 */
 export function noteRef(row: NoteRow): NoteRef {
-  let value = BigInt(`0x${createHash("sha256").update(row.path).digest("hex").slice(0, 32)}`);
-  let ulid = "";
-  for (let i = 0; i < 26; i++) {
-    ulid = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"[Number(value & 31n)] + ulid;
-    value >>= 5n;
-  }
   return {
-    id: row.id ?? `${ID_PREFIXES[row.type]}_${ulid}`, type: row.type, title: row.title, path: row.path,
+    ...(row.id ? { id: row.id } : {}), type: row.type, title: row.title, path: row.path,
     ...(row.citekey ? { citekey: row.citekey } : {}),
   };
 }

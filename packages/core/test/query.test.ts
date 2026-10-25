@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { cp, mkdtemp, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, readFile, rename, rm, stat, unlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -52,19 +52,20 @@ test("references resolve real IDs, citekeys, filenames, and report ambiguous can
   await expect(showNote(vault, "absent", { stateDir })).rejects.toMatchObject({ code: "NOTE_NOT_FOUND" });
 });
 
-test("ID-less notes are indexed with stable result-only IDs, and never written back", async () => {
+test("ID-less notes are indexed without an id (no substitute value) and never written back", async () => {
   const path = join(vault, "research/ideas/NoID.md");
   const original = await readFile(path);
   const detail = NoteDetail.parse(await showNote(vault, "NoID", { stateDir }));
-  expect(detail.note.id).toMatch(/^idea_[0-9A-HJKMNP-TV-Z]{26}$/);
+  expect("id" in detail.note).toBe(false);
+  expect(detail.note.path).toBe("research/ideas/NoID.md");
   expect(detail.frontmatter.id).toBeUndefined();
-  expect((await searchNotes(vault, "无标识", { stateDir })).hits[0]!.note.id).toBe(detail.note.id);
-  expect(LinksResult.parse(await noteLinks(vault, "NoID", { stateDir })).note.id).toBe(detail.note.id);
-  expect((await showNote(vault, "NoID", { stateDir })).note.id).toBe(detail.note.id);
-  await expect(showNote(vault, detail.note.id, { stateDir })).rejects.toMatchObject({ code: "NOTE_NOT_FOUND" });
+  const hit = (await searchNotes(vault, "无标识", { stateDir })).hits[0]!;
+  expect(hit.note.path).toBe("research/ideas/NoID.md");
+  expect("id" in hit.note).toBe(false);
+  expect("id" in LinksResult.parse(await noteLinks(vault, "NoID", { stateDir })).note).toBe(false);
   expect(await readFile(path)).toEqual(original);
   await rename(path, join(vault, "research/ideas/NewName.md"));
-  expect((await showNote(vault, "NewName", { stateDir })).note.id).not.toBe(detail.note.id);
+  expect((await showNote(vault, "NewName", { stateDir })).note.path).toBe("research/ideas/NewName.md");
 });
 
 test("links resolve outgoing, backlinks, related IDs and dangling targets; code and AI links are ignored", async () => {
@@ -138,6 +139,9 @@ test("incremental queries parse only changed files, remove deleted notes and ref
 test("short queries sort by modification time and long snippets stay plain and bounded", async () => {
   const main = join(vault, "research/ideas/Main.md");
   await writeFile(main, (await readFile(main, "utf8")) + `\n${"前".repeat(250)} **定位** [来源](https://example.invalid) ${"后".repeat(250)}\n`);
+  // 文件系统的 mtime 精度有限，刚复制的文件可能和 Main 同一时刻；显式设得更晚，避免排序靠运气。
+  const later = new Date(Date.now() + 60_000);
+  await utimes(main, later, later);
   const short = await searchNotes(vault, "来源", { stateDir });
   expect(short.hits[0]!.note.path).toBe("research/ideas/Main.md");
   const hit = (await searchNotes(vault, "定位", { stateDir })).hits[0]!;

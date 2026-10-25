@@ -43,7 +43,9 @@ test("every query JSON is one newline-terminated object accepted by the correspo
   const result = SearchResult.parse(json(["search", "index", "--type", "paper", "--limit", "1"]));
   expect(result.hits).toHaveLength(1);
   expect(result.hits[0]!.note.type).toBe("paper");
-  expect(SearchResult.parse(json(["search", "无标识"])).hits[0]!.note.id).toBe(NoteDetail.parse(json(["show", "NoID"])).note.id);
+  const noId = SearchResult.parse(json(["search", "无标识"])).hits[0]!.note;
+  expect(noId.path).toBe("research/ideas/NoID.md");
+  expect("id" in noId).toBe(false);
 });
 
 test("human search ends with blocked paths only and never exposes card text", () => {
