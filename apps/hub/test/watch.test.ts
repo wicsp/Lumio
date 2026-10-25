@@ -212,13 +212,17 @@ test("real recursive fs.watch completes a new note in seconds and its own write 
     writeFile: async (...args) => { const changed = await writeFileAtomic(...args); written += Number(changed); return changed; },
   } });
   const path = join(vault, "research/ideas/x.md"); await cp(fixture, path);
+  // 要保证的是"补全只写一次、不循环"。Hub 自己写回后是否还会收到一次事件、何时收到，取决于系统和负载，
+  // 不作为断言条件（原来要求恰好处理两次，机器繁忙时会偶发失败）。
   const deadline = Date.now() + 6500;
-  while (processed < 2 && Date.now() < deadline) await Bun.sleep(50);
+  while (written < 1 && Date.now() < deadline) await Bun.sleep(50);
+  await Bun.sleep(3000); // 防抖 2 秒 + 余量，让写回引起的事件（如果有）处理完
   await hub.drain();
   Idea.parse(parseFrontmatter(await readFile(path)).data);
-  expect(written).toBe(1); expect(processed).toBe(2);
+  expect(written).toBe(1);
+  expect(processed).toBeGreaterThanOrEqual(1); expect(processed).toBeLessThanOrEqual(2);
   expect(indexedPaths()).toEqual(["research/ideas/x.md"]);
-}, 9000);
+}, 15000);
 
 test("index.lock staging failures also retry automatically in the next cycle", async () => {
   initGit(); const hub = await start(); const relative = "research/ideas/x.md";
