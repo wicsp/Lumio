@@ -56,7 +56,7 @@ export const Base = z.looseObject({
   updated: Timestamp,
   tags: withDefault(z.array(z.string()), []),
   related: withDefault(z.array(Id), []).describe(
-    "显式关联，由人维护（ADR 0006）；正文里的 [[链接]] 由 indexer 另行解析",
+    "显式关联，由人维护（ADR 0014 第 1 节）；正文里的 [[链接]] 由 indexer 另行解析",
   ),
 });
 

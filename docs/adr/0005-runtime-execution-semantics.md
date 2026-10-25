@@ -2,6 +2,7 @@
 
 - 状态：Accepted（P2 实现 Runtime 时补全 `packages/schema/src/job.ts`）
 - 日期：2026-10-22
+- 领域：Hub 与运行
 
 ## 背景
 Runtime 要在 Mac 和服务器上执行 AI 任务和实验脚本。网络中断、进程崩溃、设备重启都会发生；

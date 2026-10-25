@@ -2,6 +2,7 @@
 
 - 状态：Implemented（2026-10-25）
 - 日期：2026-10-25
+- 领域：流程
 
 ## 背景
 原来的状态只有 Proposed、Accepted、Superseded，默认 Accepted 之后就不再修改。实际上，很多 ADR 在接受之后、

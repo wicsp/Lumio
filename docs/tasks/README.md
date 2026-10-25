@@ -18,12 +18,12 @@
 | [P1-4](P1-4-proposals.md) | 提议队列 | 后端（Codex） | P1-3 |
 | [P1-5](P1-5-skill.md) | `skills/lumio/SKILL.md` | Claude | P1-4 |
 
-P1 的设计决定见 ADR 0011；契约见 `packages/schema/src/query.ts` 与 `proposal.ts`。
+P1 的设计决定见 ADR 0014；契约见 `packages/schema/src/query.ts` 与 `proposal.ts`。
 
 已完成（✅）的任务说明保留当时的原文，其中的 vault 路径（如 `papers/`）以 ADR 0012 的新目录为准。
 
 ## 给实现者的约定
-- 开始前读 `AGENTS.md`、`docs/ARCHITECTURE.md`，以及任务说明里列出的 ADR。
+- 开始前读 `AGENTS.md`、`docs/DESIGN.md` 和本任务说明；任务说明里列出的 ADR 只在需要了解原因时再读。
 - 只做"范围"里列出的事；"不做"里的内容即使顺手也不要做。
 - 说明里写明的决定直接照做。遇到说明没有覆盖、又会影响接口或数据格式的问题，
   **停下来提问**，不要自行决定。

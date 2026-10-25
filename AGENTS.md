@@ -3,7 +3,9 @@
 本文件对 Claude Code、Codex 等所有编码 agent 生效。`CLAUDE.md` 只是引用本文件。
 
 ## 必读
-开始任何任务前先读 `docs/ARCHITECTURE.md` 和 `docs/adr/` 里相关的条目。
+开始任何任务前先读 `docs/DESIGN.md`（现行设计与规则）和你的任务说明。
+**不需要读 `docs/adr/`**：ADR 只记录决定的原因，想知道某条规则为什么这样定时，再按 DESIGN.md 中标注的编号去查。
+修改设计时，ADR 与 DESIGN.md 要在同一个 PR 里一起改（ADR 0015）。
 
 ## 硬规则
 1. **契约不可私改**：`packages/schema/` 是唯一事实来源。需要改它时，先在 `docs/adr/` 写一条

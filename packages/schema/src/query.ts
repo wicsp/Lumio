@@ -3,7 +3,7 @@ import { Id } from "./common.ts";
 import { Citekey } from "./entities.ts";
 
 /**
- * 查询结果的契约：CLI 的 `--json` 输出与 Hub 查询 API 的响应体（ADR 0010、0011）。
+ * 查询结果的契约：CLI 的 `--json` 输出与 Hub 查询 API 的响应体（ADR 0014 第 2 节）。
  * AI 通过 skill 依赖这些结构，修改即为契约变更。
  */
 
@@ -29,7 +29,7 @@ export const SearchResult = z.strictObject({
   total: z.number().int().nonnegative(),
 });
 
-/** 链接来源：frontmatter 的 related，或正文中的 [[名称]]（ADR 0011 第 2 条）。 */
+/** 链接来源：frontmatter 的 related，或正文中的 [[名称]]（ADR 0014 第 4 节）。 */
 export const LinkSource = z.enum(["related", "wikilink"]);
 
 export const Link = z.strictObject({

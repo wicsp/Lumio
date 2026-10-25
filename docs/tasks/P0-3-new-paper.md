@@ -1,7 +1,7 @@
 # P0-3 `lumio new paper`
 
 - 负责：后端（Codex）　Review：Claude
-- 相关 ADR：0004、0006、0008、0009
+- 相关 ADR：0004、0008、0009、0014
 - 涉及：`packages/core`（解析、citekey、渲染，纯本地）、`apps/cli`（联网获取）
 - 依赖：P0-1
 

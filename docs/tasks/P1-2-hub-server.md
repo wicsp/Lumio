@@ -1,7 +1,7 @@
 # P1-2 Hub 服务骨架：配置、令牌、查询 API、CLI 远程模式
 
 - 负责：后端（Codex）　Review：Claude
-- 相关 ADR：0007（部署与安全）、0010、0011（第 1、4、5 条）、0012（私密实体）
+- 相关 ADR：0007（部署与安全）、0014（第 2、3、6、7 节）、0012（私密实体）
 - 涉及：`apps/hub`、`packages/api-client`、`apps/cli`
 - 依赖：P1-1
 
@@ -26,10 +26,10 @@
    - `GET /v1/notes/<引用>` → `NoteDetail`
    - `GET /v1/notes/<引用>/links` → `LinksResult`
    - 三个查询端点都支持 `include_private=true`。**`agent` 令牌带这个参数时返回 403**；不带时私密实体一律排除
-     （ADR 0011 第 4 条）。私密笔记对 agent 令牌表现为"不存在"（`show` 返回 404）。
+     （ADR 0014 第 6 节）。私密笔记对 agent 令牌表现为"不存在"（`show` 返回 404）。
    - 引用需 URL 编码。错误响应统一为 `{"error":{"code":"…","message":"…"}}`，状态码 400/401/403/404/500。
    - 查询逻辑**直接调用 `@lumio/core`**，不在 Hub 中重写。
-4. **令牌**（ADR 0011 第 4 条）：
+4. **令牌**（ADR 0014 第 6 节）：
    - 存在 `<状态目录>/hub.sqlite`：名称、角色（`human` | `agent`）、SHA-256 哈希、创建时间、吊销时间。
    - 子命令：`lumio-hub token create <名称> --role human|agent`（只打印一次明文令牌）、`token list`、`token revoke <名称>`。
    - 令牌明文格式：`lumio_` + 32 字节随机数的 base64url。比较哈希时使用定长比较。

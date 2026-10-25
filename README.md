@@ -5,7 +5,7 @@
 - 数据（笔记/论文/任务…）**不在本仓库**，放在独立的 vault 仓库里（Markdown + YAML frontmatter）。
 - 本仓库只放代码：TypeScript monorepo，运行在 [Bun](https://bun.com) 上。
 
-先读：[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) → [`AGENTS.md`](AGENTS.md) → [`docs/adr/`](docs/adr/)
+先读：[`docs/DESIGN.md`](docs/DESIGN.md)（现行设计）→ [`AGENTS.md`](AGENTS.md)（AI 的规则）；文档导航见 [`docs/README.md`](docs/README.md)
 
 ## 目录
 

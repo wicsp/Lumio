@@ -1,4 +1,4 @@
-/** 依赖边界规则，见 docs/ARCHITECTURE.md 第 3 节。由 `bun run lint:deps` 在 CI 中强制执行。 */
+/** 依赖边界规则，见 docs/DESIGN.md 第 2 节。由 `bun run lint:deps` 在 CI 中强制执行。 */
 module.exports = {
   forbidden: [
     {

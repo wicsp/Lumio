@@ -1,14 +1,14 @@
 # P1-4 提议队列：AI 提议链接，人来接受或拒绝
 
 - 负责：后端（Codex）　Review：Claude
-- 相关 ADR：0006、0007、0011（第 2、4、5 条）
+- 相关 ADR：0007、0014（第 1、4、6、7 节）
 - 涉及：`packages/core`、`apps/hub`、`packages/api-client`、`apps/cli`
 - 契约：`packages/schema/src/proposal.ts`（已起草并经批准，**本任务不得修改**）
 - 依赖：P1-3
 
 ## 目标
 AI 发现两篇笔记应该关联时，只能提交一条提议；你看过理由后接受，Hub 才把链接写进笔记。
-这是 ADR 0006 第一次由程序强制执行。
+这是"AI 只能提议"（ADR 0014 第 1 节）第一次由程序强制执行。
 
 ## 用法
 ```
@@ -17,7 +17,7 @@ lumio proposals [--status pending|accepted|rejected] [--json]  # 默认只列 pe
 lumio proposals accept <提议ID>                               # 只有 human 令牌可用
 lumio proposals reject <提议ID>                               # 只有 human 令牌可用
 ```
-这些命令**只能在 Hub 模式下使用**（ADR 0011 第 5 条），未设置 `LUMIO_HUB_URL` 时报错并说明原因。
+这些命令**只能在 Hub 模式下使用**（ADR 0014 第 7 节），未设置 `LUMIO_HUB_URL` 时报错并说明原因。
 
 ## 范围
 

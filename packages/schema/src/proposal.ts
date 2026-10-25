@@ -2,7 +2,7 @@ import { z } from "zod";
 import { Id, Timestamp, idOf } from "./common.ts";
 
 /**
- * AI 的提议（ADR 0006、0007、0011）。存放在 Hub 的 hub.sqlite 中，不在 vault 里。
+ * AI 的提议（ADR 0014 第 1、7 节，ADR 0007）。存放在 Hub 的 hub.sqlite 中，不在 vault 里。
  * P1 只支持一种提议：在 from 笔记的 frontmatter `related` 中加入 to。
  */
 export const PROPOSAL_KINDS = ["link"] as const;

@@ -1,7 +1,7 @@
 # P1-5 `skills/lumio/SKILL.md`
 
 - 负责：Claude（文档）　Review：人类
-- 相关 ADR：0006、0010
+- 相关 ADR：0014（第 1、2、6 节）
 - 依赖：P1-1 至 P1-4 的命令与 `--json` 输出稳定之后
 
 ## 目标
@@ -13,7 +13,7 @@
 2. 正文控制在一屏以内：
    - 环境变量：`LUMIO_HUB_URL`、`LUMIO_TOKEN`（agent 令牌）。
    - 命令速查与 `--json` 输出的关键字段。
-   - **边界**（ADR 0006、0012）：可以查询、可以新建想法和论文笔记、可以提议链接；不能修改已有笔记的正文与链接，
+   - **边界**（ADR 0014 第 1、6 节、ADR 0012）：可以查询、可以新建想法和论文笔记、可以提议链接；不能修改已有笔记的正文与链接，
      不要试图直接编辑 vault 中的文件；不要使用 `--include-private`，不要读取 `life/` 目录。
    - 写报告时的流程：`search` → `show` → `links` → 在报告中用 `\cite{citekey}` → `export bib`。
 3. `skills/lumio/README.md`：如何把这份 skill 安装到 Claude Code、Codex、pi（各一行命令或路径）。

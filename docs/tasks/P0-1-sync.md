@@ -1,7 +1,7 @@
 # P0-1 补全器与 `lumio sync`
 
 - 负责：后端（Codex）　Review：Claude
-- 相关 ADR：0004、0006、0008、0009
+- 相关 ADR：0004、0008、0009、0014
 - 涉及：`packages/core`、`apps/cli`
 
 ## 目标
