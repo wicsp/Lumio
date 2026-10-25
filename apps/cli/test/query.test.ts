@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { cp, mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rename, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { LinksResult, NoteDetail, SearchResult } from "@lumio/schema";
+import { CheckResult, LinksResult, NoteDetail, SearchResult } from "@lumio/schema";
 
 const fixture = fileURLToPath(new URL("../../../fixtures/query-vault", import.meta.url));
 const main = fileURLToPath(new URL("../src/main.ts", import.meta.url));
@@ -123,4 +123,55 @@ test("export uses default/custom paths, warns on stderr, and leaves unchanged ou
   // Explicit --vault overrides the environment and state is always temporary.
   expect(cli(["search", "index", "--vault", vault, "--json"]).code).toBe(0);
   expect((await stat(join(state, "index.sqlite"))).isFile()).toBe(true);
+});
+
+test("export --from prints only selected BibTeX to stdout, warnings to stderr, and only writes with --out", async () => {
+  const citations = fileURLToPath(new URL("../../../fixtures/citations", import.meta.url));
+  await cp(join(citations, "Report.md"), join(vault, "research/ideas/Report.md"));
+  await cp(join(citations, "Gamma_2026_Uncited.md"), join(vault, "library/papers/Gamma_2026_Uncited.md"));
+  const result = cli(["export", "bib", "--from", "Report"]);
+  expect(result.code).toBe(0);
+  expect(result.stdout).toStartWith("% 本文件由 lumio 生成，请勿手动编辑\n\n@article{Alpha_2024_Paper,");
+  expect(result.stdout.match(/@article\{/g)).toHaveLength(2);
+  expect(result.stdout.indexOf("Alpha_2024_Paper")).toBeLessThan(result.stdout.indexOf("Zeta_2025_Study"));
+  for (const absent of ["Gamma_2026_Uncited", "导出", "未计入", "找不到", "缺少"]) expect(result.stdout).not.toContain(absent);
+  for (const warning of ["AI 区块中有 3 处引用未计入", "找不到 citekey：Missing_2026_Paper", "缺少 BibTeX", "key 已纠正"]) expect(result.stderr).toContain(warning);
+  expect(await Bun.file(join(vault, "library/refs.bib")).exists()).toBe(false);
+  const out = join(temp, "custom", "selected.bib");
+  expect(cli(["export", "bib", "--from", "idea_00000000000000000000000030", "--out", out]).code).toBe(0);
+  expect(await readFile(out, "utf8")).toBe(result.stdout);
+  const before = await stat(out);
+  const repeated = cli(["export", "bib", "--from", "Report", "--out", out]);
+  expect(repeated.code).toBe(0); expect(repeated.stdout).toContain("未变化"); expect((await stat(out)).mtimeMs).toBe(before.mtimeMs);
+  const privateSource = cli(["export", "bib", "--from", "Private"]);
+  expect(privateSource.code).toBe(1); expect(privateSource.stdout).toBe(""); expect(privateSource.stderr).toContain("找不到笔记");
+  for (const args of [["check", "unexpected"], ["check", "--out", out], ["check", "--limit", "1"], ["search", "x", "--from", "Report"], ["export", "bib", "--from", ""], ["sync", "--from", "Report"]]) {
+    expect(cli(args).code).toBe(1);
+  }
+});
+
+test("check reports sorted paths and count, includes related, and returns zero even for dangling links", () => {
+  const result = CheckResult.parse(json(["check"]));
+  expect(result.total).toBeGreaterThan(0);
+  const human = cli(["check"]); expect(human.code).toBe(0); expect(human.stderr).toBe("");
+  expect(human.stdout).toBe(result.dangling.map((l) => `${l.from.path}  →  [[${l.target}]]\n`).join("") + `共 ${result.total} 条悬空链接\n`);
+  expect(result.dangling.some((l) => l.source === "related")).toBe(true);
+  expect(result.dangling.some((l) => l.target === "Private" || l.target.startsWith("ast_"))).toBe(false);
+  CheckResult.parse(json(["check", "--include-private"]));
+});
+
+test("check lists all old wikilinks after rename and reports no dangling links after restoration", async () => {
+  const root = join(temp, "clean");
+  await mkdir(join(root, "library/papers"), { recursive: true }); await mkdir(join(root, "research/ideas"), { recursive: true });
+  await mkdir(join(root, "life/assets"), { recursive: true });
+  for (const path of ["library/papers/Alpha_2024_Paper.md", "life/assets/Private.md"]) await cp(join(fixture, path), join(root, path));
+  const check = fileURLToPath(new URL("../../../fixtures/citations/Check.md", import.meta.url));
+  await cp(check, join(root, "research/ideas/Main.md"));
+  const args = ["check", "--vault", root];
+  expect(cli(args).stdout).toBe("没有悬空链接\n");
+  const old = join(root, "library/papers/Alpha_2024_Paper.md"), renamed = join(root, "library/papers/Renamed.md");
+  await rename(old, renamed);
+  const broken = cli(args); expect(broken.code).toBe(0); expect(broken.stdout).toContain("共 3 条悬空链接");
+  expect(broken.stdout).not.toContain("Private");
+  await rename(renamed, old); expect(cli(args).stdout).toBe("没有悬空链接\n");
 });

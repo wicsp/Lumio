@@ -29,3 +29,10 @@
 
 每个请求输出一行 JSON。路径使用路由模板（笔记引用不写入日志），不包含查询内容或认证头；
 拒绝授权写入 `hub.sqlite` 的 audit 表。放行查询不写审计。请单独备份 `hub.sqlite`，索引可重建。
+
+使用同一个 `LUMIO_STATE_DIR` 运行 `lumio-hub backup /ABSOLUTE/PATH/TO/hub-backup.sqlite`，
+可在 Hub 运行中生成一致快照；目标目录须已存在，目标文件须不存在。备份权限为 0600，包含身份、
+令牌哈希、提议与审计，妥善保管。恢复时先用上面的 `launchctl bootout` 停止 Hub，再将备份复制到
+`LUMIO_STATE_DIR/hub.sqlite` 并确认权限为 0600；若状态目录留有旧的 `hub.sqlite-wal`、
+`hub.sqlite-shm`，在 Hub 已停止后移走，避免旧日志与恢复文件混用。然后重新 `bootstrap` 启动。
+`index.sqlite` 可删除后由 Hub 重建，不需要备份。

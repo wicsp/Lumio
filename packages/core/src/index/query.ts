@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
-import { LinksResult, NoteDetail, SearchResult, type Link, type NoteRef } from "@lumio/schema";
+import { CheckResult, LinksResult, NoteDetail, SearchResult, type Link, type NoteRef } from "@lumio/schema";
 import { CoreError } from "../errors.ts";
+import { extractCitations } from "./links.ts";
 import { noteRef, snippet, withIndex, type IndexOptions, type NoteRow } from "./store.ts";
 
 export interface QueryOptions extends IndexOptions { includePrivate?: boolean }
@@ -57,6 +58,44 @@ export async function noteLinks(root: string, reference: string, options: QueryO
       return from.private && !options.includePrivate ? [] : [{ source: edge.source, target: edge.target, dangling: false, note: noteRef(from) }];
     });
     return LinksResult.parse({ note: noteRef(row), outgoing, incoming });
+  });
+}
+
+/** References used for bibliography exports are always public, including the source note. */
+export async function collectCitations(root: string, reference: string, options: IndexOptions = {}): Promise<{ papers: NoteRef[]; warnings: string[] }> {
+  return withIndex(root, options, (db) => {
+    const row = resolveReference(db, reference);
+    const { citations, ignored } = extractCitations(row.body);
+    const papers = new Map<string, NoteRef>();
+    const warnings: string[] = ignored ? [`AI 区块中有 ${ignored} 处引用未计入`] : [];
+    for (const citation of citations) {
+      const column = citation.source === "cite" ? "citekey" : "filename";
+      const matches = db.query<NoteRow, [string]>(`SELECT * FROM notes WHERE ${column}=? ORDER BY path`).all(citation.target);
+      // Use the link graph's unique-filename resolution; LaTeX keys only match papers.
+      const candidates = citation.source === "cite" ? matches.filter((n) => n.type === "paper") : matches;
+      const paper = candidates.length === 1 ? candidates[0] : undefined;
+      if (paper?.type === "paper" && !paper.private && paper.citekey) papers.set(paper.citekey, noteRef(paper));
+      else if (citation.source === "cite" && !candidates.some((n) => n.private)) warnings.push(`找不到 citekey：${citation.target}`);
+    }
+    return { papers: [...papers.values()], warnings };
+  });
+}
+
+export async function checkLinks(root: string, options: QueryOptions = {}): Promise<CheckResult> {
+  return withIndex(root, options, (db) => {
+    type Edge = { from_path: string; source: Link["source"]; target: string };
+    const edges = db.query<Edge, [number, number]>(`
+      SELECT l.* FROM links l JOIN notes n ON n.path=l.from_path
+      WHERE l.resolved_path IS NULL AND (n.private=0 OR ?=1)
+        AND (?=1 OR NOT EXISTS (SELECT 1 FROM notes p WHERE p.private=1 AND
+          ((l.source='related' AND p.id=l.target) OR (l.source='wikilink' AND p.filename=l.target))))
+      ORDER BY l.from_path, l.target, l.rowid
+    `).all(Number(options.includePrivate ?? false), Number(options.includePrivate ?? false));
+    const dangling = edges.map((edge) => ({
+      from: noteRef(db.query<NoteRow, [string]>("SELECT * FROM notes WHERE path=?").get(edge.from_path)!),
+      source: edge.source, target: edge.target,
+    }));
+    return CheckResult.parse({ dangling, total: dangling.length });
   });
 }
 

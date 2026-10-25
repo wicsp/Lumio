@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { cp, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { Database } from "bun:sqlite";
+import { cp, mkdtemp, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Actor, ApiError, LinksResult, NoteDetail, SearchResult, Timestamp, type ApiErrorCode } from "@lumio/schema";
+import { Actor, ApiError, CheckResult, LinksResult, NoteDetail, SearchResult, Timestamp, type ApiErrorCode } from "@lumio/schema";
 import { AUTHORIZATION_RULES, authorize, type AuthorizationRequest } from "../src/authorize.ts";
 import { readConfig } from "../src/config.ts";
 import { ROUTES, startHub } from "../src/server.ts";
@@ -47,7 +48,7 @@ test("default binding is loopback; public health and every registered route call
   expect(hub!.server.hostname).toBe("127.0.0.1");
   const first = hub!.store.createProposal({ op: "link.add", args: { from: "idea_00000000000000000000000004", to: "idea_00000000000000000000000015" } }, "fixture", hub!.store.actors()[0]!.id);
   const second = hub!.store.createProposal({ op: "link.add", args: { from: "idea_00000000000000000000000015", to: "idea_00000000000000000000000004" } }, "fixture", hub!.store.actors()[0]!.id);
-  const paths = { actors: "/v1/actors", proposals: "/v1/proposals", operations: "/v1/operations", "proposal.accept": `/v1/proposals/${first.id}/accept`, "proposal.reject": `/v1/proposals/${second.id}/reject`, status: "/v1/status", health: "/health", search: "/v1/search?q=index", show: "/v1/notes/Main", links: "/v1/notes/Main/links" };
+  const paths = { check: "/v1/check", actors: "/v1/actors", proposals: "/v1/proposals", operations: "/v1/operations", "proposal.accept": `/v1/proposals/${first.id}/accept`, "proposal.reject": `/v1/proposals/${second.id}/reject`, status: "/v1/status", health: "/health", search: "/v1/search?q=index", show: "/v1/notes/Main", links: "/v1/notes/Main/links" };
   for (const route of ROUTES) {
     const response = route.operation === "operations"
       ? await fetch(`${base()}/v1/operations`, { method: "POST", headers: { Authorization: `Bearer ${human}`, "Content-Type": "application/json" }, body: JSON.stringify({ operation: { op: "link.add", args: { from: "idea_00000000000000000000000015", to: "pap_00000000000000000000000001" } } }) })
@@ -60,7 +61,7 @@ test("default binding is loopback; public health and every registered route call
 });
 
 test("authentication is required everywhere except health, including unknown routes", async () => {
-  for (const path of ["/v1/search?q=index", "/v1/notes/Main", "/v1/notes/Main/links", "/missing"]) {
+  for (const path of ["/v1/check", "/v1/search?q=index", "/v1/notes/Main", "/v1/notes/Main/links", "/missing"]) {
     for (const token of [undefined, "wrong", `lumio_${"x".repeat(43)}`, revoked]) await error(path, token, 401, "UNAUTHENTICATED");
   }
   const invalid = await fetch(`${base()}/v1/search?q=index`, { headers: { Authorization: `Basic ${human}` } });
@@ -148,7 +149,7 @@ test("only configured proxy can supply a valid forwarded IP", async () => {
 });
 
 test("authorization table is exhaustively checked, including private=false", () => {
-  expect(AUTHORIZATION_RULES).toHaveLength(27);
+  expect(AUTHORIZATION_RULES).toHaveLength(31);
   for (const rule of AUTHORIZATION_RULES) {
     const actor = rule.role === null ? null : Actor.parse({ id: "act_00000000000000000000000001", name: "test", role: rule.role, created: "2026-01-01T00:00:00Z" });
     const decision = authorize(actor, { operation: rule.operation, includePrivate: rule.includePrivate });
@@ -173,9 +174,9 @@ async function spawnCli(args: string[], remote: boolean, extraEnv: Record<string
   return { stdout, stderr, code };
 }
 
-test("CLI local and remote JSON are byte-identical for all three commands on the same fixture vault", async () => {
+test("CLI local and remote JSON are byte-identical for every query command on the same fixture vault", async () => {
   for (const args of [["search", "index", "--type", "paper", "--limit", "2"], ["search", "无标识"], ["show", "Main"],
-    ["show", "来源笔记"], ["links", "Main"], ["show", "Private", "--include-private"], ["links", "Main", "--include-private"]]) {
+    ["show", "来源笔记"], ["links", "Main"], ["check"], ["check", "--include-private"], ["show", "Private", "--include-private"], ["links", "Main", "--include-private"]]) {
     const local = await spawnCli([...args, "--json"], false); const remote = await spawnCli([...args, "--json"], true);
     expect(local.code).toBe(0); expect(remote.code).toBe(0); expect(local.stderr + remote.stderr).toBe("");
     expect(remote.stdout).toBe(local.stdout);
@@ -216,7 +217,7 @@ test("every route obeys a denial from the shared authorization entry point", asy
   hub = await startHub({ ...readConfig({ LUMIO_VAULT: vault, LUMIO_STATE_DIR: state }), port: 0 }, {
     log: (line) => logs.push(line), authorize: () => ({ result: "deny", reason: "Test denial" }),
   });
-  for (const path of ["/health", "/v1/search?q=index", "/v1/notes/Main", "/v1/notes/Main/links"]) {
+  for (const path of ["/health", "/v1/check", "/v1/search?q=index", "/v1/notes/Main", "/v1/notes/Main/links"]) {
     expect((await error(path, human, 403, "FORBIDDEN")).reason).toBe("Test denial");
   }
 });
@@ -256,4 +257,61 @@ test("autosave idle defaults to 300 seconds and rejects invalid timer values", (
   for (const value of ["", "0", "-1", "invalid", "Infinity", "2147484"]) {
     expect(() => readConfig({ LUMIO_VAULT: vault, LUMIO_AUTOSAVE_IDLE: value })).toThrow("LUMIO_AUTOSAVE_IDLE");
   }
+});
+
+test("check validates CheckResult, hides private targets, and authorizes and audits private requests", async () => {
+  for (const token of [human, agent]) {
+    const response = await request("/v1/check", token); expect(response.status).toBe(200);
+    const result = CheckResult.parse(await response.json()); expect(result.total).toBeGreaterThan(0);
+    expect(result.dangling.every((l) => l.target !== "Private" && !l.target.startsWith("ast_"))).toBe(true);
+  }
+  const included = CheckResult.parse(await (await request("/v1/check?include_private=true", human)).json());
+  expect(included.dangling.some((l) => l.target === "Private")).toBe(false);
+  expect((await error("/v1/check?include_private=true", agent, 403, "FORBIDDEN")).reason).toBe("agent-cannot-read-private");
+  expect(hub!.store.db.query("SELECT operation FROM audit").all()).toEqual([{ operation: "check" }]);
+  await error("/v1/check?include_private=yes", human, 400, "INVALID");
+  expect(JSON.parse(logs.at(-1)!).path).toBe("/v1/check");
+});
+
+test("live Hub backup preserves all tables and WAL data, uses 0600, refuses existing targets and hides credentials", async () => {
+  hub!.store.db.exec("PRAGMA journal_mode=WAL");
+  const owner = hub!.store.actors().find((a) => a.role === "human")!;
+  const proposal = hub!.store.createProposal({ op: "link.add", args: { from: "idea_00000000000000000000000004", to: "pap_00000000000000000000000001" } }, "Synthetic backup proposal", owner.id);
+  hub!.store.audit({ actor: owner, label: "mac" }, "link.add", "needs_approval", proposal.id);
+  const path = join(temp, "snapshot's backup.sqlite");
+  async function backup(target: string, extra: string[] = [], sourceState = state) {
+    const child = Bun.spawn([process.execPath, hubMain, "backup", target, ...extra], {
+      env: { ...process.env, LUMIO_STATE_DIR: sourceState, LUMIO_VAULT: undefined }, stdout: "pipe", stderr: "pipe",
+    });
+    const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+    return { stdout, stderr, code };
+  }
+  const result = await backup(path); expect(result).toEqual({ stdout: `${path}\n`, stderr: "", code: 0 });
+  expect((await stat(path)).mode & 0o777).toBe(0o600);
+  const snapshot = new Database(path, { readonly: true });
+  try {
+    expect(Object.values(snapshot.query("PRAGMA integrity_check").get()!)).toEqual(["ok"]);
+    for (const table of ["actors", "tokens", "proposals", "audit"]) {
+      const original = hub!.store.db.query(`SELECT * FROM ${table} ORDER BY rowid`).all();
+      expect(original.length).toBeGreaterThan(0);
+      expect(snapshot.query(`SELECT * FROM ${table} ORDER BY rowid`).all()).toEqual(original);
+    }
+    expect(snapshot.query("SELECT name FROM sqlite_master WHERE name='notes'").get()).toBeNull();
+  } finally { snapshot.close(); }
+  const before = await readFile(path), info = await stat(path);
+  const repeated = await backup(path); expect(repeated.code).toBe(1); expect(repeated.stdout).toBe(""); expect(repeated.stderr).toContain("已存在");
+  expect(await readFile(path)).toEqual(before); expect((await stat(path)).mtimeMs).toBe(info.mtimeMs);
+  const empty = join(temp, "existing-empty.sqlite"); await writeFile(empty, "");
+  expect((await backup(empty)).code).toBe(1); expect((await stat(empty)).size).toBe(0);
+  const link = join(temp, "link.sqlite"); await symlink(path, link);
+  expect((await backup(link)).code).toBe(1); expect(await readFile(path)).toEqual(before);
+  expect((await backup(join(temp, "absent", "backup.sqlite"))).code).toBe(1);
+  const absentSource = join(temp, "absent-source.sqlite");
+  const missing = await backup(absentSource, [], join(temp, "missing-state"));
+  expect(missing.code).toBe(1); expect(await Bun.file(absentSource).exists()).toBe(false);
+  expect((await backup(join(temp, "extra.sqlite"), ["--role", "human"])).code).toBe(1);
+  const output = [result, repeated, missing].map((r) => r.stdout + r.stderr).join("\n") + logs.join("\n");
+  const hashes = hub!.store.db.query<{ hash: string }, []>("SELECT hash FROM tokens").all();
+  for (const secret of [human, human2, agent, revoked, ...hashes.map((r) => r.hash)]) expect(output).not.toContain(secret);
+  expect((await request("/v1/check", human)).status).toBe(200);
 });

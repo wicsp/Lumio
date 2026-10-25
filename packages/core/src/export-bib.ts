@@ -1,6 +1,6 @@
 import { mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { Citekey, textContainsCardNumber } from "@lumio/schema";
+import { Citekey, textContainsCardNumber, type NoteRef } from "@lumio/schema";
 import { rewriteBibtexKey } from "./bibtex.ts";
 import { CoreError } from "./errors.ts";
 import { parseFrontmatter } from "./frontmatter.ts";
@@ -33,12 +33,14 @@ function bibtexBlock(body: string): string | undefined {
   return undefined;
 }
 
-export async function exportBib(root: string, out?: string): Promise<BibExport> {
+/** Build the same bibliography for stdout and file exports. An empty selection exports no papers. */
+export async function buildBib(root: string, papers?: readonly NoteRef[]): Promise<{ content: string; count: number; warnings: string[] }> {
   try {
     const entries: { key: string; path: string; text: string }[] = [];
     const warnings: string[] = [];
+    const paths = papers === undefined ? undefined : new Set(papers.filter((p) => p.type === "paper").map((p) => p.path));
     for (const file of await scanVault(root, ["paper"])) {
-      if (file.private) continue;
+      if (file.private || (paths && !paths.has(file.relativePath))) continue;
       const raw = await readFile(file.path);
       if (textContainsCardNumber(raw.toString("utf8"))) {
         warnings.push(`疑似含卡号，跳过：${file.relativePath}`); continue;
@@ -59,11 +61,21 @@ export async function exportBib(root: string, out?: string): Promise<BibExport> 
       }
     }
     entries.sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : a.path < b.path ? -1 : 1);
-    const path = out ?? join(root, entityDirectory("paper"), "..", "refs.bib");
     const content = `% 本文件由 lumio 生成，请勿手动编辑\n\n${entries.map((e) => e.text).join("\n\n")}${entries.length ? "\n" : ""}`;
+    return { content, count: entries.length, warnings };
+  } catch (cause) {
+    if (cause instanceof CoreError) throw cause;
+    throw new CoreError("BIB_EXPORT_FAILED", "无法导出 BibTeX", { cause });
+  }
+}
+
+export async function exportBib(root: string, out?: string, papers?: readonly NoteRef[]): Promise<BibExport> {
+  try {
+    const { content, count, warnings } = await buildBib(root, papers);
+    const path = out ?? join(root, entityDirectory("paper"), "..", "refs.bib");
     await mkdir(dirname(path), { recursive: true });
     const changed = await writeFileAtomic(path, Buffer.from(content));
-    return { path, changed, count: entries.length, warnings };
+    return { path, changed, count, warnings };
   } catch (cause) {
     if (cause instanceof CoreError) throw cause;
     throw new CoreError("BIB_EXPORT_FAILED", "无法导出 BibTeX", { cause });

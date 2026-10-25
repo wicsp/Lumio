@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { ApiError, LinksResult, NoteDetail, SearchResult } from "@lumio/schema";
+import { ApiError, CheckResult, LinksResult, NoteDetail, SearchResult } from "@lumio/schema";
 import { ApiClientError, createClient } from "../src/index.ts";
 
 const note = { type: "idea", title: "中文 / #", path: "research/ideas/test.md" } as const;
@@ -49,6 +49,21 @@ test("malformed success/error/non-JSON/network responses never escape validation
 
 const operation = { op: "link.add", args: { from: "idea_00000000000000000000000015", to: "pap_00000000000000000000000002" } } as const;
 const proposal = { id: "prop_00000000000000000000000001", operation, reason: "Related research", author: "act_00000000000000000000000001", status: "pending", created: "2026-01-01T00:00:00Z" } as const;
+
+test("check encodes visibility, validates CheckResult and propagates authorization errors", async () => {
+  const body = CheckResult.parse({ dangling: [{ from: note, source: "wikilink", target: "Missing" }], total: 1 });
+  const client = createClient({ url: "http://localhost/", token: "synthetic-token", fetch: mock(body, 200, (url, init) => {
+    expect(url.pathname).toBe("/v1/check"); expect(url.searchParams.get("include_private")).toBe("true");
+    expect(init?.method).toBe("GET"); expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer synthetic-token");
+  }) });
+  expect(await client.check({ includePrivate: true })).toEqual(body);
+  const defaultClient = createClient({ url: "http://localhost", token: "token", fetch: mock(body, 200, (url) => expect(url.search).toBe("")) });
+  expect(await defaultClient.check()).toEqual(body);
+  const invalid = createClient({ url: "http://localhost", token: "token", fetch: mock({ dangling: [], total: 0, extra: "private" }) });
+  await expect(invalid.check()).rejects.toMatchObject({ code: "INTERNAL" });
+  const denied = createClient({ url: "http://localhost", token: "token", fetch: mock({ error: { code: "FORBIDDEN", message: "Denied", reason: "agent-cannot-read-private" } }, 403) });
+  await expect(denied.check({ includePrivate: true })).rejects.toMatchObject({ code: "FORBIDDEN", reason: "agent-cannot-read-private", status: 403 });
+});
 
 test("operation/proposal/actors methods use their endpoints, methods, request bodies and success schemas", async () => {
   const cases = [
