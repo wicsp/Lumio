@@ -153,11 +153,15 @@ test("authorization table is exhaustively checked, including private=false", () 
     const actor = rule.role === null ? null : Actor.parse({ id: "act_00000000000000000000000001", name: "test", role: rule.role, created: "2026-01-01T00:00:00Z" });
     const decision = authorize(actor, { operation: rule.operation, includePrivate: rule.includePrivate });
     expect(decision).toEqual(rule.decision);
-    const expected = rule.role !== "agent" ? "allow" : rule.operation === "link.add" ? "needs_approval"
-      : rule.includePrivate || rule.operation.startsWith("proposal.") ? "deny" : "allow";
+    const expected = rule.role !== "agent" ? "allow"
+      : rule.includePrivate || rule.operation.startsWith("proposal.") || rule.operation === "link.add" ? "deny" : "allow";
     expect(decision.result).toBe(expected);
   }
   expect(authorize(null, { operation: "search" }).result).toBe("deny");
+  // P1 中没有任何操作需要批准：AI 不写链接（ADR 0018）。
+  expect(AUTHORIZATION_RULES.some((rule) => rule.decision.result === "needs_approval")).toBe(false);
+  expect(authorize(Actor.parse({ id: "act_00000000000000000000000001", name: "a", role: "agent", created: "2026-01-01T00:00:00Z" }), { operation: "link.add" }))
+    .toEqual({ result: "deny", reason: "agent-cannot-write-links" });
 });
 
 async function spawnCli(args: string[], remote: boolean, extraEnv: Record<string, string | undefined> = {}) {

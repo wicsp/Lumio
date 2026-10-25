@@ -20,7 +20,7 @@ import { Asset, Experiment, Idea, Paper, Post, Project, Source, Task } from "./e
 import { Job } from "./job.ts";
 import { Operation } from "./operation.ts";
 import { Proposal } from "./proposal.ts";
-import { LinksResult, NoteDetail, SearchResult } from "./query.ts";
+import { CheckResult, LinksResult, NoteDetail, SearchResult } from "./query.ts";
 
 /** 需要导出为 JSON Schema 的全部契约，键名即输出文件名。 */
 export const CONTRACTS = {
@@ -36,6 +36,7 @@ export const CONTRACTS = {
   "search-result": SearchResult,
   "links-result": LinksResult,
   "note-detail": NoteDetail,
+  "check-result": CheckResult,
   actor: Actor,
   operation: Operation,
   "operation-request": OperationRequest,

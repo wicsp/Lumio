@@ -113,8 +113,11 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 
 ### 3.5 链接与 AI 区块
 
-- 链接图包括 frontmatter 的 `related` 和正文中的 `[[名称]]`（去掉 `|别名`、`#标题` 后按文件名解析）；**两者都属于人**（ADR 0014）。
+- **链接只写在正文里**：标准的 `[[文件名]]`（去掉 `|别名`、`#标题` 后按文件名解析），由人在写作时写，并在句子里说明关系（ADR 0018）。
+- frontmatter 的 `related` **已弃用**：已有的值仍计入链接图，但 Lumio 不再写它，也不建议人写（ADR 0018）。
+- **改名只在 Obsidian（打开"自动更新内部链接"）或自己的客户端里进行**；其他方式改名造成的断链，Lumio 只负责列出，不自动修复（ADR 0018）。
 - 解析不到的标为悬空链接，不报错；代码块里的 `[[ ]]` 忽略。
+- 导出参考文献时从正文找引用：`lumio export bib --from <笔记>` 只导出该笔记里 `[[citekey]]` 或 `\cite{citekey}` 引用到的论文（ADR 0018）。
 - AI 生成的内容写在正文的标记区块里（ADR 0012）：
   ```
   <!-- lumio:ai start name=summary model=<模型> generated=<时间> -->
@@ -163,19 +166,20 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 - 不经过 shell，只执行登记过的程序；密钥在执行节点上才解析。
 - Agent 不自己实现，Runtime 调用现成的 agent CLI。
 
-## 5. AI 协作与权限（ADR 0014、0016）
+## 5. AI 协作与权限（ADR 0014、0016、0018）
 
-- **AI 只能提议，链接由人建立**：AI 可以查询、新建想法和论文笔记、提议链接、重写 AI 区块；
-  不能写人拥有的链接，不能改人写的正文。提议由人接受后，Hub 只写 frontmatter 的 `related`，永远不改正文。
-- **AI 的入口是 CLI + skill**：`lumio search/show/links/propose … --json`，配合 `skills/lumio/SKILL.md`；
+- **AI 只推荐，不写链接**（ADR 0018）：AI 可以查询、新建想法和论文笔记、重写 AI 区块；它检索已有笔记，在对话里告诉人
+  "哪篇的哪一段和这里相似"并给出原文，由人决定是否、怎样写进正文。AI 不能写任何链接，不能改人写的正文。
+- **AI 的入口是 CLI + skill**：`lumio search/show/links … --json`，配合 `skills/lumio/SKILL.md`；
   Claude Code、Codex、pi 共用一份。MCP 只在出现没有 shell 的客户端时，作为薄适配层再加。
 - **身份与令牌分开**（ADR 0016）：人和每个 AI agent 各是一个身份（`act_<ULID>`），角色是 `human` 或 `agent`；
   令牌只是身份的凭证，一个身份可以有多个，可单独吊销。提议、审计、日志里记身份 ID，不记令牌名称。
   令牌只显示一次，Hub 只存哈希；所有请求都要令牌，内网也不例外（ADR 0007）。
-- **每次修改都是一个操作，只有一个入口**（ADR 0016）：程序对 vault 的修改表示为 `{ op, args }`（P1 只有 `link.add`），
+- **每次修改都是一个操作，只有一个入口**（ADR 0016）：程序对 vault 的修改表示为 `{ op, args }`（P1 只有 `link.add`，已弃用、仅 human 可用，作为样例保留到 P2），
   Hub 先 `authorize(身份, 操作)` 再执行。以后的完整权限系统只替换 `authorize`。
 - **授权结果三种**：允许 → 立即执行；拒绝 → 403；**需要批准 → 生成提议**，提议里存完整的操作，人接受后 Hub 执行它。
-  P1 规则：`human` 全部允许；`agent` 查询允许（私密除外），`link.add` 需要批准，决定提议、访问私密实体拒绝。
+  P1 规则：`human` 全部允许；`agent` 查询允许（私密除外），`link.add`、决定提议、访问私密实体拒绝。
+  **P1 中没有需要批准的操作**；审批流程已实现并有测试，等 P2 出现真正需要批准的操作时使用（ADR 0018）。
 - **错误带决策信息**：错误响应统一为 `ApiError`（代码、说明、被拒绝的操作、原因、提议 ID），AI 据此向人解释。
 - **审计**：每次授权与执行都记入 `hub.sqlite`；Hub 执行的操作立即单独提交，提交信息带 `Lumio-Actor`，
   经提议执行的还带 `Lumio-Proposal`、`Lumio-Approved-By`。自动保存的提交不带身份。
@@ -208,7 +212,7 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 |---|---|---|
 | P0 | `lumio new paper`、`lumio new idea`、`lumio sync`；vault 目录结构；source / post / asset 契约 | ✅ |
 | P0-7 | 迁移真实 vault 到新目录 | ✅ |
-| P1 | 本地查询与 `export bib`；Hub（身份与令牌、查询 API、监听、自动提交、操作与提议）；skill | 下一步 |
+| P1 | 本地查询与 `export bib`；Hub（身份与令牌、查询 API、监听、自动提交、操作与提议框架）；按引用导出与断链检查；skill | 进行中 |
 | P2 | 任务与实验；Runtime 与 job 派发；Python 实验 SDK；Chrome 插件入库 | |
 | P3 | 飞书 Bot、多维表格镜像、定时工作流（含资产到期提醒） | |
 | P4 | Web Dashboard、Docker / Nix、对外 SDK、手机端 | |
