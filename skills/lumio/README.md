@@ -33,3 +33,11 @@ Codex（`codex@mac`）、pi（`pi@mac`）同理。
 **不要**在你自己的 `~/.zshrc` 里全局导出 human 令牌：从这个 shell 启动的 agent 会继承它，拿到你的全部权限。
 
 令牌是明文写在这些配置文件里的，它们只在你本机；不要提交到任何仓库。泄露时用 `lumio-hub token revoke <标签>` 吊销。
+
+## 4. 自动验收（P1-6）
+用合成 vault 检查某个 agent 是否按 skill 行事，不碰真实 vault：
+```sh
+skills/lumio/eval/run.sh claude   # 也可以是 codex、pi
+```
+会打印 agent 的回复，再逐项检查：给出了 `[[文件名]]`、推荐了相关笔记、没推荐无关论文、vault 无改动、私密笔记没泄露、
+Hub 没收到写链接或提议请求。全部通过时退出码为 0。
