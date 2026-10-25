@@ -14,7 +14,10 @@ git -C "$work/vault" init -q
 git -C "$work/vault" -c user.name=eval -c user.email=eval@example.invalid add -A
 git -C "$work/vault" -c user.name=eval -c user.email=eval@example.invalid commit -qm fixture
 mkdir -p "$work/bin" "$work/cwd/.claude/skills" "$work/cwd/.agents/skills"
-bun build "$repo/apps/cli/src/main.ts" --compile --outfile "$work/bin/lumio" >/dev/null
+# 不编译：macOS 上在沙箱里编译出的二进制签名无效，一执行就被系统 SIGKILL（退出码 137）。
+# 用一个小脚本直接以 bun 运行源码，行为与编译版相同。
+printf '#!/bin/sh\nexec bun "%s/apps/cli/src/main.ts" "$@"\n' "$repo" >"$work/bin/lumio"
+chmod +x "$work/bin/lumio"
 ln -s "$repo/skills/lumio" "$work/cwd/.claude/skills/lumio"   # Claude Code 的项目级 skill
 ln -s "$repo/skills/lumio" "$work/cwd/.agents/skills/lumio"   # Codex、pi
 
