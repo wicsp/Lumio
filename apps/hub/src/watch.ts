@@ -1,6 +1,6 @@
 import { watch, type FSWatcher } from "node:fs";
 import { lstat, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import {
   entityTypeOfPath, isPrivateType, isVaultNotePath, openVaultGit, syncFile, syncVault, updateIndex, vaultFileAt,
   VAULT_LAYOUT, type SyncFileResult, type SyncOptions, type VaultGit,
@@ -39,6 +39,10 @@ function privatePath(path: string): boolean {
   const type = entityTypeOfPath(path);
   return VAULT_LAYOUT.some((entry) => entry.private && (path === entry.dir.split("/")[0] || path.startsWith(`${entry.dir.split("/")[0]}/`)))
     || (type !== undefined && isPrivateType(type));
+}
+
+function changesAutosave(path: string): boolean {
+  return !isAbsolute(path) && path.split(/[\\/]/).every((part) => part !== "" && part !== ".." && !part.startsWith("."));
 }
 
 export async function startVaultWatch(config: { vault: string; stateDir: string; autosaveIdle: number }, options: WatchOptions = {}) {
@@ -120,9 +124,13 @@ export async function startVaultWatch(config: { vault: string; stateDir: string;
     }
   }
   function notify(path: string) {
-    if (stopped || !isVaultNotePath(path)) return;
+    if (stopped) return;
+    // 自动保存覆盖 vault 中所有非隐藏文件（报告、附件、README 等）；补全只处理笔记。
+    // 隐藏路径（.obsidian、.git、iCloud 占位文件、我们的临时文件）不重新计时。
+    if (!changesAutosave(path)) return;
     lastChange = clock.now();
     armIdle();
+    if (!isVaultNotePath(path)) return;
     const timer = debounce.get(path);
     if (timer !== undefined) clock.clear(timer);
     debounce.set(path, clock.set(() => {

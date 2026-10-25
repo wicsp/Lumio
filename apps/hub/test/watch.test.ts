@@ -134,6 +134,22 @@ test("idle timer resets on changes, commits once and omits actor trailers", asyn
   expect((await hub.status()).pending_files).toBe(0);
 });
 
+test("non-note files (reports, attachments) also start the idle timer and get committed; hidden paths do not", async () => {
+  initGit(); const hub = await start();
+  await tick(10_000); const base = Number(git("rev-list", "--count", "HEAD").trim());
+  await mkdir(join(vault, "research/reports"), { recursive: true });
+  await writeFile(join(vault, "research/reports/开题报告.md"), "# 开题报告\n");
+  hub.notify("research/reports/开题报告.md");
+  await tick(10_000);
+  expect(Number(git("rev-list", "--count", "HEAD").trim())).toBe(base + 1);
+  expect(git("-c", "core.quotepath=false", "show", "--name-only", "--format=", "HEAD").trim()).toBe("research/reports/开题报告.md");
+  // 只有隐藏路径变化时不重新计时、不提交。
+  await mkdir(join(vault, ".obsidian"), { recursive: true });
+  hub.notify(".obsidian/workspace.json");
+  await tick(60_000);
+  expect(Number(git("rev-list", "--count", "HEAD").trim())).toBe(base + 1);
+});
+
 test("all pending files are card-checked, including pre-staged non-notes; safe files still commit", async () => {
   initGit(); const hub = await start();
   const safe = "research/ideas/safe.md", blocked = "research/ideas/card.md", other = "files/card.txt";
