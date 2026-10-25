@@ -159,7 +159,7 @@ test("authorization table is exhaustively checked, including private=false", () 
   }
   expect(authorize(null, { operation: "search" }).result).toBe("deny");
   // P1 中没有任何操作需要批准：AI 不写链接（ADR 0018）。
-  expect(AUTHORIZATION_RULES.some((rule) => rule.decision.result === "needs_approval")).toBe(false);
+  expect(AUTHORIZATION_RULES.some((rule) => (rule.decision.result as string) === "needs_approval")).toBe(false);
   expect(authorize(Actor.parse({ id: "act_00000000000000000000000001", name: "a", role: "agent", created: "2026-01-01T00:00:00Z" }), { operation: "link.add" }))
     .toEqual({ result: "deny", reason: "agent-cannot-write-links" });
 });
