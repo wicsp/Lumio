@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { parseFrontmatter } from "@lumio/core";
 import { Actor, ApiError, LinksResult, OperationResult, Proposal, type Operation } from "@lumio/schema";
 import { HubStore } from "../src/store.ts";
+import { authorize } from "../src/authorize.ts";
 import { startHub } from "../src/server.ts";
 import { readConfig } from "../src/config.ts";
 import type { WatchClock } from "../src/watch.ts";
@@ -28,6 +29,10 @@ class Clock implements WatchClock {
 }
 let temp: string, vault: string, state: string, human: string, agent: string, other: string, owner: Actor, author: Actor, clock: Clock;
 let hub: Awaited<ReturnType<typeof startHub>> | undefined;
+// P1 的正式规则里没有需要批准的操作（ADR 0018：agent 不能写链接）。为了继续覆盖审批流程，
+// 这些测试把 agent 的 link.add 当作"需要批准"的样例操作；其余规则与正式规则表相同。
+const approvalRules: typeof authorize = (actor, request) =>
+  actor?.role === "agent" && request.operation === "link.add" ? { result: "needs_approval" } : authorize(actor, request);
 let beforeCommit: (() => Promise<void>) | undefined;
 let notify: (path: string) => void;
 let processed: number;
@@ -39,7 +44,7 @@ beforeEach(async () => {
   human = store.createToken("owner-mac", "owner"); agent = store.createToken("codex-mac", "codex"); other = store.createToken("other-mac", "other"); store.close();
   clock = new Clock(); beforeCommit = undefined; processed = 0;
   hub = await startHub({ ...readConfig({ LUMIO_VAULT: vault, LUMIO_STATE_DIR: state }), port: 0, autosaveIdle: 10 }, {
-    log() {}, operations: { beforeCommit: () => beforeCommit?.() },
+    log() {}, authorize: approvalRules, operations: { beforeCommit: () => beforeCommit?.() },
     watch: { clock, onProcess: () => { processed++; }, watch: ((_path, _opts, callback) => {
       notify = (path) => (callback as (event: string, path: string) => void)("change", path);
       return Object.assign(new EventEmitter(), { close() {} }) as FSWatcher;
@@ -188,7 +193,7 @@ test("git isolates the prior human edit, only commits the target and uses correc
   initGit();
   // Restart so autosave can discover the temporary repository as well.
   await hub!.stop();
-  hub = await startHub({ ...readConfig({ LUMIO_VAULT: vault, LUMIO_STATE_DIR: state }), port: 0, autosaveIdle: 10 }, { log() {}, watch: {
+  hub = await startHub({ ...readConfig({ LUMIO_VAULT: vault, LUMIO_STATE_DIR: state }), port: 0, autosaveIdle: 10 }, { log() {}, authorize: approvalRules, watch: {
     clock, onProcess: () => { processed++; }, watch: ((_path, _opts, callback) => { notify = (path) => (callback as (event: string, path: string) => void)("change", path); return Object.assign(new EventEmitter(), { close() {} }) as FSWatcher; }) as typeof watch,
   } });
   const p = await propose(); const path = join(vault, relative);
@@ -271,4 +276,16 @@ test("git commit failure leaves proposal pending, rolls back only operation byte
   await rm(join(temp, "gitdir/HEAD.lock")); beforeCommit = undefined;
   await decide(p, "accept");
   expect(git("show", "-s", "--format=%B")).toContain(`Lumio-Proposal: ${p.id}`);
+});
+
+test("with the real rules an agent cannot request link.add at all: 403, nothing written, no proposal (ADR 0018)", async () => {
+  await hub!.stop();
+  hub = await startHub({ ...readConfig({ LUMIO_VAULT: vault, LUMIO_STATE_DIR: state }), port: 0, autosaveIdle: 10 }, { log() {} });
+  const path = join(vault, relative); const before = await readFile(path);
+  const response = await fetch(`${base()}/v1/operations`, { method: "POST", headers: { Authorization: `Bearer ${agent}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ operation, reason: "看起来相关" }) });
+  expect(response.status).toBe(403);
+  expect(ApiError.parse(await response.json()).error).toMatchObject({ code: "FORBIDDEN", reason: "agent-cannot-write-links", operation });
+  expect(await readFile(path)).toEqual(before);
+  expect(hub!.store.proposals("pending")).toHaveLength(0);
 });

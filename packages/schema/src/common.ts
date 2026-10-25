@@ -57,7 +57,7 @@ export const Base = z.looseObject({
   updated: Timestamp,
   tags: withDefault(z.array(z.string()), []),
   related: withDefault(z.array(Id), []).describe(
-    "显式关联，由人维护（ADR 0014 第 1 节）；正文里的 [[链接]] 由 indexer 另行解析",
+    "已弃用（ADR 0018）：链接写在正文的 [[ ]] 里。已有的值仍计入链接图，Lumio 不再写入",
   ),
 });
 

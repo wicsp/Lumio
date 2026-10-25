@@ -11,7 +11,9 @@ export const AUTHORIZATION_RULES = [
   ...(["human", "agent"] as const).flatMap((role) => [
     { role, operation: "actors", includePrivate: false, decision: { result: "allow" } },
     { role, operation: "proposals", includePrivate: false, decision: { result: "allow" } },
-    { role, operation: "link.add", includePrivate: false, decision: { result: role === "human" ? "allow" : "needs_approval" } },
+    // 链接由人写在正文里，AI 只推荐、不写链接（ADR 0018）。link.add 仅作为审批流程的样例保留到 P2。
+    { role, operation: "link.add", includePrivate: false,
+      decision: role === "human" ? { result: "allow" as const } : { result: "deny" as const, reason: "agent-cannot-write-links" } },
     ...(["proposal.accept", "proposal.reject"] as const).map((operation) => ({ role, operation, includePrivate: false,
       decision: role === "human" ? { result: "allow" as const } : { result: "deny" as const, reason: "agent-cannot-decide-proposals" } })),
   ] as const),
