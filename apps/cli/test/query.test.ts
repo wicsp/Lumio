@@ -17,7 +17,7 @@ afterEach(async () => { await rm(temp, { recursive: true, force: true }); });
 
 function cli(args: string[]) {
   const result = Bun.spawnSync([process.execPath, main, ...args], {
-    env: { ...process.env, LUMIO_VAULT: vault, LUMIO_STATE_DIR: state, LUMIO_HUB_URL: "http://127.0.0.1:1" },
+    env: { ...process.env, LUMIO_VAULT: vault, LUMIO_STATE_DIR: state, LUMIO_HUB_URL: undefined, LUMIO_TOKEN: undefined },
     stdout: "pipe", stderr: "pipe",
   });
   return { code: result.exitCode, stdout: result.stdout.toString(), stderr: result.stderr.toString() };
