@@ -27,6 +27,28 @@ function withoutCode(body: string): string {
   return result + lines.slice(cursor);
 }
 
+export interface Citation { source: "wikilink" | "cite"; target: string }
+
+/** Count citation commands as occurrences, even when a command contains several keys. */
+export function extractCitations(body: string): { citations: Citation[]; ignored: number } {
+  const text = withoutCode(body);
+  const ai = /<!--\s*lumio:ai start\b[^>]*-->[\s\S]*?(?:<!--\s*lumio:ai end\b[^>]*-->|$)/g;
+  const commands = /\\(?:cite|citep|citet|parencite|textcite)\s*(?:\[[^\]]*\]\s*)*\{([^{}]*)\}/g;
+  let ignored = 0;
+  const human = text.replace(ai, (block) => {
+    ignored += extractLinks({}, block.replace(/<!--[^>]*-->/g, "")).length + [...block.matchAll(commands)].length;
+    return "";
+  });
+  const citations: Citation[] = extractLinks({}, human).map((link) => ({ source: "wikilink", target: link.target }));
+  for (const match of human.matchAll(commands)) {
+    for (const key of match[1]!.split(",")) {
+      const target = key.trim();
+      if (target) citations.push({ source: "cite", target });
+    }
+  }
+  return { citations, ignored };
+}
+
 /** Remove code and AI-owned blocks before extracting human-owned links. */
 export function extractLinks(frontmatter: Record<string, unknown>, body: string): RawLink[] {
   const links: RawLink[] = [];

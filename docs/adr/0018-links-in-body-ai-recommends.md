@@ -1,6 +1,6 @@
 # 0018 链接写在正文里，AI 只推荐不写链接，`related` 弃用
 
-- 状态：Accepted
+- 状态：Implemented（2026-10-25，#16、P1-5）
 - 日期：2026-10-25
 - 领域：数据、AI 协作与权限
 - 影响：ADR 0014 第 1、4 节，ADR 0016 第 3 节的 P1 规则表，`packages/schema` 中 `Base.related` 的说明

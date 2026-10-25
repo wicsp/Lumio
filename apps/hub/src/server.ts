@@ -1,6 +1,6 @@
 import { stat } from "node:fs/promises";
 import { isIP } from "node:net";
-import { CoreError, noteLinks, searchNotes, showNote, type SearchOptions } from "@lumio/core";
+import { CoreError, checkLinks, noteLinks, searchNotes, showNote, type SearchOptions } from "@lumio/core";
 import { ApiError, NOTE_TYPES, type ApiErrorCode } from "@lumio/schema";
 import { version } from "../package.json";
 import { startVaultWatch, type WatchOptions } from "./watch.ts";
@@ -20,6 +20,7 @@ export const ROUTES = [
   { operation: "status", pattern: /^\/v1\/status$/ },
   { operation: "health", pattern: /^\/health$/ },
   { operation: "search", pattern: /^\/v1\/search$/ },
+  { operation: "check", pattern: /^\/v1\/check$/ },
   { operation: "links", pattern: /^\/v1\/notes\/([^/]+)\/links$/ },
   { operation: "show", pattern: /^\/v1\/notes\/([^/]+)$/ },
 ] as const;
@@ -50,7 +51,7 @@ export async function startHub(config: HubConfig, options: {
         // Logging uses route templates, so references (or secrets in a URL) cannot leak.
         const route = ROUTES.find((route) => request.method === ("method" in route ? route.method : "GET") && route.pattern.test(url.pathname));
         const path = route?.operation === "status" ? "/v1/status" : route?.operation === "health" ? "/health" : route?.operation === "search" ? "/v1/search"
-          : route?.operation === "show" ? "/v1/notes/<reference>" : route?.operation === "links" ? "/v1/notes/<reference>/links" : route?.operation === "operations" ? "/v1/operations"
+          : route?.operation === "check" ? "/v1/check" : route?.operation === "show" ? "/v1/notes/<reference>" : route?.operation === "links" ? "/v1/notes/<reference>/links" : route?.operation === "operations" ? "/v1/operations"
             : route?.operation === "actors" ? "/v1/actors" : route?.operation === "proposals" ? "/v1/proposals"
               : route?.operation === "proposal.accept" ? "/v1/proposals/<id>/accept" : route?.operation === "proposal.reject" ? "/v1/proposals/<id>/reject" : "<unmatched>";
         let clientIp = server.requestIP(request)?.address ?? null;
@@ -85,6 +86,8 @@ export async function startHub(config: HubConfig, options: {
           let result: unknown;
           if (route.operation === "status") {
             result = await vaultWatch!.status(includePrivate);
+          } else if (route.operation === "check") {
+            result = await checkLinks(config.vault, queryOptions);
           } else if (route.operation === "search") {
             const type = url.searchParams.get("type");
             const limit = url.searchParams.get("limit");

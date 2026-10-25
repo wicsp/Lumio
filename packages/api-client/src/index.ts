@@ -1,4 +1,4 @@
-import { Actor, OperationRequest, OperationResult, Proposal, ProposalStatus, ApiError, LinksResult, NoteDetail, SearchResult, type ApiErrorCode, type NoteRef } from "@lumio/schema";
+import { Actor, OperationRequest, OperationResult, Proposal, ProposalStatus, ApiError, CheckResult, LinksResult, NoteDetail, SearchResult, type ApiErrorCode, type NoteRef } from "@lumio/schema";
 
 export class ApiClientError extends Error {
   readonly code: ApiErrorCode;
@@ -61,6 +61,9 @@ export function createClient(options: { url: string; token: string; fetch?: type
     },
     links(reference: string, options: QueryOptions = {}) {
       return request(`/v1/notes/${encodeURIComponent(reference)}/links`, queryParams(options), LinksResult);
+    },
+    check(options: QueryOptions = {}) {
+      return request("/v1/check", queryParams(options), CheckResult);
     },
   };
 }

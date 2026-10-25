@@ -1,20 +1,29 @@
-import { excludedCardPaths, exportBib, noteLinks, searchNotes, showNote, type SearchOptions } from "@lumio/core";
+import { buildBib, checkLinks, collectCitations, excludedCardPaths, exportBib, noteLinks, searchNotes, showNote, type SearchOptions } from "@lumio/core";
 import { createClient } from "@lumio/api-client";
 import { NOTE_TYPES, type NoteRef } from "@lumio/schema";
 
 export interface QueryCommand {
-  command: "search" | "show" | "links" | "export";
+  command: "search" | "show" | "links" | "check" | "export";
   argument: string;
   type?: string;
   limit?: string;
   includePrivate?: boolean;
   json?: boolean;
   out?: string;
+  from?: string;
 }
 
 export async function runQuery(root: string | undefined, command: QueryCommand, log: (line: string) => void, warn: (line: string) => void, remote?: ReturnType<typeof createClient>): Promise<number> {
   if (command.command === "export") {
-    const result = await exportBib(root!, command.out);
+    const citations = command.from === undefined ? undefined : await collectCitations(root!, command.from);
+    for (const warning of citations?.warnings ?? []) warn(warning);
+    if (citations && command.out === undefined) {
+      const result = await buildBib(root!, citations.papers);
+      for (const warning of result.warnings) warn(warning);
+      log(result.content.endsWith("\n") ? result.content.slice(0, -1) : result.content);
+      return 0;
+    }
+    const result = await exportBib(root!, command.out, citations?.papers);
     for (const warning of result.warnings) warn(warning);
     log(`导出 ${result.count} 篇论文：${result.path}${result.changed ? "" : "（未变化）"}`);
     return 0;
@@ -25,7 +34,15 @@ export async function runQuery(root: string | undefined, command: QueryCommand, 
     includePrivate: command.includePrivate, type: command.type as NoteRef["type"] | undefined,
     ...(command.limit !== undefined ? { limit: Number(command.limit) } : {}),
   };
-  if (command.command === "search") {
+  if (command.command === "check") {
+    const result = await (remote ? remote.check(options) : checkLinks(root!, options));
+    if (command.json) log(JSON.stringify(result));
+    else if (!result.total) log("没有悬空链接");
+    else {
+      for (const link of result.dangling) log(`${link.from.path}  →  [[${link.target}]]`);
+      log(`共 ${result.total} 条悬空链接`);
+    }
+  } else if (command.command === "search") {
     const result = await (remote ? remote.search(command.argument, options) : searchNotes(root!, command.argument, options));
     if (command.json) log(JSON.stringify(result));
     else {

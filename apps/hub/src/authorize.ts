@@ -1,6 +1,6 @@
 import type { Actor } from "@lumio/schema";
 
-export const QUERY_OPERATIONS = ["search", "show", "links", "status"] as const;
+export const QUERY_OPERATIONS = ["search", "show", "links", "check", "status"] as const;
 export type QueryOperation = (typeof QUERY_OPERATIONS)[number];
 export interface AuthorizationRequest { operation: QueryOperation | "health" | "actors" | "proposals" | "proposal.accept" | "proposal.reject" | "link.add"; includePrivate?: boolean }
 export type Decision = { result: "allow" } | { result: "deny"; reason: string } | { result: "needs_approval" };

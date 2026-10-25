@@ -37,7 +37,7 @@ async function executeCli(args: string[], options: CliOptions): Promise<number> 
     options: {
       vault: { type: "string" }, "dry-run": { type: "boolean" },
       abbr: { type: "string" }, reason: { type: "string" }, status: { type: "string" },
-      type: { type: "string" }, limit: { type: "string" }, out: { type: "string" },
+      type: { type: "string" }, limit: { type: "string" }, out: { type: "string" }, from: { type: "string" },
       "include-private": { type: "boolean" }, json: { type: "boolean" },
     },
   });
@@ -61,14 +61,14 @@ async function executeCli(args: string[], options: CliOptions): Promise<number> 
     return 0;
   }
 
-  const query = command === "search" || command === "show" || command === "links";
+  const query = command === "search" || command === "show" || command === "links" || command === "check";
   const bib = command === "export" && positionals[1] === "bib";
   if (query || bib) {
-    if (positionals.length !== 2 || values.abbr !== undefined || values["dry-run"] !== undefined
-      || (!bib && values.out !== undefined)
+    if (positionals.length !== (command === "check" ? 1 : 2) || values.abbr !== undefined || values["dry-run"] !== undefined
+      || (!bib && (values.out !== undefined || values.from !== undefined)) || values.from === ""
       || (command !== "search" && (values.type !== undefined || values.limit !== undefined))
       || (bib && (values.json !== undefined || values["include-private"] !== undefined))) {
-      throw new Error("用法：lumio search <查询> [--type 类型] [--limit N] [--include-private] [--json]；lumio show|links <引用> [--include-private] [--json]；lumio export bib [--out 路径]");
+      throw new Error("用法：lumio search <查询> [--type 类型] [--limit N] [--include-private] [--json]；lumio show|links <引用> [--include-private] [--json]；lumio check [--include-private] [--json]；lumio export bib [--from 引用] [--out 路径]");
     }
     const url = process.env.LUMIO_HUB_URL;
     const token = process.env.LUMIO_TOKEN;
@@ -77,8 +77,8 @@ async function executeCli(args: string[], options: CliOptions): Promise<number> 
     }
     const remote = query && url && token ? createClient({ url, token }) : undefined;
     return runQuery(remote ? undefined : resolveVault(values.vault, process.env.LUMIO_VAULT), {
-      command: bib ? "export" : command as "search" | "show" | "links", argument: positionals[1]!,
-      type: values.type, limit: values.limit, out: values.out,
+      command: bib ? "export" : command as "search" | "show" | "links" | "check", argument: positionals[1] ?? "",
+      type: values.type, limit: values.limit, out: values.out, from: values.from,
       includePrivate: values["include-private"], json: values.json,
     }, log, options.warn ?? console.error, remote);
   }
@@ -87,7 +87,7 @@ async function executeCli(args: string[], options: CliOptions): Promise<number> 
   const paper = positionals.length === 3 && positionals[0] === "new" && positionals[1] === "paper";
   if ((!sync && !idea && !paper) || (!sync && values["dry-run"] !== undefined)
     || (!paper && values.abbr !== undefined)
-    || [values.type, values.limit, values.out, values.json, values["include-private"]].some((v) => v !== undefined)) {
+    || [values.type, values.limit, values.out, values.from, values.json, values["include-private"]].some((v) => v !== undefined)) {
     throw new Error("用法：lumio sync [--vault <路径>] [--dry-run]；lumio new idea <标题> [--vault <路径>]；lumio new paper <输入> [--vault <路径>] [--abbr <缩写>]");
   }
   const root = resolveVault(values.vault, process.env.LUMIO_VAULT);
