@@ -1,6 +1,6 @@
 # 0003 以 Zod 作为契约，导出 JSON Schema 给其他语言
 
-- 状态：Accepted
+- 状态：Implemented（2026-10-22）
 - 日期：2026-10-22
 - 取代：本 ADR 早先的提议版本"以 JSON Schema 作为跨语言契约"
 

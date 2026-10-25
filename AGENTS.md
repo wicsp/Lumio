@@ -7,7 +7,9 @@
 
 ## 硬规则
 1. **契约不可私改**：`packages/schema/` 是唯一事实来源。需要改它时，先在 `docs/adr/` 写一条
-   状态为 `Proposed` 的 ADR，停下来等人类批准，批准后再改。导出的 JSON Schema 和由它生成的
+   状态为 `Proposed` 的 ADR，停下来等人类批准，批准后再改。
+   **ADR 本身的修改规则见 ADR 0013**：`Implemented` 的内容定稿，不得修改原文，要变更就写新的 ADR；
+   `Accepted` 的内容修改前要人类批准，并记入文末的"修订记录"。导出的 JSON Schema 和由它生成的
    其他语言类型都是生成物，不得手改。
 2. **依赖方向**（由 `bun run lint:deps` 强制）
    - `apps/*` → `packages/*`。`packages/*` 不得依赖 `apps/*`；`apps/*` 之间不得互相 import。

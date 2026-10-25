@@ -1,6 +1,6 @@
 # 0005 Runtime 执行语义
 
-- 状态：Accepted（原则）；对应的 `packages/schema/src/job.ts` 字段在 P2 实现 Runtime 时补全
+- 状态：Accepted（P2 实现 Runtime 时补全 `packages/schema/src/job.ts`）
 - 日期：2026-10-22
 
 ## 背景

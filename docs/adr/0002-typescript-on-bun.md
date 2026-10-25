@@ -1,6 +1,6 @@
 # 0002 全部使用 TypeScript，运行在 Bun 上
 
-- 状态：Accepted
+- 状态：Implemented（2026-10-22）
 - 日期：2026-10-22
 - 取代：本 ADR 早先的提议版本"Rust 写后端，TS 写客户端"
 
