@@ -3,10 +3,16 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { CoreError } from "./errors.ts";
 
+export interface GitTrailers {
+  "Lumio-Actor"?: string;
+  "Lumio-Proposal"?: string;
+  "Lumio-Approved-By"?: string;
+}
+
 export interface VaultGit {
   changedFiles(): Promise<string[]>;
   add(path: string, expectedContent?: Uint8Array | null): Promise<void>;
-  commit(paths: string[], message: string): Promise<void>;
+  commit(paths: string[], message: string, trailers?: GitTrailers): Promise<void>;
 }
 
 /** Only the vault's own .git is accepted; never discover a parent repository. */
@@ -51,7 +57,8 @@ export async function openVaultGit(root: string, executable = "git"): Promise<Va
       // Cache the exact staged object, not a path that commit could re-read later.
       staged.set(path, entry || `0 ${"0".repeat(40)}\t${path}\0`);
     },
-    async commit(paths, message) {
+    async commit(paths, message, trailers = {}) {
+      if (Object.entries(trailers).some(([key, value]) => !["Lumio-Actor", "Lumio-Proposal", "Lumio-Approved-By"].includes(key) || !value || /[\r\n]/.test(value))) throw new CoreError("GIT_FAILED", "git trailer 不合法");
       if (!paths.length) return;
       paths.forEach(check);
       if (paths.some((path) => !staged.has(path))) throw new CoreError("GIT_FAILED", "提交路径尚未暂存");
@@ -64,7 +71,9 @@ export async function openVaultGit(root: string, executable = "git"): Promise<Va
         try { await run(["rev-parse", "--verify", "HEAD"]); } catch { hasHead = false; }
         await run(hasHead ? ["read-tree", "HEAD"] : ["read-tree", "--empty"], { index });
         await run(["update-index", "-z", "--index-info"], { index, input: paths.map((path) => staged.get(path)!).join("") });
-        await run(["commit", "-m", message], { index });
+        const suffix = Object.entries(trailers).map(([key, value]) => `${key}: ${value}`).join("\n");
+        const changed = !hasHead || (await run(["diff-index", "--cached", "--name-only", "-z", "HEAD"], { index })).length > 0;
+        if (changed) await run(["commit", "-m", message + (suffix ? `\n\n${suffix}` : "")], { index });
         for (const path of paths) staged.delete(path);
       } finally { await rm(temp, { recursive: true, force: true }); }
     },

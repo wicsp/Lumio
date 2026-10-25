@@ -4,7 +4,9 @@ import {
   createIdea, createPaper, generateCitekey, newId, parseArxivMetadata,
   parseCrossrefMetadata, parsePaperInput, resolveVault,
 } from "@lumio/core";
-import { createClient } from "@lumio/api-client";
+import { ApiClientError, createClient } from "@lumio/api-client";
+import { ApiError } from "@lumio/schema";
+import { runOperations } from "./operations.ts";
 import { version } from "../package.json";
 import { syncVault } from "./sync.ts";
 import { fetchPaperSource, type PaperFetcher } from "./paper-source.ts";
@@ -17,17 +19,34 @@ export interface CliOptions {
 }
 
 export async function runCli(args: string[], options: CliOptions = {}): Promise<number> {
+  try { return await executeCli(args, options); }
+  catch (cause) {
+    if (!["link", "propose", "proposals"].includes(args[0] ?? "") || !args.includes("--json")) throw cause;
+    const error = cause instanceof ApiClientError ? {
+      code: cause.code, message: cause.message, operation: cause.operation, reason: cause.reason, proposal: cause.proposal,
+    } : { code: "INVALID", message: cause instanceof Error ? cause.message : "无法执行命令" };
+    (options.log ?? console.log)(JSON.stringify(ApiError.parse({ error })));
+    return 1;
+  }
+}
+
+async function executeCli(args: string[], options: CliOptions): Promise<number> {
   const log = options.log ?? console.log;
   const { values, positionals } = parseArgs({
     args, allowPositionals: true, strict: true,
     options: {
       vault: { type: "string" }, "dry-run": { type: "boolean" },
-      abbr: { type: "string" },
+      abbr: { type: "string" }, reason: { type: "string" }, status: { type: "string" },
       type: { type: "string" }, limit: { type: "string" }, out: { type: "string" },
       "include-private": { type: "boolean" }, json: { type: "boolean" },
     },
   });
   const command = positionals[0];
+  if (["link", "propose", "proposals"].includes(command ?? "")) {
+    if (Object.keys(values).some((key) => !["reason", "status", "json"].includes(key))) throw new Error("链接与提议命令不支持此选项");
+    return runOperations(positionals, values, log);
+  }
+  if (values.reason !== undefined || values.status !== undefined) throw new Error("reason 和 status 只用于链接与提议命令");
   if (command === "hub" && positionals[1] === "status") {
     if (positionals.length !== 2 || Object.keys(values).length) throw new Error("用法：lumio hub status");
     const url = process.env.LUMIO_HUB_URL, token = process.env.LUMIO_TOKEN;

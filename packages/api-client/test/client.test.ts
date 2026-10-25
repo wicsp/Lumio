@@ -46,3 +46,32 @@ test("malformed success/error/non-JSON/network responses never escape validation
     }
   }
 });
+
+const operation = { op: "link.add", args: { from: "idea_00000000000000000000000015", to: "pap_00000000000000000000000002" } } as const;
+const proposal = { id: "prop_00000000000000000000000001", operation, reason: "Related research", author: "act_00000000000000000000000001", status: "pending", created: "2026-01-01T00:00:00Z" } as const;
+
+test("operation/proposal/actors methods use their endpoints, methods, request bodies and success schemas", async () => {
+  const cases = [
+    { path: "/v1/actors", body: [{ id: proposal.author, name: "codex", role: "agent", created: proposal.created }], call: (client: ReturnType<typeof createClient>) => client.actors() },
+    { path: "/v1/proposals?status=pending", body: [proposal], call: (client: ReturnType<typeof createClient>) => client.proposals() },
+    { path: "/v1/proposals?status=rejected", body: [{ ...proposal, status: "rejected" }], call: (client: ReturnType<typeof createClient>) => client.proposals("rejected") },
+    { path: "/v1/operations", body: { status: "pending_approval", proposal }, payload: { operation, reason: proposal.reason }, status: 202, call: (client: ReturnType<typeof createClient>) => client.operation({ operation, reason: proposal.reason }) },
+    { path: "/v1/operations", body: { status: "applied", operation }, payload: { operation }, call: (client: ReturnType<typeof createClient>) => client.operation({ operation }) },
+    { path: `/v1/proposals/${proposal.id}/accept`, body: { ...proposal, status: "accepted" }, payload: {}, call: (client: ReturnType<typeof createClient>) => client.acceptProposal(proposal.id) },
+    { path: `/v1/proposals/${proposal.id}/reject`, body: { ...proposal, status: "rejected" }, payload: {}, call: (client: ReturnType<typeof createClient>) => client.rejectProposal(proposal.id) },
+  ];
+  for (const row of cases) {
+    const client = createClient({ url: "http://localhost", token: "synthetic-token", fetch: mock(row.body, "status" in row ? row.status : 200, (url, init) => {
+      expect(url.pathname + url.search).toBe(row.path);
+      const post = "payload" in row;
+      expect(init?.method).toBe(post ? "POST" : "GET");
+      expect(init?.body === undefined ? undefined : JSON.parse(String(init.body))).toEqual(post ? row.payload : undefined);
+      expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer synthetic-token");
+    }) });
+    expect(await row.call(client) as unknown).toEqual(row.body);
+    const invalid = createClient({ url: "http://localhost", token: "synthetic-token", fetch: mock({ private: "secret-response" }) });
+    await expect(row.call(invalid)).rejects.toMatchObject({ code: "INTERNAL" });
+    const denied = createClient({ url: "http://localhost", token: "synthetic-token", fetch: mock({ error: { code: "FORBIDDEN", message: "Denied", operation, reason: "agent-cannot-decide-proposals", proposal: proposal.id } }, 403) });
+    await expect(row.call(denied)).rejects.toMatchObject({ code: "FORBIDDEN", operation, reason: "agent-cannot-decide-proposals", proposal: proposal.id });
+  }
+});

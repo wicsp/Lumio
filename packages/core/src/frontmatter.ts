@@ -1,4 +1,5 @@
-import { Document, isMap, isScalar, parseDocument } from "yaml";
+import { Id } from "@lumio/schema";
+import { Document, isMap, isScalar, isSeq, parseDocument } from "yaml";
 import { isDeepStrictEqual } from "node:util";
 import { CoreError } from "./errors.ts";
 
@@ -108,4 +109,47 @@ export function parseFrontmatter(source: string | Uint8Array): Frontmatter {
     if (cause instanceof CoreError) throw cause;
     throw new CoreError("INVALID_FRONTMATTER", "frontmatter 不是合法 YAML", { cause });
   }
+}
+
+/** Append only related; preserve every other byte, including sequence style/comments. */
+export function appendRelatedId(source: Uint8Array, id: string): Buffer {
+  if (!Id.safeParse(id).success) throw new CoreError("INVALID_FRONTMATTER", "related 目标必须是合法 ID");
+  const bytes = Buffer.from(source);
+  const parsed = parseFrontmatter(bytes);
+  const related = parsed.data.related;
+  if (related !== undefined && related !== null && !Array.isArray(related)) {
+    throw new CoreError("INVALID_FRONTMATTER", "related 必须是列表或空值");
+  }
+  if (Array.isArray(related) && related.includes(id)) return bytes;
+  if (!Object.hasOwn(parsed.data, "related")) return parsed.render({ related: [id] });
+  const opening = /^(?:\xef\xbb\xbf)?---[ \t]*(\r?\n)/.exec(bytes.toString("latin1"))!;
+  const start = opening[0].length;
+  const raw = bytes.toString("latin1");
+  const close = /^---[ \t]*(?:\r?\n|$)/m.exec(raw.slice(start))!;
+  const header = bytes.subarray(start, start + close.index).toString("utf8");
+  const node = parseDocument(header, { keepSourceTokens: true }).get("related", true);
+  let at: number, text: string, end: number;
+  if (isSeq(node) && node.range) {
+    if (node.flow) {
+      // Insert after the last item, ahead of a trailing comma and comments.
+      const last = node.items.at(-1);
+      at = last && typeof last === "object" && "range" in last
+        ? (last.range as [number, number, number])[1] : node.range[0] + 1;
+      text = `${node.items.length ? ", " : ""}${id}`;
+    } else {
+      at = node.range[2];
+      const indent = header.slice(header.lastIndexOf("\n", node.range[0] - 1) + 1, node.range[0]);
+      text = `${header.slice(0, at).endsWith("\n") ? "" : opening[1]}${indent}- ${id}${opening[1]}`;
+    }
+    end = at;
+  } else if (isScalar(node) && node.range && related === null) {
+    [at, end] = node.range;
+    text = ` [${id}] `;
+  } else throw new CoreError("UNSAFE_FRONTMATTER_EDIT", "无法安全追加 related");
+  const updated = Buffer.concat([bytes.subarray(0, start), Buffer.from(header.slice(0, at) + text + header.slice(end)), bytes.subarray(start + close.index)]);
+  const check = parseFrontmatter(updated);
+  if (!isDeepStrictEqual(check.data, { ...parsed.data, related: [...(related as unknown[] ?? []), id] })) {
+    throw new CoreError("UNSAFE_FRONTMATTER_EDIT", "无法在保留其他字段的前提下追加 related");
+  }
+  return updated;
 }
