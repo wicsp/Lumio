@@ -1,11 +1,11 @@
 import { JobResult, RuntimeAck, RuntimeHeartbeat, RuntimeInfo, RuntimeRegistration, RuntimeSync } from "@lumio/schema";
-import { Jobs } from "./jobs.ts";
+import { Jobs, type RoutineHooks } from "./jobs.ts";
 import type { authorize } from "./authorize.ts";
 import { HubError } from "./errors.ts";
 import type { HubStore, Identity } from "./store.ts";
 
 export async function handleRuntime(request: Request, operation: "runtime.register" | "runtime.sync" | "runtime.ack" | "runtime.results" | "runtimes",
-  identity: Identity, store: HubStore, decide: typeof authorize, now: Date): Promise<Response> {
+  identity: Identity, store: HubStore, decide: typeof authorize, now: Date, routines?: RoutineHooks): Promise<Response> {
   const decision = decide(identity.actor, { operation });
   let execution = "applied";
   try {
@@ -20,7 +20,7 @@ export async function handleRuntime(request: Request, operation: "runtime.regist
       if (!registration.success) throw new HubError("INVALID", "执行器登记内容不合法");
       return Response.json(store.registerRuntime(identity.actor.id, registration.data, now));
     }
-    const jobs = new Jobs(store);
+    const jobs = new Jobs(store, routines);
     if (operation === "runtime.ack") {
       const ack = RuntimeAck.safeParse(body);
       if (!ack.success) throw new HubError("INVALID", "Job 确认内容不合法");

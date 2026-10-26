@@ -2,6 +2,7 @@ import { z } from "zod";
 import { idOf } from "./common.ts";
 import { Operation } from "./operation.ts";
 import { Proposal } from "./proposal.ts";
+import { NoteRef } from "./query.ts";
 
 /**
  * Hub API 的通用请求与响应（ADR 0016 第 2–4 节）。
@@ -23,7 +24,7 @@ export const OperationRequest = z.strictObject({
  * 为"需要批准"时生成一条提议（pending_approval，HTTP 202）。"拒绝"走 ApiError。
  */
 export const OperationResult = z.discriminatedUnion("status", [
-  z.strictObject({ status: z.literal("applied"), operation: Operation }),
+  z.strictObject({ status: z.literal("applied"), operation: Operation, note: NoteRef.optional().describe("操作新建的笔记（如 routine.followup）") }),
   z.strictObject({ status: z.literal("pending_approval"), proposal: Proposal }),
 ]);
 

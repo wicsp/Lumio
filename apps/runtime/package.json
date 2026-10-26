@@ -4,5 +4,5 @@
   "private": true,
   "type": "module",
   "scripts": { "build": "bun build --compile src/main.ts --outfile dist/lumio-runtime" },
-  "dependencies": { "@lumio/schema": "workspace:*" }
+  "dependencies": { "@lumio/core": "workspace:*", "@lumio/schema": "workspace:*" }
 }

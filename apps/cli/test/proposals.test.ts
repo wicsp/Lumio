@@ -24,7 +24,7 @@ test("proposal rendering uses actors for author/decider names and falls back to 
       expect(stdout).toContain(`提交者：${known ? "codex" : proposal.author}`);
       expect(stdout).toContain(`决定者：${known ? "owner" : proposal.decided_by}`);
       const op = proposal.operation;
-      expect(stdout).toContain(op.args.task);
+      if (op.op === "task.dispatch") expect(stdout).toContain(op.args.task);
     } finally { await server.stop(true); }
   }
 });

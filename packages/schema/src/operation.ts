@@ -17,6 +17,18 @@ export const TaskDispatch = z.strictObject({
   }),
 });
 
+/**
+ * 从例行任务的某一次结果开出一个普通任务（ADR 0019 第 6 节，P2-5）。Hub 在 `plan/tasks/` 新建任务笔记，
+ * 负责人与执行配置照抄例行任务，`turn: human`，等人写下追问后再派出。
+ */
+export const RoutineFollowup = z.strictObject({
+  op: z.literal("routine.followup"),
+  args: z.strictObject({
+    routine: idOf("rtn"),
+    job: idOf("job").describe("例行任务的哪一次（那一次的 Job）"),
+  }),
+});
+
 /** 执行器上的高权限命令（ADR 0019 第 7 节）：经 `lumio sudo` 发起，P2 中一律需要批准。 */
 export const ExecPrivileged = z.strictObject({
   op: z.literal("exec.privileged"),
@@ -28,10 +40,10 @@ export const ExecPrivileged = z.strictObject({
 });
 
 /**
- * Hub 当前实现了的操作。TaskDispatch 由 P2-4 加入，ExecPrivileged 由 P2-6 加入；
+ * Hub 当前实现了的操作。TaskDispatch 由 P2-4 加入，RoutineFollowup 由 P2-5 加入，ExecPrivileged 由 P2-6 加入；
  * 它们的格式已经批准（ADR 0019），实现时只需把它们放进这个列表。
  */
-export const Operation = z.discriminatedUnion("op", [TaskDispatch]);
+export const Operation = z.discriminatedUnion("op", [TaskDispatch, RoutineFollowup]);
 
 export const OPERATION_NAMES = Operation.options.map((o) => o.shape.op.value);
 
