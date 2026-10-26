@@ -1,4 +1,4 @@
-import { CommandRun, Job, JobSpec, JobStatus, RuntimeName, RuntimeInfo, Actor, OperationRequest, OperationResult, Proposal, ProposalStatus, ApiError, CheckResult, LinksResult, NoteDetail, SearchResult, type ApiErrorCode, type NoteRef } from "@lumio/schema";
+import { JobRun, Job, JobSpec, JobStatus, RuntimeName, RuntimeInfo, Actor, OperationRequest, OperationResult, Proposal, ProposalStatus, ApiError, CheckResult, LinksResult, NoteDetail, SearchResult, type ApiErrorCode, type NoteRef } from "@lumio/schema";
 
 export class ApiClientError extends Error {
   readonly code: ApiErrorCode;
@@ -15,11 +15,11 @@ export class ApiClientError extends Error {
   }
 }
 export const SubmitJob = JobSpec.omit({ protocol_version: true, id: true, source: true, lease: true, created: true }).extend({
-  runtime: RuntimeName, run: CommandRun, workdir: JobSpec.shape.workdir.default("~"),
+  runtime: RuntimeName, run: JobRun, workdir: JobSpec.shape.workdir.default("~"),
   timeout_seconds: JobSpec.shape.timeout_seconds.default(7200),
 });
 export interface SubmitJobInput {
-  runtime: string; run: { kind: "command"; argv: string[] }; workdir?: string; timeout_seconds?: number; gpus?: number[];
+  runtime: string; run: import("@lumio/schema").JobRun; workdir?: string; timeout_seconds?: number; gpus?: number[];
 }
 export interface QueryOptions { includePrivate?: boolean }
 export interface SearchOptions extends QueryOptions { type?: NoteRef["type"]; limit?: number }

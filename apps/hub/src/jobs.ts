@@ -1,13 +1,13 @@
 import { randomBytes } from "node:crypto";
 import { newId } from "@lumio/core";
-import { JOB_PROTOCOL_VERSION, CommandRun, Job, JobResult, JobSpec, JobStatus, RuntimeName, RuntimeSync, type RuntimeHeartbeat } from "@lumio/schema";
+import { JOB_PROTOCOL_VERSION, Job, JobResult, JobRun, JobSpec, JobStatus, RuntimeName, RuntimeSync, type RuntimeHeartbeat } from "@lumio/schema";
 import type { HubStore, Identity } from "./store.ts";
 import type { authorize } from "./authorize.ts";
 import { HubError } from "./errors.ts";
 
 // Request fields are derived from the approved JobSpec, with the human-facing runtime name.
 export const SubmitJob = JobSpec.omit({ protocol_version: true, id: true, source: true, lease: true, created: true }).extend({
-  runtime: RuntimeName, run: CommandRun, workdir: JobSpec.shape.workdir.default("~"),
+  runtime: RuntimeName, run: JobRun, workdir: JobSpec.shape.workdir.default("~"),
   timeout_seconds: JobSpec.shape.timeout_seconds.default(7200),
 });
 const active = (job: Job) => job.status === "assigned" || job.status === "running";
@@ -31,6 +31,10 @@ export class Jobs {
     if (!input.success) throw new HubError("INVALID", "Job 提交内容不合法");
     const runtime = this.store.runtimes(now).find((r) => r.registration.name === input.data.runtime);
     if (!runtime) throw new HubError("INVALID", "指定的执行器不存在");
+    const run = input.data.run;
+    if (run.kind === "agent" && !runtime.registration.engines.some((e) => e.name === run.engine)) {
+      throw new HubError("INVALID", `执行器 ${input.data.runtime} 上没有登记 ${run.engine}`);
+    }
     const job = Job.parse({ spec: { ...input.data, runtime: runtime.actor, protocol_version: JOB_PROTOCOL_VERSION,
       id: newId("job", now, randomBytes), lease: randomBytes(32).toString("base64url"), created: now.toISOString() }, status: "queued" });
     this.save(job); return job;
