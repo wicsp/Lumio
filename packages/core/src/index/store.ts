@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import { Database } from "bun:sqlite";
 import { mkdir, readFile, stat, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -60,19 +61,31 @@ function initialize(db: Database, root: string): void {
  * Hub 与本地 CLI 可能同时打开同一个索引（两个进程）。遇到锁时等待而不是立刻失败；
  * WAL 让读取不被写入挡住。
  */
-function connect(path: string): Database {
+async function connect(path: string): Promise<Database> {
   const db = new Database(path, { create: true, strict: true });
   try {
     db.exec("PRAGMA busy_timeout = 5000");
-    db.exec("PRAGMA journal_mode = WAL");
-    return db;
+    const deadline = Date.now() + 5000;
+    for (;;) {
+      try {
+        // WAL 已开启时不再切换模式；首次并发初始化的模式切换可能立即 SQLITE_BUSY，
+        // 即使配置了 busy_timeout。仅对锁冲突做有界重试，不把它误判为索引损坏。
+        db.exec(`PRAGMA busy_timeout = ${Math.max(1, deadline - Date.now())}`);
+        if (db.query<{ journal_mode: string }, []>("PRAGMA journal_mode").get()!.journal_mode !== "wal") db.exec("PRAGMA journal_mode = WAL");
+        db.exec("PRAGMA busy_timeout = 5000");
+        return db;
+      } catch (cause) {
+        if ((cause as { code?: string }).code !== "SQLITE_BUSY" || Date.now() >= deadline) throw cause;
+        await sleep(Math.min(25, Math.max(1, deadline - Date.now())));
+      }
+    }
   } catch (cause) { db.close(); throw cause; }
 }
 
 async function openStore(path: string, root: string): Promise<Database> {
   let db: Database | undefined;
   try {
-    db = connect(path);
+    db = await connect(path);
     const tables = db.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type='table'").all();
     if (!tables.length) { initializeOnce(db, root); return db; }
     const metadata = tables.some((t) => t.name === "metadata")
@@ -95,7 +108,7 @@ async function openStore(path: string, root: string): Promise<Database> {
   for (const file of [path, `${path}-wal`, `${path}-shm`]) await unlink(file).catch((cause) => {
     if ((cause as { code?: string }).code !== "ENOENT") throw cause;
   });
-  const fresh = connect(path);
+  const fresh = await connect(path);
   try { initializeOnce(fresh, root); return fresh; }
   catch (cause) { fresh.close(); throw cause; }
 }
