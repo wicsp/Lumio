@@ -5,6 +5,7 @@ import { ApiError, NOTE_TYPES, type ApiErrorCode } from "@lumio/schema";
 import { version } from "../package.json";
 import { startVaultWatch, type WatchOptions } from "./watch.ts";
 import { handleOperation, type OperationOptions } from "./operations.ts";
+import { handleJobs } from "./jobs.ts";
 import { handleRuntime } from "./runtime.ts";
 import { authorize } from "./authorize.ts";
 import type { HubConfig } from "./config.ts";
@@ -13,6 +14,12 @@ import { HubStore, type Identity } from "./store.ts";
 
 // Routes share authentication, authorization and logging before dispatch.
 export const ROUTES = [
+  { operation: "job.submit", method: "POST", pattern: /^\/v1\/jobs$/ },
+  { operation: "jobs", method: "GET", pattern: /^\/v1\/jobs$/ },
+  { operation: "job.show", method: "GET", pattern: /^\/v1\/jobs\/([^/]+)$/ },
+  { operation: "job.cancel", method: "POST", pattern: /^\/v1\/jobs\/([^/]+)\/cancel$/ },
+  { operation: "runtime.ack", method: "POST", pattern: /^\/v1\/runtime\/ack$/ },
+  { operation: "runtime.results", method: "POST", pattern: /^\/v1\/runtime\/results$/ },
   { operation: "runtime.register", method: "POST", pattern: /^\/v1\/runtime\/register$/ },
   { operation: "runtime.sync", method: "POST", pattern: /^\/v1\/runtime\/sync$/ },
   { operation: "runtimes", method: "GET", pattern: /^\/v1\/runtimes$/ },
@@ -55,7 +62,7 @@ export async function startHub(config: HubConfig, options: {
         let status = 500;
         // Logging uses route templates, so references (or secrets in a URL) cannot leak.
         const route = ROUTES.find((route) => request.method === ("method" in route ? route.method : "GET") && route.pattern.test(url.pathname));
-        const path = route?.operation === "runtime.register" ? "/v1/runtime/register" : route?.operation === "runtime.sync" ? "/v1/runtime/sync" : route?.operation === "runtimes" ? "/v1/runtimes" : route?.operation === "status" ? "/v1/status" : route?.operation === "health" ? "/health" : route?.operation === "search" ? "/v1/search"
+        const path = route?.operation === "job.submit" || route?.operation === "jobs" ? "/v1/jobs" : route?.operation === "job.show" ? "/v1/jobs/<id>" : route?.operation === "job.cancel" ? "/v1/jobs/<id>/cancel" : route?.operation === "runtime.ack" ? "/v1/runtime/ack" : route?.operation === "runtime.results" ? "/v1/runtime/results" : route?.operation === "runtime.register" ? "/v1/runtime/register" : route?.operation === "runtime.sync" ? "/v1/runtime/sync" : route?.operation === "runtimes" ? "/v1/runtimes" : route?.operation === "status" ? "/v1/status" : route?.operation === "health" ? "/health" : route?.operation === "search" ? "/v1/search"
           : route?.operation === "check" ? "/v1/check" : route?.operation === "show" ? "/v1/notes/<reference>" : route?.operation === "links" ? "/v1/notes/<reference>/links" : route?.operation === "operations" ? "/v1/operations"
             : route?.operation === "actors" ? "/v1/actors" : route?.operation === "proposals" ? "/v1/proposals"
               : route?.operation === "proposal.accept" ? "/v1/proposals/<id>/accept" : route?.operation === "proposal.reject" ? "/v1/proposals/<id>/reject" : "<unmatched>";
@@ -71,7 +78,11 @@ export async function startHub(config: HubConfig, options: {
             if (!identity) throw new HubError("UNAUTHENTICATED", "需要有效的 Bearer 令牌");
           }
           if (!route) throw new HubError("NOT_FOUND", "找不到端点");
-          if (route.operation === "runtime.register" || route.operation === "runtime.sync" || route.operation === "runtimes") {
+          if (route.operation === "job.submit" || route.operation === "jobs" || route.operation === "job.show" || route.operation === "job.cancel") {
+            const response = await handleJobs(request, route.operation, route.pattern.exec(url.pathname)?.[1], identity!, store, decide, (options.now ?? (() => new Date()))());
+            status = response.status; return response;
+          }
+          if (route.operation === "runtime.register" || route.operation === "runtime.sync" || route.operation === "runtime.ack" || route.operation === "runtime.results" || route.operation === "runtimes") {
             const response = await handleRuntime(request, route.operation, identity!, store, decide, (options.now ?? (() => new Date()))());
             status = response.status;
             return response;

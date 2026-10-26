@@ -20,13 +20,24 @@
 | [P1-6](P1-6-skill.md) ✅ | `skills/lumio/SKILL.md`（Claude Code、Codex 自动验收 6 项通过；pi 见待办） | Claude | P1-5 |
 | [P2-0](P2-0-design.md) ✅ | P2 的设计与契约（ADR 0019） | Claude 起草，人类批准 | P1 |
 | [P2-1](P2-1-runtime-register.md) ✅ | 执行器骨架：登记、能力、在线情况 | 后端（Codex） | P2-0 |
-| [P2-2](P2-2-dispatch-core.md) | 派活的可靠核心（只跑普通命令） | 后端（Codex） | P2-1 |
+| [P2-2](P2-2-dispatch-core.md) ✅ | 派活的可靠核心（只跑普通命令） | 后端（Codex） | P2-1 |
 | [P2-3](P2-3-agent-adapters.md) | 接上 codex、claude、pi | 后端（Codex） | P2-2 |
 | [P2-4](P2-4-task-rounds.md) | 任务笔记里的一问一答（做完即可日常使用） | 后端（Codex） | P2-3 |
 | [P2-5](P2-5-routines.md) | 例行任务 | 后端（Codex） | P2-4 |
 | [P2-6](P2-6-sudo-gate.md) | `lumio sudo`：高权限命令的审批门 | 后端（Codex） | P2-4 |
 
 P1 的设计决定见 ADR 0014、0016、0017、0018；P2 见 ADR 0019 与修订后的 ADR 0005；契约见 `packages/schema/src/` 中的 `query.ts`、`actor.ts`、`operation.ts`、`proposal.ts`、`api.ts`。
+
+## 等人类回来处理
+
+开发期间人类不在电脑旁；需要人动手的验收与交叉 review 集中记在这里，处理完一项删一项。
+
+| 事项 | 来自 | 怎么做 |
+|---|---|---|
+| 服务器上的执行器升级到最新版 | P2-2 起 | 服务器上 `git pull` 后重新 `bun run --cwd apps/runtime build`，替换 `~/.local/bin/lumio-runtime`，`systemctl --user restart lumio-runtime` |
+| Mac 上的 Hub 重启一次 | P2-1 review 起 | 让新代码（心跳不写审计、Job 接口等）生效 |
+| P2-2 手动验收 | P2-2 | 执行器配置 `LUMIO_RUNTIME_ALLOWED_COMMANDS=/usr/bin/nvidia-smi`；`lumio job submit --runtime server -- /usr/bin/nvidia-smi`，合上 Mac 几分钟再打开，`lumio job show <job>` 有结果 |
+| pi 的 skill 验收 | P1-6 | 在自己的终端直接运行 `skills/lumio/eval/run.sh pi` |
 
 ## 待办（尚未排期，到时再写成任务说明）
 

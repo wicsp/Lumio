@@ -1,9 +1,10 @@
-import { RuntimeHeartbeat, RuntimeInfo, RuntimeRegistration, RuntimeSync } from "@lumio/schema";
+import { JobResult, RuntimeAck, RuntimeHeartbeat, RuntimeInfo, RuntimeRegistration, RuntimeSync } from "@lumio/schema";
+import { Jobs } from "./jobs.ts";
 import type { authorize } from "./authorize.ts";
 import { HubError } from "./errors.ts";
 import type { HubStore, Identity } from "./store.ts";
 
-export async function handleRuntime(request: Request, operation: "runtime.register" | "runtime.sync" | "runtimes",
+export async function handleRuntime(request: Request, operation: "runtime.register" | "runtime.sync" | "runtime.ack" | "runtime.results" | "runtimes",
   identity: Identity, store: HubStore, decide: typeof authorize, now: Date): Promise<Response> {
   const decision = decide(identity.actor, { operation });
   let execution = "applied";
@@ -19,9 +20,21 @@ export async function handleRuntime(request: Request, operation: "runtime.regist
       if (!registration.success) throw new HubError("INVALID", "执行器登记内容不合法");
       return Response.json(store.registerRuntime(identity.actor.id, registration.data, now));
     }
+    const jobs = new Jobs(store);
+    if (operation === "runtime.ack") {
+      const ack = RuntimeAck.safeParse(body);
+      if (!ack.success) throw new HubError("INVALID", "Job 确认内容不合法");
+      jobs.ack(identity.actor.id, ack.data.accepted, now);
+      return Response.json(ack.data);
+    }
+    if (operation === "runtime.results") {
+      const result = JobResult.safeParse(body);
+      if (!result.success) throw new HubError("INVALID", "Job 结果不合法");
+      jobs.result(identity.actor.id, result.data);
+      return Response.json(result.data);
+    }
     if (!RuntimeHeartbeat.safeParse(body).success) throw new HubError("INVALID", "执行器心跳不合法");
-    store.syncRuntime(identity.actor.id, now);
-    return Response.json(RuntimeSync.parse({ jobs: [], cancel: [], routines: [] }));
+    return Response.json(RuntimeSync.parse(jobs.sync(identity.actor.id, RuntimeHeartbeat.parse(body), now)));
   } catch (cause) {
     execution = cause instanceof HubError ? cause.code : "INTERNAL";
     throw cause;

@@ -3,8 +3,9 @@ import type { Actor } from "@lumio/schema";
 export const QUERY_OPERATIONS = ["search", "show", "links", "check", "status"] as const;
 export type QueryOperation = (typeof QUERY_OPERATIONS)[number];
 export const EXISTING_OPERATIONS = [...QUERY_OPERATIONS, "health", "operations", "actors", "proposals", "proposal.accept", "proposal.reject", "link.add"] as const;
-export const RUNTIME_OPERATIONS = ["runtime.register", "runtime.sync", "runtimes"] as const;
-export interface AuthorizationRequest { operation: (typeof EXISTING_OPERATIONS)[number] | (typeof RUNTIME_OPERATIONS)[number]; includePrivate?: boolean }
+export const RUNTIME_OPERATIONS = ["runtime.register", "runtime.sync", "runtime.ack", "runtime.results", "runtimes"] as const;
+export const JOB_OPERATIONS = ["job.submit", "jobs", "job.show", "job.cancel"] as const;
+export interface AuthorizationRequest { operation: (typeof EXISTING_OPERATIONS)[number] | (typeof RUNTIME_OPERATIONS)[number] | (typeof JOB_OPERATIONS)[number]; includePrivate?: boolean }
 export type Decision = { result: "allow" } | { result: "deny"; reason: string } | { result: "needs_approval" };
 
 // One rule table is the only place that decides access. Public health is explicit.
@@ -18,6 +19,9 @@ export const AUTHORIZATION_RULES = [
     role, operation, includePrivate: false,
     decision: (operation === "runtimes" ? role === "human" : role === "runtime")
       ? { result: "allow" as const } : { result: "deny" as const, reason: "请求未获授权" },
+  }))),
+  ...(["human", "agent", "runtime"] as const).flatMap((role) => JOB_OPERATIONS.map((operation) => ({
+    role, operation, includePrivate: false, decision: role === "human" ? { result: "allow" as const } : { result: "deny" as const, reason: "请求未获授权" },
   }))),
   ...(["human", "agent"] as const).flatMap((role) => [
     { role, operation: "actors", includePrivate: false, decision: { result: "allow" } },

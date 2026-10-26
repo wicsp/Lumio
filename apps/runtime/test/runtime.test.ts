@@ -14,7 +14,10 @@ test("runtime config uses required environment, defaults and schema constraints 
     registration: { protocol_version: 2, name: "server", engines: [], tags: [], max_concurrent: 1 } });
   expect(readConfig({ ...env, LUMIO_RUNTIME_TAGS: "gpu:4, lab", LUMIO_RUNTIME_MAX_CONCURRENT: "4", LUMIO_RUNTIME_POLL_SECONDS: "0.1" }))
     .toMatchObject({ pollSeconds: 0.1, registration: { tags: ["gpu:4", "lab"], max_concurrent: 4 } });
+  expect(readConfig({ ...env, LUMIO_RUNTIME_ALLOWED_COMMANDS: "/bin/echo, /usr/bin/true" }).allowedCommands).toEqual(["/bin/echo", "/usr/bin/true"]);
+  expect(config.allowedCommands).toEqual([]);
   for (const override of [
+    { LUMIO_RUNTIME_ALLOWED_COMMANDS: "echo" }, { LUMIO_RUNTIME_ALLOWED_COMMANDS: "/bin/echo," },
     { LUMIO_HUB_URL: undefined }, { LUMIO_TOKEN: "" }, { LUMIO_RUNTIME_NAME: undefined }, { LUMIO_RUNTIME_NAME: "Bad Name" },
     { LUMIO_RUNTIME_MAX_CONCURRENT: "1.5" }, { LUMIO_RUNTIME_MAX_CONCURRENT: "0" }, { LUMIO_RUNTIME_TAGS: "bad tag" },
     { LUMIO_HUB_URL: `http://user:${env.LUMIO_TOKEN}@localhost` }, { LUMIO_HUB_URL: "file:///tmp" }, { LUMIO_HUB_URL: "bad" },

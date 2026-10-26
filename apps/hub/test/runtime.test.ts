@@ -90,7 +90,7 @@ test("malformed JSON, wrong protocol and unknown fields return INVALID without c
 
 test("runtime is denied at every existing endpoint before body parsing; other roles cannot register or sync", async () => {
   for (const route of ROUTES.filter((route) => !(RUNTIME_OPERATIONS as readonly string[]).includes(route.operation))) {
-    const path = { operations: "/v1/operations", actors: "/v1/actors", proposals: "/v1/proposals", "proposal.accept": "/v1/proposals/missing/accept", "proposal.reject": "/v1/proposals/missing/reject",
+    const path = { "job.submit": "/v1/jobs", jobs: "/v1/jobs", "job.show": "/v1/jobs/missing", "job.cancel": "/v1/jobs/missing/cancel", operations: "/v1/operations", actors: "/v1/actors", proposals: "/v1/proposals", "proposal.accept": "/v1/proposals/missing/accept", "proposal.reject": "/v1/proposals/missing/reject",
       status: "/v1/status", health: "/health", search: "/v1/search", check: "/v1/check", links: "/v1/notes/Main/links", show: "/v1/notes/Main" };
     const response = await request(path[route.operation as keyof typeof path], runtime, "method" in route && route.method === "POST" ? "{" : undefined);
     expect(response.status).toBe(403); expect(ApiError.parse(await response.json()).error.code).toBe("FORBIDDEN");

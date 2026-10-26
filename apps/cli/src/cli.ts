@@ -6,6 +6,7 @@ import {
 } from "@lumio/core";
 import { ApiClientError, createClient } from "@lumio/api-client";
 import { ApiError } from "@lumio/schema";
+import { runJobs } from "./jobs.ts";
 import { runOperations } from "./operations.ts";
 import { version } from "../package.json";
 import { syncVault } from "./sync.ts";
@@ -21,7 +22,7 @@ export interface CliOptions {
 export async function runCli(args: string[], options: CliOptions = {}): Promise<number> {
   try { return await executeCli(args, options); }
   catch (cause) {
-    if (!["link", "propose", "proposals"].includes(args[0] ?? "") || !args.includes("--json")) throw cause;
+    if (!["job", "link", "propose", "proposals"].includes(args[0] ?? "") || !args.includes("--json")) throw cause;
     const error = cause instanceof ApiClientError ? {
       code: cause.code, message: cause.message, operation: cause.operation, reason: cause.reason, proposal: cause.proposal,
     } : { code: "INVALID", message: cause instanceof Error ? cause.message : "无法执行命令" };
@@ -32,6 +33,7 @@ export async function runCli(args: string[], options: CliOptions = {}): Promise<
 
 async function executeCli(args: string[], options: CliOptions): Promise<number> {
   const log = options.log ?? console.log;
+  if (args[0] === "job") return runJobs(args.slice(1), log);
   const { values, positionals } = parseArgs({
     args, allowPositionals: true, strict: true,
     options: {

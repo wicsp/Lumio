@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Actor, ApiError, CheckResult, LinksResult, NoteDetail, SearchResult, Timestamp, type ApiErrorCode } from "@lumio/schema";
-import { AUTHORIZATION_RULES, RUNTIME_OPERATIONS, authorize, type AuthorizationRequest } from "../src/authorize.ts";
+import { AUTHORIZATION_RULES, JOB_OPERATIONS, RUNTIME_OPERATIONS, authorize, type AuthorizationRequest } from "../src/authorize.ts";
 import { readConfig } from "../src/config.ts";
 import { ROUTES, startHub } from "../src/server.ts";
 import type { HubStatus } from "../src/watch.ts";
@@ -49,7 +49,7 @@ test("default binding is loopback; public health and every registered route call
   const first = hub!.store.createProposal({ op: "link.add", args: { from: "idea_00000000000000000000000004", to: "idea_00000000000000000000000015" } }, "fixture", hub!.store.actors()[0]!.id);
   const second = hub!.store.createProposal({ op: "link.add", args: { from: "idea_00000000000000000000000015", to: "idea_00000000000000000000000004" } }, "fixture", hub!.store.actors()[0]!.id);
   const paths = { check: "/v1/check", actors: "/v1/actors", proposals: "/v1/proposals", operations: "/v1/operations", "proposal.accept": `/v1/proposals/${first.id}/accept`, "proposal.reject": `/v1/proposals/${second.id}/reject`, status: "/v1/status", health: "/health", search: "/v1/search?q=index", show: "/v1/notes/Main", links: "/v1/notes/Main/links" };
-  const existingRoutes = ROUTES.filter((route) => !(RUNTIME_OPERATIONS as readonly string[]).includes(route.operation));
+  const existingRoutes = ROUTES.filter((route) => !([...RUNTIME_OPERATIONS, ...JOB_OPERATIONS] as readonly string[]).includes(route.operation));
   for (const route of existingRoutes) {
     const response = route.operation === "operations"
       ? await fetch(`${base()}/v1/operations`, { method: "POST", headers: { Authorization: `Bearer ${human}`, "Content-Type": "application/json" }, body: JSON.stringify({ operation: { op: "link.add", args: { from: "idea_00000000000000000000000015", to: "pap_00000000000000000000000001" } } }) })
@@ -157,6 +157,7 @@ test("authorization table is exhaustively checked, including private=false", () 
     expect(decision).toEqual(rule.decision);
     const expected = (RUNTIME_OPERATIONS as readonly string[]).includes(rule.operation)
       ? ((rule.operation === "runtimes" ? rule.role === "human" : rule.role === "runtime") ? "allow" : "deny")
+      : (JOB_OPERATIONS as readonly string[]).includes(rule.operation) ? (rule.role === "human" ? "allow" : "deny")
       : rule.role === "runtime" ? "deny" : rule.role !== "agent" ? "allow"
         : rule.includePrivate || rule.operation.startsWith("proposal.") || rule.operation === "link.add" ? "deny" : "allow";
     expect(decision.result).toBe(expected);
