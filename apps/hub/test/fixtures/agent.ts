@@ -15,10 +15,11 @@ if (prompt.includes("COMMIT")) {
     Bun.spawnSync(["git", ...a], { stdout: "ignore", stderr: "ignore" });
   }
 }
-const reply = `完成：${prompt}` + (prompt.includes("ASK") ? "\n<lumio-question>要不要顺手重构？</lumio-question>" : "");
+const reply = (prompt.includes("SECRET") ? `密钥是 sk-${"a".repeat(32)}\n` : "") + `完成：${prompt.split("\n").at(-2) ?? prompt}`
+  + (prompt.includes("ASK") ? "\n<lumio-question>要不要顺手重构？</lumio-question>" : "");
 if (engine === "codex") {
   const resumed = args[1] === "resume" ? args.at(-2) : undefined;
-  console.log(JSON.stringify({ type: "thread.started", thread_id: resumed ?? "thr-fake-1" }));
+  if (!prompt.includes("NOSESSION")) console.log(JSON.stringify({ type: "thread.started", thread_id: resumed ?? "thr-fake-1" }));
   console.log(JSON.stringify({ type: "turn.completed" }));
   writeFileSync(value("--output-last-message")!, reply);
 } else if (engine === "claude") {

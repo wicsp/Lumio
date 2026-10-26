@@ -29,6 +29,8 @@ export interface WatchOptions {
   git?: (root: string) => Promise<VaultGit | undefined>;
   syncOptions?: SyncOptions;
   onProcess?: (path: string) => void;
+  /** 一篇笔记处理完（补全、索引）之后调用；在写入队列里执行（P2-4 用来发现 turn 的变化）。 */
+  onNote?: (path: string) => Promise<void>;
 }
 
 // Schema diagnostics can mention user-controlled YAML keys. Never log card text.
@@ -144,6 +146,7 @@ export async function startVaultWatch(config: { vault: string; stateDir: string;
         }
         // Refresh also on deletion/rename and on conversion to an excluded note.
         await updateIndex(config.vault, { stateDir: config.stateDir });
+        if (options.onNote) await options.onNote(path).catch(() => report(path, `跳过  ${path}  无法处理任务状态`));
       });
     }, 2000));
   }
@@ -167,6 +170,8 @@ export async function startVaultWatch(config: { vault: string; stateDir: string;
       return result;
     },
     notify,
+    /** 记一条问题（显示在 lumio hub status 里）。 */
+    issue(path: string, line: string) { report(path, line); },
     async drain() { await queue; },
     async status(includePrivate = false): Promise<HubStatus> {
       let pending: string[] = [];

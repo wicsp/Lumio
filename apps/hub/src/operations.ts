@@ -8,11 +8,13 @@ import { authorize } from "./authorize.ts";
 import type { HubConfig } from "./config.ts";
 import { HubError } from "./errors.ts";
 import type { HubStore, Identity } from "./store.ts";
+import type { TaskRounds } from "./tasks.ts";
 
-export interface OperationOptions { beforeCommit?: WriteOptions["beforeCommit"] }
+export interface OperationOptions { beforeCommit?: WriteOptions["beforeCommit"]; tasks?: TaskRounds }
+type LinkAddOperation = Extract<Operation, { op: "link.add" }>;
 
 // Both direct operations and accepted proposals use the same checked writer.
-async function prepare(config: HubConfig, operation: Operation, identity: Identity) {
+async function prepare(config: HubConfig, operation: LinkAddOperation, identity: Identity) {
   const query = { stateDir: config.stateDir, includePrivate: identity.actor.role === "human" };
   try {
     const from = await showNote(config.vault, operation.args.from, query);
@@ -36,7 +38,7 @@ async function prepare(config: HubConfig, operation: Operation, identity: Identi
   }
 }
 
-async function execute(config: HubConfig, operation: Operation, identity: Identity, prepared: Awaited<ReturnType<typeof prepare>>, options: OperationOptions, proposal?: Proposal) {
+async function execute(config: HubConfig, operation: LinkAddOperation, identity: Identity, prepared: Awaited<ReturnType<typeof prepare>>, options: OperationOptions, proposal?: Proposal) {
   const { from, to, file, source, content } = prepared;
   const git = await openVaultGit(config.vault);
   if (git && (await git.changedFiles()).includes(file.relativePath)) {
@@ -96,6 +98,15 @@ export async function handleOperation(request: Request, kind: "operations" | "ac
       const parsed = OperationRequest.safeParse(body);
       if (!parsed.success) throw new HubError("INVALID", "操作请求不合法");
       operation = parsed.data.operation;
+      if (operation.op === "task.dispatch") {
+        // 派出任务（ADR 0019，P2-4）：只有允许与拒绝，没有"需要批准"。
+        const decision = check(operation.op);
+        if (decision.result !== "allow") throw new HubError("FORBIDDEN", "请求未获授权", { operation });
+        if (!options.tasks) throw new HubError("INTERNAL", "Hub 未启用任务派活");
+        await options.tasks.dispatch(operation.args.task, operation.args.trigger, identity);
+        audit("applied");
+        return Response.json(OperationResult.parse({ status: "applied", operation }));
+      }
       const prepared = await prepare(config, operation, identity);
       if (prepared.source.equals(prepared.content)) throw new HubError("INVALID", "链接已存在", { operation });
       const decision = check(operation.op);
@@ -116,8 +127,9 @@ export async function handleOperation(request: Request, kind: "operations" | "ac
     if (!proposal) throw new HubError("NOT_FOUND", "提议不存在");
     if (proposal.status !== "pending") throw new HubError("CONFLICT", "只有待批准的提议可以决定", { operation, proposal: proposal.id });
     if (kind === "proposal.accept") {
-      const prepared = await prepare(config, operation!, identity);
-      await execute(config, operation!, identity, prepared, options, proposal);
+      if (operation?.op !== "link.add") throw new HubError("INVALID", "这种提议无法执行", { operation });
+      const prepared = await prepare(config, operation, identity);
+      await execute(config, operation, identity, prepared, options, proposal);
     }
     proposal = store.decideProposal(proposal.id, kind === "proposal.accept" ? "accepted" : "rejected", identity.actor.id);
     audit(proposal.status);

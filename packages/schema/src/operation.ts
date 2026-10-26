@@ -36,10 +36,10 @@ export const ExecPrivileged = z.strictObject({
 });
 
 /**
- * Hub 当前实现了的操作。TaskDispatch 由 P2-4 加入（同时删除 LinkAdd），ExecPrivileged 由 P2-6 加入；
+ * Hub 当前实现了的操作。TaskDispatch 已由 P2-4 加入（LinkAdd 随后删除），ExecPrivileged 由 P2-6 加入；
  * 它们的格式已经批准（ADR 0019），实现时只需把它们放进这个列表。
  */
-export const Operation = z.discriminatedUnion("op", [LinkAdd]);
+export const Operation = z.discriminatedUnion("op", [LinkAdd, TaskDispatch]);
 
 export const OPERATION_NAMES = Operation.options.map((o) => o.shape.op.value);
 
