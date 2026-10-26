@@ -8,7 +8,7 @@ import { parseFrontmatter } from "../frontmatter.ts";
 import { scanVault } from "../vault.ts";
 import { extractLinks, plainText } from "./links.ts";
 
-const VERSION = 1;
+const VERSION = 2; // 2：链接只来自正文（ADR 0018），旧索引自动重建
 export interface IndexOptions {
   stateDir?: string;
   /** Dependency injection lets tests assert unchanged notes are never parsed again. */
@@ -165,9 +165,7 @@ export async function withIndex<T>(root: string, options: IndexOptions, query: (
         }
       }
       {
-        database.exec(`UPDATE links SET resolved_path = CASE source
-          WHEN 'related' THEN (SELECT min(path) FROM notes WHERE id=links.target HAVING count(*)=1)
-          ELSE (SELECT min(path) FROM notes WHERE filename=links.target HAVING count(*)=1) END`);
+        database.exec(`UPDATE links SET resolved_path = (SELECT min(path) FROM notes WHERE filename=links.target HAVING count(*)=1)`);
       }
     }).immediate();
     return query(database);

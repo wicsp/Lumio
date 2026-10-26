@@ -150,12 +150,12 @@ test("export --from prints only selected BibTeX to stdout, warnings to stderr, a
   }
 });
 
-test("check reports sorted paths and count, includes related, and returns zero even for dangling links", () => {
+test("check reports sorted paths and count, ignores legacy related, and returns zero even for dangling links", () => {
   const result = CheckResult.parse(json(["check"]));
   expect(result.total).toBeGreaterThan(0);
   const human = cli(["check"]); expect(human.code).toBe(0); expect(human.stderr).toBe("");
   expect(human.stdout).toBe(result.dangling.map((l) => `${l.from.path}  →  [[${l.target}]]\n`).join("") + `共 ${result.total} 条悬空链接\n`);
-  expect(result.dangling.some((l) => l.source === "related")).toBe(true);
+  expect(result.dangling.some((l) => l.target === "idea_00000000000000000000000099")).toBe(false);
   expect(result.dangling.some((l) => l.target === "Private" || l.target.startsWith("ast_"))).toBe(false);
   CheckResult.parse(json(["check", "--include-private"]));
 });

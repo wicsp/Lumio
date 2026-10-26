@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { Proposal } from "@lumio/schema";
 
-const proposal = Proposal.parse({ id: "prop_00000000000000000000000001", operation: { op: "link.add", args: { from: "idea_00000000000000000000000015", to: "pap_00000000000000000000000002" } }, reason: "合成提议", author: "act_00000000000000000000000001", status: "accepted", created: "2026-01-01T00:00:00Z", decided: "2026-01-01T00:00:01Z", decided_by: "act_00000000000000000000000002" });
+const proposal = Proposal.parse({ id: "prop_00000000000000000000000001", operation: { op: "task.dispatch", args: { task: "task_00000000000000000000000012", trigger: "cli" } }, reason: "合成提议", author: "act_00000000000000000000000001", status: "accepted", created: "2026-01-01T00:00:00Z", decided: "2026-01-01T00:00:01Z", decided_by: "act_00000000000000000000000002" });
 
 test("proposal rendering uses actors for author/decider names and falls back to IDs when absent", async () => {
   for (const known of [false, true]) {
@@ -24,7 +24,7 @@ test("proposal rendering uses actors for author/decider names and falls back to 
       expect(stdout).toContain(`提交者：${known ? "codex" : proposal.author}`);
       expect(stdout).toContain(`决定者：${known ? "owner" : proposal.decided_by}`);
       const op = proposal.operation;
-      if (op.op === "link.add") expect(stdout).toContain(`${op.args.from} → ${op.args.to}`);
+      expect(stdout).toContain(op.args.task);
     } finally { await server.stop(true); }
   }
 });

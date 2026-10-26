@@ -57,9 +57,7 @@ export const Base = z.looseObject({
   created: Timestamp,
   updated: Timestamp,
   tags: withDefault(z.array(z.string()), []),
-  related: withDefault(z.array(Id), []).describe(
-    "已弃用（ADR 0018）：链接写在正文的 [[ ]] 里。已有的值仍计入链接图，Lumio 不再写入",
-  ),
+  // related 已删除（ADR 0018）：链接写在正文的 [[ ]] 里。旧笔记里的 related 作为未知字段原样保留，不再计入链接图。
 });
 
 export const AGENTS = ["claude-code", "codex", "pi"] as const;

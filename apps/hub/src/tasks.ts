@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import {
   CoreError, entityDirectory, humanPart, parseFrontmatter, scanVault, setFields, showNote, upsertBlock, writeFileAtomic,
+  type GitTrailers,
 } from "@lumio/core";
 import { textContainsCardNumber, type AgentRun, type Job, type Operation } from "@lumio/schema";
 import type { HubConfig } from "./config.ts";
@@ -11,6 +12,7 @@ import { HubError } from "./errors.ts";
 import type { Jobs } from "./jobs.ts";
 import type { HubStore, Identity } from "./store.ts";
 import type { WatchClock } from "./watch.ts";
+import { writeAndCommit } from "./commit.ts";
 
 /**
  * 任务笔记里的一问一答（ADR 0019 第 2、3、4 节，P2-4）。
@@ -195,8 +197,10 @@ export class TaskRounds {
 
     const runtimes = this.store.runtimes(now).filter((r) => r.registration.engines.some((e) => e.name === engine));
     const device = typeof assignee.device === "string" ? assignee.device : undefined;
-    const runtime = device ? this.store.runtimes(now).find((r) => r.registration.name === device) : runtimes.find((r) => r.online);
-    if (!runtime) throw new HubError("INVALID", device ? `没有可用的执行器：${device} 未登记` : `没有可用的执行器：没有在线且装了 ${engine} 的执行器`);
+    // 没指定设备时优先挑在线的；都不在线就交给最近见过的那个，它上线后领取（相当于在 Hub 排队）。
+    const runtime = device ? this.store.runtimes(now).find((r) => r.registration.name === device)
+      : runtimes.find((r) => r.online) ?? [...runtimes].sort((a, b) => Date.parse(b.last_seen) - Date.parse(a.last_seen))[0];
+    if (!runtime) throw new HubError("INVALID", device ? `没有可用的执行器：${device} 未登记` : `没有可用的执行器：没有登记过装了 ${engine} 的执行器`);
     if (!runtime.registration.engines.some((e) => e.name === engine)) throw new HubError("INVALID", `执行器 ${runtime.registration.name} 上没有登记 ${engine}`);
 
     const round = s.rounds + 1;
@@ -237,7 +241,7 @@ export class TaskRounds {
       if (d.turn !== "agent") patch.turn = "agent";
       if (d.status === undefined || d.status === null || d.status === "todo") patch.status = "active";
       return Object.keys(patch).length ? setFields(b, patch) : b;
-    });
+    }, { message: `lumio: task.dispatch ${title} 第 ${round} 轮`, trailers: { "Lumio-Actor": identity.actor.id, "Lumio-Job": job.spec.id } });
     return job;
   }
 
@@ -252,7 +256,8 @@ export class TaskRounds {
       if (!s) { this.markWritten(row.job); continue; }
       const block = this.render(job, row.round);
       try {
-        await this.edit(s.path, (b) => setFields(upsertBlock(b, `round-${row.round}`, `job=${job.spec.id}`, block), { turn: "human" }));
+        await this.edit(s.path, (b) => setFields(upsertBlock(b, `round-${row.round}`, `job=${job.spec.id}`, block), { turn: "human" }),
+          { message: `lumio: 第 ${row.round} 轮结果 ${job.status}`, trailers: { "Lumio-Actor": job.spec.runtime, "Lumio-Job": job.spec.id } });
       } catch (cause) {
         if (cause instanceof CoreError && cause.code === "FILE_CHANGED") continue;
         this.issue(s.path, `跳过  ${s.path}  无法写回第 ${row.round} 轮的结果`);
@@ -289,15 +294,24 @@ export class TaskRounds {
     return lines.join("\n");
   }
 
-  /** 读-改-写一篇笔记；文件在中途被改了就重试，最多 3 次。 */
-  private async edit(path: string, change: (bytes: Buffer) => Buffer): Promise<void> {
+  /**
+   * 读-改-写一篇笔记；文件在中途被改了就重试，最多 3 次。
+   * 给出 commit 时，写入后立即单独提交并带 trailer（ADR 0016 第 5 节）；提交失败记一条问题，留给自动保存。
+   */
+  private async edit(path: string, change: (bytes: Buffer) => Buffer, commit?: { message: string; trailers: GitTrailers }): Promise<void> {
     const file = join(this.config.vault, path);
     for (let attempt = 0; ; attempt++) {
       const bytes = await readFile(file);
       const next = change(bytes);
       if (next.equals(bytes)) return;
-      try { await writeFileAtomic(file, next, { expectedContent: bytes }); return; }
-      catch (cause) { if (!(cause instanceof CoreError && cause.code === "FILE_CHANGED") || attempt >= 2) throw cause; }
+      try {
+        const write = () => writeFileAtomic(file, next, { expectedContent: bytes }).then(() => {});
+        if (!commit) { await write(); return; }
+        if (!(await writeAndCommit(this.config.vault, path, bytes, write, commit.message, commit.trailers))) {
+          this.issue(path, `跳过  ${path}  Hub 的写入已完成，但未能单独提交，将由自动保存提交`);
+        }
+        return;
+      } catch (cause) { if (!(cause instanceof CoreError && cause.code === "FILE_CHANGED") || attempt >= 2) throw cause; }
     }
   }
 }

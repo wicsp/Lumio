@@ -19,7 +19,7 @@ test("fills metadata, takes title from filename, formats seconds with local offs
     created: "2026-10-21T20:34:56+08:00", updated: "2026-10-22T21:20:00+08:00",
   });
   expect(issues).toEqual([]);
-  expect(Idea.parse(patch)).toMatchObject({ status: "seed", tags: [], related: [], schema_version: 1 });
+  expect(Idea.parse(patch)).toMatchObject({ status: "seed", tags: [], schema_version: 1 });
   expect(base.frontmatter).toEqual({});
 });
 
@@ -61,7 +61,7 @@ test("null ID is filled, optional/default null fields are preserved and accepted
   expect(patch.id).toBe(`idea_${ulid}`);
   expect(issues).toEqual([]);
   expect(patch).not.toHaveProperty("status");
-  expect(Idea.parse({ ...fm, ...patch })).toMatchObject({ status: "seed", tags: [], related: [] });
+  expect(Idea.parse({ ...fm, ...patch })).toMatchObject({ status: "seed", tags: [] });
 });
 
 test.each(["paper", "idea", "project", "task", "experiment"] as EntityType[])("fills %s with matching ID and schema defaults", (type) => {

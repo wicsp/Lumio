@@ -88,7 +88,7 @@ export async function checkLinks(root: string, options: QueryOptions = {}): Prom
       SELECT l.* FROM links l JOIN notes n ON n.path=l.from_path
       WHERE l.resolved_path IS NULL AND (n.private=0 OR ?=1)
         AND (?=1 OR NOT EXISTS (SELECT 1 FROM notes p WHERE p.private=1 AND
-          ((l.source='related' AND p.id=l.target) OR (l.source='wikilink' AND p.filename=l.target))))
+          p.filename=l.target))
       ORDER BY l.from_path, l.target, l.rowid
     `).all(Number(options.includePrivate ?? false), Number(options.includePrivate ?? false));
     const dangling = edges.map((edge) => ({

@@ -31,13 +31,13 @@ export const SearchResult = z.strictObject({
   total: z.number().int().nonnegative(),
 });
 
-/** 链接来源：frontmatter 的 related，或正文中的 [[名称]]（ADR 0014 第 4 节）。 */
-export const LinkSource = z.enum(["related", "wikilink"]);
+/** 链接来源：正文中的 [[名称]]（ADR 0018：related 已删除）。保留这个字段，以后有新来源时再扩展。 */
+export const LinkSource = z.enum(["wikilink"]);
 
 export const Link = z.strictObject({
   source: LinkSource,
   note: NoteRef.optional().describe("链接解析到的笔记；悬空链接时缺省"),
-  target: z.string().describe("原始链接目标：related 中的 ID，或 [[ ]] 中去掉别名和标题后的名称"),
+  target: z.string().describe("原始链接目标：[[ ]] 中去掉别名和标题后的名称"),
   dangling: z.boolean().describe("目标无法解析为 vault 中的笔记"),
 });
 

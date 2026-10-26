@@ -2,7 +2,7 @@ import type { Actor } from "@lumio/schema";
 
 export const QUERY_OPERATIONS = ["search", "show", "links", "check", "status"] as const;
 export type QueryOperation = (typeof QUERY_OPERATIONS)[number];
-export const EXISTING_OPERATIONS = [...QUERY_OPERATIONS, "health", "operations", "actors", "proposals", "proposal.accept", "proposal.reject", "link.add", "task.dispatch"] as const;
+export const EXISTING_OPERATIONS = [...QUERY_OPERATIONS, "health", "operations", "actors", "proposals", "proposal.accept", "proposal.reject", "task.dispatch"] as const;
 export const RUNTIME_OPERATIONS = ["runtime.register", "runtime.sync", "runtime.ack", "runtime.results", "runtimes"] as const;
 export const JOB_OPERATIONS = ["job.submit", "jobs", "job.show", "job.cancel"] as const;
 export interface AuthorizationRequest { operation: (typeof EXISTING_OPERATIONS)[number] | (typeof RUNTIME_OPERATIONS)[number] | (typeof JOB_OPERATIONS)[number]; includePrivate?: boolean }
@@ -26,9 +26,6 @@ export const AUTHORIZATION_RULES = [
   ...(["human", "agent"] as const).flatMap((role) => [
     { role, operation: "actors", includePrivate: false, decision: { result: "allow" } },
     { role, operation: "proposals", includePrivate: false, decision: { result: "allow" } },
-    // 链接由人写在正文里，AI 只推荐、不写链接（ADR 0018）。link.add 仅作为审批流程的样例保留到 P2。
-    { role, operation: "link.add", includePrivate: false,
-      decision: role === "human" ? { result: "allow" as const } : { result: "deny" as const, reason: "agent-cannot-write-links" } },
     // 派出任务只能由人发起（ADR 0019）：AI 的汇报不能派新活。
     { role, operation: "task.dispatch", includePrivate: false,
       decision: role === "human" ? { result: "allow" as const } : { result: "deny" as const, reason: "agent-cannot-dispatch-tasks" } },

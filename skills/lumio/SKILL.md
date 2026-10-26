@@ -23,7 +23,7 @@ description: 查用户（Wenbin）的研究笔记库：论文笔记、想法、�
 引用可以是 ID、论文的 citekey（如 `He_2020_LightGCN`）或文件名（不含 `.md`）。没有 ID 的笔记结果里没有 `id`，用文件名引用。
 
 ## 边界（必须遵守）
-- **不写任何链接**：不用 `lumio link add`、`lumio propose link`。链接由用户自己写在正文里。
+- **不写任何链接**：Lumio 没有写链接的命令，链接由用户自己写在正文里。
 - **不改文件**：不直接编辑、移动、重命名 vault 里的任何文件，也不用 `lumio sync`。新建笔记只在用户明确要求时用 `lumio new idea|paper`。
 - **不碰私密内容**：不用 `--include-private`，不读 `life/` 目录。
 - 命令失败时读 JSON 里的 `error.code`、`error.reason`，把原因告诉用户；**不要换个办法绕过去**（比如改用直接读文件）。
