@@ -18,9 +18,21 @@ export class Jobs {
     if (!row) throw new HubError("NOT_FOUND", "Job 不存在");
     return Job.parse(JSON.parse(row.record));
   }
-  list(status?: string): Job[] {
-    return this.store.db.query<{ record: string }, []>("SELECT record FROM jobs ORDER BY rowid").all()
-      .map((row) => Job.parse(JSON.parse(row.record))).filter((job) => status === undefined || job.status === status);
+  list(status?: string, task?: string): Job[] {
+    const rows = task === undefined
+      ? this.store.db.query<{ record: string }, []>("SELECT record FROM jobs ORDER BY rowid").all()
+      : this.store.db.query<{ record: string }, [string]>("SELECT record FROM jobs WHERE json_extract(record, '$.spec.source.task') = ? ORDER BY rowid").all(task);
+    return rows.map((row) => Job.parse(JSON.parse(row.record))).filter((job) => status === undefined || job.status === status);
+  }
+  /** 某个任务还没有结果的那一轮（ADR 0019：一个任务同时只有一轮在执行）。 */
+  activeForTask(task: string): Job | undefined {
+    return this.list(undefined, task).find((job) => !job.result && job.status !== "cancelled");
+  }
+  /** Hub 内部创建一轮（P2-4 的任务派活用；带来源）。 */
+  create(fields: { runtime: string; run: JobSpec["run"]; workdir: string; gpus?: number[]; timeout_seconds: number; source?: JobSpec["source"] }, now: Date): Job {
+    const job = Job.parse({ spec: { ...fields, protocol_version: JOB_PROTOCOL_VERSION,
+      id: newId("job", now, randomBytes), lease: randomBytes(32).toString("base64url"), created: now.toISOString() }, status: "queued" });
+    this.save(job); return job;
   }
   private save(job: Job) {
     this.store.db.query("INSERT INTO jobs(id, record) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET record=excluded.record")
@@ -35,9 +47,7 @@ export class Jobs {
     if (run.kind === "agent" && !runtime.registration.engines.some((e) => e.name === run.engine)) {
       throw new HubError("INVALID", `执行器 ${input.data.runtime} 上没有登记 ${run.engine}`);
     }
-    const job = Job.parse({ spec: { ...input.data, runtime: runtime.actor, protocol_version: JOB_PROTOCOL_VERSION,
-      id: newId("job", now, randomBytes), lease: randomBytes(32).toString("base64url"), created: now.toISOString() }, status: "queued" });
-    this.save(job); return job;
+    return this.create({ ...input.data, runtime: runtime.actor }, now);
   }
   cancel(id: string): Job {
     return this.store.db.transaction(() => {
@@ -108,9 +118,11 @@ export async function handleJobs(request: Request, operation: "job.submit" | "jo
       return Response.json(jobs.submit(body, now));
     }
     if (operation === "jobs") {
-      const status = new URL(request.url).searchParams.get("status");
+      const params = new URL(request.url).searchParams;
+      const status = params.get("status"), task = params.get("task");
       if (status !== null && !JobStatus.safeParse(status).success) throw new HubError("INVALID", "Job 状态不合法");
-      return Response.json(jobs.list(status ?? undefined));
+      if (task !== null && !/^task_[0-9A-HJKMNP-TV-Z]{26}$/.test(task)) throw new HubError("INVALID", "task 必须是任务 ID");
+      return Response.json(jobs.list(status ?? undefined, task ?? undefined));
     }
     return Response.json(operation === "job.cancel" ? jobs.cancel(id!) : jobs.get(id!));
   } catch (cause) { execution = cause instanceof HubError ? cause.code : "INTERNAL"; throw cause; }

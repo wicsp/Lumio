@@ -53,7 +53,9 @@ export function createClient(options: { url: string; token: string; fetch?: type
   const queryParams = (options: QueryOptions): Record<string, string> => options.includePrivate === undefined ? {} : { include_private: String(options.includePrivate) };
   return {
     submitJob(input: SubmitJobInput) { return request("/v1/jobs", {}, Job, validate(SubmitJob, input)); },
-    jobs(status?: JobStatus) { return request("/v1/jobs", status === undefined ? {} : { status: validate(JobStatus, status) }, Job.array()); },
+    jobs(status?: JobStatus, task?: string) {
+      return request("/v1/jobs", { ...(status === undefined ? {} : { status: validate(JobStatus, status) }), ...(task === undefined ? {} : { task }) }, Job.array());
+    },
     job(id: string) { return request(`/v1/jobs/${encodeURIComponent(validate(JobSpec.shape.id, id))}`, {}, Job); },
     cancelJob(id: string) { return request(`/v1/jobs/${encodeURIComponent(validate(JobSpec.shape.id, id))}/cancel`, {}, Job, {}); },
     runtimes() { return request("/v1/runtimes", {}, RuntimeInfo.array()); },

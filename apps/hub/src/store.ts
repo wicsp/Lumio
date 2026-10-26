@@ -96,8 +96,8 @@ export class HubStore {
   }
 
   createProposal(operation: Operation, reason: string, author: string): Proposal {
-    const duplicate = this.proposals("pending").find((p) => p.operation.op === operation.op
-      && p.operation.args.from === operation.args.from && p.operation.args.to === operation.args.to);
+    // 内容相同的待批准提议只保留一个（按完整操作比较，与操作种类无关）。
+    const duplicate = this.proposals("pending").find((p) => JSON.stringify(p.operation) === JSON.stringify(operation));
     if (duplicate) throw new HubError("CONFLICT", "已有相同的待批准提议", { operation, proposal: duplicate.id });
     const now = new Date();
     const proposal = Proposal.parse({ id: newId("prop", now, randomBytes), operation, reason, author, status: "pending", created: now.toISOString() });

@@ -15,11 +15,12 @@ export async function runOperations(args: string[], values: { reason?: string; s
   async function render(proposals: Proposal[]) {
     const names = new Map((await client.actors()).map((actor) => [actor.id, actor.name]));
     for (const p of proposals) {
-      const titles = await Promise.all([p.operation.args.from, p.operation.args.to].map(async (id) => {
+      const op = p.operation;
+      const what = op.op === "link.add" ? (await Promise.all([op.args.from, op.args.to].map(async (id) => {
         try { return (await client.show(id)).note.title; }
         catch (cause) { if (cause instanceof ApiClientError && cause.code === "NOT_FOUND") return id; throw cause; }
-      }));
-      log(`${p.id}  ${p.status}\n${titles[0]} → ${titles[1]}\n理由：${p.reason}\n提交者：${names.get(p.author) ?? p.author}  ${p.created}${p.decided_by ? `\n决定者：${names.get(p.decided_by) ?? p.decided_by}  ${p.decided}` : ""}`);
+      }))).join(" → ") : `${op.op} ${JSON.stringify(op.args)}`;
+      log(`${p.id}  ${p.status}\n${what}\n理由：${p.reason}\n提交者：${names.get(p.author) ?? p.author}  ${p.created}${p.decided_by ? `\n决定者：${names.get(p.decided_by) ?? p.decided_by}  ${p.decided}` : ""}`);
     }
   }
   if (link) {
