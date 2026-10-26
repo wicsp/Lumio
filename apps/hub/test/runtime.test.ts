@@ -62,6 +62,8 @@ test("register and sync validate contracts, persist capabilities, sort names and
   const audit = hub!.store.db.query<{ operation: string; authorization: string; execution_result: string }, []>("SELECT * FROM audit").all();
   expect(audit).toContainEqual(expect.objectContaining({ operation: "runtime.sync", authorization: "allow", execution_result: "NOT_FOUND" }));
   expect(audit).toContainEqual(expect.objectContaining({ operation: "runtime.register", authorization: "allow", execution_result: "applied" }));
+  // 成功的心跳不进审计（P2-1 review：否则每 5 秒一行）。
+  expect(audit.filter((row) => row.operation === "runtime.sync" && row.execution_result === "applied")).toHaveLength(0);
 });
 
 test("different runtime identities cannot claim one name, and one identity cannot change its name", async () => {

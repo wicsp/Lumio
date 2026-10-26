@@ -25,5 +25,10 @@ export async function handleRuntime(request: Request, operation: "runtime.regist
   } catch (cause) {
     execution = cause instanceof HubError ? cause.code : "INTERNAL";
     throw cause;
-  } finally { store.audit(identity, operation, decision.result, undefined, execution); }
+  } finally {
+    // 心跳每隔几秒一次，查询列表也很频繁：成功放行的不记审计（与 P1-2"查询放行不必记"一致），
+    // 否则审计表会被心跳淹没。拒绝、失败与登记照常记录。
+    const routine = operation !== "runtime.register" && decision.result === "allow" && execution === "applied";
+    if (!routine) store.audit(identity, operation, decision.result, undefined, execution);
+  }
 }

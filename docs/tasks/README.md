@@ -19,7 +19,7 @@
 | [P1-5](P1-5-cite-check-backup.md) ✅ | 按引用导出 BibTeX、断链检查、Hub 备份 | 后端（Codex） | P1-4 |
 | [P1-6](P1-6-skill.md) ✅ | `skills/lumio/SKILL.md`（Claude Code、Codex 自动验收 6 项通过；pi 见待办） | Claude | P1-5 |
 | [P2-0](P2-0-design.md) ✅ | P2 的设计与契约（ADR 0019） | Claude 起草，人类批准 | P1 |
-| [P2-1](P2-1-runtime-register.md) | 执行器骨架：登记、能力、在线情况 | 后端（Codex） | P2-0 |
+| [P2-1](P2-1-runtime-register.md) ✅ | 执行器骨架：登记、能力、在线情况 | 后端（Codex） | P2-0 |
 | [P2-2](P2-2-dispatch-core.md) | 派活的可靠核心（只跑普通命令） | 后端（Codex） | P2-1 |
 | [P2-3](P2-3-agent-adapters.md) | 接上 codex、claude、pi | 后端（Codex） | P2-2 |
 | [P2-4](P2-4-task-rounds.md) | 任务笔记里的一问一答（做完即可日常使用） | 后端（Codex） | P2-3 |
