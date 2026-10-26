@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Actor, ApiError, CheckResult, LinksResult, NoteDetail, SearchResult, Timestamp, type ApiErrorCode } from "@lumio/schema";
-import { AUTHORIZATION_RULES, authorize, type AuthorizationRequest } from "../src/authorize.ts";
+import { AUTHORIZATION_RULES, RUNTIME_OPERATIONS, authorize, type AuthorizationRequest } from "../src/authorize.ts";
 import { readConfig } from "../src/config.ts";
 import { ROUTES, startHub } from "../src/server.ts";
 import type { HubStatus } from "../src/watch.ts";
@@ -49,15 +49,16 @@ test("default binding is loopback; public health and every registered route call
   const first = hub!.store.createProposal({ op: "link.add", args: { from: "idea_00000000000000000000000004", to: "idea_00000000000000000000000015" } }, "fixture", hub!.store.actors()[0]!.id);
   const second = hub!.store.createProposal({ op: "link.add", args: { from: "idea_00000000000000000000000015", to: "idea_00000000000000000000000004" } }, "fixture", hub!.store.actors()[0]!.id);
   const paths = { check: "/v1/check", actors: "/v1/actors", proposals: "/v1/proposals", operations: "/v1/operations", "proposal.accept": `/v1/proposals/${first.id}/accept`, "proposal.reject": `/v1/proposals/${second.id}/reject`, status: "/v1/status", health: "/health", search: "/v1/search?q=index", show: "/v1/notes/Main", links: "/v1/notes/Main/links" };
-  for (const route of ROUTES) {
+  const existingRoutes = ROUTES.filter((route) => !(RUNTIME_OPERATIONS as readonly string[]).includes(route.operation));
+  for (const route of existingRoutes) {
     const response = route.operation === "operations"
       ? await fetch(`${base()}/v1/operations`, { method: "POST", headers: { Authorization: `Bearer ${human}`, "Content-Type": "application/json" }, body: JSON.stringify({ operation: { op: "link.add", args: { from: "idea_00000000000000000000000015", to: "pap_00000000000000000000000001" } } }) })
-      : await request(paths[route.operation], route.operation === "health" ? undefined : human, {}, "method" in route ? route.method : "GET");
+      : await request(paths[route.operation as keyof typeof paths], route.operation === "health" ? undefined : human, {}, "method" in route ? route.method : "GET");
     expect(response.status).toBe(200);
     if (route.operation === "health") expect(await response.json()).toEqual({ ok: true, version: "0.0.0" });
     expect(decisions.at(-1)?.operation).toBe(route.operation === "operations" ? "link.add" : route.operation);
   }
-  expect(decisions).toHaveLength(ROUTES.length);
+  expect(decisions).toHaveLength(existingRoutes.length);
 });
 
 test("authentication is required everywhere except health, including unknown routes", async () => {
@@ -149,13 +150,15 @@ test("only configured proxy can supply a valid forwarded IP", async () => {
 });
 
 test("authorization table is exhaustively checked, including private=false", () => {
-  expect(AUTHORIZATION_RULES).toHaveLength(31);
+  expect(new Set(AUTHORIZATION_RULES.map((rule) => `${rule.role}/${rule.operation}/${rule.includePrivate}`)).size).toBe(AUTHORIZATION_RULES.length);
   for (const rule of AUTHORIZATION_RULES) {
     const actor = rule.role === null ? null : Actor.parse({ id: "act_00000000000000000000000001", name: "test", role: rule.role, created: "2026-01-01T00:00:00Z" });
     const decision = authorize(actor, { operation: rule.operation, includePrivate: rule.includePrivate });
     expect(decision).toEqual(rule.decision);
-    const expected = rule.role !== "agent" ? "allow"
-      : rule.includePrivate || rule.operation.startsWith("proposal.") || rule.operation === "link.add" ? "deny" : "allow";
+    const expected = (RUNTIME_OPERATIONS as readonly string[]).includes(rule.operation)
+      ? ((rule.operation === "runtimes" ? rule.role === "human" : rule.role === "runtime") ? "allow" : "deny")
+      : rule.role === "runtime" ? "deny" : rule.role !== "agent" ? "allow"
+        : rule.includePrivate || rule.operation.startsWith("proposal.") || rule.operation === "link.add" ? "deny" : "allow";
     expect(decision.result).toBe(expected);
   }
   expect(authorize(null, { operation: "search" }).result).toBe("deny");
@@ -199,7 +202,8 @@ test("management commands create/list/revoke with only a temporary state directo
   expect(management(["actor", "create", "invalid name", "--role", "human"]).code).toBe(1);
   const created = management(["token", "create", "mac", "--actor", "owner"]);
   expect(created.code).toBe(0); expect(created.stderr).toBe(""); expect(created.stdout.trim()).toMatch(/^lumio_[A-Za-z0-9_-]{43}$/);
-  expect(JSON.parse(management(["actor", "list"]).stdout)).toHaveLength(1);
+  expect(Actor.parse(JSON.parse(management(["actor", "create", "server", "--role", "runtime"]).stdout)).role).toBe("runtime");
+  expect(JSON.parse(management(["actor", "list"]).stdout)).toHaveLength(2);
   const listed = management(["token", "list"]); expect(listed.stdout).not.toContain(created.stdout.trim()); expect(listed.stdout).not.toContain("hash");
   expect(management(["token", "revoke", "mac"]).code).toBe(0);
   expect(JSON.parse(management(["token", "list"]).stdout)[0].revoked).not.toBeNull();

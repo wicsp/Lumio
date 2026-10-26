@@ -1,4 +1,17 @@
-// Runtime：每台设备上的 daemon。领取 job → 调用 claude / codex / pi / 脚本 → 结果写回 vault。
-// 只通过 HTTP + job 协议与 Hub 通信，不 import apps/hub（ADR 0005）。P2 起实现。
-// 若将来用 Rust 重写，替换这一个 app 即可（ADR 0002）。
-console.log("lumio-runtime: not implemented yet");
+#!/usr/bin/env bun
+import { readConfig, RuntimeError } from "./config.ts";
+import { runRuntime } from "./runtime.ts";
+
+const controller = new AbortController();
+const shutdown = () => controller.abort();
+process.once("SIGTERM", shutdown);
+process.once("SIGINT", shutdown);
+try { await runRuntime(readConfig(), { signal: controller.signal }); }
+catch (cause) {
+  // Never print fetch exceptions, environment values or agent output.
+  console.error(cause instanceof RuntimeError ? cause.message : "执行器无法启动；请检查配置与状态目录权限");
+  process.exitCode = 1;
+} finally {
+  process.removeListener("SIGTERM", shutdown);
+  process.removeListener("SIGINT", shutdown);
+}

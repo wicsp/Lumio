@@ -67,6 +67,7 @@ test("check encodes visibility, validates CheckResult and propagates authorizati
 
 test("operation/proposal/actors methods use their endpoints, methods, request bodies and success schemas", async () => {
   const cases = [
+    { path: "/v1/runtimes", body: [{ actor: proposal.author, registration: { protocol_version: 2, name: "server", engines: [], tags: [], max_concurrent: 1 }, last_seen: proposal.created, online: true }], call: (client: ReturnType<typeof createClient>) => client.runtimes() },
     { path: "/v1/actors", body: [{ id: proposal.author, name: "codex", role: "agent", created: proposal.created }], call: (client: ReturnType<typeof createClient>) => client.actors() },
     { path: "/v1/proposals?status=pending", body: [proposal], call: (client: ReturnType<typeof createClient>) => client.proposals() },
     { path: "/v1/proposals?status=rejected", body: [{ ...proposal, status: "rejected" }], call: (client: ReturnType<typeof createClient>) => client.proposals("rejected") },

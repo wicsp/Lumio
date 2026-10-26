@@ -1,0 +1,14 @@
+[Unit]
+Description=Lumio Runtime
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/lumio-runtime/runtime.env
+ExecStart=%h/.local/bin/lumio-runtime
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
