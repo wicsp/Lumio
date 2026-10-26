@@ -39,3 +39,20 @@ test("rebuilding a corrupt index also removes stale WAL files", async () => {
   const wal = Bun.file(join(stateDir, "index.sqlite-wal"));
   expect((await wal.exists()) ? await wal.text() : "").not.toBe("stale");
 });
+
+test("switching a fresh index to WAL waits for an existing rollback-journal reader", async () => {
+  const { mkdir } = await import("node:fs/promises");
+  await mkdir(stateDir, { recursive: true });
+  const path = join(stateDir, "index.sqlite");
+  const db = new Database(path, { create: true });
+  db.exec("PRAGMA journal_mode=DELETE; CREATE TABLE placeholder (value TEXT)"); db.close();
+  const child = Bun.spawn([process.execPath, "-e", `import {Database} from "bun:sqlite";
+const db=new Database(process.argv[1]); db.exec("BEGIN; SELECT * FROM placeholder");
+console.log("locked"); await Bun.sleep(300); db.exec("ROLLBACK");db.close();`, path], { stdout: "pipe", stderr: "pipe" });
+  try {
+    const reader = child.stdout.getReader(); const ready = await reader.read(); reader.releaseLock();
+    expect(new TextDecoder().decode(ready.value)).toContain("locked");
+    expect((await searchNotes(vault, "index", { stateDir })).total).toBeGreaterThan(0);
+    expect(await child.exited).toBe(0);
+  } finally { if (child.exitCode === null) child.kill(); await child.exited; }
+});

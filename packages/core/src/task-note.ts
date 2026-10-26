@@ -57,12 +57,15 @@ export function humanPart(body: string): string {
  */
 export function upsertBlock(source: Uint8Array, name: string, attrs: string, content: string): Buffer {
   if (!/^[a-z0-9][a-z0-9_.:-]*$/.test(name)) throw new CoreError("INVALID_FRONTMATTER", "AI 区块名称不合法");
+  if (/[<>\r\n]/.test(attrs)) throw new CoreError("INVALID_FRONTMATTER", "AI 区块属性不合法");
+  // 汇报是不可信文本，不能让其中的控制标记提前结束或另开 AI 区块。
+  const safeContent = content.replace(/<!--(?=\s*lumio:ai\b)/g, "&lt;!--");
   const bytes = Buffer.from(source);
   const parsed = parseFrontmatter(bytes);
   const body = parsed.body.toString("utf8");
   if (!Buffer.from(body, "utf8").equals(parsed.body)) throw new CoreError("UNSAFE_FRONTMATTER_EDIT", "正文不是 UTF-8，无法安全写入");
   const prefix = bytes.subarray(0, bytes.length - parsed.body.length);
-  const block = `<!-- lumio:ai start name=${name}${attrs ? ` ${attrs}` : ""} -->\n${content.trim()}\n<!-- lumio:ai end name=${name} -->\n`;
+  const block = `<!-- lumio:ai start name=${name}${attrs ? ` ${attrs}` : ""} -->\n${safeContent.trim()}\n<!-- lumio:ai end name=${name} -->\n`;
   const existing = new RegExp(`<!--\\s*lumio:ai start name=${name.replace(/[.]/g, "\\.")}(?:\\s[^>]*)?-->[\\s\\S]*?<!--\\s*lumio:ai end name=${name.replace(/[.]/g, "\\.")}\\s*-->[ \\t]*\\r?\\n?`);
   const next = existing.test(body)
     ? body.replace(existing, () => block)
