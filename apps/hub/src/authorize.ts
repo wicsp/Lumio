@@ -3,7 +3,7 @@ import type { Actor } from "@lumio/schema";
 export const QUERY_OPERATIONS = ["search", "show", "links", "check", "status"] as const;
 export type QueryOperation = (typeof QUERY_OPERATIONS)[number];
 export const EXISTING_OPERATIONS = [...QUERY_OPERATIONS, "health", "operations", "actors", "proposals", "proposal.accept", "proposal.reject", "task.dispatch", "routine.followup", "routines", "exec.privileged"] as const;
-export const RUNTIME_OPERATIONS = ["runtime.register", "runtime.sync", "runtime.ack", "runtime.results", "runtimes"] as const;
+export const RUNTIME_OPERATIONS = ["runtime.register", "runtime.sync", "runtime.ack", "runtime.results", "runtimes", "runtime.privileged.status", "runtime.privileged.report"] as const;
 export const JOB_OPERATIONS = ["job.submit", "jobs", "job.show", "job.cancel"] as const;
 export interface AuthorizationRequest { operation: (typeof EXISTING_OPERATIONS)[number] | (typeof RUNTIME_OPERATIONS)[number] | (typeof JOB_OPERATIONS)[number]; includePrivate?: boolean }
 export type Decision = { result: "allow" } | { result: "deny"; reason: string } | { result: "needs_approval" };
@@ -13,7 +13,7 @@ export const AUTHORIZATION_RULES = [
   { role: null, operation: "health", includePrivate: false, decision: { result: "allow" } },
   ...(["human", "agent"] as const).map((role) => ({ role, operation: "health", includePrivate: false, decision: { result: "allow" } } as const)),
   ...EXISTING_OPERATIONS.flatMap((operation) => [false, true].map((includePrivate) => ({
-    role: "runtime", operation, includePrivate, decision: { result: "deny", reason: "请求未获授权" },
+    role: "runtime", operation, includePrivate, decision: operation === "exec.privileged" && !includePrivate ? { result: "needs_approval" as const } : { result: "deny" as const, reason: "请求未获授权" },
   } as const))),
   ...(["human", "agent", "runtime"] as const).flatMap((role) => RUNTIME_OPERATIONS.map((operation) => ({
     role, operation, includePrivate: false,
@@ -33,8 +33,8 @@ export const AUTHORIZATION_RULES = [
     // 从例行任务开出追问任务：新建笔记，同样只能由人发起。
     { role, operation: "routine.followup", includePrivate: false,
       decision: role === "human" ? { result: "allow" as const } : { result: "deny" as const, reason: "agent-cannot-create-tasks" } },
-    // 高权限命令（ADR 0020）：格式已定，由 P2-6 实现；在那之前一律拒绝。
-    { role, operation: "exec.privileged", includePrivate: false, decision: { result: "deny" as const, reason: "exec-privileged-not-implemented" } },
+    // 高权限命令只能由执行器发起，人和 agent 只能查看或解释。
+    { role, operation: "exec.privileged", includePrivate: false, decision: { result: "deny" as const, reason: "only-runtimes-request-privileged" } },
     ...(["proposal.accept", "proposal.reject"] as const).map((operation) => ({ role, operation, includePrivate: false,
       decision: role === "human" ? { result: "allow" as const } : { result: "deny" as const, reason: "agent-cannot-decide-proposals" } })),
   ] as const),

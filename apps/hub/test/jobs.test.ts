@@ -111,7 +111,7 @@ test("real command captures stdout tail, stderr log, cwd, literal argv, GPU and 
   const result = (await get(job.spec.id)).result!;
   expect(result.exit_code).toBe(0); expect(result.report!.length).toBe(4000);
   expect(result.report).toContain(`cwd=${await realpath(temp)} gpu=0,2 arg=$(touch never); --literal`);
-  expect(result.report).toContain("lumio-env=none"); // 执行器的令牌与配置不传给被执行的程序（P2-2 review）
+  expect(result.report).toContain("lumio-env=LUMIO_SUDO_SOCKET,LUMIO_SUDO_TOKEN"); // 执行器的令牌与配置不传给被执行的程序（P2-2 review）
   const log = await readFile(result.log!, "utf8"); expect(log).toContain("stderr only"); expect(log).toContain("x".repeat(4500)); expect(result.report).not.toContain("stderr only");
   expect(await exists(join(temp, "never"))).toBe(false);
   const failed = await submit("fail"); await eventually(async () => (await get(failed.spec.id)).status === "failed");

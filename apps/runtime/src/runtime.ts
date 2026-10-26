@@ -1,3 +1,4 @@
+import { SudoGate } from "./sudo.ts";
 import { mkdir } from "node:fs/promises";
 import { RuntimeAck, RuntimeInfo, RuntimeRegistration, RuntimeSync } from "@lumio/schema";
 import type { RuntimeConfig } from "./config.ts";
@@ -41,7 +42,8 @@ export async function runRuntime(config: RuntimeConfig, options: {
   const plans = new RoutinePlans(queue);
   const now = options.now ?? (() => new Date());
   let actor: string | undefined;
-  const executor = new Executor(queue, config, options.env ?? process.env, () => { events.notify(); deliveries.notify(); }, registration.engines);
+  const sudo = new SudoGate(config, queue, () => actor, fetcher, signal, log);
+  const executor = new Executor(queue, config, options.env ?? process.env, () => { events.notify(); deliveries.notify(); }, registration.engines, sudo);
   let registered = false, disconnected = false;
   let backoff = Math.min(config.pollSeconds, 60);
   async function send(path: string, body: unknown) {
@@ -58,6 +60,7 @@ export async function runRuntime(config: RuntimeConfig, options: {
   async function deliver() {
     const retries = new Map<string, { at: number; delay: number }>(), conflicts = new Set<string>();
     while (!signal.aborted) {
+      await sudo.flush();
       let next = 60_000;
       for (const result of queue.outbox()) {
         if (signal.aborted) break;
@@ -82,6 +85,7 @@ export async function runRuntime(config: RuntimeConfig, options: {
   let delivering: Promise<void> | undefined;
   let deliveryFailure: unknown;
   try {
+    await sudo.start();
     await executor.recover();
     delivering = deliver().catch((cause) => { deliveryFailure = cause; shutdown.abort(); });
     while (!signal.aborted) {
@@ -120,6 +124,7 @@ export async function runRuntime(config: RuntimeConfig, options: {
   } finally {
     shutdown.abort();
     await executor.shutdown();
+    await sudo.close();
     await delivering;
     queue.close();
   }

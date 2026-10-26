@@ -26,7 +26,11 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env) {
   if (env.LUMIO_RUNTIME_STATE_DIR === "") throw new RuntimeError("LUMIO_RUNTIME_STATE_DIR 不能为空");
   const allowedCommands = env.LUMIO_RUNTIME_ALLOWED_COMMANDS ? env.LUMIO_RUNTIME_ALLOWED_COMMANDS.split(",").map((s) => s.trim()) : [];
   if (allowedCommands.some((s) => !isAbsolute(s))) throw new RuntimeError("LUMIO_RUNTIME_ALLOWED_COMMANDS 必须是逗号分隔的绝对路径");
-  return { allowedCommands, url: url.href.replace(/\/+$/, ""), token: env.LUMIO_TOKEN, registration: registration.data, pollSeconds,
+  const sudoCommand = env.LUMIO_RUNTIME_SUDO_COMMAND?.trim().split(/\s+/).filter(Boolean) ?? [];
+  if (sudoCommand.length && !isAbsolute(sudoCommand[0]!)) throw new RuntimeError("LUMIO_RUNTIME_SUDO_COMMAND 首项必须是绝对路径");
+  const sudoTimeout = Number(env.LUMIO_RUNTIME_SUDO_TIMEOUT ?? 1800);
+  if (!Number.isFinite(sudoTimeout) || sudoTimeout <= 0 || sudoTimeout * 1000 > 2_147_483_647) throw new RuntimeError("LUMIO_RUNTIME_SUDO_TIMEOUT 必须是有效的正秒数");
+  return { sudoCommand, sudoTimeout, allowedCommands, url: url.href.replace(/\/+$/, ""), token: env.LUMIO_TOKEN, registration: registration.data, pollSeconds,
     stateDir: resolve(env.LUMIO_RUNTIME_STATE_DIR ?? join(homedir(), ".local", "share", "lumio-runtime")) };
 }
 export type RuntimeConfig = ReturnType<typeof readConfig>;

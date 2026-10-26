@@ -1,6 +1,6 @@
 # 0019 P2 架构：Hub 与执行器、任务与轮次、例行任务
 
-- 状态：Accepted（部分实现：第 1 节执行器登记（P2-1）、第 5 节派活与断开后接上（P2-2）、第 7 节 agent 适配器（P2-3）、第 2–4 节任务与轮次（P2-4）、第 6 节例行任务（P2-5）已实现；第 7 节 `lumio sudo` 由 P2-6 实现）
+- 状态：Implemented（P2-1 至 P2-6；真实 agent 与服务器的人工验收见 docs/tasks/README.md）
 - 日期：2026-10-26
 - 领域：Hub 与运行、AI 协作与权限、数据、安全
 - 影响：ADR 0005（修订）、ADR 0007、ADR 0016、ADR 0017、ADR 0018（第 3 节在 P2-4 执行）；`packages/schema` 的 task、routine、job、actor、operation
@@ -104,3 +104,4 @@ P2 要做到：把活交给服务器（或任何设备）上的 agent，它自�
 - 2026-10-26：P2-3 合并，第 7 节适配器部分标为已实现（真实 agent 的参数待人工验证）
 - 2026-10-26：P2-4 合并，第 2–4 节标为已实现；ADR 0018 第 3 节（删除 `related`、`link.add`）随之执行
 - 2026-10-26：P2-5 合并，第 6 节标为已实现。契约补充（人类事先同意直接合并）：操作 `routine.followup`（从某一次开出任务，human 允许、agent 拒绝）、`RoutineInfo`（`GET /v1/routines`）、`OperationResult` 的 applied 可带新建的 `note`。执行器自己触发的 Job 由 Hub 按编号认领（编号的时间部分即触发时间）
+- 2026-10-26：P2-6 实现第 7 节的高权限命令审批门（细化见 ADR 0020）；签名、重放防护与端到端自动验收通过，服务器人工验收待办。

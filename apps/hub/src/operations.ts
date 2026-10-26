@@ -1,3 +1,4 @@
+import type { Privileged } from "./privileged.ts";
 import { CoreError } from "@lumio/core";
 import { Actor, OperationRequest, OperationResult, Proposal, ProposalStatus, type NoteRef, type Operation } from "@lumio/schema";
 import { authorize } from "./authorize.ts";
@@ -11,7 +12,7 @@ import type { Routines } from "./routines.ts";
  * 统一的操作入口（ADR 0016）：先授权（允许 / 拒绝 / 需要批准），再执行；需要批准的原样存成提议，人接受后执行同一个操作。
  * 现在的操作：task.dispatch（P2-4）、routine.followup（P2-5）。exec.privileged 由 P2-6 加入。link.add 已删除（ADR 0018）。
  */
-export interface OperationOptions { tasks?: TaskRounds; routines?: Routines }
+export interface OperationOptions { tasks?: TaskRounds; routines?: Routines; privileged?: Privileged }
 
 /** 执行一个已经获准的操作。直接执行与接受提议共用这一个函数。 */
 async function execute(operation: Operation, identity: Identity, options: OperationOptions): Promise<NoteRef | undefined> {
@@ -63,6 +64,10 @@ export async function handleOperation(request: Request, kind: "operations" | "ac
       const decision = check(operation.op);
       if (decision.result === "needs_approval") {
         if (!parsed.data.reason) throw new HubError("INVALID", "提议必须填写理由", { operation });
+        if (operation.op === "exec.privileged") {
+          if (!options.privileged) throw new HubError("INTERNAL", "未启用高权限审批");
+          options.privileged.validate(operation, identity.actor.id);
+        }
         proposal = store.createProposal(operation, parsed.data.reason, identity.actor.id);
         audit("pending_approval");
         return Response.json(OperationResult.parse({ status: "pending_approval", proposal }), { status: 202 });
@@ -81,7 +86,10 @@ export async function handleOperation(request: Request, kind: "operations" | "ac
       // 以提议作者的身份执行：批准者只是放行（审计里同时记录批准者）。
       const author = store.actors().find((a) => a.id === proposal!.author);
       if (!author) throw new HubError("CONFLICT", "提议的作者已不存在", { operation, proposal: proposal.id });
-      await execute(operation!, { actor: author, label: identity.label }, options);
+      if (operation!.op === "exec.privileged") {
+        if (!options.privileged) throw new HubError("INTERNAL", "未启用高权限审批");
+        options.privileged.approve(proposal, identity);
+      } else await execute(operation!, { actor: author, label: identity.label }, options);
     }
     proposal = store.decideProposal(proposal.id, kind === "proposal.accept" ? "accepted" : "rejected", identity.actor.id);
     audit(proposal.status);

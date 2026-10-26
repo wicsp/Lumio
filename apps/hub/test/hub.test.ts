@@ -156,7 +156,7 @@ test("authorization table is exhaustively checked, including private=false", () 
     const actor = rule.role === null ? null : Actor.parse({ id: "act_00000000000000000000000001", name: "test", role: rule.role, created: "2026-01-01T00:00:00Z" });
     const decision = authorize(actor, { operation: rule.operation, includePrivate: rule.includePrivate });
     expect(decision).toEqual(rule.decision);
-    const expected = (RUNTIME_OPERATIONS as readonly string[]).includes(rule.operation)
+    const expected = rule.operation === "exec.privileged" && rule.role === "runtime" && !rule.includePrivate ? "needs_approval" : (RUNTIME_OPERATIONS as readonly string[]).includes(rule.operation)
       ? ((rule.operation === "runtimes" ? rule.role === "human" : rule.role === "runtime") ? "allow" : "deny")
       : (JOB_OPERATIONS as readonly string[]).includes(rule.operation) ? (rule.role === "human" ? "allow" : "deny")
       : rule.role === "runtime" || rule.operation === "exec.privileged" ? "deny" : rule.role !== "agent" ? "allow"
@@ -164,8 +164,8 @@ test("authorization table is exhaustively checked, including private=false", () 
     expect(decision.result).toBe(expected);
   }
   expect(authorize(null, { operation: "search" }).result).toBe("deny");
-  // P1 中没有任何操作需要批准：AI 不写链接（ADR 0018）。
-  expect(AUTHORIZATION_RULES.some((rule) => (rule.decision.result as string) === "needs_approval")).toBe(false);
+  // P2-6：唯一需要批准的操作是 runtime 的 exec.privileged。
+  expect(AUTHORIZATION_RULES.filter((rule) => rule.decision.result === "needs_approval").map((rule) => [rule.role, rule.operation])).toEqual([["runtime", "exec.privileged"]]);
   expect(authorize(Actor.parse({ id: "act_00000000000000000000000001", name: "a", role: "agent", created: "2026-01-01T00:00:00Z" }), { operation: "task.dispatch" }))
     .toEqual({ result: "deny", reason: "agent-cannot-dispatch-tasks" });
 });

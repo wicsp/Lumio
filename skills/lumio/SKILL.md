@@ -47,6 +47,11 @@ description: 查用户（Wenbin）的研究笔记库：论文笔记、想法、�
 - 按 `schedule` 自动执行的模板；每次的结果追加在笔记里的 `run-…` 区块。`lumio routine list` 看计划、下次与上次。
 - 想就某一次追问由用户运行 `lumio routine followup <例行任务> <日期>`（agent 令牌会被拒绝）。
 
+## 高权限命令审批
+- `exec.privileged` 提议来自服务器上一轮之内的 agent。用户用 `lumio proposals` 查看执行器、命令、来源与理由，
+  用 `lumio proposals accept|reject <ID>` 作决定。需要 root 的执行器 agent 用 `lumio-runtime sudo -- <绝对路径程序> [参数…]` 申请并等待。
+- AI 可以解释命令的作用和影响，**不能替用户接受**（agent 令牌会被拒绝），不要建议用户不看就接受。
+
 ## 其他
 - 正文里 `<!-- lumio:ai start … -->` 到 `<!-- lumio:ai end … -->` 之间是 AI 写的草稿，不是用户的观点；引用用户观点时不要用这部分。
 - 用户改过文件名后，可以用 `lumio check` 找出断链，告诉用户在哪里，由用户修。

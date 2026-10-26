@@ -45,7 +45,7 @@ export const INSTRUCTIONS = (fields: { round: number; title: string; id: string;
 工作目录：${fields.workdir}
 
 要求：
-- 只在工作目录内工作。不要读写用户的 Lumio 笔记库，不要尝试提权（sudo）。
+- 只在工作目录内工作。不要读写用户的 Lumio 笔记库，需要 root 时运行 \`lumio-runtime sudo -- <命令>\` 并等待用户批准（可能要等很久，也可能被拒绝）；不要直接使用 sudo。
 - 完成后，用中文简要汇报：做了什么、改了哪些文件、结果如何、还有什么遗留问题。
 - 如果需要用户做决定才能继续，在最后的回复里用 <lumio-question>你的问题</lumio-question> 写出问题，然后结束这一轮，不要自行假设。
 `;

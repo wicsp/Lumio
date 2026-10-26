@@ -89,7 +89,7 @@ test("malformed JSON, wrong protocol and unknown fields return INVALID without c
 });
 
 test("runtime is denied at every existing endpoint before body parsing; other roles cannot register or sync", async () => {
-  for (const route of ROUTES.filter((route) => !(RUNTIME_OPERATIONS as readonly string[]).includes(route.operation))) {
+  for (const route of ROUTES.filter((route) => route.operation !== "operations" && !(RUNTIME_OPERATIONS as readonly string[]).includes(route.operation))) {
     const path = { "job.submit": "/v1/jobs", jobs: "/v1/jobs", "job.show": "/v1/jobs/missing", "job.cancel": "/v1/jobs/missing/cancel", operations: "/v1/operations", actors: "/v1/actors", proposals: "/v1/proposals", "proposal.accept": "/v1/proposals/missing/accept", "proposal.reject": "/v1/proposals/missing/reject",
       status: "/v1/status", health: "/health", search: "/v1/search", check: "/v1/check", links: "/v1/notes/Main/links", show: "/v1/notes/Main", routines: "/v1/routines" };
     const response = await request(path[route.operation as keyof typeof path], runtime, "method" in route && route.method === "POST" ? "{" : undefined);
@@ -114,7 +114,7 @@ test("runtime is denied at every existing endpoint before body parsing; other ro
 test("rule table covers each runtime and role permission, with private queries denied too", () => {
   const actors = hub!.store.actors();
   for (const operation of EXISTING_OPERATIONS) for (const includePrivate of [false, true]) {
-    expect(authorize(actors.find((actor) => actor.role === "runtime")!, { operation, includePrivate }).result).toBe("deny");
+    expect(authorize(actors.find((actor) => actor.role === "runtime")!, { operation, includePrivate }).result).toBe(operation === "exec.privileged" && !includePrivate ? "needs_approval" : "deny");
   }
   for (const operation of RUNTIME_OPERATIONS) for (const role of ["human", "agent", "runtime"] as const) {
     expect(authorize(actors.find((actor) => actor.role === role)!, { operation }).result)
