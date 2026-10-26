@@ -43,7 +43,7 @@ P1 的设计决定见 ADR 0014、0016、0017、0018；P2 见 ADR 0019、0020 与
 | P2-4 手动验收 | P2-4 | 在真实 vault 的 `plan/tasks/` 新建一个任务：`assignee: {agent: codex, device: server}`、`workdir: <服务器上的目录>`、写好要求后把 `turn` 改成 `agent`；约半分钟后应派出，结果写回笔记，`turn` 变回 `human`。再写一句意见、改 `turn: agent`，确认第 2 轮接着上一轮。Obsidian 和 iPad 上都看一眼。另外：`related` 不再计入链接，`lumio check` 的悬空链接数可能变少（索引版本升到 2，首次运行会自动重建）；vault 的 git log 里派出与写回各有一个带 `Lumio-Job` 的提交 |
 | P2-5 手动验收 | P2-5 | 服务器执行器升级后，在 `plan/routines/` 建一个每 10 分钟执行一次的例行任务（`schedule: "*/10 * * * *"`、`assignee: {agent: codex, device: server}`、`workdir`）；`lumio routine list` 应显示下次时间。合上 Mac 半小时后打开，笔记里应有补写的结果。再试一次 `lumio routine followup <例行任务> <日期>` |
 
-2026-10-26 已完成 #27–#30 的 Codex 交叉 review，问题与修复见 [review 报告](../reviews/2026-10-26-p2-3-to-p2-5.md)。修复 PR 等人审阅，未合并。
+2026-10-26 已完成 #27–#30 的 Codex 交叉 review，问题与修复见 [review 报告](../reviews/2026-10-26-p2-3-to-p2-5.md)，修复（#33–#35）已合并。
 
 ## 待办（尚未排期，到时再写成任务说明）
 
@@ -59,7 +59,6 @@ P1 的设计决定见 ADR 0014、0016、0017、0018；P2 见 ADR 0019、0020 与
 | 服务器模式下 Obsidian 怎么用 | 上服务器时 | ADR 0017 第 5 节的三个备选 |
 | 改名操作 `note.rename`：自己的客户端经 Hub 改名并同步更新所有引用 | 做自己的客户端时 | ADR 0018 第 4 节 |
 | pi 验收：在 Codex 里嵌套运行 `run.sh pi` 时，pi 调用命令后被 SIGKILL（137）；单独 `pi -p` 正常 | 人类回到 Mac 时 | 先在自己的终端直接运行 `skills/lumio/eval/run.sh pi`，区分是嵌套环境问题还是 pi 的 bug |
-| 多进程并发索引测试在 macOS 上偶发失败过一次（Linux、Mac 上各跑几十次未复现） | 再出现时 | 已复现 WAL 初始化锁冲突，修复见 [#33](https://github.com/wicsp/Lumio/pull/33)，待审阅合并 |
 
 已完成（✅）的任务说明保留当时的原文，其中的 vault 路径（如 `papers/`）以 ADR 0012 的新目录为准。
 
