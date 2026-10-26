@@ -1,3 +1,4 @@
+import { parseArgs } from "node:util";
 import { expect, test } from "bun:test";
 import { AgentRun } from "@lumio/schema";
 import { ADAPTERS, compareVersions, splitQuestion, versionSupported } from "../src/agents.ts";
@@ -45,4 +46,18 @@ test("question marker becomes a separate question; empty marker is ignored", () 
   expect(splitQuestion("做了 A。\n<lumio-question> 要不要顺手重构？ </lumio-question>")).toEqual({ report: "做了 A。", question: "要不要顺手重构？" });
   expect(splitQuestion("没有问题")).toEqual({ report: "没有问题" });
   expect(splitQuestion("x <lumio-question> </lumio-question>")).toEqual({ report: "x" });
+});
+
+
+test("Codex resumed rounds use the resume parser's supported flags and preserve workspace isolation", () => {
+  const argv = ADAPTERS.codex.argv(run({ model: "m1", session: { id: "thread-previous", resume: true } }), ctx);
+  // Codex 0.163.0 exec resume --help：子命令有 --config/-c，没有 --sandbox。
+  // 用严格子命令语法校验，旧实现会因 unknown --sandbox 直接失败。
+  const parsed = parseArgs({ args: argv.slice(2), allowPositionals: true, strict: true, options: {
+    "skip-git-repo-check": { type: "boolean" }, config: { type: "string", short: "c" }, json: { type: "boolean" },
+    "output-last-message": { type: "string" }, model: { type: "string", short: "m" },
+  } });
+  expect(parsed.values.config).toBe('sandbox_mode="workspace-write"');
+  expect(parsed.values.json).toBe(true); expect(parsed.values["output-last-message"]).toBe(ctx.lastMessageFile);
+  expect(parsed.positionals).toEqual(["thread-previous", "做事"]);
 });
