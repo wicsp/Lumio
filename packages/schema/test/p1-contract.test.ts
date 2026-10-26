@@ -59,7 +59,7 @@ describe("actor, operation and proposal contracts (ADR 0016)", () => {
 
   test("operations are a closed, strict union", () => {
     expect(Operation.parse(op).op).toBe("link.add");
-    expect(OPERATION_NAMES).toEqual(["link.add"]);
+    expect(OPERATION_NAMES).toEqual(["link.add", "task.dispatch"]);
     expect(Operation.safeParse({ op: "note.delete", args: {} }).success).toBe(false);
     expect(Operation.safeParse({ ...op, args: { ...op.args, extra: 1 } }).success).toBe(false);
   });
@@ -67,7 +67,7 @@ describe("actor, operation and proposal contracts (ADR 0016)", () => {
   test("valid proposal stores the whole operation", () => {
     const parsed = Proposal.parse(p);
     expect(parsed.status).toBe("pending");
-    expect(parsed.operation.args.to).toBe(`pap_${U}`);
+    expect(parsed.operation.op === "link.add" && parsed.operation.args.to).toBe(`pap_${U}`);
   });
   test("proposal ids use the prop prefix; author is an actor id, not a token name", () => {
     expect(Proposal.safeParse({ ...p, id: `idea_${U}` }).success).toBe(false);

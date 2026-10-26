@@ -11,6 +11,8 @@ import { authorize } from "./authorize.ts";
 import type { HubConfig } from "./config.ts";
 import { HubError } from "./errors.ts";
 import { HubStore, type Identity } from "./store.ts";
+import { Jobs } from "./jobs.ts";
+import { TaskRounds, type TaskOptions } from "./tasks.ts";
 
 // Routes share authentication, authorization and logging before dispatch.
 export const ROUTES = [
@@ -43,6 +45,7 @@ export async function startHub(config: HubConfig, options: {
   authorize?: typeof authorize;
   watch?: WatchOptions;
   operations?: OperationOptions;
+  tasks?: TaskOptions;
 } = {}) {
   if (!(await stat(config.vault)).isDirectory()) throw new HubError("INVALID", "LUMIO_VAULT 必须是目录");
   const store = await HubStore.open(config.stateDir);
@@ -50,8 +53,13 @@ export async function startHub(config: HubConfig, options: {
   const decide = options.authorize ?? authorize;
   let server: Bun.Server<undefined>;
   let vaultWatch: Awaited<ReturnType<typeof startVaultWatch>> | undefined;
+  let tasks: TaskRounds | undefined;
   try {
-    vaultWatch = await startVaultWatch(config, { ...options.watch, log });
+    vaultWatch = await startVaultWatch(config, { ...options.watch, log,
+      onNote: async (path) => { await options.watch?.onNote?.(path); await tasks?.noteChanged(path); } });
+    const watch = vaultWatch;
+    tasks = new TaskRounds(config, store, new Jobs(store), (action) => watch.exclusive(action), (path, line) => watch.issue(path, line), options.tasks);
+    await watch.exclusive(() => tasks!.start());
     server = Bun.serve({
       hostname: config.hostname, port: config.port,
       async fetch(request, server) {
@@ -85,6 +93,8 @@ export async function startHub(config: HubConfig, options: {
           if (route.operation === "runtime.register" || route.operation === "runtime.sync" || route.operation === "runtime.ack" || route.operation === "runtime.results" || route.operation === "runtimes") {
             const response = await handleRuntime(request, route.operation, identity!, store, decide, (options.now ?? (() => new Date()))());
             status = response.status;
+            // 结果到了就尽快写回任务笔记（失败的留给定时任务重试）。
+            if (route.operation === "runtime.results" && response.status === 200) void vaultWatch!.exclusive(() => tasks!.writeResults()).catch(() => {});
             return response;
           }
           // Reject runtime access before reading operation bodies or querying the vault.
@@ -98,7 +108,7 @@ export async function startHub(config: HubConfig, options: {
           if (route.operation === "operations" || route.operation === "actors" || route.operation === "proposals" || route.operation === "proposal.accept" || route.operation === "proposal.reject") {
             const response = await vaultWatch!.exclusive(() => handleOperation(request,
               route.operation,
-              route.pattern.exec(url.pathname)?.[1], identity!, store, config, decide, options.operations));
+              route.pattern.exec(url.pathname)?.[1], identity!, store, config, decide, { ...options.operations, tasks }));
             status = response.status;
             return response;
           }
@@ -150,6 +160,6 @@ export async function startHub(config: HubConfig, options: {
         }
       },
     });
-  } catch (cause) { await vaultWatch?.stop(); store.close(); throw cause; }
-  return { server, store, async stop() { await server.stop(true); await vaultWatch?.stop(); store.close(); } };
+  } catch (cause) { tasks?.stop(); await vaultWatch?.stop(); store.close(); throw cause; }
+  return { server, store, tasks: tasks!, async stop() { await server.stop(true); tasks?.stop(); await vaultWatch?.stop(); store.close(); } };
 }

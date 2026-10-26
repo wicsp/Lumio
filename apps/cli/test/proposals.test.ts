@@ -23,7 +23,8 @@ test("proposal rendering uses actors for author/decider names and falls back to 
       expect(code).toBe(0); expect(stderr).toBe(""); expect(calls).toContain("/v1/actors");
       expect(stdout).toContain(`提交者：${known ? "codex" : proposal.author}`);
       expect(stdout).toContain(`决定者：${known ? "owner" : proposal.decided_by}`);
-      expect(stdout).toContain(`${proposal.operation.args.from} → ${proposal.operation.args.to}`);
+      const op = proposal.operation;
+      if (op.op === "link.add") expect(stdout).toContain(`${op.args.from} → ${op.args.to}`);
     } finally { await server.stop(true); }
   }
 });

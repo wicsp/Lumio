@@ -159,7 +159,7 @@ test("authorization table is exhaustively checked, including private=false", () 
       ? ((rule.operation === "runtimes" ? rule.role === "human" : rule.role === "runtime") ? "allow" : "deny")
       : (JOB_OPERATIONS as readonly string[]).includes(rule.operation) ? (rule.role === "human" ? "allow" : "deny")
       : rule.role === "runtime" ? "deny" : rule.role !== "agent" ? "allow"
-        : rule.includePrivate || rule.operation.startsWith("proposal.") || rule.operation === "link.add" ? "deny" : "allow";
+        : rule.includePrivate || rule.operation.startsWith("proposal.") || rule.operation === "link.add" || rule.operation === "task.dispatch" ? "deny" : "allow";
     expect(decision.result).toBe(expected);
   }
   expect(authorize(null, { operation: "search" }).result).toBe("deny");
