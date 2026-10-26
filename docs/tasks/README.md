@@ -34,6 +34,7 @@ P1 的设计决定见 ADR 0014、0016、0017、0018；P2 见 ADR 0019、0020 与
 
 | 事项 | 来自 | 怎么做 |
 |---|---|---|
+| P2-6 手动验收 | P2-6 | 按 `infra/sudo-helper.md` 在自己的服务器安装助手，让 agent 申请安装一个软件包，在 Mac 查看命令并批准，确认安装成功；再拒绝一次确认不执行 |
 | 服务器上的执行器升级到最新版 | P2-2 起 | 服务器上 `git pull` 后重新 `bun run --cwd apps/runtime build`，替换 `~/.local/bin/lumio-runtime`，`systemctl --user restart lumio-runtime` |
 | Mac 上的 Hub 重启一次 | P2-1 review 起 | 让新代码（心跳不写审计、Job 接口等）生效 |
 | P2-2 手动验收 | P2-2 | 执行器配置 `LUMIO_RUNTIME_ALLOWED_COMMANDS=/usr/bin/nvidia-smi`；`lumio job submit --runtime server -- /usr/bin/nvidia-smi`，合上 Mac 几分钟再打开，`lumio job show <job>` 有结果 |
@@ -41,7 +42,6 @@ P1 的设计决定见 ADR 0014、0016、0017、0018；P2 见 ADR 0019、0020 与
 | P2-3 真实 agent 验证 | P2-3 | 适配器的参数按文档写成，自动测试用的是假 agent。在服务器上对 codex、claude、pi 各派一轮（`lumio job submit --runtime server --agent <名称> --workdir <临时 git 仓库> --session <id> "新建一个文件并提交"`），再用 `--resume` 追问一次，确认：能执行、取到汇报、能接上会话、`<lumio-question>` 能识别。重点核对：codex 的 `exec resume` 参数顺序与 `--json` 里的 `thread.started`；pi 的 `--session-id` 能否和 `-p` 一起用；claude 的 `--session-id` 需要 UUID。不对的话把实际输出贴给 Claude 改适配器 |
 | P2-4 手动验收 | P2-4 | 在真实 vault 的 `plan/tasks/` 新建一个任务：`assignee: {agent: codex, device: server}`、`workdir: <服务器上的目录>`、写好要求后把 `turn` 改成 `agent`；约半分钟后应派出，结果写回笔记，`turn` 变回 `human`。再写一句意见、改 `turn: agent`，确认第 2 轮接着上一轮。Obsidian 和 iPad 上都看一眼。另外：`related` 不再计入链接，`lumio check` 的悬空链接数可能变少（索引版本升到 2，首次运行会自动重建）；vault 的 git log 里派出与写回各有一个带 `Lumio-Job` 的提交 |
 | P2-5 手动验收 | P2-5 | 服务器执行器升级后，在 `plan/routines/` 建一个每 10 分钟执行一次的例行任务（`schedule: "*/10 * * * *"`、`assignee: {agent: codex, device: server}`、`workdir`）；`lumio routine list` 应显示下次时间。合上 Mac 半小时后打开，笔记里应有补写的结果。再试一次 `lumio routine followup <例行任务> <日期>` |
-| P2-6 手动验收 | P2-6 | 按 `infra/sudo-helper.md` 在自己的服务器安装助手，让 agent 申请安装一个软件包，在 Mac 查看命令并批准，确认安装成功；再拒绝一次确认不执行 |
 | Codex 交叉 review：P2-3 起由 Claude 写的后端 PR | P2-3 起 | 人类不在期间由 Claude 实现并合并了 P2-3（以及之后的切片）。回来后请 Codex 对这些 PR 做一次交叉 review，有问题开新 PR 修 |
 
 ## 待办（尚未排期，到时再写成任务说明）
