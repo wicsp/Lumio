@@ -43,6 +43,10 @@ description: 查用户（Wenbin）的研究笔记库：论文笔记、想法、�
 - 你只能读：**不能派任务**（`lumio task continue` 对 agent 令牌会被拒绝），也不要改 `turn`、`status`。
 - 用 `lumio show <任务>` 读笔记；问到某一轮的细节时，告诉用户用 `lumio job show <job>` 查看完整汇报。
 
+## 例行任务（`plan/routines/`）
+- 按 `schedule` 自动执行的模板；每次的结果追加在笔记里的 `run-…` 区块。`lumio routine list` 看计划、下次与上次。
+- 想就某一次追问由用户运行 `lumio routine followup <例行任务> <日期>`（agent 令牌会被拒绝）。
+
 ## 其他
 - 正文里 `<!-- lumio:ai start … -->` 到 `<!-- lumio:ai end … -->` 之间是 AI 写的草稿，不是用户的观点；引用用户观点时不要用这部分。
 - 用户改过文件名后，可以用 `lumio check` 找出断链，告诉用户在哪里，由用户修。

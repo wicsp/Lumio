@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { openVaultGit, type GitTrailers } from "@lumio/core";
+import { CoreError, openVaultGit, writeFileAtomic, type GitTrailers } from "@lumio/core";
 import { textContainsCardNumber } from "@lumio/schema";
 
 /**
@@ -27,4 +27,24 @@ export async function writeAndCommit(vault: string, relativePath: string, before
     await git.commit([relativePath], message.replace(/[\r\n]+/g, " "), trailers);
     return true;
   } catch { return false; }
+}
+
+/**
+ * 读-改-写一篇笔记；文件在中途被改了就重试，最多 3 次。
+ * 给出 commit 时，写入后立即单独提交并带 trailer（ADR 0016 第 5 节）；提交失败调用 onCommitFailed，留给自动保存。
+ */
+export async function editNote(vault: string, path: string, change: (bytes: Buffer) => Buffer,
+  commit: { message: string; trailers: GitTrailers } | undefined, onCommitFailed: () => void): Promise<void> {
+  const file = join(vault, path);
+  for (let attempt = 0; ; attempt++) {
+    const bytes = await readFile(file);
+    const next = change(bytes);
+    if (next.equals(bytes)) return;
+    try {
+      const write = () => writeFileAtomic(file, next, { expectedContent: bytes }).then(() => {});
+      if (!commit) { await write(); return; }
+      if (!(await writeAndCommit(vault, path, bytes, write, commit.message, commit.trailers))) onCommitFailed();
+      return;
+    } catch (cause) { if (!(cause instanceof CoreError && cause.code === "FILE_CHANGED") || attempt >= 2) throw cause; }
+  }
 }

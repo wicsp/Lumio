@@ -4,6 +4,7 @@ import type { RuntimeConfig } from "./config.ts";
 import { detectEngines } from "./engines.ts";
 import { Queue } from "./queue.ts";
 import { Executor } from "./executor.ts";
+import { RoutinePlans } from "./routines.ts";
 
 class Wake {
   private listeners = new Set<() => void>();
@@ -25,6 +26,8 @@ export async function runRuntime(config: RuntimeConfig, options: {
   env?: NodeJS.ProcessEnv;
   fetch?: typeof globalThis.fetch;
   sleep?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
+  /** 例行任务用的时钟（测试注入）。 */
+  now?: () => Date;
 }): Promise<void> {
   const shutdown = new AbortController();
   const signal = AbortSignal.any([options.signal, shutdown.signal]);
@@ -35,6 +38,9 @@ export async function runRuntime(config: RuntimeConfig, options: {
   await mkdir(config.stateDir, { recursive: true, mode: 0o700 });
   const registration = RuntimeRegistration.parse({ ...config.registration, engines: await detectEngines(options.env) });
   const queue = new Queue(config.stateDir);
+  const plans = new RoutinePlans(queue);
+  const now = options.now ?? (() => new Date());
+  let actor: string | undefined;
   const executor = new Executor(queue, config, options.env ?? process.env, () => { events.notify(); deliveries.notify(); }, registration.engines);
   let registered = false, disconnected = false;
   let backoff = Math.min(config.pollSeconds, 60);
@@ -83,7 +89,7 @@ export async function runRuntime(config: RuntimeConfig, options: {
       let justAcked = false;
       try {
         if (!registered) {
-          await post("/v1/runtime/register", registration, RuntimeInfo);
+          actor = (await post("/v1/runtime/register", registration, RuntimeInfo)).actor;
           registered = true;
           log("执行器登记成功");
           if (disconnected) log("Hub 连接已恢复");
@@ -97,6 +103,7 @@ export async function runRuntime(config: RuntimeConfig, options: {
             queue.ack(accepted); deliveries.notify(); justAcked = true;
           }
           executor.cancel(sync.cancel);
+          if (actor) plans.replace(sync.routines, actor, now());
         }
         backoff = Math.min(config.pollSeconds, 60);
       } catch {
@@ -105,6 +112,8 @@ export async function runRuntime(config: RuntimeConfig, options: {
         disconnected = true; registered = false;
         delay = backoff; backoff = Math.min(backoff * 2, 60);
       }
+      // 例行任务到点就生成 Job，不论 Hub 是否在线（ADR 0019 第 6 节）。
+      if (plans.fire(now()).length) deliveries.notify();
       if (!justAcked) executor.pump();
       try { await wait(delay * 1000, signal); } catch (cause) { if (!signal.aborted) throw cause; }
     }

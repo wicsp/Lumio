@@ -13,6 +13,8 @@ import { HubError } from "./errors.ts";
 import { HubStore, type Identity } from "./store.ts";
 import { Jobs } from "./jobs.ts";
 import { TaskRounds, type TaskOptions } from "./tasks.ts";
+import { Routines, type RoutineOptions } from "./routines.ts";
+import type { RoutineHooks } from "./jobs.ts";
 
 // Routes share authentication, authorization and logging before dispatch.
 export const ROUTES = [
@@ -25,6 +27,7 @@ export const ROUTES = [
   { operation: "runtime.register", method: "POST", pattern: /^\/v1\/runtime\/register$/ },
   { operation: "runtime.sync", method: "POST", pattern: /^\/v1\/runtime\/sync$/ },
   { operation: "runtimes", method: "GET", pattern: /^\/v1\/runtimes$/ },
+  { operation: "routines", method: "GET", pattern: /^\/v1\/routines$/ },
   { operation: "operations", method: "POST", pattern: /^\/v1\/operations$/ },
   { operation: "actors", method: "GET", pattern: /^\/v1\/actors$/ },
   { operation: "proposals", method: "GET", pattern: /^\/v1\/proposals$/ },
@@ -46,6 +49,7 @@ export async function startHub(config: HubConfig, options: {
   watch?: WatchOptions;
   operations?: OperationOptions;
   tasks?: TaskOptions;
+  routines?: RoutineOptions;
 } = {}) {
   if (!(await stat(config.vault)).isDirectory()) throw new HubError("INVALID", "LUMIO_VAULT 必须是目录");
   const store = await HubStore.open(config.stateDir);
@@ -54,12 +58,16 @@ export async function startHub(config: HubConfig, options: {
   let server: Bun.Server<undefined>;
   let vaultWatch: Awaited<ReturnType<typeof startVaultWatch>> | undefined;
   let tasks: TaskRounds | undefined;
+  let routines: Routines | undefined;
+  const hooks: RoutineHooks = { plans: (actor) => routines?.plans(actor) ?? [], adopt: (actor, id, now) => routines?.adopt(actor, id, now) };
   try {
     vaultWatch = await startVaultWatch(config, { ...options.watch, log,
-      onNote: async (path) => { await options.watch?.onNote?.(path); await tasks?.noteChanged(path); } });
+      onNote: async (path) => { await options.watch?.onNote?.(path); await tasks?.noteChanged(path); await routines?.noteChanged(path); } });
     const watch = vaultWatch;
-    tasks = new TaskRounds(config, store, new Jobs(store), (action) => watch.exclusive(action), (path, line) => watch.issue(path, line), options.tasks);
+    tasks = new TaskRounds(config, store, new Jobs(store, hooks), (action) => watch.exclusive(action), (path, line) => watch.issue(path, line), options.tasks);
+    routines = new Routines(config, store, new Jobs(store, hooks), (action) => watch.exclusive(action), (path, line) => watch.issue(path, line), options.routines);
     await watch.exclusive(() => tasks!.start());
+    await watch.exclusive(() => routines!.start());
     server = Bun.serve({
       hostname: config.hostname, port: config.port,
       async fetch(request, server) {
@@ -70,7 +78,7 @@ export async function startHub(config: HubConfig, options: {
         let status = 500;
         // Logging uses route templates, so references (or secrets in a URL) cannot leak.
         const route = ROUTES.find((route) => request.method === ("method" in route ? route.method : "GET") && route.pattern.test(url.pathname));
-        const path = route?.operation === "job.submit" || route?.operation === "jobs" ? "/v1/jobs" : route?.operation === "job.show" ? "/v1/jobs/<id>" : route?.operation === "job.cancel" ? "/v1/jobs/<id>/cancel" : route?.operation === "runtime.ack" ? "/v1/runtime/ack" : route?.operation === "runtime.results" ? "/v1/runtime/results" : route?.operation === "runtime.register" ? "/v1/runtime/register" : route?.operation === "runtime.sync" ? "/v1/runtime/sync" : route?.operation === "runtimes" ? "/v1/runtimes" : route?.operation === "status" ? "/v1/status" : route?.operation === "health" ? "/health" : route?.operation === "search" ? "/v1/search"
+        const path = route?.operation === "job.submit" || route?.operation === "jobs" ? "/v1/jobs" : route?.operation === "job.show" ? "/v1/jobs/<id>" : route?.operation === "job.cancel" ? "/v1/jobs/<id>/cancel" : route?.operation === "runtime.ack" ? "/v1/runtime/ack" : route?.operation === "runtime.results" ? "/v1/runtime/results" : route?.operation === "runtime.register" ? "/v1/runtime/register" : route?.operation === "runtime.sync" ? "/v1/runtime/sync" : route?.operation === "runtimes" ? "/v1/runtimes" : route?.operation === "routines" ? "/v1/routines" : route?.operation === "status" ? "/v1/status" : route?.operation === "health" ? "/health" : route?.operation === "search" ? "/v1/search"
           : route?.operation === "check" ? "/v1/check" : route?.operation === "show" ? "/v1/notes/<reference>" : route?.operation === "links" ? "/v1/notes/<reference>/links" : route?.operation === "operations" ? "/v1/operations"
             : route?.operation === "actors" ? "/v1/actors" : route?.operation === "proposals" ? "/v1/proposals"
               : route?.operation === "proposal.accept" ? "/v1/proposals/<id>/accept" : route?.operation === "proposal.reject" ? "/v1/proposals/<id>/reject" : "<unmatched>";
@@ -91,11 +99,21 @@ export async function startHub(config: HubConfig, options: {
             status = response.status; return response;
           }
           if (route.operation === "runtime.register" || route.operation === "runtime.sync" || route.operation === "runtime.ack" || route.operation === "runtime.results" || route.operation === "runtimes") {
-            const response = await handleRuntime(request, route.operation, identity!, store, decide, (options.now ?? (() => new Date()))());
+            const response = await handleRuntime(request, route.operation, identity!, store, decide, (options.now ?? (() => new Date()))(), hooks);
             status = response.status;
-            // 结果到了就尽快写回任务笔记（失败的留给定时任务重试）。
-            if (route.operation === "runtime.results" && response.status === 200) void vaultWatch!.exclusive(() => tasks!.writeResults()).catch(() => {});
+            // 结果到了就尽快写回笔记（失败的留给定时任务重试）。
+            if (route.operation === "runtime.results" && response.status === 200) {
+              void vaultWatch!.exclusive(async () => { await tasks!.writeResults(); await routines!.writeResults(); }).catch(() => {});
+            }
             return response;
+          }
+          if (route.operation === "routines") {
+            const decision = decide(identity!.actor, { operation: "routines" });
+            if (decision.result !== "allow") {
+              store.auditDenied(identity!, route.operation);
+              throw new HubError("FORBIDDEN", "请求未获授权", { reason: decision.result === "deny" ? decision.reason : "Approval required" });
+            }
+            status = 200; return Response.json(routines!.list());
           }
           // Reject runtime access before reading operation bodies or querying the vault.
           if (identity?.actor.role === "runtime" && ["operations", "actors", "proposals", "proposal.accept", "proposal.reject"].includes(route.operation)) {
@@ -108,7 +126,7 @@ export async function startHub(config: HubConfig, options: {
           if (route.operation === "operations" || route.operation === "actors" || route.operation === "proposals" || route.operation === "proposal.accept" || route.operation === "proposal.reject") {
             const response = await vaultWatch!.exclusive(() => handleOperation(request,
               route.operation,
-              route.pattern.exec(url.pathname)?.[1], identity!, store, config, decide, { ...options.operations, tasks }));
+              route.pattern.exec(url.pathname)?.[1], identity!, store, config, decide, { ...options.operations, tasks, routines }));
             status = response.status;
             return response;
           }
@@ -160,6 +178,6 @@ export async function startHub(config: HubConfig, options: {
         }
       },
     });
-  } catch (cause) { tasks?.stop(); await vaultWatch?.stop(); store.close(); throw cause; }
-  return { server, store, tasks: tasks!, async stop() { await server.stop(true); tasks?.stop(); await vaultWatch?.stop(); store.close(); } };
+  } catch (cause) { tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); throw cause; }
+  return { server, store, tasks: tasks!, routines: routines!, async stop() { await server.stop(true); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); } };
 }

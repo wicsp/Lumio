@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AGENTS, Timestamp, idOf } from "./common.ts";
+import { NoteRef } from "./query.ts";
 
 /**
  * Hub ↔ 执行器（Runtime）的协议（ADR 0005、ADR 0019）。
@@ -140,6 +141,18 @@ export const RoutineSpec = z.strictObject({
   }),
 });
 
+/** `lumio routine list` / `GET /v1/routines` 的一项：Hub 眼中的例行任务（P2-5）。 */
+export const RoutineInfo = z.strictObject({
+  routine: NoteRef,
+  schedule: z.string(),
+  timezone: z.string(),
+  status: z.enum(["active", "paused"]),
+  runtime: RuntimeName.optional().describe("计划交给了哪个执行器；没有生效时缺失"),
+  next: Timestamp.optional().describe("下一次计划触发时间（暂停或计划没有生效时缺失）"),
+  last: z.strictObject({ job: idOf("job"), fired_at: Timestamp, status: JobStatus }).optional().describe("最近一次"),
+  problem: z.string().optional().describe("计划没有生效的原因，如缺少 workdir、没有可用的执行器"),
+});
+
 /** 执行器每次轮询时报告的状态（同时也是心跳）。 */
 export const RuntimeHeartbeat = z.strictObject({
   running: z.array(idOf("job")),
@@ -168,6 +181,7 @@ export type Job = z.infer<typeof Job>;
 export type RuntimeRegistration = z.infer<typeof RuntimeRegistration>;
 export type RuntimeInfo = z.infer<typeof RuntimeInfo>;
 export type RoutineSpec = z.infer<typeof RoutineSpec>;
+export type RoutineInfo = z.infer<typeof RoutineInfo>;
 export type RuntimeHeartbeat = z.infer<typeof RuntimeHeartbeat>;
 export type RuntimeSync = z.infer<typeof RuntimeSync>;
 export type RuntimeAck = z.infer<typeof RuntimeAck>;

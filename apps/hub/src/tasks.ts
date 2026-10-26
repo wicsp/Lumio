@@ -3,16 +3,16 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import {
-  CoreError, entityDirectory, humanPart, parseFrontmatter, scanVault, setFields, showNote, upsertBlock, writeFileAtomic,
+  CoreError, entityDirectory, humanPart, parseFrontmatter, scanVault, setFields, showNote, upsertBlock,
   type GitTrailers,
 } from "@lumio/core";
-import { textContainsCardNumber, type AgentRun, type Job, type Operation } from "@lumio/schema";
+import { textContainsCardNumber, type AgentRun, type Job, type Operation, type RuntimeInfo } from "@lumio/schema";
 import type { HubConfig } from "./config.ts";
 import { HubError } from "./errors.ts";
 import type { Jobs } from "./jobs.ts";
 import type { HubStore, Identity } from "./store.ts";
 import type { WatchClock } from "./watch.ts";
-import { writeAndCommit } from "./commit.ts";
+import { editNote } from "./commit.ts";
 
 /**
  * 任务笔记里的一问一答（ADR 0019 第 2、3、4 节，P2-4）。
@@ -67,7 +67,29 @@ export function lineDiff(before: string, after: string): { added: string[]; remo
   return { added: added.filter((l) => l.trim()), removed: removed.filter((l) => l.trim()) };
 }
 
-const OUTCOME: Record<string, string> = {
+
+/** workdir（可以 ~ 开头）是否落在笔记库里（ADR 0019：不允许）。 */
+export function workdirInVault(vault: string, workdir: string): boolean {
+  const expanded = workdir === "~" ? homedir() : workdir.startsWith("~/") ? join(homedir(), workdir.slice(2)) : workdir;
+  const inside = relative(resolve(vault), resolve(expanded));
+  return !inside || (!inside.startsWith("..") && !inside.startsWith("/"));
+}
+
+/**
+ * 选执行器：`device` 给出时用它；否则挑在线且装了该 agent 的；都不在线就交给最近见过的那个，它上线后领取（相当于在 Hub 排队）。
+ * 找不到时抛出以"没有可用的执行器"开头的错误。
+ */
+export function pickRuntime(store: HubStore, now: Date, engine: AgentRun["engine"], device: string | undefined): RuntimeInfo {
+  const all = store.runtimes(now);
+  const runtimes = all.filter((r) => r.registration.engines.some((e) => e.name === engine));
+  const runtime = device ? all.find((r) => r.registration.name === device)
+    : runtimes.find((r) => r.online) ?? [...runtimes].sort((a, b) => Date.parse(b.last_seen) - Date.parse(a.last_seen))[0];
+  if (!runtime) throw new HubError("INVALID", device ? `没有可用的执行器：${device} 未登记` : `没有可用的执行器：没有登记过装了 ${engine} 的执行器`);
+  if (!runtime.registration.engines.some((e) => e.name === engine)) throw new HubError("INVALID", `执行器 ${runtime.registration.name} 上没有登记 ${engine}`);
+  return runtime;
+}
+
+export const OUTCOME: Record<string, string> = {
   done: "完成", waiting_for_human: "有问题等你回答", unknown: "情况不明", cancelled: "已取消",
 };
 
@@ -191,17 +213,8 @@ export class TaskRounds {
     if (!["codex", "claude-code", "pi"].includes(engine)) throw new HubError("INVALID", `未知的 agent：${engine}`);
     if (typeof data.workdir !== "string" || !data.workdir) throw new HubError("INVALID", "任务没有写 workdir（执行器上的工作目录）");
     if (this.jobs.activeForTask(task)) throw new HubError("CONFLICT", "这个任务已有一轮在执行");
-    const expanded = data.workdir === "~" ? homedir() : data.workdir.startsWith("~/") ? join(homedir(), data.workdir.slice(2)) : data.workdir;
-    const inside = relative(resolve(this.config.vault), resolve(expanded));
-    if (!inside || (!inside.startsWith("..") && !inside.startsWith("/"))) throw new HubError("INVALID", "工作目录不能在笔记库里（ADR 0019）");
-
-    const runtimes = this.store.runtimes(now).filter((r) => r.registration.engines.some((e) => e.name === engine));
-    const device = typeof assignee.device === "string" ? assignee.device : undefined;
-    // 没指定设备时优先挑在线的；都不在线就交给最近见过的那个，它上线后领取（相当于在 Hub 排队）。
-    const runtime = device ? this.store.runtimes(now).find((r) => r.registration.name === device)
-      : runtimes.find((r) => r.online) ?? [...runtimes].sort((a, b) => Date.parse(b.last_seen) - Date.parse(a.last_seen))[0];
-    if (!runtime) throw new HubError("INVALID", device ? `没有可用的执行器：${device} 未登记` : `没有可用的执行器：没有登记过装了 ${engine} 的执行器`);
-    if (!runtime.registration.engines.some((e) => e.name === engine)) throw new HubError("INVALID", `执行器 ${runtime.registration.name} 上没有登记 ${engine}`);
+    if (workdirInVault(this.config.vault, data.workdir)) throw new HubError("INVALID", "工作目录不能在笔记库里（ADR 0019）");
+    const runtime = pickRuntime(this.store, now, engine, typeof assignee.device === "string" ? assignee.device : undefined);
 
     const round = s.rounds + 1;
     const previous = this.jobs.list(undefined, task).at(-1);
@@ -222,6 +235,13 @@ export class TaskRounds {
     } else {
       const last = previous?.result?.report;
       content = `# ${title}\n\n${human}${last ? `\n\n## 上一轮的汇报\n\n${last.slice(0, 20_000)}` : ""}`;
+    }
+    // 从例行任务开出的追问（P2-5）：那一次的汇报放在 routine-run 区块里，人写的部分不含它；没接上会话时附上。
+    const origin = /<!--\s*lumio:ai start name=routine-run job=(job_[0-9A-HJKMNP-TV-Z]{26})/.exec(parsed.body.toString("utf8"))?.[1];
+    if (origin && !resumable) {
+      let report: string | undefined;
+      try { report = this.jobs.get(origin).result?.report; } catch { /* 记录已不在 */ }
+      if (report) content += `\n\n## 例行任务那一次的汇报\n\n${report.slice(0, 20_000)}`;
     }
     const prompt = `${INSTRUCTIONS({ round, title, id: task, workdir: data.workdir })}\n${content}\n`;
     const timeout = typeof data.timeout_minutes === "number" && data.timeout_minutes > 0 ? data.timeout_minutes * 60 : 7200;
@@ -294,24 +314,7 @@ export class TaskRounds {
     return lines.join("\n");
   }
 
-  /**
-   * 读-改-写一篇笔记；文件在中途被改了就重试，最多 3 次。
-   * 给出 commit 时，写入后立即单独提交并带 trailer（ADR 0016 第 5 节）；提交失败记一条问题，留给自动保存。
-   */
   private async edit(path: string, change: (bytes: Buffer) => Buffer, commit?: { message: string; trailers: GitTrailers }): Promise<void> {
-    const file = join(this.config.vault, path);
-    for (let attempt = 0; ; attempt++) {
-      const bytes = await readFile(file);
-      const next = change(bytes);
-      if (next.equals(bytes)) return;
-      try {
-        const write = () => writeFileAtomic(file, next, { expectedContent: bytes }).then(() => {});
-        if (!commit) { await write(); return; }
-        if (!(await writeAndCommit(this.config.vault, path, bytes, write, commit.message, commit.trailers))) {
-          this.issue(path, `跳过  ${path}  Hub 的写入已完成，但未能单独提交，将由自动保存提交`);
-        }
-        return;
-      } catch (cause) { if (!(cause instanceof CoreError && cause.code === "FILE_CHANGED") || attempt >= 2) throw cause; }
-    }
+    await editNote(this.config.vault, path, change, commit, () => this.issue(path, `跳过  ${path}  Hub 的写入已完成，但未能单独提交，将由自动保存提交`));
   }
 }

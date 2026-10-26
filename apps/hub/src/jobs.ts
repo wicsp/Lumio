@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { newId } from "@lumio/core";
-import { JOB_PROTOCOL_VERSION, Job, JobResult, JobRun, JobSpec, JobStatus, RuntimeName, RuntimeSync, type RuntimeHeartbeat } from "@lumio/schema";
+import { JOB_PROTOCOL_VERSION, Job, JobResult, JobRun, JobSpec, JobStatus, RuntimeName, RuntimeSync, type RoutineSpec, type RuntimeHeartbeat } from "@lumio/schema";
 import type { HubStore, Identity } from "./store.ts";
 import type { authorize } from "./authorize.ts";
 import { HubError } from "./errors.ts";
@@ -11,17 +11,24 @@ export const SubmitJob = JobSpec.omit({ protocol_version: true, id: true, source
   timeout_seconds: JobSpec.shape.timeout_seconds.default(7200),
 });
 const active = (job: Job) => job.status === "assigned" || job.status === "running";
+/** 例行任务（P2-5）：执行器自己触发的 Job 由它认领，计划由它提供。 */
+export interface RoutineHooks {
+  plans(actor: string): RoutineSpec[];
+  adopt(actor: string, id: string, now: Date): Job | undefined;
+}
 export class Jobs {
-  constructor(private store: HubStore) {}
+  constructor(private store: HubStore, private routines?: RoutineHooks) {}
   get(id: string): Job {
     const row = this.store.db.query<{ record: string }, [string]>("SELECT record FROM jobs WHERE id=?").get(id);
     if (!row) throw new HubError("NOT_FOUND", "Job 不存在");
     return Job.parse(JSON.parse(row.record));
   }
-  list(status?: string, task?: string): Job[] {
-    const rows = task === undefined
-      ? this.store.db.query<{ record: string }, []>("SELECT record FROM jobs ORDER BY rowid").all()
-      : this.store.db.query<{ record: string }, [string]>("SELECT record FROM jobs WHERE json_extract(record, '$.spec.source.task') = ? ORDER BY rowid").all(task);
+  list(status?: string, task?: string, routine?: string): Job[] {
+    const rows = task !== undefined
+      ? this.store.db.query<{ record: string }, [string]>("SELECT record FROM jobs WHERE json_extract(record, '$.spec.source.task') = ? ORDER BY rowid").all(task)
+      : routine !== undefined
+        ? this.store.db.query<{ record: string }, [string]>("SELECT record FROM jobs WHERE json_extract(record, '$.spec.source.routine') = ? ORDER BY json_extract(record, '$.spec.source.fired_at')").all(routine)
+        : this.store.db.query<{ record: string }, []>("SELECT record FROM jobs ORDER BY rowid").all();
     return rows.map((row) => Job.parse(JSON.parse(row.record))).filter((job) => status === undefined || job.status === status);
   }
   /** 某个任务还没有结果的那一轮（ADR 0019：一个任务同时只有一轮在执行）。 */
@@ -33,6 +40,10 @@ export class Jobs {
     const job = Job.parse({ spec: { ...fields, protocol_version: JOB_PROTOCOL_VERSION,
       id: newId("job", now, randomBytes), lease: randomBytes(32).toString("base64url"), created: now.toISOString() }, status: "queued" });
     this.save(job); return job;
+  }
+  /** 记下一个由别处生成的 Job（例行任务由执行器触发）；已有同编号的记录时不变。 */
+  record(job: Job) {
+    this.store.db.query("INSERT OR IGNORE INTO jobs(id, record) VALUES (?, ?)").run(job.spec.id, JSON.stringify(Job.parse(job)));
   }
   private save(job: Job) {
     this.store.db.query("INSERT INTO jobs(id, record) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET record=excluded.record")
@@ -67,9 +78,13 @@ export class Jobs {
       }
     })();
   }
-  private owned(actor: string, id: string): Job {
+  private owned(actor: string, id: string, now = new Date()): Job {
     let job: Job;
-    try { job = this.get(id); } catch { throw new HubError("CONFLICT", "Job 与执行器不匹配"); }
+    try { job = this.get(id); } catch {
+      const adopted = this.routines?.adopt(actor, id, now);
+      if (!adopted) throw new HubError("CONFLICT", "Job 与执行器不匹配");
+      job = adopted;
+    }
     if (job.spec.runtime !== actor) throw new HubError("CONFLICT", "Job 与执行器不匹配");
     return job;
   }
@@ -94,6 +109,10 @@ export class Jobs {
   sync(actor: string, heartbeat: RuntimeHeartbeat, now: Date): RuntimeSync {
     return this.store.db.transaction(() => {
       this.store.syncRuntime(actor, now);
+      // 执行器自己触发的例行任务：Hub 第一次听说时补建记录。
+      for (const id of [...heartbeat.running, ...heartbeat.queued]) {
+        if (!this.store.db.query("SELECT 1 FROM jobs WHERE id=?").get(id)) this.routines?.adopt(actor, id, now);
+      }
       const running = new Set(heartbeat.running);
       for (const job of this.open(actor)) {
         if (running.has(job.spec.id) && active(job)) { job.status = "running"; job.last_seen = now.toISOString(); this.save(job); }
@@ -101,7 +120,7 @@ export class Jobs {
       const jobs = this.open(actor);
       const cancelled = new Set(this.store.db.query<{ id: string }, []>("SELECT id FROM jobs WHERE cancel=1").all().map((r) => r.id));
       return RuntimeSync.parse({ jobs: jobs.filter((j) => j.status === "queued").map((j) => j.spec),
-        cancel: jobs.filter((j) => !j.result && j.assigned && (cancelled.has(j.spec.id) || j.status === "cancelled")).map((j) => j.spec.id), routines: [] });
+        cancel: jobs.filter((j) => !j.result && j.assigned && (cancelled.has(j.spec.id) || j.status === "cancelled")).map((j) => j.spec.id), routines: this.routines?.plans(actor) ?? [] });
     })();
   }
 }
@@ -119,10 +138,11 @@ export async function handleJobs(request: Request, operation: "job.submit" | "jo
     }
     if (operation === "jobs") {
       const params = new URL(request.url).searchParams;
-      const status = params.get("status"), task = params.get("task");
+      const status = params.get("status"), task = params.get("task"), routine = params.get("routine");
       if (status !== null && !JobStatus.safeParse(status).success) throw new HubError("INVALID", "Job 状态不合法");
       if (task !== null && !/^task_[0-9A-HJKMNP-TV-Z]{26}$/.test(task)) throw new HubError("INVALID", "task 必须是任务 ID");
-      return Response.json(jobs.list(status ?? undefined, task ?? undefined));
+      if (routine !== null && !/^rtn_[0-9A-HJKMNP-TV-Z]{26}$/.test(routine)) throw new HubError("INVALID", "routine 必须是例行任务 ID");
+      return Response.json(jobs.list(status ?? undefined, task ?? undefined, routine ?? undefined));
     }
     return Response.json(operation === "job.cancel" ? jobs.cancel(id!) : jobs.get(id!));
   } catch (cause) { execution = cause instanceof HubError ? cause.code : "INTERNAL"; throw cause; }
