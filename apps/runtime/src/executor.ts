@@ -19,6 +19,13 @@ export async function killGroup(pid: number) {
   while (groupExists(pid) && Date.now() < deadline) await sleep(25);
   if (groupExists(pid)) signalGroup(pid, "SIGKILL");
 }
+/**
+ * 被执行的程序（以及 P2-3 起的 agent）拿不到执行器自己的配置，尤其是 LUMIO_TOKEN（P2-2 review）。
+ * 局限：执行器与被执行的程序是同一个系统账号，后者仍可能读到执行器的配置文件；真正隔离需要单独的账号（见待办）。
+ */
+export function jobEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(env).filter(([key]) => !key.startsWith("LUMIO_")));
+}
 export class Executor {
   private running = new Map<string, { child: ChildProcess; stop?: Promise<void>; reason?: "超时" | "取消" }>();
   private pending = new Set<Promise<void>>();
@@ -92,7 +99,7 @@ export class Executor {
       child.stdout!.on("data", (chunk: Buffer) => { report = (report + decoder.write(chunk)).slice(-4000); write(chunk); });
       child.stderr!.on("data", write);
       const workdir = spec.workdir === "~" ? homedir() : spec.workdir.startsWith("~/") ? join(homedir(), spec.workdir.slice(2)) : spec.workdir;
-      child.stdin!.end(JSON.stringify({ spec: { ...spec, workdir }, completion, env: { ...this.env, ...(spec.gpus ? { CUDA_VISIBLE_DEVICES: spec.gpus.join(",") } : {}) } }));
+      child.stdin!.end(JSON.stringify({ spec: { ...spec, workdir }, completion, env: { ...jobEnv(this.env), ...(spec.gpus ? { CUDA_VISIBLE_DEVICES: spec.gpus.join(",") } : {}) } }));
       const deadline = Date.now() + spec.timeout_seconds * 1000;
       const armTimeout = () => {
         const remaining = deadline - Date.now();

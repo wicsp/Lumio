@@ -70,14 +70,21 @@ export class Jobs {
       job.result = result; job.status = result.status; this.save(job);
     })();
   }
+  /** 这个执行器名下还没有结果的 Job。只查需要的行，不随历史 Job 增多而变慢（P2-2 review）。 */
+  private open(actor: string): Job[] {
+    return this.store.db.query<{ record: string }, [string]>(
+      `SELECT record FROM jobs WHERE json_extract(record, '$.spec.runtime') = ? AND json_extract(record, '$.result') IS NULL
+       AND NOT (json_extract(record, '$.status') = 'cancelled' AND json_extract(record, '$.assigned') IS NULL) ORDER BY rowid`,
+    ).all(actor).map((row) => Job.parse(JSON.parse(row.record)));
+  }
   sync(actor: string, heartbeat: RuntimeHeartbeat, now: Date): RuntimeSync {
     return this.store.db.transaction(() => {
       this.store.syncRuntime(actor, now);
-      for (const id of heartbeat.running) {
-        const job = this.list().find((j) => j.spec.id === id && j.spec.runtime === actor);
-        if (job && active(job)) { job.status = "running"; job.last_seen = now.toISOString(); this.save(job); }
+      const running = new Set(heartbeat.running);
+      for (const job of this.open(actor)) {
+        if (running.has(job.spec.id) && active(job)) { job.status = "running"; job.last_seen = now.toISOString(); this.save(job); }
       }
-      const jobs = this.list().filter((j) => j.spec.runtime === actor);
+      const jobs = this.open(actor);
       const cancelled = new Set(this.store.db.query<{ id: string }, []>("SELECT id FROM jobs WHERE cancel=1").all().map((r) => r.id));
       return RuntimeSync.parse({ jobs: jobs.filter((j) => j.status === "queued").map((j) => j.spec),
         cancel: jobs.filter((j) => !j.result && j.assigned && (cancelled.has(j.spec.id) || j.status === "cancelled")).map((j) => j.spec.id), routines: [] });

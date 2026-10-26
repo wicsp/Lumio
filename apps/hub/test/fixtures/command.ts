@@ -16,6 +16,7 @@ if (mode === "child") {
       console.log("x".repeat(4500) + "中文 stdout");
       console.error("stderr only");
       console.log(`cwd=${process.cwd()} gpu=${process.env.CUDA_VISIBLE_DEVICES} arg=${extra}`);
+      console.log(`lumio-env=${Object.keys(process.env).filter((k) => k.startsWith("LUMIO_")).join(",") || "none"}`);
     }
     await Bun.sleep(Number(delay));
     if (path) appendFileSync(path, "end\n");
