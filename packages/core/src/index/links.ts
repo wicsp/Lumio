@@ -51,12 +51,9 @@ export function extractCitations(body: string): { citations: Citation[]; ignored
 
 /** Remove code and AI-owned blocks before extracting human-owned links. */
 export function extractLinks(frontmatter: Record<string, unknown>, body: string): RawLink[] {
+  // 链接只来自正文的 [[ ]]（ADR 0018）；frontmatter 里遗留的 related 不再计入。
+  void frontmatter;
   const links: RawLink[] = [];
-  if (Array.isArray(frontmatter.related)) {
-    for (const target of frontmatter.related) {
-      if (typeof target === "string") links.push({ source: "related", target });
-    }
-  }
   const human = withoutCode(body)
     .replace(/<!--\s*lumio:ai start\b[^>]*-->[\s\S]*?(?:<!--\s*lumio:ai end\b[^>]*-->|$)/g, "");
   for (const match of human.matchAll(/\[\[([^\]\n]+)\]\]/g)) {

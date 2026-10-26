@@ -26,7 +26,7 @@ test("client encodes references/options and validates all success schemas", asyn
 });
 
 test("ApiError becomes a coded error preserving all decision information", async () => {
-  const error = ApiError.parse({ error: { code: "FORBIDDEN", message: "Denied", operation: { op: "link.add", args: { from: "idea_00000000000000000000000001", to: "pap_00000000000000000000000001" } }, reason: "agent-cannot-read-private", proposal: "prop_00000000000000000000000001" } });
+  const error = ApiError.parse({ error: { code: "FORBIDDEN", message: "Denied", operation: { op: "task.dispatch", args: { task: "task_00000000000000000000000012", trigger: "cli" } }, reason: "agent-cannot-read-private", proposal: "prop_00000000000000000000000001" } });
   const client = createClient({ url: "http://localhost", token: "secret", fetch: mock(error, 403) });
   try { await client.show("Private"); throw new Error("Expected failure"); }
   catch (cause) {
@@ -47,8 +47,8 @@ test("malformed success/error/non-JSON/network responses never escape validation
   }
 });
 
-const operation = { op: "link.add", args: { from: "idea_00000000000000000000000015", to: "pap_00000000000000000000000002" } } as const;
-const proposal = { id: "prop_00000000000000000000000001", operation, reason: "Related research", author: "act_00000000000000000000000001", status: "pending", created: "2026-01-01T00:00:00Z" } as const;
+const operation = { op: "task.dispatch", args: { task: "task_00000000000000000000000012", trigger: "cli" } } as const;
+const proposal = { id: "prop_00000000000000000000000001", operation, reason: "Dispatch please", author: "act_00000000000000000000000001", status: "pending", created: "2026-01-01T00:00:00Z" } as const;
 
 test("check encodes visibility, validates CheckResult and propagates authorization errors", async () => {
   const body = CheckResult.parse({ dangling: [{ from: note, source: "wikilink", target: "Missing" }], total: 1 });

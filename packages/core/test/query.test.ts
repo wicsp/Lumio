@@ -68,18 +68,18 @@ test("ID-less notes are indexed without an id (no substitute value) and never wr
   expect((await showNote(vault, "NewName", { stateDir })).note.path).toBe("research/ideas/NewName.md");
 });
 
-test("links resolve outgoing, backlinks, related IDs and dangling targets; code and AI links are ignored", async () => {
+test("links resolve outgoing, backlinks and dangling targets; legacy related, code and AI links are ignored", async () => {
   const result = LinksResult.parse(await noteLinks(vault, "Main", { stateDir }));
-  expect(result.outgoing.filter((l) => l.note?.id === alpha)).toHaveLength(5);
+  expect(result.outgoing.filter((l) => l.note?.id === alpha)).toHaveLength(4);
   expect(result.outgoing.filter((l) => l.dangling).map((l) => l.target)).toEqual([
-    "ast_00000000000000000000000007", "idea_00000000000000000000000099", "Ghost", "Twin", "Private", "AfterFence", "AfterAI",
+    "Ghost", "Twin", "Private", "AfterFence", "AfterAI",
   ]);
   expect(result.outgoing.find((l) => l.target === "NoID")?.dangling).toBe(false);
   expect(result.incoming.map((l) => l.note.title).sort()).toEqual(["No ID note", "来源教程"].sort());
   const serialized = JSON.stringify(result);
   for (const absent of ["InlineFake", "DoubleFake", "FenceFake", "AIFake"]) expect(serialized).not.toContain(absent);
   const backlinks = await noteLinks(vault, alpha, { stateDir });
-  expect(backlinks.incoming).toHaveLength(5);
+  expect(backlinks.incoming).toHaveLength(4);
   expect(backlinks.incoming.every((l) => l.note.title === "Main graph")).toBe(true);
 });
 
@@ -98,9 +98,9 @@ test("private notes and backlinks are hidden by default; inclusion restores them
   const options = { stateDir, includePrivate: true };
   expect((await searchNotes(vault, "privateonly", options)).total).toBe(1);
   expect(NoteDetail.parse(await showNote(vault, "Private", options)).note.type).toBe("asset");
-  expect(LinksResult.parse(await noteLinks(vault, "Private", options)).incoming).toHaveLength(2);
+  expect(LinksResult.parse(await noteLinks(vault, "Private", options)).incoming).toHaveLength(1);
   const main = await noteLinks(vault, "Main", options);
-  expect(main.outgoing.filter((l) => l.note?.type === "asset")).toHaveLength(2);
+  expect(main.outgoing.filter((l) => l.note?.type === "asset")).toHaveLength(1);
   expect(main.incoming.some((l) => l.note.type === "asset")).toBe(true);
 });
 

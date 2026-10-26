@@ -46,17 +46,18 @@ test("default binding is loopback; public health and every registered route call
   expect(readConfig({ LUMIO_VAULT: vault }).hostname).toBe("127.0.0.1");
   expect(readConfig({ LUMIO_VAULT: vault }).port).toBe(7420);
   expect(hub!.server.hostname).toBe("127.0.0.1");
-  const first = hub!.store.createProposal({ op: "link.add", args: { from: "idea_00000000000000000000000004", to: "idea_00000000000000000000000015" } }, "fixture", hub!.store.actors()[0]!.id);
-  const second = hub!.store.createProposal({ op: "link.add", args: { from: "idea_00000000000000000000000015", to: "idea_00000000000000000000000004" } }, "fixture", hub!.store.actors()[0]!.id);
+  const first = hub!.store.createProposal({ op: "task.dispatch", args: { task: "task_00000000000000000000000012", trigger: "cli" } }, "fixture", hub!.store.actors()[0]!.id);
+  const second = hub!.store.createProposal({ op: "task.dispatch", args: { task: "task_00000000000000000000000013", trigger: "cli" } }, "fixture", hub!.store.actors()[0]!.id);
   const paths = { check: "/v1/check", actors: "/v1/actors", proposals: "/v1/proposals", operations: "/v1/operations", "proposal.accept": `/v1/proposals/${first.id}/accept`, "proposal.reject": `/v1/proposals/${second.id}/reject`, status: "/v1/status", health: "/health", search: "/v1/search?q=index", show: "/v1/notes/Main", links: "/v1/notes/Main/links" };
   const existingRoutes = ROUTES.filter((route) => !([...RUNTIME_OPERATIONS, ...JOB_OPERATIONS] as readonly string[]).includes(route.operation));
   for (const route of existingRoutes) {
     const response = route.operation === "operations"
-      ? await fetch(`${base()}/v1/operations`, { method: "POST", headers: { Authorization: `Bearer ${human}`, "Content-Type": "application/json" }, body: JSON.stringify({ operation: { op: "link.add", args: { from: "idea_00000000000000000000000015", to: "pap_00000000000000000000000001" } } }) })
+      ? await fetch(`${base()}/v1/operations`, { method: "POST", headers: { Authorization: `Bearer ${human}`, "Content-Type": "application/json" }, body: JSON.stringify({ operation: { op: "task.dispatch", args: { task: "task_00000000000000000000000012", trigger: "cli" } } }) })
       : await request(paths[route.operation as keyof typeof paths], route.operation === "health" ? undefined : human, {}, "method" in route ? route.method : "GET");
-    expect(response.status).toBe(200);
+    // 合成 vault 里的 Task 没有 assignee，派活会在授权之后被拒绝（400）；这里只验证每条路由都先经过 authorize。
+    expect(response.status).toBe(route.operation === "operations" || route.operation === "proposal.accept" ? 400 : 200);
     if (route.operation === "health") expect(await response.json()).toEqual({ ok: true, version: "0.0.0" });
-    expect(decisions.at(-1)?.operation).toBe(route.operation === "operations" ? "link.add" : route.operation);
+    expect(decisions.at(-1)?.operation).toBe(route.operation === "operations" ? "task.dispatch" : route.operation);
   }
   expect(decisions).toHaveLength(existingRoutes.length);
 });
@@ -159,14 +160,14 @@ test("authorization table is exhaustively checked, including private=false", () 
       ? ((rule.operation === "runtimes" ? rule.role === "human" : rule.role === "runtime") ? "allow" : "deny")
       : (JOB_OPERATIONS as readonly string[]).includes(rule.operation) ? (rule.role === "human" ? "allow" : "deny")
       : rule.role === "runtime" ? "deny" : rule.role !== "agent" ? "allow"
-        : rule.includePrivate || rule.operation.startsWith("proposal.") || rule.operation === "link.add" || rule.operation === "task.dispatch" ? "deny" : "allow";
+        : rule.includePrivate || rule.operation.startsWith("proposal.") || rule.operation === "task.dispatch" ? "deny" : "allow";
     expect(decision.result).toBe(expected);
   }
   expect(authorize(null, { operation: "search" }).result).toBe("deny");
   // P1 中没有任何操作需要批准：AI 不写链接（ADR 0018）。
   expect(AUTHORIZATION_RULES.some((rule) => (rule.decision.result as string) === "needs_approval")).toBe(false);
-  expect(authorize(Actor.parse({ id: "act_00000000000000000000000001", name: "a", role: "agent", created: "2026-01-01T00:00:00Z" }), { operation: "link.add" }))
-    .toEqual({ result: "deny", reason: "agent-cannot-write-links" });
+  expect(authorize(Actor.parse({ id: "act_00000000000000000000000001", name: "a", role: "agent", created: "2026-01-01T00:00:00Z" }), { operation: "task.dispatch" }))
+    .toEqual({ result: "deny", reason: "agent-cannot-dispatch-tasks" });
 });
 
 async function spawnCli(args: string[], remote: boolean, extraEnv: Record<string, string | undefined> = {}) {
@@ -281,8 +282,8 @@ test("check validates CheckResult, hides private targets, and authorizes and aud
 test("live Hub backup preserves all tables and WAL data, uses 0600, refuses existing targets and hides credentials", async () => {
   hub!.store.db.exec("PRAGMA journal_mode=WAL");
   const owner = hub!.store.actors().find((a) => a.role === "human")!;
-  const proposal = hub!.store.createProposal({ op: "link.add", args: { from: "idea_00000000000000000000000004", to: "pap_00000000000000000000000001" } }, "Synthetic backup proposal", owner.id);
-  hub!.store.audit({ actor: owner, label: "mac" }, "link.add", "needs_approval", proposal.id);
+  const proposal = hub!.store.createProposal({ op: "task.dispatch", args: { task: "task_00000000000000000000000012", trigger: "cli" } }, "Synthetic backup proposal", owner.id);
+  hub!.store.audit({ actor: owner, label: "mac" }, "task.dispatch", "needs_approval", proposal.id);
   const path = join(temp, "snapshot's backup.sqlite");
   async function backup(target: string, extra: string[] = [], sourceState = state) {
     const child = Bun.spawn([process.execPath, hubMain, "backup", target, ...extra], {

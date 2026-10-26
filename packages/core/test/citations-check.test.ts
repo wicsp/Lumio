@@ -80,9 +80,10 @@ test("renames list every broken wikilink, restore empties the list, and private 
   expect((await checkLinks(root, { stateDir, includePrivate: true })).dangling.map((l) => l.target)).toEqual(["PrivateMissing"]);
 });
 
-test("check includes old related IDs, sorts by source path and target, and hides ambiguous private targets", async () => {
+test("check ignores legacy related IDs, sorts by source path and target, and hides ambiguous private targets", async () => {
   const result = CheckResult.parse(await checkLinks(vault, { stateDir }));
-  expect(result.dangling.some((l) => l.source === "related" && l.target === "idea_00000000000000000000000099")).toBe(true);
+  expect(result.dangling.some((l) => l.target === "idea_00000000000000000000000099")).toBe(false); // 只在 related 里（ADR 0018）
+  expect(result.dangling.every((l) => l.source === "wikilink")).toBe(true);
   expect(result.dangling.some((l) => l.target === "Private" || l.target === "ast_00000000000000000000000007")).toBe(false);
   const keys = result.dangling.map((l) => `${l.from.path}\t${l.target}`);
   expect(keys).toEqual([...keys].sort());

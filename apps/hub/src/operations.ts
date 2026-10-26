@@ -1,72 +1,29 @@
-import { readFile } from "node:fs/promises";
-import {
-  appendRelatedId, CoreError, openVaultGit, parseFrontmatter, showNote, vaultFileAt, writeFileAtomic,
-  type WriteOptions,
-} from "@lumio/core";
-import { Actor, OperationRequest, OperationResult, Proposal, ProposalStatus, textContainsCardNumber, type Operation } from "@lumio/schema";
+import { CoreError } from "@lumio/core";
+import { Actor, OperationRequest, OperationResult, Proposal, ProposalStatus, type Operation } from "@lumio/schema";
 import { authorize } from "./authorize.ts";
 import type { HubConfig } from "./config.ts";
 import { HubError } from "./errors.ts";
 import type { HubStore, Identity } from "./store.ts";
 import type { TaskRounds } from "./tasks.ts";
 
-export interface OperationOptions { beforeCommit?: WriteOptions["beforeCommit"]; tasks?: TaskRounds }
-type LinkAddOperation = Extract<Operation, { op: "link.add" }>;
+/**
+ * 统一的操作入口（ADR 0016）：先授权（允许 / 拒绝 / 需要批准），再执行；需要批准的原样存成提议，人接受后执行同一个操作。
+ * 现在的操作：task.dispatch（P2-4）。exec.privileged 由 P2-6 加入。link.add 已删除（ADR 0018）。
+ */
+export interface OperationOptions { tasks?: TaskRounds }
 
-// Both direct operations and accepted proposals use the same checked writer.
-async function prepare(config: HubConfig, operation: LinkAddOperation, identity: Identity) {
-  const query = { stateDir: config.stateDir, includePrivate: identity.actor.role === "human" };
-  try {
-    const from = await showNote(config.vault, operation.args.from, query);
-    const to = await showNote(config.vault, operation.args.to, query);
-    if (!from.note.id || !to.note.id || from.note.id === to.note.id) throw new HubError("INVALID", "链接需要两篇不同且有 ID 的笔记");
-    const file = await vaultFileAt(config.vault, from.note.path);
-    if (!file || (file.private && identity.actor.role === "agent")) throw new HubError("INVALID", "找不到笔记");
-    const source = await readFile(file.path);
-    const data = parseFrontmatter(source).data;
-    if (data.id !== operation.args.from) throw new CoreError("FILE_CHANGED", "文件在处理中被修改，请重新运行");
-    const content = appendRelatedId(source, operation.args.to);
-    if (textContainsCardNumber(source.toString("utf8")) || textContainsCardNumber(content.toString("utf8"))) {
-      throw new HubError("INVALID", "文件疑似含卡号，无法执行操作");
-    }
-    return { from, to, file, source, content };
-  } catch (cause) {
-    if (cause instanceof CoreError && ["NOTE_NOT_FOUND", "AMBIGUOUS_REFERENCE", "INVALID_FRONTMATTER", "UNSAFE_FRONTMATTER_EDIT"].includes(cause.code)) {
-      throw new HubError("INVALID", "链接引用不存在、不唯一，或 related 不是有效列表", { operation });
-    }
-    throw cause;
+/** 执行一个已经获准的操作。直接执行与接受提议共用这一个函数。 */
+async function execute(operation: Operation, identity: Identity, options: OperationOptions): Promise<void> {
+  if (operation.op === "task.dispatch") {
+    if (!options.tasks) throw new HubError("INTERNAL", "Hub 未启用任务派活");
+    await options.tasks.dispatch(operation.args.task, operation.args.trigger, identity);
+    return;
   }
-}
-
-async function execute(config: HubConfig, operation: LinkAddOperation, identity: Identity, prepared: Awaited<ReturnType<typeof prepare>>, options: OperationOptions, proposal?: Proposal) {
-  const { from, to, file, source, content } = prepared;
-  const git = await openVaultGit(config.vault);
-  if (git && (await git.changedFiles()).includes(file.relativePath)) {
-    await git.add(file.relativePath, source);
-    await git.commit([file.relativePath], "lumio: auto-save 1 files");
-  }
-  await writeFileAtomic(file.path, content, { expectedContent: source, beforeCommit: options.beforeCommit });
-  if (git && !source.equals(content)) {
-    try {
-      await git.add(file.relativePath, content);
-      await git.commit([file.relativePath], `lumio: link.add ${from.note.title.replace(/[\r\n]/g, " ")} → ${to.note.title.replace(/[\r\n]/g, " ")}`, {
-        "Lumio-Actor": proposal?.author ?? identity.actor.id,
-        ...(proposal ? { "Lumio-Proposal": proposal.id, "Lumio-Approved-By": identity.actor.id } : {}),
-      });
-    } catch (cause) {
-      // A failed git commit must not leave an uncredited operation for autosave.
-      // Roll back only our own bytes; a concurrent human edit always wins.
-      try {
-        await writeFileAtomic(file.path, source, { expectedContent: content });
-        await git.add(file.relativePath, source);
-      } catch { /* Preserve the current file if someone edited it meanwhile. */ }
-      throw cause;
-    }
-  }
+  throw new HubError("INVALID", "不支持的操作", { operation });
 }
 
 export async function handleOperation(request: Request, kind: "operations" | "actors" | "proposals" | "proposal.accept" | "proposal.reject", proposalId: string | undefined,
-  identity: Identity, store: HubStore, config: HubConfig, decide: typeof authorize, options: OperationOptions = {}): Promise<Response> {
+  identity: Identity, store: HubStore, _config: HubConfig, decide: typeof authorize, options: OperationOptions = {}): Promise<Response> {
   let operation: Operation | undefined;
   let proposal: Proposal | undefined;
   let authorization = "deny";
@@ -98,17 +55,6 @@ export async function handleOperation(request: Request, kind: "operations" | "ac
       const parsed = OperationRequest.safeParse(body);
       if (!parsed.success) throw new HubError("INVALID", "操作请求不合法");
       operation = parsed.data.operation;
-      if (operation.op === "task.dispatch") {
-        // 派出任务（ADR 0019，P2-4）：只有允许与拒绝，没有"需要批准"。
-        const decision = check(operation.op);
-        if (decision.result !== "allow") throw new HubError("FORBIDDEN", "请求未获授权", { operation });
-        if (!options.tasks) throw new HubError("INTERNAL", "Hub 未启用任务派活");
-        await options.tasks.dispatch(operation.args.task, operation.args.trigger, identity);
-        audit("applied");
-        return Response.json(OperationResult.parse({ status: "applied", operation }));
-      }
-      const prepared = await prepare(config, operation, identity);
-      if (prepared.source.equals(prepared.content)) throw new HubError("INVALID", "链接已存在", { operation });
       const decision = check(operation.op);
       if (decision.result === "needs_approval") {
         if (!parsed.data.reason) throw new HubError("INVALID", "提议必须填写理由", { operation });
@@ -116,7 +62,7 @@ export async function handleOperation(request: Request, kind: "operations" | "ac
         audit("pending_approval");
         return Response.json(OperationResult.parse({ status: "pending_approval", proposal }), { status: 202 });
       }
-      await execute(config, operation, identity, prepared, options);
+      await execute(operation, identity, options);
       audit("applied");
       return Response.json(OperationResult.parse({ status: "applied", operation }));
     }
@@ -127,9 +73,10 @@ export async function handleOperation(request: Request, kind: "operations" | "ac
     if (!proposal) throw new HubError("NOT_FOUND", "提议不存在");
     if (proposal.status !== "pending") throw new HubError("CONFLICT", "只有待批准的提议可以决定", { operation, proposal: proposal.id });
     if (kind === "proposal.accept") {
-      if (operation?.op !== "link.add") throw new HubError("INVALID", "这种提议无法执行", { operation });
-      const prepared = await prepare(config, operation, identity);
-      await execute(config, operation, identity, prepared, options, proposal);
+      // 以提议作者的身份执行：批准者只是放行（审计里同时记录批准者）。
+      const author = store.actors().find((a) => a.id === proposal!.author);
+      if (!author) throw new HubError("CONFLICT", "提议的作者已不存在", { operation, proposal: proposal.id });
+      await execute(operation!, { actor: author, label: identity.label }, options);
     }
     proposal = store.decideProposal(proposal.id, kind === "proposal.accept" ? "accepted" : "rejected", identity.actor.id);
     audit(proposal.status);
@@ -138,7 +85,7 @@ export async function handleOperation(request: Request, kind: "operations" | "ac
     if ((kind === "actors" || kind === "proposals") && authorization === "deny") store.audit(identity, kind, "deny");
     if (kind !== "actors" && kind !== "proposals" && !audited) audit(cause instanceof CoreError || cause instanceof HubError ? cause.code : "INTERNAL");
     if (cause instanceof CoreError && ["FILE_CHANGED", "WRITE_FAILED", "GIT_FAILED"].includes(cause.code)) {
-      throw new HubError("CONFLICT", `文件已变化或无法安全写入、提交，请重试${proposal ? "；提议保持待批准" : ""}`, { operation, proposal: proposal?.id });
+      throw new HubError("CONFLICT", `文件已变化或无法安全写入，请重试${proposal ? "；提议保持待批准" : ""}`, { operation, proposal: proposal?.id });
     }
     if (cause instanceof HubError) throw new HubError(cause.code, cause.message, { operation, proposal: proposal?.id, ...cause.details });
     throw cause;

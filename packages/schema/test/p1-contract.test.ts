@@ -28,10 +28,10 @@ describe("query contracts", () => {
     const parsed = LinksResult.parse({
       note: ref,
       outgoing: [{ source: "wikilink", target: "Missing_2020_X", dangling: true }],
-      incoming: [{ source: "related", target: `pap_${U}`, dangling: false, note: { ...ref, citekey: undefined, type: "idea", id: `idea_${U}` } }],
+      incoming: [{ source: "wikilink", target: `pap_${U}`, dangling: false, note: { ...ref, citekey: undefined, type: "idea", id: `idea_${U}` } }],
     });
     expect(parsed.outgoing[0]?.note).toBeUndefined();
-    expect(LinksResult.safeParse({ note: ref, outgoing: [], incoming: [{ source: "related", target: "x", dangling: true }] }).success).toBe(false);
+    expect(LinksResult.safeParse({ note: ref, outgoing: [], incoming: [{ source: "wikilink", target: "x", dangling: true }] }).success).toBe(false);
   });
 
   test("check result lists dangling links with their source note", () => {
@@ -46,7 +46,7 @@ describe("query contracts", () => {
 });
 
 describe("actor, operation and proposal contracts (ADR 0016)", () => {
-  const op = { op: "link.add", args: { from: `idea_${U}`, to: `pap_${U}` } };
+  const op = { op: "task.dispatch", args: { task: `task_${U}`, trigger: "cli" } };
   const p = { id: `prop_${U}`, operation: op, reason: "两者都讨论来源标记", author: `act_${U}`, status: "pending", created: now };
 
   test("actor ids use the act prefix and names are restricted", () => {
@@ -58,8 +58,9 @@ describe("actor, operation and proposal contracts (ADR 0016)", () => {
   });
 
   test("operations are a closed, strict union", () => {
-    expect(Operation.parse(op).op).toBe("link.add");
-    expect(OPERATION_NAMES).toEqual(["link.add", "task.dispatch"]);
+    expect(Operation.parse(op).op).toBe("task.dispatch");
+    expect(OPERATION_NAMES).toEqual(["task.dispatch"]);
+    expect(Operation.safeParse({ op: "link.add", args: { from: `idea_${U}`, to: `pap_${U}` } }).success).toBe(false);
     expect(Operation.safeParse({ op: "note.delete", args: {} }).success).toBe(false);
     expect(Operation.safeParse({ ...op, args: { ...op.args, extra: 1 } }).success).toBe(false);
   });
@@ -67,7 +68,7 @@ describe("actor, operation and proposal contracts (ADR 0016)", () => {
   test("valid proposal stores the whole operation", () => {
     const parsed = Proposal.parse(p);
     expect(parsed.status).toBe("pending");
-    expect(parsed.operation.op === "link.add" && parsed.operation.args.to).toBe(`pap_${U}`);
+    expect(parsed.operation.op === "task.dispatch" && parsed.operation.args.task).toBe(`task_${U}`);
   });
   test("proposal ids use the prop prefix; author is an actor id, not a token name", () => {
     expect(Proposal.safeParse({ ...p, id: `idea_${U}` }).success).toBe(false);

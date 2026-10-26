@@ -7,6 +7,8 @@ export interface GitTrailers {
   "Lumio-Actor"?: string;
   "Lumio-Proposal"?: string;
   "Lumio-Approved-By"?: string;
+  /** 写回某一轮结果时，这一轮的 Job ID（P2-4）。 */
+  "Lumio-Job"?: string;
 }
 
 export interface VaultGit {
@@ -58,7 +60,7 @@ export async function openVaultGit(root: string, executable = "git"): Promise<Va
       staged.set(path, entry || `0 ${"0".repeat(40)}\t${path}\0`);
     },
     async commit(paths, message, trailers = {}) {
-      if (Object.entries(trailers).some(([key, value]) => !["Lumio-Actor", "Lumio-Proposal", "Lumio-Approved-By"].includes(key) || !value || /[\r\n]/.test(value))) throw new CoreError("GIT_FAILED", "git trailer 不合法");
+      if (Object.entries(trailers).some(([key, value]) => !["Lumio-Actor", "Lumio-Proposal", "Lumio-Approved-By", "Lumio-Job"].includes(key) || !value || /[\r\n]/.test(value))) throw new CoreError("GIT_FAILED", "git trailer 不合法");
       if (!paths.length) return;
       paths.forEach(check);
       if (paths.some((path) => !staged.has(path))) throw new CoreError("GIT_FAILED", "提交路径尚未暂存");

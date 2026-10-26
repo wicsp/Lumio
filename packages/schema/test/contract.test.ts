@@ -64,10 +64,9 @@ describe("empty YAML fields (ADR 0008)", () => {
   });
 
   test("null fields with defaults take the default", () => {
-    const parsed = Paper.parse({ ...paper, status: null, tags: null, related: null });
+    const parsed = Paper.parse({ ...paper, status: null, tags: null });
     expect(parsed.status).toBe("to-read");
     expect(parsed.tags).toEqual([]);
-    expect(parsed.related).toEqual([]);
   });
 
   test("required fields still reject null", () => {

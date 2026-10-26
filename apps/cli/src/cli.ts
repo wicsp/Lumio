@@ -23,7 +23,7 @@ export interface CliOptions {
 export async function runCli(args: string[], options: CliOptions = {}): Promise<number> {
   try { return await executeCli(args, options); }
   catch (cause) {
-    if (!["job", "task", "link", "propose", "proposals"].includes(args[0] ?? "") || !args.includes("--json")) throw cause;
+    if (!["job", "task", "proposals"].includes(args[0] ?? "") || !args.includes("--json")) throw cause;
     const error = cause instanceof ApiClientError ? {
       code: cause.code, message: cause.message, operation: cause.operation, reason: cause.reason, proposal: cause.proposal,
     } : { code: "INVALID", message: cause instanceof Error ? cause.message : "无法执行命令" };
@@ -60,7 +60,7 @@ async function executeCli(args: string[], options: CliOptions): Promise<number> 
     }
     return 0;
   }
-  if (["link", "propose", "proposals"].includes(command ?? "")) {
+  if (command === "proposals") {
     if (Object.keys(values).some((key) => !["reason", "status", "json"].includes(key))) throw new Error("链接与提议命令不支持此选项");
     return runOperations(positionals, values, log);
   }
