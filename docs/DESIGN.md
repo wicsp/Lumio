@@ -231,6 +231,6 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 | P0 | `lumio new paper`、`lumio new idea`、`lumio sync`；vault 目录结构；source / post / asset 契约 | ✅ |
 | P0-7 | 迁移真实 vault 到新目录 | ✅ |
 | P1 | 本地查询与 `export bib`；Hub（身份与令牌、查询 API、监听、自动提交、操作与提议框架）；按引用导出与断链检查；skill | ✅（pi 验收待补） |
-| P2 | 执行器与派活（P2-1 至 P2-6）：执行器登记、可靠的派活核心、三种 agent 适配器、任务笔记里的一问一答、例行任务、`lumio sudo` 审批的门 | 下一步 |
+| P2 | 执行器与派活（P2-1 ✅ 至 P2-6）：执行器登记、可靠的派活核心、三种 agent 适配器、任务笔记里的一问一答、例行任务、`lumio sudo` 审批的门 | 下一步 |
 | P3 | 飞书 Bot（派活、批准、通知）、审批模型、资产到期提醒、多维表格镜像；Chrome 插件入库论文 | |
 | P4 | Web Dashboard、Docker / Nix、对外 SDK、手机端 | |

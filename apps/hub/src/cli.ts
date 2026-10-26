@@ -18,7 +18,7 @@ export async function runManagement(args: string[], log: (line: string) => void 
   const tokenCreate = kind === "token" && action === "create" && positionals.length === 3 && values.actor !== undefined && values.role === undefined;
   const list = (kind === "actor" || kind === "token") && action === "list" && positionals.length === 2 && !Object.keys(values).length;
   const revoke = kind === "token" && action === "revoke" && positionals.length === 3 && !Object.keys(values).length;
-  if (!actorCreate && !tokenCreate && !list && !revoke) throw new HubError("INVALID", "用法：actor create <名称> --role human|agent；actor list；token create <标签> --actor <身份名称>；token list；token revoke <标签>");
+  if (!actorCreate && !tokenCreate && !list && !revoke) throw new HubError("INVALID", "用法：actor create <名称> --role human|agent|runtime；actor list；token create <标签> --actor <身份名称>；token list；token revoke <标签>");
   const store = await HubStore.open(stateDirectory());
   try {
     if (actorCreate) log(JSON.stringify(store.createActor(name!, ActorRole.parse(values.role))));

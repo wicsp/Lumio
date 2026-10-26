@@ -42,6 +42,20 @@ async function executeCli(args: string[], options: CliOptions): Promise<number> 
     },
   });
   const command = positionals[0];
+  if (command === "runtime") {
+    if (positionals.length !== 2 || positionals[1] !== "list" || Object.keys(values).some((key) => key !== "json")) {
+      throw new Error("用法：lumio runtime list [--json]");
+    }
+    const url = process.env.LUMIO_HUB_URL, token = process.env.LUMIO_TOKEN;
+    if (!url || !token) throw new Error("runtime list 需要设置非空的 LUMIO_HUB_URL 和 LUMIO_TOKEN");
+    const runtimes = await createClient({ url, token }).runtimes();
+    if (values.json) log(JSON.stringify(runtimes));
+    else for (const runtime of runtimes) {
+      const registration = runtime.registration;
+      log(`${registration.name}  ${runtime.online ? "在线" : "失联"}（最近一次：${runtime.last_seen}）  ${registration.engines.map((engine) => `${engine.name} ${engine.version}`).join(", ")}  ${registration.tags.join(", ")}`);
+    }
+    return 0;
+  }
   if (["link", "propose", "proposals"].includes(command ?? "")) {
     if (Object.keys(values).some((key) => !["reason", "status", "json"].includes(key))) throw new Error("链接与提议命令不支持此选项");
     return runOperations(positionals, values, log);

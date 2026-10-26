@@ -2,12 +2,23 @@ import type { Actor } from "@lumio/schema";
 
 export const QUERY_OPERATIONS = ["search", "show", "links", "check", "status"] as const;
 export type QueryOperation = (typeof QUERY_OPERATIONS)[number];
-export interface AuthorizationRequest { operation: QueryOperation | "health" | "actors" | "proposals" | "proposal.accept" | "proposal.reject" | "link.add"; includePrivate?: boolean }
+export const EXISTING_OPERATIONS = [...QUERY_OPERATIONS, "health", "operations", "actors", "proposals", "proposal.accept", "proposal.reject", "link.add"] as const;
+export const RUNTIME_OPERATIONS = ["runtime.register", "runtime.sync", "runtimes"] as const;
+export interface AuthorizationRequest { operation: (typeof EXISTING_OPERATIONS)[number] | (typeof RUNTIME_OPERATIONS)[number]; includePrivate?: boolean }
 export type Decision = { result: "allow" } | { result: "deny"; reason: string } | { result: "needs_approval" };
 
 // One rule table is the only place that decides access. Public health is explicit.
 export const AUTHORIZATION_RULES = [
   { role: null, operation: "health", includePrivate: false, decision: { result: "allow" } },
+  ...(["human", "agent"] as const).map((role) => ({ role, operation: "health", includePrivate: false, decision: { result: "allow" } } as const)),
+  ...EXISTING_OPERATIONS.flatMap((operation) => [false, true].map((includePrivate) => ({
+    role: "runtime", operation, includePrivate, decision: { result: "deny", reason: "请求未获授权" },
+  } as const))),
+  ...(["human", "agent", "runtime"] as const).flatMap((role) => RUNTIME_OPERATIONS.map((operation) => ({
+    role, operation, includePrivate: false,
+    decision: (operation === "runtimes" ? role === "human" : role === "runtime")
+      ? { result: "allow" as const } : { result: "deny" as const, reason: "请求未获授权" },
+  }))),
   ...(["human", "agent"] as const).flatMap((role) => [
     { role, operation: "actors", includePrivate: false, decision: { result: "allow" } },
     { role, operation: "proposals", includePrivate: false, decision: { result: "allow" } },

@@ -3,8 +3,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { chmod, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { newId } from "@lumio/core";
-import { Actor, Proposal, type Operation, type ProposalStatus, type ActorRole } from "@lumio/schema";
-import type { QueryOperation } from "./authorize.ts";
+import { Actor, Proposal, type Operation, type ProposalStatus, type ActorRole, RuntimeRegistration, RuntimeInfo } from "@lumio/schema";
 import { HubError } from "./errors.ts";
 
 export interface Identity { actor: Actor; label: string }
@@ -23,6 +22,8 @@ export class HubStore {
           created TEXT NOT NULL, revoked TEXT);
         CREATE TABLE IF NOT EXISTS proposals (id TEXT PRIMARY KEY, operation TEXT NOT NULL, reason TEXT NOT NULL,
           author TEXT NOT NULL REFERENCES actors(id), status TEXT NOT NULL, created TEXT NOT NULL, decided TEXT, decided_by TEXT REFERENCES actors(id));
+        CREATE TABLE IF NOT EXISTS runtimes (actor TEXT PRIMARY KEY REFERENCES actors(id), name TEXT NOT NULL UNIQUE,
+          registration TEXT NOT NULL, last_seen TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS audit (time TEXT NOT NULL, actor_id TEXT NOT NULL REFERENCES actors(id), token_label TEXT NOT NULL,
           operation TEXT NOT NULL, authorization TEXT NOT NULL, proposal_id TEXT, execution_result TEXT);
       `);
@@ -75,7 +76,7 @@ export class HubStore {
     return { actor, label: row.label };
   }
 
-  auditDenied(identity: Identity, operation: QueryOperation): void {
+  auditDenied(identity: Identity, operation: string): void {
     this.db.query("INSERT INTO audit VALUES (?, ?, ?, ?, 'deny', NULL, NULL)")
       .run(new Date().toISOString(), identity.actor.id, identity.label, operation);
   }
@@ -113,6 +114,31 @@ export class HubStore {
   audit(identity: Identity, operation: string, authorization: string, proposal?: string, execution?: string): void {
     this.db.query("INSERT INTO audit VALUES (?, ?, ?, ?, ?, ?, ?)")
       .run(new Date().toISOString(), identity.actor.id, identity.label, operation, authorization, proposal ?? null, execution ?? null);
+  }
+
+  registerRuntime(actor: string, registration: RuntimeRegistration, now: Date): RuntimeInfo {
+    return this.db.transaction(() => {
+      const existing = this.db.query<{ name: string }, [string]>("SELECT name FROM runtimes WHERE actor=?").get(actor);
+      if (existing && existing.name !== registration.name) throw new HubError("CONFLICT", "同一执行器身份不能更换名称");
+      const named = this.db.query<{ actor: string }, [string]>("SELECT actor FROM runtimes WHERE name=?").get(registration.name);
+      if (named && named.actor !== actor) throw new HubError("CONFLICT", "执行器名称已被另一身份使用");
+      this.db.query(`INSERT INTO runtimes VALUES (?, ?, ?, ?)
+        ON CONFLICT(actor) DO UPDATE SET registration=excluded.registration, last_seen=excluded.last_seen`)
+        .run(actor, registration.name, JSON.stringify(registration), now.toISOString());
+      return RuntimeInfo.parse({ actor, registration, last_seen: now.toISOString(), online: true });
+    })();
+  }
+
+  syncRuntime(actor: string, now: Date): void {
+    const result = this.db.query("UPDATE runtimes SET last_seen=? WHERE actor=?").run(now.toISOString(), actor);
+    if (!result.changes) throw new HubError("NOT_FOUND", "执行器尚未登记");
+  }
+
+  runtimes(now: Date): RuntimeInfo[] {
+    return this.db.query<{ actor: string; registration: string; last_seen: string }, []>(
+      "SELECT actor, registration, last_seen FROM runtimes ORDER BY name",
+    ).all().map((row) => RuntimeInfo.parse({ ...row, registration: JSON.parse(row.registration),
+      online: now.getTime() - Date.parse(row.last_seen) <= 180_000 }));
   }
 
   close(): void { this.db.close(); }

@@ -5,6 +5,7 @@ import { ApiError, NOTE_TYPES, type ApiErrorCode } from "@lumio/schema";
 import { version } from "../package.json";
 import { startVaultWatch, type WatchOptions } from "./watch.ts";
 import { handleOperation, type OperationOptions } from "./operations.ts";
+import { handleRuntime } from "./runtime.ts";
 import { authorize } from "./authorize.ts";
 import type { HubConfig } from "./config.ts";
 import { HubError } from "./errors.ts";
@@ -12,6 +13,9 @@ import { HubStore, type Identity } from "./store.ts";
 
 // Routes share authentication, authorization and logging before dispatch.
 export const ROUTES = [
+  { operation: "runtime.register", method: "POST", pattern: /^\/v1\/runtime\/register$/ },
+  { operation: "runtime.sync", method: "POST", pattern: /^\/v1\/runtime\/sync$/ },
+  { operation: "runtimes", method: "GET", pattern: /^\/v1\/runtimes$/ },
   { operation: "operations", method: "POST", pattern: /^\/v1\/operations$/ },
   { operation: "actors", method: "GET", pattern: /^\/v1\/actors$/ },
   { operation: "proposals", method: "GET", pattern: /^\/v1\/proposals$/ },
@@ -28,6 +32,7 @@ const STATUS: Record<ApiErrorCode, number> = { INVALID: 400, UNAUTHENTICATED: 40
 
 export async function startHub(config: HubConfig, options: {
   log?: (line: string) => void;
+  now?: () => Date;
   authorize?: typeof authorize;
   watch?: WatchOptions;
   operations?: OperationOptions;
@@ -50,7 +55,7 @@ export async function startHub(config: HubConfig, options: {
         let status = 500;
         // Logging uses route templates, so references (or secrets in a URL) cannot leak.
         const route = ROUTES.find((route) => request.method === ("method" in route ? route.method : "GET") && route.pattern.test(url.pathname));
-        const path = route?.operation === "status" ? "/v1/status" : route?.operation === "health" ? "/health" : route?.operation === "search" ? "/v1/search"
+        const path = route?.operation === "runtime.register" ? "/v1/runtime/register" : route?.operation === "runtime.sync" ? "/v1/runtime/sync" : route?.operation === "runtimes" ? "/v1/runtimes" : route?.operation === "status" ? "/v1/status" : route?.operation === "health" ? "/health" : route?.operation === "search" ? "/v1/search"
           : route?.operation === "check" ? "/v1/check" : route?.operation === "show" ? "/v1/notes/<reference>" : route?.operation === "links" ? "/v1/notes/<reference>/links" : route?.operation === "operations" ? "/v1/operations"
             : route?.operation === "actors" ? "/v1/actors" : route?.operation === "proposals" ? "/v1/proposals"
               : route?.operation === "proposal.accept" ? "/v1/proposals/<id>/accept" : route?.operation === "proposal.reject" ? "/v1/proposals/<id>/reject" : "<unmatched>";
@@ -60,11 +65,25 @@ export async function startHub(config: HubConfig, options: {
           if (forwarded && isIP(forwarded)) clientIp = forwarded;
         }
         try {
+          if (route?.operation === "health") identity = store.authenticate(request.headers.get("authorization"));
           if (route?.operation !== "health") {
             identity = store.authenticate(request.headers.get("authorization"));
             if (!identity) throw new HubError("UNAUTHENTICATED", "需要有效的 Bearer 令牌");
           }
           if (!route) throw new HubError("NOT_FOUND", "找不到端点");
+          if (route.operation === "runtime.register" || route.operation === "runtime.sync" || route.operation === "runtimes") {
+            const response = await handleRuntime(request, route.operation, identity!, store, decide, (options.now ?? (() => new Date()))());
+            status = response.status;
+            return response;
+          }
+          // Reject runtime access before reading operation bodies or querying the vault.
+          if (identity?.actor.role === "runtime" && ["operations", "actors", "proposals", "proposal.accept", "proposal.reject"].includes(route.operation)) {
+            const decision = decide(identity.actor, { operation: route.operation });
+            if (decision.result !== "allow") {
+              store.auditDenied(identity, route.operation);
+              throw new HubError("FORBIDDEN", "请求未获授权", { reason: decision.result === "deny" ? decision.reason : "Approval required" });
+            }
+          }
           if (route.operation === "operations" || route.operation === "actors" || route.operation === "proposals" || route.operation === "proposal.accept" || route.operation === "proposal.reject") {
             const response = await vaultWatch!.exclusive(() => handleOperation(request,
               route.operation,
@@ -76,7 +95,7 @@ export async function startHub(config: HubConfig, options: {
           const includePrivate = privateValue === "true";
           const decision = decide(identity?.actor ?? null, { operation: route.operation, includePrivate: route.operation === "health" ? false : includePrivate });
           if (decision.result !== "allow") {
-            if (identity && route.operation !== "health") store.auditDenied(identity, route.operation);
+            if (identity) store.auditDenied(identity, route.operation);
             status = 403;
             return Response.json(ApiError.parse({ error: { code: "FORBIDDEN", message: "请求未获授权", reason: decision.result === "deny" ? decision.reason : "Approval required" } }), { status });
           }
