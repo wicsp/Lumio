@@ -1,4 +1,4 @@
-import { RuntimeInfo, Actor, OperationRequest, OperationResult, Proposal, ProposalStatus, ApiError, CheckResult, LinksResult, NoteDetail, SearchResult, type ApiErrorCode, type NoteRef } from "@lumio/schema";
+import { CommandRun, Job, JobSpec, JobStatus, RuntimeName, RuntimeInfo, Actor, OperationRequest, OperationResult, Proposal, ProposalStatus, ApiError, CheckResult, LinksResult, NoteDetail, SearchResult, type ApiErrorCode, type NoteRef } from "@lumio/schema";
 
 export class ApiClientError extends Error {
   readonly code: ApiErrorCode;
@@ -13,6 +13,13 @@ export class ApiClientError extends Error {
     this.reason = error.reason;
     this.proposal = error.proposal;
   }
+}
+export const SubmitJob = JobSpec.omit({ protocol_version: true, id: true, source: true, lease: true, created: true }).extend({
+  runtime: RuntimeName, run: CommandRun, workdir: JobSpec.shape.workdir.default("~"),
+  timeout_seconds: JobSpec.shape.timeout_seconds.default(7200),
+});
+export interface SubmitJobInput {
+  runtime: string; run: { kind: "command"; argv: string[] }; workdir?: string; timeout_seconds?: number; gpus?: number[];
 }
 export interface QueryOptions { includePrivate?: boolean }
 export interface SearchOptions extends QueryOptions { type?: NoteRef["type"]; limit?: number }
@@ -45,6 +52,10 @@ export function createClient(options: { url: string; token: string; fetch?: type
   }
   const queryParams = (options: QueryOptions): Record<string, string> => options.includePrivate === undefined ? {} : { include_private: String(options.includePrivate) };
   return {
+    submitJob(input: SubmitJobInput) { return request("/v1/jobs", {}, Job, validate(SubmitJob, input)); },
+    jobs(status?: JobStatus) { return request("/v1/jobs", status === undefined ? {} : { status: validate(JobStatus, status) }, Job.array()); },
+    job(id: string) { return request(`/v1/jobs/${encodeURIComponent(validate(JobSpec.shape.id, id))}`, {}, Job); },
+    cancelJob(id: string) { return request(`/v1/jobs/${encodeURIComponent(validate(JobSpec.shape.id, id))}/cancel`, {}, Job, {}); },
     runtimes() { return request("/v1/runtimes", {}, RuntimeInfo.array()); },
     actors() { return request("/v1/actors", {}, Actor.array()); },
     operation(input: OperationRequest) { return request("/v1/operations", {}, OperationResult, validate(OperationRequest, input)); },

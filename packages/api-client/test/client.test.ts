@@ -91,3 +91,26 @@ test("operation/proposal/actors methods use their endpoints, methods, request bo
     await expect(row.call(denied)).rejects.toMatchObject({ code: "FORBIDDEN", operation, reason: "agent-cannot-decide-proposals", proposal: proposal.id });
   }
 });
+
+test("job client validates request defaults, Job output and errors at all four endpoints", async () => {
+  const { Job } = await import("@lumio/schema");
+  const job = Job.parse({ spec: { protocol_version: 2, id: "job_00000000000000000000000001", runtime: "act_00000000000000000000000001", lease: "synthetic_lease_123456", run: { kind: "command", argv: ["/bin/echo"] }, workdir: "~", timeout_seconds: 7200, created: "2026-01-01T00:00:00Z" }, status: "queued" });
+  const cases = [
+    { path: "/v1/jobs", payload: { runtime: "server", run: job.spec.run, workdir: "~", timeout_seconds: 7200 }, body: job, call: (c: ReturnType<typeof createClient>) => c.submitJob({ runtime: "server", run: { kind: "command", argv: ["/bin/echo"] } }) },
+    { path: "/v1/jobs?status=queued", body: [job], call: (c: ReturnType<typeof createClient>) => c.jobs("queued") },
+    { path: `/v1/jobs/${job.spec.id}`, body: job, call: (c: ReturnType<typeof createClient>) => c.job(job.spec.id) },
+    { path: `/v1/jobs/${job.spec.id}/cancel`, payload: {}, body: job, call: (c: ReturnType<typeof createClient>) => c.cancelJob(job.spec.id) },
+  ];
+  for (const row of cases) {
+    const client = createClient({ url: "http://localhost", token: "synthetic", fetch: mock(row.body, 200, (url, init) => {
+      expect(url.pathname + url.search).toBe(row.path); expect(init!.method).toBe("payload" in row ? "POST" : "GET");
+      expect(init!.body ? JSON.parse(String(init!.body)) : undefined).toEqual("payload" in row ? row.payload : undefined);
+    }) });
+    expect(await row.call(client)).toEqual(row.body);
+    await expect(row.call(createClient({ url: "http://localhost", token: "synthetic", fetch: mock({ bad: true }) }))).rejects.toMatchObject({ code: "INTERNAL" });
+    await expect(row.call(createClient({ url: "http://localhost", token: "synthetic", fetch: mock({ error: { code: "FORBIDDEN", message: "Denied" } }, 403) }))).rejects.toMatchObject({ code: "FORBIDDEN", status: 403 });
+  }
+  const client = createClient({ url: "http://localhost", token: "synthetic", fetch: mock(job, 200, () => { throw new Error("must not send invalid input"); }) });
+  await expect(Promise.resolve().then(() => client.submitJob({ runtime: "Bad Name", run: { kind: "command", argv: [] } }))).rejects.toMatchObject({ code: "INVALID" });
+  await expect(Promise.resolve().then(() => client.job("bad"))).rejects.toMatchObject({ code: "INVALID" });
+});

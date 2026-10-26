@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { JOB_PROTOCOL_VERSION, RuntimeRegistration } from "@lumio/schema";
 
 export class RuntimeError extends Error {
@@ -24,7 +24,9 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env) {
     throw new RuntimeError("LUMIO_RUNTIME_POLL_SECONDS 必须是有效的正秒数");
   }
   if (env.LUMIO_RUNTIME_STATE_DIR === "") throw new RuntimeError("LUMIO_RUNTIME_STATE_DIR 不能为空");
-  return { url: url.href.replace(/\/+$/, ""), token: env.LUMIO_TOKEN, registration: registration.data, pollSeconds,
+  const allowedCommands = env.LUMIO_RUNTIME_ALLOWED_COMMANDS ? env.LUMIO_RUNTIME_ALLOWED_COMMANDS.split(",").map((s) => s.trim()) : [];
+  if (allowedCommands.some((s) => !isAbsolute(s))) throw new RuntimeError("LUMIO_RUNTIME_ALLOWED_COMMANDS 必须是逗号分隔的绝对路径");
+  return { allowedCommands, url: url.href.replace(/\/+$/, ""), token: env.LUMIO_TOKEN, registration: registration.data, pollSeconds,
     stateDir: resolve(env.LUMIO_RUNTIME_STATE_DIR ?? join(homedir(), ".local", "share", "lumio-runtime")) };
 }
 export type RuntimeConfig = ReturnType<typeof readConfig>;

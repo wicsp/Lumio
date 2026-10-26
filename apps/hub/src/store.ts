@@ -24,6 +24,7 @@ export class HubStore {
           author TEXT NOT NULL REFERENCES actors(id), status TEXT NOT NULL, created TEXT NOT NULL, decided TEXT, decided_by TEXT REFERENCES actors(id));
         CREATE TABLE IF NOT EXISTS runtimes (actor TEXT PRIMARY KEY REFERENCES actors(id), name TEXT NOT NULL UNIQUE,
           registration TEXT NOT NULL, last_seen TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, record TEXT NOT NULL, cancel INTEGER NOT NULL DEFAULT 0);
         CREATE TABLE IF NOT EXISTS audit (time TEXT NOT NULL, actor_id TEXT NOT NULL REFERENCES actors(id), token_label TEXT NOT NULL,
           operation TEXT NOT NULL, authorization TEXT NOT NULL, proposal_id TEXT, execution_result TEXT);
       `);
