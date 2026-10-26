@@ -311,7 +311,10 @@ export class TaskRounds {
       lines.push(`git：${r.git.before?.commit.slice(0, 8) ?? "—"} → ${r.git.after?.commit.slice(0, 8) ?? "—"}${r.git.after?.dirty ? "（有未提交的改动）" : ""}`);
     }
     lines.push(`完整汇报：\`lumio job show ${job.spec.id}\``);
-    return lines.join("\n");
+    const block = lines.join("\n");
+    // error、版本等元数据同样来自执行器，检查最终区块而不是只检查 report/question。
+    if (containsSecret(block)) return `### 结果未写入\n\n汇报中疑似包含敏感信息（密钥或卡号），未写入笔记。请用 \`lumio job show ${job.spec.id}\` 查看。`;
+    return block;
   }
 
   private async edit(path: string, change: (bytes: Buffer) => Buffer, commit?: { message: string; trailers: GitTrailers }): Promise<void> {
