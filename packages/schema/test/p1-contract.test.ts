@@ -59,7 +59,7 @@ describe("actor, operation and proposal contracts (ADR 0016)", () => {
 
   test("operations are a closed, strict union", () => {
     expect(Operation.parse(op).op).toBe("task.dispatch");
-    expect(OPERATION_NAMES).toEqual(["task.dispatch", "routine.followup"]);
+    expect(OPERATION_NAMES).toEqual(["task.dispatch", "routine.followup", "exec.privileged"]);
     expect(Operation.safeParse({ op: "link.add", args: { from: `idea_${U}`, to: `pap_${U}` } }).success).toBe(false);
     expect(Operation.safeParse({ op: "note.delete", args: {} }).success).toBe(false);
     expect(Operation.safeParse({ ...op, args: { ...op.args, extra: 1 } }).success).toBe(false);
