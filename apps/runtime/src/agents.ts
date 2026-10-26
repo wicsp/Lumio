@@ -32,7 +32,9 @@ const codex: Adapter = {
   engine: "codex", command: "codex", sandbox: "os",
   versions: { min: "0.160.0", below: "0.200.0" },
   argv(run, ctx) {
-    const common = ["--skip-git-repo-check", "--sandbox", "workspace-write", "--json", "--output-last-message", ctx.lastMessageFile,
+    // exec resume 不接受 --sandbox（0.163.0）；它接受 -c，与首次执行保持相同隔离配置。
+    const sandbox = run.session?.resume ? ["-c", 'sandbox_mode="workspace-write"'] : ["--sandbox", "workspace-write"];
+    const common = ["--skip-git-repo-check", ...sandbox, "--json", "--output-last-message", ctx.lastMessageFile,
       ...(run.model ? ["-m", run.model] : [])];
     return run.session?.resume
       ? ["exec", "resume", ...common, run.session.id, run.prompt]
