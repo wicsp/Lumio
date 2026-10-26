@@ -159,6 +159,9 @@ export const RuntimeAck = z.strictObject({ accepted: z.array(idOf("job")) });
 
 export type JobSpec = z.infer<typeof JobSpec>;
 export type JobRun = z.infer<typeof JobRun>;
+export type AgentRun = z.infer<typeof AgentRun>;
+export type CommandRun = z.infer<typeof CommandRun>;
+export type GitState = z.infer<typeof GitState>;
 export type JobStatus = z.infer<typeof JobStatus>;
 export type JobResult = z.infer<typeof JobResult>;
 export type Job = z.infer<typeof Job>;

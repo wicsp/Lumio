@@ -1,16 +1,23 @@
 import { parseArgs } from "node:util";
 import { createClient } from "@lumio/api-client";
-import { JobStatus, type Job } from "@lumio/schema";
+import { AgentRun, JobStatus, type Job } from "@lumio/schema";
 
-const usage = "用法：lumio job submit --runtime <名称> [--workdir 路径] [--timeout 30m] [--gpus 0,1] -- <程序> [参数…]；lumio job list [--status 状态] [--json]；lumio job show <job> [--json]；lumio job cancel <job>";
+const usage = "用法：lumio job submit --runtime <名称> [--workdir 路径] [--timeout 30m] [--gpus 0,1] -- <程序> [参数…]；" +
+  "lumio job submit --runtime <名称> --agent codex|claude-code|pi [--model 模型] [--session ID [--resume]] [--workdir 路径] [--timeout 2h] [--gpus 0,1] \"<要求>\"；lumio job list [--status 状态] [--json]；lumio job show <job> [--json]；lumio job cancel <job>";
 export async function runJobs(args: string[], log: (line: string) => void) {
   const split = args.indexOf("--");
   const { values, positionals } = parseArgs({ args: split < 0 ? args : args.slice(0, split), allowPositionals: true, strict: true, options: {
     runtime: { type: "string" }, workdir: { type: "string" }, timeout: { type: "string" }, gpus: { type: "string" }, status: { type: "string" }, json: { type: "boolean" },
+    agent: { type: "string" }, model: { type: "string" }, session: { type: "string" }, resume: { type: "boolean" },
   } });
   const [action, id] = positionals;
   const keys = Object.keys(values);
-  if (action === "submit") {
+  const agentKeys = ["agent", "model", "session", "resume"];
+  if (action === "submit" && values.agent !== undefined) {
+    // agent 类型：要求是唯一的位置参数，不用 --。
+    if (positionals.length !== 2 || split >= 0 || !positionals[1] || !values.runtime || (values.resume && !values.session)
+      || keys.some((k) => !["runtime", "workdir", "timeout", "gpus", "json", ...agentKeys].includes(k))) throw new Error(usage);
+  } else if (action === "submit") {
     if (positionals.length !== 1 || split < 0 || !args[split + 1] || !values.runtime || keys.some((k) => !["runtime", "workdir", "timeout", "gpus", "json"].includes(k))) throw new Error(usage);
   } else if (action === "list") {
     if (positionals.length !== 1 || split >= 0 || keys.some((k) => !["status", "json"].includes(k))) throw new Error(usage);
@@ -34,7 +41,11 @@ export async function runJobs(args: string[], log: (line: string) => void) {
       gpus = values.gpus.split(",").map(Number);
       if (!gpus.every(Number.isSafeInteger)) throw new Error("gpus 超出有效范围");
     }
-    result = await client.submitJob({ runtime: values.runtime!, run: { kind: "command", argv: args.slice(split + 1) },
+    const run = values.agent !== undefined
+      ? AgentRun.parse({ kind: "agent", engine: values.agent, prompt: positionals[1],
+        ...(values.model ? { model: values.model } : {}), ...(values.session ? { session: { id: values.session, resume: Boolean(values.resume) } } : {}) })
+      : { kind: "command" as const, argv: args.slice(split + 1) };
+    result = await client.submitJob({ runtime: values.runtime!, run,
       ...(values.workdir !== undefined ? { workdir: values.workdir } : {}), ...(timeout !== undefined ? { timeout_seconds: timeout } : {}), ...(gpus ? { gpus } : {}) });
   } else if (action === "list") {
     const status = values.status === undefined ? undefined : JobStatus.parse(values.status);
@@ -47,6 +58,11 @@ export async function runJobs(args: string[], log: (line: string) => void) {
       const runtime = runtimes.get(job.spec.runtime);
       log(`${job.spec.id}  ${job.status}  ${runtime?.registration.name ?? job.spec.runtime}${runtime?.online === false ? "  执行器失联" : ""}`);
       if (action === "show") {
+        const r = job.result;
+        if (job.spec.run.kind === "agent") log(`agent：${job.spec.run.engine}${r?.engine ? ` ${r.engine.version}（隔离：${r.engine.sandbox === "os" ? "系统沙箱" : "无沙箱"}）` : ""}`);
+        if (r?.question) log(`问题：${r.question}`);
+        if (r?.git) log(`git：${r.git.before?.commit.slice(0, 8) ?? "—"} → ${r.git.after?.commit.slice(0, 8) ?? "—"}${r.git.after?.dirty ? "（有未提交的改动）" : ""}`);
+        if (r?.error) log(`错误：${r.error}`);
         log(JSON.stringify(job, null, 2));
       }
     }

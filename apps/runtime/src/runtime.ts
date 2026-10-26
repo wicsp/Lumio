@@ -35,7 +35,7 @@ export async function runRuntime(config: RuntimeConfig, options: {
   await mkdir(config.stateDir, { recursive: true, mode: 0o700 });
   const registration = RuntimeRegistration.parse({ ...config.registration, engines: await detectEngines(options.env) });
   const queue = new Queue(config.stateDir);
-  const executor = new Executor(queue, config, options.env ?? process.env, () => { events.notify(); deliveries.notify(); });
+  const executor = new Executor(queue, config, options.env ?? process.env, () => { events.notify(); deliveries.notify(); }, registration.engines);
   let registered = false, disconnected = false;
   let backoff = Math.min(config.pollSeconds, 60);
   async function send(path: string, body: unknown) {
