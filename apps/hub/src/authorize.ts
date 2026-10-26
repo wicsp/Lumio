@@ -2,7 +2,7 @@ import type { Actor } from "@lumio/schema";
 
 export const QUERY_OPERATIONS = ["search", "show", "links", "check", "status"] as const;
 export type QueryOperation = (typeof QUERY_OPERATIONS)[number];
-export const EXISTING_OPERATIONS = [...QUERY_OPERATIONS, "health", "operations", "actors", "proposals", "proposal.accept", "proposal.reject", "task.dispatch", "routine.followup", "routines"] as const;
+export const EXISTING_OPERATIONS = [...QUERY_OPERATIONS, "health", "operations", "actors", "proposals", "proposal.accept", "proposal.reject", "task.dispatch", "routine.followup", "routines", "exec.privileged"] as const;
 export const RUNTIME_OPERATIONS = ["runtime.register", "runtime.sync", "runtime.ack", "runtime.results", "runtimes"] as const;
 export const JOB_OPERATIONS = ["job.submit", "jobs", "job.show", "job.cancel"] as const;
 export interface AuthorizationRequest { operation: (typeof EXISTING_OPERATIONS)[number] | (typeof RUNTIME_OPERATIONS)[number] | (typeof JOB_OPERATIONS)[number]; includePrivate?: boolean }
@@ -33,6 +33,8 @@ export const AUTHORIZATION_RULES = [
     // 从例行任务开出追问任务：新建笔记，同样只能由人发起。
     { role, operation: "routine.followup", includePrivate: false,
       decision: role === "human" ? { result: "allow" as const } : { result: "deny" as const, reason: "agent-cannot-create-tasks" } },
+    // 高权限命令（ADR 0020）：格式已定，由 P2-6 实现；在那之前一律拒绝。
+    { role, operation: "exec.privileged", includePrivate: false, decision: { result: "deny" as const, reason: "exec-privileged-not-implemented" } },
     ...(["proposal.accept", "proposal.reject"] as const).map((operation) => ({ role, operation, includePrivate: false,
       decision: role === "human" ? { result: "allow" as const } : { result: "deny" as const, reason: "agent-cannot-decide-proposals" } })),
   ] as const),

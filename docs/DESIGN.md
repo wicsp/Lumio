@@ -218,7 +218,8 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 - vault 的 `.gitignore` 排除 Obsidian 插件设置文件（可能含明文密钥）。
 - **派活的安全底线**（ADR 0019）：
   - 执行器用普通账号运行，不用 root；工作目录不能在笔记库里；能用 agent 自带沙箱的就打开，每一轮记录隔离级别。
-  - 高权限命令只能经 `lumio sudo` 发起，成为需要批准的操作 `exec.privileged`；审批模型（P3）只看命令和人写的要求。
+  - 高权限命令只能在一轮之内经 `lumio-runtime sudo` 发起，成为需要批准的操作 `exec.privileged`；人接受后 Hub 签发一次性、10 分钟内有效的
+    批准凭据，root 助手程序用 Hub 公钥验证后执行一次（ADR 0020：agent 与执行器同一账号，助手程序不信任调用者）。审批模型（P3）只看命令和人写的要求。
   - AI 汇报写回笔记前检查疑似卡号和常见密钥格式，命中的不写入。
   - 每一轮有最长运行时间（默认 2 小时）；取消时杀掉整个进程组；`gpus` 只暴露指定的 GPU。
 

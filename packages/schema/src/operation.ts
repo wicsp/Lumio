@@ -29,7 +29,7 @@ export const RoutineFollowup = z.strictObject({
   }),
 });
 
-/** 执行器上的高权限命令（ADR 0019 第 7 节）：经 `lumio sudo` 发起，P2 中一律需要批准。 */
+/** 执行器上的高权限命令（ADR 0019 第 7 节、ADR 0020）：由执行器代一轮之内的 agent 提交，一律需要批准。 */
 export const ExecPrivileged = z.strictObject({
   op: z.literal("exec.privileged"),
   args: z.strictObject({
@@ -40,10 +40,10 @@ export const ExecPrivileged = z.strictObject({
 });
 
 /**
- * Hub 当前实现了的操作。TaskDispatch 由 P2-4 加入，RoutineFollowup 由 P2-5 加入，ExecPrivileged 由 P2-6 加入；
- * 它们的格式已经批准（ADR 0019），实现时只需把它们放进这个列表。
+ * 全部操作。TaskDispatch（P2-4）、RoutineFollowup（P2-5）已实现；ExecPrivileged 的格式已批准（ADR 0019、0020），
+ * 由 P2-6 实现——在此之前 Hub 的授权表里没有它的规则，一律拒绝。
  */
-export const Operation = z.discriminatedUnion("op", [TaskDispatch, RoutineFollowup]);
+export const Operation = z.discriminatedUnion("op", [TaskDispatch, RoutineFollowup, ExecPrivileged]);
 
 export const OPERATION_NAMES = Operation.options.map((o) => o.shape.op.value);
 

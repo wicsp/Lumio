@@ -24,9 +24,9 @@
 | [P2-3](P2-3-agent-adapters.md) ✅ | 接上 codex、claude、pi | 后端（Codex） | P2-2 |
 | [P2-4](P2-4-task-rounds.md) ✅ | 任务笔记里的一问一答（做完即可日常使用） | 后端（Codex） | P2-3 |
 | [P2-5](P2-5-routines.md) ✅ | 例行任务 | 后端（Codex） | P2-4 |
-| [P2-6](P2-6-sudo-gate.md) | `lumio sudo`：高权限命令的审批门 | 后端（Codex） | P2-4 |
+| [P2-6](P2-6-sudo-gate.md) | `lumio-runtime sudo`：高权限命令的审批门（ADR 0020） | 后端（Codex） | P2-4 |
 
-P1 的设计决定见 ADR 0014、0016、0017、0018；P2 见 ADR 0019 与修订后的 ADR 0005；契约见 `packages/schema/src/` 中的 `query.ts`、`actor.ts`、`operation.ts`、`proposal.ts`、`api.ts`。
+P1 的设计决定见 ADR 0014、0016、0017、0018；P2 见 ADR 0019、0020 与修订后的 ADR 0005；契约见 `packages/schema/src/` 中的 `query.ts`、`actor.ts`、`operation.ts`、`proposal.ts`、`api.ts`。
 
 ## 等人类回来处理
 

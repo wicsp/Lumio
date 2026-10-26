@@ -159,7 +159,7 @@ test("authorization table is exhaustively checked, including private=false", () 
     const expected = (RUNTIME_OPERATIONS as readonly string[]).includes(rule.operation)
       ? ((rule.operation === "runtimes" ? rule.role === "human" : rule.role === "runtime") ? "allow" : "deny")
       : (JOB_OPERATIONS as readonly string[]).includes(rule.operation) ? (rule.role === "human" ? "allow" : "deny")
-      : rule.role === "runtime" ? "deny" : rule.role !== "agent" ? "allow"
+      : rule.role === "runtime" || rule.operation === "exec.privileged" ? "deny" : rule.role !== "agent" ? "allow"
         : rule.includePrivate || rule.operation.startsWith("proposal.") || rule.operation === "task.dispatch" || rule.operation === "routine.followup" ? "deny" : "allow";
     expect(decision.result).toBe(expected);
   }

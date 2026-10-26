@@ -13,12 +13,14 @@ export * from "./operation.ts";
 export * from "./proposal.ts";
 export * from "./api.ts";
 export * from "./secrets.ts";
+export * from "./privileged.ts";
 
 import { Actor } from "./actor.ts";
 import { ApiError, OperationRequest, OperationResult } from "./api.ts";
 import { Asset, Experiment, Idea, Paper, Post, Project, Routine, Source, Task } from "./entities.ts";
 import { Job, JobResult, JobSpec, RoutineInfo, RuntimeAck, RuntimeHeartbeat, RuntimeInfo, RuntimeRegistration, RuntimeSync } from "./job.ts";
 import { Operation } from "./operation.ts";
+import { PrivilegedApproval, PrivilegedReport, PrivilegedStatus } from "./privileged.ts";
 import { Proposal } from "./proposal.ts";
 import { CheckResult, LinksResult, NoteDetail, SearchResult } from "./query.ts";
 
@@ -42,6 +44,9 @@ export const CONTRACTS = {
   "runtime-sync": RuntimeSync,
   "runtime-ack": RuntimeAck,
   "routine-info": RoutineInfo,
+  "privileged-approval": PrivilegedApproval,
+  "privileged-status": PrivilegedStatus,
+  "privileged-report": PrivilegedReport,
   "search-result": SearchResult,
   "links-result": LinksResult,
   "note-detail": NoteDetail,
