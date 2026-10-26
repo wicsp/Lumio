@@ -24,7 +24,7 @@
 | [P2-3](P2-3-agent-adapters.md) ✅ | 接上 codex、claude、pi | 后端（Codex） | P2-2 |
 | [P2-4](P2-4-task-rounds.md) ✅ | 任务笔记里的一问一答（做完即可日常使用） | 后端（Codex） | P2-3 |
 | [P2-5](P2-5-routines.md) ✅ | 例行任务 | 后端（Codex） | P2-4 |
-| [P2-6](P2-6-sudo-gate.md) | `lumio-runtime sudo`：高权限命令的审批门（ADR 0020） | 后端（Codex） | P2-4 |
+| [P2-6](P2-6-sudo-gate.md) ✅ | `lumio-runtime sudo`：高权限命令的审批门（ADR 0020） | 后端（Codex） | P2-4 |
 
 P1 的设计决定见 ADR 0014、0016、0017、0018；P2 见 ADR 0019、0020 与修订后的 ADR 0005；契约见 `packages/schema/src/` 中的 `query.ts`、`actor.ts`、`operation.ts`、`proposal.ts`、`api.ts`。
 
@@ -34,6 +34,7 @@ P1 的设计决定见 ADR 0014、0016、0017、0018；P2 见 ADR 0019、0020 与
 
 | 事项 | 来自 | 怎么做 |
 |---|---|---|
+| P2-6 手动验收 | P2-6 | 按 `infra/sudo-helper.md` 在自己的服务器安装助手，让 agent 申请安装一个软件包，在 Mac 查看命令并批准，确认安装成功；再拒绝一次确认不执行 |
 | 服务器上的执行器升级到最新版 | P2-2 起 | 服务器上 `git pull` 后重新 `bun run --cwd apps/runtime build`，替换 `~/.local/bin/lumio-runtime`，`systemctl --user restart lumio-runtime` |
 | Mac 上的 Hub 重启一次 | P2-1 review 起 | 让新代码（心跳不写审计、Job 接口等）生效 |
 | P2-2 手动验收 | P2-2 | 执行器配置 `LUMIO_RUNTIME_ALLOWED_COMMANDS=/usr/bin/nvidia-smi`；`lumio job submit --runtime server -- /usr/bin/nvidia-smi`，合上 Mac 几分钟再打开，`lumio job show <job>` 有结果 |

@@ -1,10 +1,16 @@
 #!/usr/bin/env bun
+import { runSudo } from "./sudo.ts";
+import { runSudoHelper } from "./sudo-helper.ts";
 import { readConfig, RuntimeError } from "./config.ts";
 import { runRuntime } from "./runtime.ts";
 import { runWorker } from "./worker.ts";
 
 if (process.argv[2] === "--job-worker") {
   await runWorker();
+} else if (process.argv[2] === "--sudo-helper") {
+  process.exitCode = await runSudoHelper();
+} else if (process.argv[2] === "sudo") {
+  process.exitCode = await runSudo(process.argv.slice(3));
 } else {
   const controller = new AbortController();
   const shutdown = () => controller.abort();

@@ -15,7 +15,22 @@ export async function runOperations(args: string[], values: { reason?: string; s
   async function render(proposals: Proposal[]) {
     const names = new Map((await client.actors()).map((actor) => [actor.id, actor.name]));
     for (const p of proposals) {
-      log(`${p.id}  ${p.status}\n${p.operation.op} ${JSON.stringify(p.operation.args)}\n理由：${p.reason}\n提交者：${names.get(p.author) ?? p.author}  ${p.created}${p.decided_by ? `\n决定者：${names.get(p.decided_by) ?? p.decided_by}  ${p.decided}` : ""}`);
+      let command = `${p.operation.op} ${JSON.stringify(p.operation.args)}`;
+      if (p.operation.op === "exec.privileged") {
+        const { runtime, job: id, argv } = p.operation.args;
+        command = `在 ${names.get(runtime) ?? runtime} 上以 root 执行：${argv.map((a) => /^[a-zA-Z0-9_./:=+,-]+$/.test(a) ? a : JSON.stringify(a)).join(" ")}`;
+        try {
+          const job = await client.job(id);
+          const source = job.spec.source;
+          if (source?.task || source?.routine) {
+            const ref = source.task ?? source.routine!;
+            let title = ref;
+            try { title = (await client.show(ref)).note.title; } catch { /* 来源笔记可能已删除。 */ }
+            command += `\n来源：${title}${source.task ? ` · 第 ${source.round} 轮` : "（例行任务）"}`;
+          } else command += `\n来源：${id}`;
+        } catch { command += `\n来源：${id}`; }
+      }
+      log(`${p.id}  ${p.status}\n${command}\n理由：${p.reason}\n提交者：${names.get(p.author) ?? p.author}  ${p.created}${p.decided_by ? `\n决定者：${names.get(p.decided_by) ?? p.decided_by}  ${p.decided}` : ""}`);
     }
   }
   if (list) {

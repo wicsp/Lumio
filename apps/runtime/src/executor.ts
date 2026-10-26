@@ -1,3 +1,4 @@
+import type { SudoGate } from "./sudo.ts";
 import { StringDecoder } from "node:string_decoder";
 import { finished } from "node:stream/promises";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -54,7 +55,7 @@ export class Executor {
   private pending = new Set<Promise<void>>();
   private stopping = false;
   constructor(private queue: Queue, private config: RuntimeConfig, private env: NodeJS.ProcessEnv, private wake: () => void,
-    private engines: Engines = []) {}
+    private engines: Engines = [], private sudo?: SudoGate) {}
   async recover() {
     for (const job of this.queue.jobs().filter((j) => j.state === "running")) {
       if (job.pid && groupExists(job.pid)) await killGroup(job.pid);
@@ -71,6 +72,7 @@ export class Executor {
   private stop(id: string, reason: "超时" | "取消") {
     const run = this.running.get(id);
     if (!run || run.stop) return;
+    this.sudo?.end(id);
     run.reason = reason;
     run.stop = run.child.pid ? killGroup(run.child.pid) : Promise.resolve();
   }
@@ -144,7 +146,7 @@ export class Executor {
         write(chunk);
       });
       child.stderr!.on("data", write);
-      child.stdin!.end(JSON.stringify({ spec: { ...spec, workdir }, argv, completion, env: { ...jobEnv(this.env), ...(spec.gpus ? { CUDA_VISIBLE_DEVICES: spec.gpus.join(",") } : {}) } }));
+      child.stdin!.end(JSON.stringify({ spec: { ...spec, workdir }, argv, completion, env: { ...jobEnv(this.env), ...this.sudo?.begin(spec), ...(spec.gpus ? { CUDA_VISIBLE_DEVICES: spec.gpus.join(",") } : {}) } }));
       const deadline = Date.now() + spec.timeout_seconds * 1000;
       const armTimeout = () => {
         const remaining = deadline - Date.now();
@@ -186,10 +188,11 @@ export class Executor {
         ...problem });
     } catch {
       if (!this.stopping) finish({ job: spec.id, lease: spec.lease, started, finished: new Date().toISOString(), status: "failed", error: "无法执行程序", report, log });
-    } finally { if (timer) clearTimeout(timer); this.running.delete(spec.id); }
+    } finally { this.sudo?.end(spec.id); if (timer) clearTimeout(timer); this.running.delete(spec.id); }
   }
   async shutdown() {
     this.stopping = true;
+    for (const id of this.running.keys()) this.sudo?.end(id);
     await Promise.all([...this.running.values()].map(async (run) => { if (run.child.pid) await killGroup(run.child.pid); }));
     await Promise.all(this.pending);
   }
