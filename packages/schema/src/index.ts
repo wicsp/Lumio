@@ -14,6 +14,7 @@ export * from "./proposal.ts";
 export * from "./api.ts";
 export * from "./secrets.ts";
 export * from "./privileged.ts";
+export * from "./setup.ts";
 
 import { Actor } from "./actor.ts";
 import { ApiError, OperationRequest, OperationResult } from "./api.ts";
@@ -21,6 +22,7 @@ import { Asset, Experiment, Idea, Paper, Post, Project, Routine, Source, Task } 
 import { Job, JobResult, JobSpec, RoutineInfo, RuntimeAck, RuntimeHeartbeat, RuntimeInfo, RuntimeRegistration, RuntimeSync } from "./job.ts";
 import { Operation } from "./operation.ts";
 import { PrivilegedApproval, PrivilegedReport, PrivilegedStatus } from "./privileged.ts";
+import { CliConfig, HubSigningKey, RuntimeInvite, RuntimeInviteRequest, RuntimeJoin, RuntimeJoinRequest } from "./setup.ts";
 import { Proposal } from "./proposal.ts";
 import { CheckResult, LinksResult, NoteDetail, SearchResult } from "./query.ts";
 
@@ -47,6 +49,12 @@ export const CONTRACTS = {
   "privileged-approval": PrivilegedApproval,
   "privileged-status": PrivilegedStatus,
   "privileged-report": PrivilegedReport,
+  "cli-config": CliConfig,
+  "runtime-invite-request": RuntimeInviteRequest,
+  "runtime-invite": RuntimeInvite,
+  "runtime-join-request": RuntimeJoinRequest,
+  "runtime-join": RuntimeJoin,
+  "hub-signing-key": HubSigningKey,
   "search-result": SearchResult,
   "links-result": LinksResult,
   "note-detail": NoteDetail,
