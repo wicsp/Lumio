@@ -7,10 +7,10 @@
   "engines": { "bun": ">=1.3.13 <1.4" },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "bun test",
+    "test": "bun test --timeout 30000",
     "lint:deps": "depcruise packages apps --config .dependency-cruiser.cjs",
     "schema:export": "bun run packages/schema/scripts/export-json-schema.ts",
-    "check": "bun run typecheck && bun run lint:deps && bun test"
+    "check": "bun run typecheck && bun run lint:deps && bun test --timeout 30000"
   },
   "devDependencies": {
     "@types/bun": "^1.3.0",

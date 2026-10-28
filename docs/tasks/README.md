@@ -25,7 +25,7 @@
 | [P2-4](P2-4-task-rounds.md) ✅ | 任务笔记里的一问一答（做完即可日常使用） | 后端（Codex） | P2-3 |
 | [P2-5](P2-5-routines.md) ✅ | 例行任务 | 后端（Codex） | P2-4 |
 | [P2-6](P2-6-sudo-gate.md) ✅ | `lumio-runtime sudo`：高权限命令的审批门（ADR 0020） | 后端（Codex） | P2-4 |
-| [P2-7](P2-7-release-and-setup.md) | 发布编译好的程序；一条命令装好 Hub、CLI 与本机执行器（ADR 0021、0022） | 后端（Codex） | P2-6 |
+| [P2-7](P2-7-release-and-setup.md) ✅ | 发布编译好的程序；一条命令装好 Hub、CLI 与本机执行器（ADR 0021、0022） | 后端（Codex） | P2-6 |
 | [P2-8](P2-8-runtime-pairing.md) | 加一台执行器、另一台机器上的 CLI：一次性配对码；一条命令装提权助手 | 后端（Codex） | P2-7 |
 | [P2-9](P2-9-doctor-selftest-upgrade.md) | `lumio doctor`、`lumio selftest`、`upgrade` | 后端（Codex） | P2-8 |
 | [P2-10](P2-10-markdown-links.md) | 同时识别标准 Markdown 链接（ADR 0022） | 后端（Codex） | 无 |
