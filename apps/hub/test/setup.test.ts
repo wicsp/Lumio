@@ -138,3 +138,44 @@ test("setup connects a real synthetic Hub and local runtime through HTTP without
     expect(runtimes).toHaveLength(1); expect(runtimes[0]).toMatchObject({ online: true, registration: { name: "my-mac.local" } });
   } finally { if (child) { child.kill(); await child.exited; } await hub?.stop(); }
 });
+
+
+test("noninteractive setup explains selected defaults and how to change them without prompting", async () => {
+  const f = await fixture();
+  await setup({ ...f.options, yes: false, interactive: false, server: true,
+    find: () => "/synthetic/tailscale", ask: async () => { throw new Error("must not prompt"); },
+  });
+  const output = f.logs.join("\n");
+  for (const text of ["没有交互终端", "采用默认值", "lumio-hub setup --vault <路径>", "lumio-hub setup --server", `vault=${f.home}/.config/lumio/vault`, "监听=0.0.0.0:7420", "对外地址=未设置", "Tailscale 不自动启用"]) expect(output).toContain(text);
+  expect(f.commands.some((argv) => argv[0]?.includes("tailscale"))).toBe(false);
+});
+
+test("service files preserve shared directory permissions while configs remain private, even under umask 077", async () => {
+  for (const platform of ["darwin", "linux"]) {
+    const f = await fixture(platform);
+    const shared = join(f.home, platform === "darwin" ? "Library/LaunchAgents" : ".config/systemd/user");
+    await mkdir(shared, { recursive: true }); await chmod(shared, 0o751);
+    const path = join(shared, platform === "darwin" ? "io.lumio.hub.plist" : "lumio-hub.service");
+    await writeFile(path, "old service"); await chmod(path, 0o666);
+    const mask = process.umask(0o077);
+    try { await setup(f.options); } finally { process.umask(mask); }
+    expect((await stat(shared)).mode & 0o777).toBe(0o751);
+    expect((await stat(path)).mode & 0o777).toBe(platform === "darwin" ? 0o600 : 0o644);
+    expect((await stat(join(f.home, ".config/lumio"))).mode & 0o777).toBe(0o700);
+    expect((await stat(join(f.home, ".config/lumio/config.json"))).mode & 0o777).toBe(0o600);
+  }
+});
+
+test("source setup and install-service reject the Bun interpreter before writing any files", async () => {
+  for (const [entry, command] of [["../src/main.ts", "setup"], ["../../runtime/src/main.ts", "install-service"]]) {
+    const f = await fixture();
+    const child = Bun.spawn([process.execPath, new URL(entry!, import.meta.url).pathname, command!], {
+      env: { HOME: f.home, PATH: "" }, stdin: "ignore", stdout: "pipe", stderr: "pipe",
+    });
+    const [code, output, error] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    expect(code).toBe(1); expect(output).toBe(""); expect(error).toContain("请用 install.sh 安装的程序运行");
+    for (const path of [".config/lumio", ".config/lumio-runtime", ".local/share/lumio", ".local/share/lumio-runtime", "Library/LaunchAgents"]) {
+      await expect(stat(join(f.home, path))).rejects.toMatchObject({ code: "ENOENT" });
+    }
+  }
+});

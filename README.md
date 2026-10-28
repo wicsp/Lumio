@@ -33,6 +33,14 @@ curl -fsSL https://raw.githubusercontent.com/wicsp/Lumio/main/install.sh | sh
 程序装到 `~/.local/bin`；按终端提示把它加入 PATH。默认单机模式会配置 Hub、本机执行器和 CLI，
 vault 默认在 `~/.config/lumio/vault`，可用 `lumio-hub setup --vault /已有的笔记目录` 指定。
 安装可重复运行，CLI 配置文件会自动更新，令牌不显示在终端。
+指定已有 vault 也可以只运行一行：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/wicsp/Lumio/main/install.sh | sh -s -- --vault "/已有的笔记目录"
+```
+
+安装脚本会尝试从终端询问设置；没有终端时使用已有配置或默认值，并打印实际配置与修改方法。
+`setup` 和 `install-service` 须用安装后的独立程序运行，源码入口会拒绝安装后台服务。
 
 服务器模式（Hub 与 vault 在服务器上）：
 

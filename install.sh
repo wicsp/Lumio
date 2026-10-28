@@ -2,21 +2,23 @@
 set -eu
 
 fail() { printf 'Lumio 安装失败：%s\n' "$1" >&2; exit 1; }
-usage() { fail '用法：install.sh [--server] [--version vX.Y.Z] [--no-setup]；install.sh runtime --hub <地址> --code <配对码> [--version vX.Y.Z]'; }
+usage() { fail '用法：install.sh [--server] [--vault <路径>] [--version vX.Y.Z] [--no-setup]；install.sh runtime --hub <地址> --code <配对码> [--version vX.Y.Z]'; }
 mode=hub
 server=no
 setup=yes
 version=
 hub=
 code=
+vault=
 if [ "${1-}" = runtime ]; then mode=runtime; shift; fi
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --server) [ "$mode" = hub ] || usage; server=yes; shift ;;
+    --vault) [ "$mode" = hub ] || usage; [ "$#" -ge 2 ] || usage; [ -n "$2" ] || usage; vault=$2; shift 2 ;;
     --no-setup) setup=no; shift ;;
     --version) [ "$#" -ge 2 ] || usage; version=$2; shift 2 ;;
-    --hub) [ "$mode" = runtime ] && [ "$#" -ge 2 ] || usage; hub=$2; shift 2 ;;
-    --code) [ "$mode" = runtime ] && [ "$#" -ge 2 ] || usage; code=$2; shift 2 ;;
+    --hub) [ "$mode" = runtime ] || usage; [ "$#" -ge 2 ] || usage; hub=$2; shift 2 ;;
+    --code) [ "$mode" = runtime ] || usage; [ "$#" -ge 2 ] || usage; code=$2; shift 2 ;;
     *) usage ;;
   esac
 done
@@ -65,7 +67,7 @@ done
 mkdir "$tmp/extracted"
 tar -xzf "$tmp/$archive" -C "$tmp/extracted" || fail '解压程序'
 for binary in lumio lumio-hub lumio-runtime; do
-  [ -f "$tmp/extracted/$binary" ] && [ ! -L "$tmp/extracted/$binary" ] || fail '压缩包含非普通程序文件'
+  if [ ! -f "$tmp/extracted/$binary" ] || [ -L "$tmp/extracted/$binary" ]; then fail '压缩包含非普通程序文件'; fi
 done
 bin=$HOME/.local/bin
 mkdir -p "$bin" || fail '创建 ~/.local/bin'
@@ -84,8 +86,14 @@ esac
 [ "$setup" = yes ] || exit 0
 if [ "$mode" = runtime ]; then
   "$bin/lumio-runtime" join --hub "$hub" --code "$code" || fail 'lumio-runtime join（配对在 P2-8 实现，请确认版本支持）'
-elif [ "$server" = yes ]; then
-  "$bin/lumio-hub" setup --server || fail 'lumio-hub setup --server'
 else
-  "$bin/lumio-hub" setup || fail 'lumio-hub setup'
+  set -- "$bin/lumio-hub" setup
+  if [ "$server" = yes ]; then set -- "$@" --server; fi
+  if [ -n "$vault" ]; then set -- "$@" --vault "$vault"; fi
+  # curl | sh owns stdin; reconnect setup to the controlling terminal if one exists.
+  if [ ! -t 0 ] && ( : < /dev/tty ) 2>/dev/null; then
+    "$@" < /dev/tty || fail 'lumio-hub setup'
+  else
+    "$@" || fail 'lumio-hub setup'
+  fi
 fi

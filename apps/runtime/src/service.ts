@@ -11,13 +11,14 @@ export const runCommand: RunCommand = async (argv) => {
   const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
   return { code, stdout, stderr };
 };
-export async function privateFile(path: string, content: string) {
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  await chmod(dirname(path), 0o700);
+async function atomicFile(path: string, content: string, mode: number, privateDirectory = false) {
+  await mkdir(dirname(path), { recursive: true, mode: privateDirectory ? 0o700 : 0o755 });
+  if (privateDirectory) await chmod(dirname(path), 0o700);
   const temp = `${path}.${crypto.randomUUID()}.tmp`;
-  try { await writeFile(temp, content, { mode: 0o600, flag: "wx" }); await rename(temp, path); }
+  try { await writeFile(temp, content, { mode, flag: "wx" }); await chmod(temp, mode); await rename(temp, path); }
   finally { await rm(temp, { force: true }); }
 }
+export const privateFile = (path: string, content: string) => atomicFile(path, content, 0o600, true);
 /** Our generated format is also accepted by systemd EnvironmentFile (no shell expansion). */
 export function parseEnvironment(content: string): Record<string, string> {
   const env: Record<string, string> = {};
@@ -63,6 +64,7 @@ export async function installService(options: ServiceOptions = {}): Promise<void
   const platform = options.platform ?? process.platform;
   const run = options.run ?? runCommand, log = options.log ?? console.log;
   const binary = options.binary ?? process.execPath;
+  if (binary === process.execPath && !Bun.main.startsWith("/$bunfs/")) throw new RuntimeError("请用 install.sh 安装的程序运行 install-service；从源码运行不会安装后台服务");
   if (!isAbsolute(binary) || /[\r\n]/.test(binary)) throw new RuntimeError("执行器程序路径必须是绝对路径");
   const envFile = join(home, ".config/lumio-runtime/runtime.env");
   const env = parseEnvironment(await readFile(envFile, "utf8"));
@@ -73,14 +75,14 @@ export async function installService(options: ServiceOptions = {}): Promise<void
   await rm(receipt, { force: true });
   if (platform === "darwin") {
     const path = join(home, "Library/LaunchAgents/io.lumio.runtime.plist");
-    await privateFile(path, runtimePlist(binary, env, state));
+    await atomicFile(path, runtimePlist(binary, env, state), 0o600);
     if ((await run(["plutil", "-lint", path])).code) throw new RuntimeError("执行器服务配置校验失败");
     const domain = `gui/${options.uid ?? process.getuid!()}`;
     await run(["launchctl", "bootout", domain, path]);
     if ((await run(["launchctl", "bootstrap", domain, path])).code) throw new RuntimeError(`执行器服务无法启动，请查看 ${state}/runtime.err.log`);
   } else if (platform === "linux") {
     const path = join(home, ".config/systemd/user/lumio-runtime.service");
-    await privateFile(path, runtimeUnit(binary, envFile));
+    await atomicFile(path, runtimeUnit(binary, envFile), 0o644);
     let available = false;
     try { available = (await run(["systemctl", "--user", "show-environment"])).code === 0; } catch { /* manual fallback */ }
     if (!available) {

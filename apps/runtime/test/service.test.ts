@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { RuntimeInfo } from "@lumio/schema";
@@ -31,14 +31,35 @@ test("install-service writes launchd and systemd configurations, waits for regis
 });
 test("no systemd prints a manual fallback; stale registration is ignored and timeout identifies logs", async () => {
   const { home, state, info } = await fixture(); const logs: string[] = [];
-  await installService({ home, platform: "linux", log: (line) => logs.push(line), run: async () => ({ code: 1, stdout: "", stderr: "" }) });
+  await installService({ home, binary: join(home, "bin/lumio-runtime"), platform: "linux", log: (line) => logs.push(line), run: async () => ({ code: 1, stdout: "", stderr: "" }) });
   expect(logs.join("\n")).toContain("nohup"); expect(logs.join("\n")).toContain("@reboot");
   await writeFile(join(state, "registered.json"), JSON.stringify(info)); let time = 0;
-  await expect(installService({ home, platform: "linux", now: () => time, sleep: async (ms) => { time += ms; }, log: () => {}, run: async () => ({ code: 0, stdout: "Linger=yes", stderr: "" }) })).rejects.toThrow("journalctl");
+  await expect(installService({ home, binary: join(home, "bin/lumio-runtime"), platform: "linux", now: () => time, sleep: async (ms) => { time += ms; }, log: () => {}, run: async () => ({ code: 0, stdout: "Linger=yes", stderr: "" }) })).rejects.toThrow("journalctl");
 });
 test("daemon loads runtime.env with explicit environment taking precedence, and systemd escapes percent specifiers", async () => {
   const { home } = await fixture(); const env = await runtimeEnvironment(home, { LUMIO_RUNTIME_NAME: "override" });
   expect(env.LUMIO_TOKEN).toBe("synthetic-token"); expect(env.LUMIO_RUNTIME_NAME).toBe("override"); expect(env.PATH).toBe("/synthetic/agents:/usr/bin:/bin");
   expect(parseEnvironment('A="a\\$b\\`c\\\\d\\\"e"\n')).toEqual({ A: 'a$b`c\\d"e' });
   expect(runtimeUnit("/a%/runtime", "/b%/runtime.env")).toContain("/a%%/runtime");
+});
+
+test("runtime service files preserve shared directory permissions and use appropriate modes under umask 077", async () => {
+  for (const platform of ["darwin", "linux"]) {
+    const { home, state, info } = await fixture();
+    const shared = join(home, platform === "darwin" ? "Library/LaunchAgents" : ".config/systemd/user");
+    await mkdir(shared, { recursive: true }); await chmod(shared, 0o751);
+    const path = join(shared, platform === "darwin" ? "io.lumio.runtime.plist" : "lumio-runtime.service");
+    await writeFile(path, "old service"); await chmod(path, 0o666);
+    const mask = process.umask(0o077);
+    try {
+      await installService({ home, platform, binary: join(home, "bin/lumio-runtime"), uid: 123, log: () => {}, run: async (argv) => {
+        if (argv.includes("bootstrap") || argv.includes("enable")) await writeFile(join(state, "registered.json"), JSON.stringify(info));
+        return { code: 0, stdout: "Linger=yes", stderr: "" };
+      } });
+    } finally { process.umask(mask); }
+    expect((await stat(shared)).mode & 0o777).toBe(0o751);
+    expect((await stat(path)).mode & 0o777).toBe(platform === "darwin" ? 0o600 : 0o644);
+    expect((await stat(state)).mode & 0o777).toBe(0o700);
+    expect((await stat(join(home, ".config/lumio-runtime/runtime.env"))).mode & 0o777).toBe(0o600);
+  }
 });

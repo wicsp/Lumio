@@ -11,7 +11,7 @@ test("POSIX installer verifies synthetic HTTP releases, forwards setup/join argu
   const archiveDir = join(root, "archive"), tools = join(root, "tools"), home = join(root, "home");
   await mkdir(archiveDir); await mkdir(tools); await mkdir(home);
   await writeFile(join(tools, "uname"), '#!/bin/sh\ncase "$1" in -s) printf "%s\\n" "$TEST_OS";; -m) printf "%s\\n" "$TEST_ARCH";; esac\n', { mode: 0o755 });
-  for (const name of ["lumio", "lumio-hub", "lumio-runtime"]) await writeFile(join(archiveDir, name), '#!/bin/sh\nprintf "%s\\n" "$@" > "$HOME/called-$(basename "$0")"\n', { mode: 0o755 });
+  for (const name of ["lumio", "lumio-hub", "lumio-runtime"]) await writeFile(join(archiveDir, name), '#!/bin/sh\nprintf "%s\\n" "$@" > "$HOME/called-$(basename "$0")"\nif [ -t 0 ]; then printf tty; else printf pipe; fi > "$HOME/stdin-$(basename "$0")"\n', { mode: 0o755 });
   const archive = join(root, "lumio-linux-x64.tar.gz");
   const tar = Bun.spawnSync(["tar", "-czf", archive, "-C", archiveDir, "lumio", "lumio-hub", "lumio-runtime"]); expect(tar.exitCode).toBe(0);
   const content = await readFile(archive), hash = createHash("sha256").update(content).digest("hex");
@@ -21,8 +21,9 @@ test("POSIX installer verifies synthetic HTTP releases, forwards setup/join argu
     if (path.endsWith("/SHA256SUMS")) return new Response(`${corrupt ? "0".repeat(64) : hash}  lumio-linux-x64.tar.gz\n`);
     return new Response(content);
   } });
+  const installEnv = { ...process.env, HOME: home, PATH: tools + ":" + process.env.PATH, TEST_OS: "Linux", TEST_ARCH: "x86_64", LUMIO_RELEASE_BASE_URL: server.url.href.replace(/\/$/, "") };
   async function install(args: string[], extra: Record<string, string> = {}) {
-    const child = Bun.spawn(["sh", installer, ...args], { env: { ...process.env, HOME: home, PATH: tools + ":" + process.env.PATH, TEST_OS: "Linux", TEST_ARCH: "x86_64", LUMIO_RELEASE_BASE_URL: server.url.href.replace(/\/$/, ""), ...extra }, stdout: "pipe", stderr: "pipe" });
+    const child = Bun.spawn(["sh", installer, ...args], { env: { ...installEnv, ...extra }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
     const [out, error, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
     return { out, error, code };
   }
@@ -31,6 +32,21 @@ test("POSIX installer verifies synthetic HTTP releases, forwards setup/join argu
     for (const name of ["lumio", "lumio-hub", "lumio-runtime"]) expect((await stat(join(home, ".local/bin", name))).mode & 0o777).toBe(0o755);
     result = await install([]); expect(result.code).toBe(0); expect(await readFile(join(home, "called-lumio-hub"), "utf8")).toBe("setup\n");
     result = await install(["--server"]); expect(result.code).toBe(0); expect(await readFile(join(home, "called-lumio-hub"), "utf8")).toBe("setup\n--server\n");
+    const vault = join(home, "vault with spaces ' and $dollars");
+    result = await install(["--server", "--vault", vault]); expect(result.code).toBe(0);
+    expect(await readFile(join(home, "called-lumio-hub"), "utf8")).toBe(`setup\n--server\n--vault\n${vault}\n`);
+    expect((await install(["--vault"])).error).toContain("用法");
+    expect((await install(["runtime", "--vault", vault])).error).toContain("用法");
+    const script = Bun.which("script");
+    if (script) {
+      const command = 'cat "$TEST_INSTALLER" | sh -s -- --vault "$TEST_VAULT"';
+      const args = process.platform === "darwin" ? [script, "-q", "/dev/null", "sh", "-c", command] : [script, "-q", "-e", "-c", command, "/dev/null"];
+      const child = Bun.spawn(args, { env: { ...installEnv, TEST_INSTALLER: installer, TEST_VAULT: vault }, stdin: "ignore", stdout: "pipe", stderr: "pipe", timeout: 10_000 });
+      const [code] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+      expect(code).toBe(0);
+      expect(await readFile(join(home, "stdin-lumio-hub"), "utf8")).toBe("tty");
+      expect(await readFile(join(home, "called-lumio-hub"), "utf8")).toBe(`setup\n--vault\n${vault}\n`);
+    }
     result = await install(["runtime", "--hub", "https://synthetic.example", "--code", "synthetic-pairing-code"]); expect(result.code).toBe(0);
     expect(await readFile(join(home, "called-lumio-runtime"), "utf8")).toBe("join\n--hub\nhttps://synthetic.example\n--code\nsynthetic-pairing-code\n");
     expect(result.out + result.error).not.toContain("synthetic-pairing-code");
