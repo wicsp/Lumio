@@ -37,6 +37,27 @@ export const RuntimeJoin = z.strictObject({
   token: z.string().min(1).describe("只在这一次响应里出现；同名的旧令牌已吊销"),
 });
 
+/** `POST /v1/client-invites`（human）：为另一台机器上的 CLI 生成配对码（`lumio login`）。 */
+export const ClientInviteRequest = z.strictObject({
+  name: z.string().regex(/^[a-z0-9][a-z0-9@._-]{0,63}$/).describe("令牌标签，如 cli@macbook"),
+});
+
+export const ClientInvite = z.strictObject({
+  name: ClientInviteRequest.shape.name,
+  code: PairingCode,
+  expires: Timestamp,
+  hub_url: z.url(),
+  command: z.string().min(1).describe("在那台机器上运行的命令，如 lumio login <地址> --code <配对码>"),
+});
+
+/** `POST /v1/client/join`（不需要令牌，只认配对码）：换取一个 human 身份的令牌，写进那台机器的 CLI 配置文件。 */
+export const ClientJoinRequest = z.strictObject({ code: PairingCode });
+
+export const ClientJoin = z.strictObject({
+  actor: idOf("act"),
+  token: z.string().min(1).describe("只在这一次响应里出现"),
+});
+
 /** `GET /v1/runtime/signing-key`（runtime）：Hub 的 Ed25519 公钥，安装提权助手时用（ADR 0020、0021）。 */
 export const HubSigningKey = z.strictObject({
   public_key: z.string().regex(/^[A-Za-z0-9_-]{43}$/).describe("32 字节原始公钥，base64url"),
@@ -55,3 +76,7 @@ export type RuntimeInvite = z.infer<typeof RuntimeInvite>;
 export type RuntimeJoinRequest = z.infer<typeof RuntimeJoinRequest>;
 export type RuntimeJoin = z.infer<typeof RuntimeJoin>;
 export type HubSigningKey = z.infer<typeof HubSigningKey>;
+export type ClientInviteRequest = z.infer<typeof ClientInviteRequest>;
+export type ClientInvite = z.infer<typeof ClientInvite>;
+export type ClientJoinRequest = z.infer<typeof ClientJoinRequest>;
+export type ClientJoin = z.infer<typeof ClientJoin>;

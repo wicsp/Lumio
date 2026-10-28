@@ -12,22 +12,22 @@
 
 ## 范围
 
-### `lumio doctor [--json]`（Mac）
+### `lumio doctor [--json]`
 1. 逐项检查，每项输出 `✓` 或 `✗ <问题>  → <怎么修>`，最后一行汇总；有 `✗` 时退出码 1。`--json` 输出每项的 `{ name, ok, problem?, fix? }`。
    - 配置：配置文件存在、权限 0600、能解析。
    - Hub：`/health` 可达；版本与 CLI 一致（不一致 → "运行 `lumio upgrade`"）；令牌有效（`/v1/actors`）。
-   - launchd：`io.lumio.hub` 已加载（`launchctl print gui/<uid>/io.lumio.hub`）。
+   - 后台服务（Hub 在本机时）：macOS 上 `io.lumio.hub` 已加载（`launchctl print gui/<uid>/io.lumio.hub`），Linux 上 `lumio-hub.service` 在运行；本机执行器同理。
    - vault：`/v1/status` 正常；Hub 的问题列表非空时逐条列出。
-   - Tailscale：远程地址可达（从本机请求 `<LUMIO_PUBLIC_URL>/health`）。
+   - 对外地址（设置了时）：从本机请求 `<LUMIO_PUBLIC_URL>/health` 可达；是 `http://` 且不是本机地址时给出警告（不算失败）。
    - 执行器：每个已登记的执行器在线与否（离线 → 最近一次时间与"在服务器上运行 `lumio-runtime doctor`"）、检测到的 agent 与版本、
      不在适配器验证范围内的版本。
    - 例行任务：`GET /v1/routines` 里有 `problem` 的逐条列出。
    - 待批准的提议数量（有则提示 `lumio proposals`）。
 2. 检查逻辑写成可注入的函数，便于测试。
 
-### `lumio-runtime doctor`（服务器）
+### `lumio-runtime doctor`（执行器所在机器）
 3. 同样的输出格式：`runtime.env` 存在且 0600、能连 Hub 并通过认证、systemd 服务在运行、linger、每个 agent 在 `runtime.env` 的 PATH 里能找到且版本受支持、
-   状态目录权限、待交回的结果数、提权助手（配置了 `LUMIO_RUNTIME_SUDO_COMMAND` 时：助手文件存在且 root 所有、`sudo -n -l` 显示有这一条）。
+   后台服务在运行（systemd 或 launchd）、状态目录权限、待交回的结果数、提权助手（配置了 `LUMIO_RUNTIME_SUDO_COMMAND` 时：助手文件存在且 root 所有、`sudo -n -l` 显示有这一条）。
 
 ### `lumio selftest [--runtime <名称>] [--agents codex,claude-code,pi] [--notes]`
 4. 默认对指定执行器（只登记了一个时自动选它）上检测到的每个 agent，经 Hub 提交 `job submit`（`workdir: "~"`），**提示词要求 agent 不修改任何文件**：
@@ -42,13 +42,13 @@
 7. 自检不需要 `LUMIO_RUNTIME_ALLOWED_COMMANDS`、不提权、不修改工作目录以外的内容。
 
 ### 升级
-8. `lumio upgrade [--version vX.Y.Z]`（Mac）：从 GitHub Release 下载并校验（与 install.sh 相同的逻辑）→ 替换 `~/.local/bin` 里的三个程序 →
-   `launchctl kickstart -k gui/<uid>/io.lumio.hub` → 等待 `/health` 显示新版本。已是最新则直接说明。
-9. `lumio-runtime upgrade [--version …]`（服务器）：同上，替换后 `systemctl --user restart lumio-runtime`；装了提权助手时提示
+8. `lumio upgrade [--version vX.Y.Z]`：从 GitHub Release 下载并校验（与 install.sh 相同的逻辑）→ 替换 `~/.local/bin` 里的三个程序 →
+   重启本机的 Hub 与执行器服务（launchd：`kickstart -k`；systemd：`restart`）→ 等待 `/health` 显示新版本。已是最新则直接说明。
+9. `lumio-runtime upgrade [--version …]`（只有执行器的机器）：同上，替换后重启执行器服务；装了提权助手时提示
    "还需运行 `sudo lumio-runtime install-sudo-helper` 更新助手程序"。
 
 ### 文档
-10. `docs/tasks/README.md` 的"等人类回来处理"改写为：安装（Mac 一行、服务器一行）→ `lumio doctor` → `lumio selftest --notes` →
+10. `docs/tasks/README.md` 的"等人类回来处理"改写为：安装（Hub 一行、每台执行器一行）→ `lumio doctor` → `lumio selftest --notes` →
     只有自检覆盖不到的项目（iPad 上看一眼笔记、合上 Mac 后例行任务补写、提权的真实安装）才需要人手动做。
 
 ## 不做
@@ -59,4 +59,4 @@
 2. 测试：doctor 每一项的正常与异常（注入 HTTP、命令执行与文件系统）；selftest 用真实 Hub + 执行器 + 假 agent 跑完全部项目且通过，
    再分别让假 agent 不记得暗号、不提问、不响应取消，确认对应项目判为失败、其他项目不受影响；`--notes` 用合成 vault；
    upgrade 用本地起的 HTTP 服务模拟 Release，覆盖校验失败不替换、已是最新。
-3. 人类验收：Mac 上 `lumio doctor` 全部 `✓`，`lumio selftest --notes` 全部通过。
+3. 人类验收：`lumio doctor` 全部 `✓`，`lumio selftest --notes` 全部通过。

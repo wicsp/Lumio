@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { CliConfig, HubSigningKey, PairingCode, RuntimeInvite, RuntimeJoin, RuntimeJoinRequest, signingKeyFingerprint } from "../src/index.ts";
+import { CliConfig, ClientInvite, ClientJoinRequest, HubSigningKey, PairingCode, RuntimeInvite, RuntimeJoin, RuntimeJoinRequest, signingKeyFingerprint } from "../src/index.ts";
 
 // ADR 0021：安装与配对的契约。
 const code = "abcdefghijklmnopqrstuvwxyz";
@@ -26,4 +26,11 @@ test("signing key fingerprint is the first 8 bytes of SHA-256, grouped", () => {
   expect(fingerprint).toMatch(/^[0-9a-f]{4}(-[0-9a-f]{4}){3}$/);
   expect(HubSigningKey.parse({ public_key: raw.toString("base64url"), fingerprint }).fingerprint).toBe(fingerprint);
   expect(() => signingKeyFingerprint("xyz")).toThrow();
+});
+
+test("client invites pair another machine's CLI", () => {
+  const invite = { name: "cli@macbook", code, expires: "2026-10-28T10:10:00Z", hub_url: "https://lumio.example.org", command: `lumio login https://lumio.example.org --code ${code}` };
+  expect(ClientInvite.parse(invite)).toEqual(invite);
+  expect(ClientInvite.safeParse({ ...invite, name: "Bad Name" }).success).toBe(false);
+  expect(ClientJoinRequest.safeParse({ code: "short" }).success).toBe(false);
 });
