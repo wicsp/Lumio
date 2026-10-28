@@ -51,7 +51,8 @@ test("login failures keep existing config and hide untrusted response data", asy
 });
 
 const script = Bun.which("script");
-test.skipIf(!script)("lumio login asks the overwrite question on the real terminal even when stdin is a pipe (P2-11)", async () => {
+// 只在 Linux 上用 script 自动验证；macOS 由人工在真实终端验证（PR #46）。
+test.skipIf(!script || process.platform !== "linux")("lumio login asks the overwrite question on the real terminal even when stdin is a pipe (P2-11)", async () => {
   const { home, path } = await fixture();
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, JSON.stringify({ hub_url: "http://127.0.0.1:1", token: "old-token" }), { mode: 0o600 });
