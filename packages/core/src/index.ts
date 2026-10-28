@@ -25,3 +25,4 @@ export * from "./git.ts";
 export { updateIndex } from "./index/store.ts";
 export * from "./task-note.ts";
 export * from "./cron.ts";
+export * from "./terminal.ts";

@@ -35,6 +35,8 @@ test("POSIX installer verifies synthetic HTTP releases, forwards setup/join argu
     const vault = join(home, "vault with spaces ' and $dollars");
     result = await install(["--server", "--vault", vault]); expect(result.code).toBe(0);
     expect(await readFile(join(home, "called-lumio-hub"), "utf8")).toBe(`setup\n--server\n--vault\n${vault}\n`);
+    result = await install(["--vault", vault, "--public-url", "https://mac.synthetic.ts.net"]); expect(result.code).toBe(0);
+    expect(await readFile(join(home, "called-lumio-hub"), "utf8")).toBe(`setup\n--vault\n${vault}\n--public-url\nhttps://mac.synthetic.ts.net\n`);
     expect((await install(["--vault"])).error).toContain("用法");
     expect((await install(["runtime", "--vault", vault])).error).toContain("用法");
     const script = Bun.which("script");

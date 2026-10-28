@@ -44,6 +44,13 @@ export function fillMetadata(input: FillInput, ctx: FillContext): { patch: Recor
   if (type === "paper" && missing("citekey") && Citekey.safeParse(input.fileName).success) {
     patch.citekey = input.fileName;
   }
+  // 需要人拨动的开关写进文件，人才知道能改（ADR 0023）；其他默认值仍只在读取时补上。
+  if (type === "task" && missing("status")) patch.status = "todo";
+  if (type === "routine" && missing("status")) patch.status = "active";
+  const assignee = fm.assignee;
+  if (type === "task" && missing("turn") && assignee !== null && typeof assignee === "object" && typeof (assignee as { agent?: unknown }).agent === "string") {
+    patch.turn = "human";
+  }
   const result = CONTRACTS[type].safeParse({ ...fm, ...patch });
   const issues: Issue[] = result.success ? [] : result.error.issues.map((issue) => ({
     path: issue.path.map(String).join("."),

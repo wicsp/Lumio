@@ -11,9 +11,10 @@ try {
   const args = process.argv.slice(2);
   if (args.length === 1 && args[0] === "--version") console.log(version);
   else if (args[0] === "setup") {
-    const { values, positionals } = parseArgs({ args: args.slice(1), options: { vault: { type: "string" }, server: { type: "boolean" }, yes: { type: "boolean" } } });
-    if (positionals.length) throw new HubError("INVALID", "用法：lumio-hub setup [--vault 路径] [--server] [--yes]");
-    await setup(values);
+    const { values, positionals } = parseArgs({ args: args.slice(1), options: { vault: { type: "string" }, server: { type: "boolean" }, yes: { type: "boolean" }, "public-url": { type: "string" } } });
+    if (positionals.length) throw new HubError("INVALID", "用法：lumio-hub setup [--vault 路径] [--server] [--public-url 地址] [--yes]");
+    const { "public-url": publicUrl, ...rest } = values;
+    await setup({ ...rest, ...(publicUrl !== undefined ? { publicUrl } : {}) });
   }
   else if (args.length) await runManagement(args);
   else {

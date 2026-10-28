@@ -2,7 +2,7 @@
 set -eu
 
 fail() { printf 'Lumio 安装失败：%s\n' "$1" >&2; exit 1; }
-usage() { fail '用法：install.sh [--server] [--vault <路径>] [--version vX.Y.Z] [--no-setup]；install.sh runtime --hub <地址> --code <配对码> [--version vX.Y.Z]'; }
+usage() { fail '用法：install.sh [--server] [--vault <路径>] [--public-url <地址>] [--version vX.Y.Z] [--no-setup]；install.sh runtime --hub <地址> --code <配对码> [--version vX.Y.Z]'; }
 mode=hub
 server=no
 setup=yes
@@ -10,11 +10,13 @@ version=
 hub=
 code=
 vault=
+public_url=
 if [ "${1-}" = runtime ]; then mode=runtime; shift; fi
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --server) [ "$mode" = hub ] || usage; server=yes; shift ;;
     --vault) [ "$mode" = hub ] || usage; [ "$#" -ge 2 ] || usage; [ -n "$2" ] || usage; vault=$2; shift 2 ;;
+    --public-url) [ "$mode" = hub ] || usage; [ "$#" -ge 2 ] || usage; [ -n "$2" ] || usage; public_url=$2; shift 2 ;;
     --no-setup) setup=no; shift ;;
     --version) [ "$#" -ge 2 ] || usage; version=$2; shift 2 ;;
     --hub) [ "$mode" = runtime ] || usage; [ "$#" -ge 2 ] || usage; hub=$2; shift 2 ;;
@@ -90,6 +92,7 @@ else
   set -- "$bin/lumio-hub" setup
   if [ "$server" = yes ]; then set -- "$@" --server; fi
   if [ -n "$vault" ]; then set -- "$@" --vault "$vault"; fi
+  if [ -n "$public_url" ]; then set -- "$@" --public-url "$public_url"; fi
   # curl | sh owns stdin; reconnect setup to the controlling terminal if one exists.
   if [ ! -t 0 ] && ( : < /dev/tty ) 2>/dev/null; then
     "$@" < /dev/tty || fail 'lumio-hub setup'

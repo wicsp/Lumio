@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { chmod, chown, copyFile, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, parse } from "node:path";
-import { createInterface } from "node:readline/promises";
+import { askTerminal, openTerminal } from "@lumio/core";
 import { HubSigningKey, RuntimeInfo, signingKeyFingerprint } from "@lumio/schema";
 import { readConfig, RuntimeError } from "./config.ts";
 import { environmentText, optionalFile } from "./pairing.ts";
@@ -12,9 +12,8 @@ export interface SudoPaths { binary: string; config: string; state: string; sudo
 const paths: SudoPaths = { binary: "/usr/local/libexec/lumio-sudo-helper", config: "/etc/lumio/sudo.json", state: "/var/lib/lumio-sudo", sudoers: "/etc/sudoers.d/lumio" };
 interface Account { name: string; uid: number; gid: number; home: string }
 async function confirmFingerprint(): Promise<boolean> {
-  const input = createInterface({ input: process.stdin, output: process.stdout });
-  try { return (await input.question("确认与 Hub 上 lumio-hub signing-key 显示的指纹一致？输入 yes：")).trim() === "yes"; }
-  finally { input.close(); }
+  const terminal = openTerminal();
+  return terminal ? (askTerminal(terminal, "确认与 Hub 上 lumio-hub signing-key 显示的指纹一致？输入 yes：") ?? "").trim() === "yes" : false;
 }
 /** Runs as the runtime user, including when requested by the root installer. */
 export async function configureSudoEnvironment(home: string, command?: string) {
@@ -78,7 +77,7 @@ export async function installSudoHelper(args: string[], options: {
     for (const file of [target.sudoers, target.config, target.binary]) await rm(file, { force: true });
     await restart(); log("提权助手已卸载；已用凭据记录保留"); return;
   }
-  if (!(options.interactive ?? (process.stdin.isTTY && process.stdout.isTTY))) throw new RuntimeError("需要交互终端核对 Hub 公钥指纹；未安装提权助手");
+  if (!(options.interactive ?? Boolean(openTerminal()))) throw new RuntimeError("需要交互终端核对 Hub 公钥指纹；未安装提权助手");
   const config = readConfig({ ...runtimeEnv, LUMIO_RUNTIME_STATE_DIR: runtimeEnv.LUMIO_RUNTIME_STATE_DIR ?? join(account.home, ".local/share/lumio-runtime") }), fetcher = options.fetch ?? globalThis.fetch;
   async function request<T>(path: string, schema: { parse(value: unknown): T }, body?: unknown): Promise<T> {
     try {
