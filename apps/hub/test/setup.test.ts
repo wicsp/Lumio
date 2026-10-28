@@ -179,3 +179,18 @@ test("source setup and install-service reject the Bun interpreter before writing
     }
   }
 });
+
+test("single-machine setup never asks about Tailscale; --public-url sets the address without changing the binding (P2-11)", async () => {
+  const f = await fixture(); const asked: string[] = [];
+  await setup({ ...f.options, yes: false, publicUrl: "https://mac.synthetic.ts.net", find: (name) => name === "tailscale" ? "/opt/tailscale" : null,
+    ask: async (question, fallback) => { asked.push(question); return fallback; } });
+  expect(asked.some((q) => q.includes("Tailscale"))).toBe(false);
+  const env = parseEnvironment(await readFile(join(f.home, ".config/lumio/hub.env"), "utf8"));
+  expect(env.LUMIO_PUBLIC_URL).toBe("https://mac.synthetic.ts.net");
+  expect(env.LUMIO_HUB_LISTEN).toBe("127.0.0.1:7420");
+  asked.length = 0;
+  await setup({ ...f.options, yes: false, find: (name) => name === "tailscale" ? "/opt/tailscale" : null, ask: async (question, fallback) => { asked.push(question); return fallback; } });
+  expect(asked.some((q) => q.includes("Tailscale"))).toBe(false);
+  expect(parseEnvironment(await readFile(join(f.home, ".config/lumio/hub.env"), "utf8")).LUMIO_PUBLIC_URL).toBe("https://mac.synthetic.ts.net"); // 重跑沿用
+});
+

@@ -32,9 +32,14 @@ export class Pairing {
   }
   invite(kind: "runtime" | "client", name: string, identity: Identity) {
     const url = this.config.publicUrl;
-    if (!url) throw new HubError("INVALID", "Hub 还没有对外地址：服务器模式用 lumio-hub setup --server 设置；单机模式想让别的机器连进来，也需要先设置一个它们能访问的地址（如 Tailscale 地址）");
+    if (!url) throw new HubError("INVALID", "Hub 还没有对外地址（别的机器连 Hub 用的地址）。单机模式：lumio-hub setup --public-url <地址>（如 Tailscale serve 的 https 地址）；服务器模式：lumio-hub setup --server");
     return this.store.db.transaction(() => {
       let actor = identity.actor;
+      if (kind === "client") {
+        // 令牌标签全局唯一：同名标签属于别的身份时拒绝，避免顶掉别人的令牌。
+        const taken = this.store.tokens().find((t) => t.label === name && !t.revoked && t.actor_id !== actor.id);
+        if (taken) throw new HubError("CONFLICT", "这个名称已被其他身份的令牌使用，请用 --name 换一个");
+      }
       if (kind === "runtime") {
         const existing = this.store.actors().find((a) => a.name === name);
         if (existing && existing.role !== "runtime") throw new HubError("CONFLICT", "名称已被其他角色的身份使用");
@@ -69,10 +74,12 @@ export class Pairing {
       const actor = this.store.actors().find((a) => a.id === row.actor)!;
       if (kind === "runtime") this.revokeActor(actor.id);
       const label = kind === "runtime" ? `runtime-${row.name}-${this.now().toISOString().slice(0, 10)}` : row.name;
-      // A label is not an identity: another human's identically named client must keep its credential.
+      // 同一身份重新登录同一台机器：吊销旧令牌再新建（P2-11），不累积仍然有效的令牌。
+      // 标签被别的身份占用（邀请之后才出现）时拒绝。
       const collision = this.store.tokens().find((t) => t.label === label);
-      if (collision) this.store.db.query("UPDATE tokens SET label=? WHERE label=?").run(`${label}#${crypto.randomUUID()}`, label);
-      const token = this.store.createToken(label, actor.name);
+      if (collision && collision.actor_id !== actor.id && !collision.revoked) throw invalid();
+      // replaceToken：吊销同名旧令牌、把旧标签改名留作审计，再新建。
+      const token = this.store.replaceToken(label, actor.name);
       this.store.audit({ actor, label }, `${kind}.join`, "allow", undefined, "applied");
       return kind === "runtime" ? RuntimeJoin.parse({ name: row.name, actor: actor.id, token }) : ClientJoin.parse({ actor: actor.id, token });
     })();

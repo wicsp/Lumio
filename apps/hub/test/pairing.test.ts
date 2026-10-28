@@ -112,3 +112,24 @@ test("real Hub + CLI runtime add + join with temporary HOME connects a foregroun
   daemon.kill("SIGTERM"); expect(await daemon.exited).toBe(0); daemon = undefined;
   expect(await new Response(child.stderr).text()).toBe(""); expect(await new Response(child.stdout).text()).toContain("已连上 Hub");
 }, 15_000);
+
+test("logging in again from the same machine revokes the previous CLI token; a label held by another identity is refused (P2-11)", async () => {
+  const first = ClientJoin.parse(await (await request("/v1/client/join", undefined, { code: (await invite("client", "cli@mac")).code })).json());
+  const second = ClientJoin.parse(await (await request("/v1/client/join", undefined, { code: (await invite("client", "cli@mac")).code })).json());
+  expect(hub.store.authenticate(`Bearer ${first.token}`)).toBeNull();
+  expect(hub.store.authenticate(`Bearer ${second.token}`)).not.toBeNull();
+  expect(hub.store.tokens().filter((t) => t.label === "cli@mac")).toHaveLength(1);
+  // 别的身份（agent）已有同名令牌：不能为它顶掉。
+  hub.store.createToken("cli@shared", "agent");
+  const refused = await request("/v1/client-invites", human, { name: "cli@shared" });
+  expect(refused.status).toBe(409);
+  expect(ApiError.parse(await refused.json()).error.message).toContain("--name");
+});
+
+test("without a public URL the pairing hint names --public-url and --server", async () => {
+  await hub.stop(); hub = await boot("");
+  const response = await request("/v1/runtime-invites", human, { name: "server" });
+  expect(response.status).toBe(400);
+  const message = ApiError.parse(await response.json()).error.message;
+  expect(message).toContain("--public-url"); expect(message).toContain("--server");
+});

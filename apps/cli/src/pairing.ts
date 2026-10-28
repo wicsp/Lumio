@@ -1,17 +1,16 @@
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 import { createClient } from "@lumio/api-client";
+import { askTerminal, openTerminal } from "@lumio/core";
 import { CliConfig } from "@lumio/schema";
 import { hubCredentials, readCliConfig } from "./config.ts";
 
 async function confirmOverwrite(): Promise<boolean> {
-  if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("已有 CLI 配置，请在交互终端确认是否覆盖");
-  const input = createInterface({ input: process.stdin, output: process.stdout });
-  try { return (await input.question("已有 CLI 配置，覆盖？输入 yes：")).trim() === "yes"; }
-  finally { input.close(); }
+  const terminal = openTerminal();
+  if (!terminal) throw new Error("已有 CLI 配置，请在交互终端确认是否覆盖");
+  return (askTerminal(terminal, "已有 CLI 配置，覆盖？输入 yes：") ?? "").trim() === "yes";
 }
 async function writeConfig(path: string, value: unknown) {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 }); await chmod(dirname(path), 0o700);

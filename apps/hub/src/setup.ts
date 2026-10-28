@@ -1,7 +1,7 @@
 import * as files from "node:fs/promises";
 import { homedir, hostname } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { createInterface } from "node:readline/promises";
+import { askTerminal, openTerminal } from "@lumio/core";
 import { CliConfig, RuntimeName } from "@lumio/schema";
 import { readConfig, isLoopback } from "./config.ts";
 import { HubError } from "./errors.ts";
@@ -56,7 +56,7 @@ export function runtimeName(host: string): string {
   return RuntimeName.parse(host.toLowerCase().replace(/[^a-z0-9._-]/g, "-").replace(/^[^a-z0-9]+/, "").slice(0, 64) || "local");
 }
 export interface SetupOptions {
-  vault?: string; server?: boolean; yes?: boolean; interactive?: boolean; home?: string; host?: string; platform?: string;
+  vault?: string; server?: boolean; yes?: boolean; interactive?: boolean; publicUrl?: string; terminalPath?: string; home?: string; host?: string; platform?: string;
   binary?: string; runtimeBinary?: string; env?: NodeJS.ProcessEnv; uid?: number;
   run?: Run; find?: (program: string) => string | null; fetch?: (input: string, init?: RequestInit) => Promise<Response>; files?: typeof files;
   now?: () => number; sleep?: (ms: number) => Promise<void>; log?: (line: string) => void;
@@ -72,13 +72,13 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
   if (![binary, runtimeBinary].every((path) => isAbsolute(path) && !/[\r\n]/.test(path))) throw new HubError("INVALID", "程序路径必须是绝对路径");
   const run = options.run ?? runCommand, find = options.find ?? ((program) => Bun.which(program));
   const log = options.log ?? console.log, fetcher = options.fetch ?? fetch;
-  const interactive = options.interactive ?? Boolean(options.ask || process.stdin.isTTY);
-  if (!interactive) log("当前没有交互终端，将沿用已有配置或采用默认值。更改 vault：lumio-hub setup --vault <路径>；更改服务器地址或 Tailscale：在交互终端运行 lumio-hub setup --server。");
+  const terminal = options.ask ? undefined : openTerminal(options.terminalPath);
+  const interactive = options.interactive ?? Boolean(options.ask || terminal);
+  if (!interactive) log("当前没有交互终端，将沿用已有配置或采用默认值。更改 vault：lumio-hub setup --vault <路径>；设置对外地址：lumio-hub setup --public-url <地址>；服务器模式与 Tailscale：在交互终端运行 lumio-hub setup --server。");
   const ask = async (question: string, fallback: string) => {
     if (options.yes || !interactive) return fallback;
     if (options.ask) return (await options.ask(question, fallback)).trim() || fallback;
-    const input = createInterface({ input: process.stdin, output: process.stdout });
-    try { return (await input.question(`${question} [${fallback}]：`)).trim() || fallback; } finally { input.close(); }
+    return terminal ? (askTerminal(terminal, `${question} [${fallback}]：`) ?? "").trim() || fallback : fallback;
   };
   async function optional(path: string) {
     try { return await fs.readFile(path, "utf8"); } catch (cause) { if ((cause as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw cause; }
@@ -113,13 +113,14 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
   const envFile = join(home, ".config/lumio/hub.env");
   const previousEnv = parseEnvironment(await optional(envFile) ?? "");
   let listen = env.LUMIO_HUB_LISTEN ?? previousEnv.LUMIO_HUB_LISTEN ?? "127.0.0.1:7420";
-  let publicUrl = env.LUMIO_PUBLIC_URL ?? previousEnv.LUMIO_PUBLIC_URL ?? "";
+  let publicUrl = options.publicUrl ?? env.LUMIO_PUBLIC_URL ?? previousEnv.LUMIO_PUBLIC_URL ?? "";
   if (options.server) {
     listen = await ask("监听地址", env.LUMIO_HUB_LISTEN ?? (previousEnv.LUMIO_PUBLIC_URL ? listen : "0.0.0.0:7420"));
     publicUrl = await ask("对外地址（如 https://lumio.example.org）", publicUrl);
   }
   const tailscale = find("tailscale");
-  if (tailscale && (await ask("用 Tailscale 提供对外地址？yes/no", "no")) === "yes") {
+  // Tailscale 只是补充（ADR 0022）：只在服务器模式下询问；单机模式用 --public-url 直接设置对外地址。
+  if (options.server && options.publicUrl === undefined && tailscale && (await ask("用 Tailscale 提供对外地址？yes/no", "no")) === "yes") {
     const mode = await ask("Tailscale 方式：serve / ip", "serve");
     const result = await run([tailscale, "status", "--json"]);
     let status: { Self?: { DNSName?: string; TailscaleIPs?: string[] } };

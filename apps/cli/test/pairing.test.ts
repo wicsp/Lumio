@@ -49,3 +49,22 @@ test("login failures keep existing config and hide untrusted response data", asy
     expect(await readFile(path, "utf8")).toBe(old);
   }
 });
+
+const script = Bun.which("script");
+test.skipIf(!script)("lumio login asks the overwrite question on the real terminal even when stdin is a pipe (P2-11)", async () => {
+  const { home, path } = await fixture();
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, JSON.stringify({ hub_url: "http://127.0.0.1:1", token: "old-token" }), { mode: 0o600 });
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => Response.json(joined) });
+  try {
+    const main = new URL("../src/main.ts", import.meta.url).pathname;
+    const command = `echo piped | HOME=${JSON.stringify(home)} ${JSON.stringify(process.execPath)} ${JSON.stringify(main)} login http://127.0.0.1:${server.port} --code ${code}`;
+    const args = process.platform === "darwin" ? [script!, "-q", "/dev/null", "sh", "-c", command] : [script!, "-q", "-e", "-c", command, "/dev/null"];
+    const child = Bun.spawn(args, { stdin: "pipe", stdout: "pipe", stderr: "pipe", timeout: 20_000 });
+    await Bun.sleep(1500); child.stdin.write("yes\n"); child.stdin.flush(); child.stdin.end();
+    const [exit, output] = await Promise.all([child.exited, new Response(child.stdout).text()]);
+    expect(exit).toBe(0);
+    expect(output).toContain("覆盖？输入 yes");
+    expect(CliConfig.parse(JSON.parse(await readFile(path, "utf8"))).token).toBe("synthetic-client-token");
+  } finally { await server.stop(true); }
+}, 30_000);
