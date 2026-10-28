@@ -25,12 +25,17 @@
 | [P2-4](P2-4-task-rounds.md) ✅ | 任务笔记里的一问一答（做完即可日常使用） | 后端（Codex） | P2-3 |
 | [P2-5](P2-5-routines.md) ✅ | 例行任务 | 后端（Codex） | P2-4 |
 | [P2-6](P2-6-sudo-gate.md) ✅ | `lumio-runtime sudo`：高权限命令的审批门（ADR 0020） | 后端（Codex） | P2-4 |
+| [P2-7](P2-7-release-and-mac-setup.md) | 发布编译好的程序；Mac 上一条命令装好 Hub 与 CLI（ADR 0021） | 后端（Codex） | P2-6 |
+| [P2-8](P2-8-runtime-pairing.md) | 加一台服务器：一次性配对码；一条命令装提权助手 | 后端（Codex） | P2-7 |
+| [P2-9](P2-9-doctor-selftest-upgrade.md) | `lumio doctor`、`lumio selftest`、`upgrade` | 后端（Codex） | P2-8 |
 
 P1 的设计决定见 ADR 0014、0016、0017、0018；P2 见 ADR 0019、0020 与修订后的 ADR 0005；契约见 `packages/schema/src/` 中的 `query.ts`、`actor.ts`、`operation.ts`、`proposal.ts`、`api.ts`。
 
 ## 等人类回来处理
 
 开发期间人类不在电脑旁；需要人动手的验收与交叉 review 集中记在这里，处理完一项删一项。
+
+**2026-10-28 起暂停下面的手动验收**：第一次验收卡在安装上（ADR 0021）。P2-7 至 P2-9 做完后，安装只需 Mac 一行、服务器一行，大部分项目由 `lumio selftest` 自动验证，P2-9 会把这张表改写成只剩自检覆盖不到的几项。
 
 | 事项 | 来自 | 怎么做 |
 |---|---|---|

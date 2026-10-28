@@ -154,6 +154,10 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 - **只做单用户、单机模式**：Hub 与 vault 都在 Mac 上，Mac 开着才能用。iPad、手机经 iCloud 同步来的修改等同于人直接改文件。
 - 以后的服务器模式：Hub 与 vault 都搬到服务器上，其他设备都是客户端；**不存在两边各有一份、互相同步的模式**。
   服务器模式下 Obsidian 怎么用尚未决定（ADR 0017 第 5 节）。
+- **安装**（ADR 0021）：打 `v*` 标签时 CI 编译 `lumio`、`lumio-hub`、`lumio-runtime` 发布到 GitHub Releases；`install.sh` 下载、校验、装到 `~/.local/bin`。
+  Mac 上运行 `lumio-hub setup`（可重复运行）：身份、CLI 配置文件 `~/.config/lumio/config.json`、launchd、Tailscale 转发。
+  加服务器：`lumio runtime add <名称>` 生成一次性配对码（10 分钟、一次有效），服务器上 `lumio-runtime join` 换取令牌并装好 systemd 用户服务。
+  `lumio doctor`、`lumio-runtime doctor` 检查安装；`lumio selftest` 用真实 agent 验证关键路径；`upgrade` 升级。Nix 以后作为另一种安装方式。
 - **远程访问用 Tailscale**：Hub 仍只监听 `127.0.0.1`，由 `tailscale serve` 转发并提供 HTTPS；服务器上的 Runtime 也这样访问。
 - **Hub 只讲 HTTP**；以后上公网时由反向代理（Caddy、Cloudflare Tunnel）负责 HTTPS，代码不改。
 - 所有地址可配置；只信任配置过的反向代理传来的客户端信息。
@@ -240,6 +244,6 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 | P0 | `lumio new paper`、`lumio new idea`、`lumio sync`；vault 目录结构；source / post / asset 契约 | ✅ |
 | P0-7 | 迁移真实 vault 到新目录 | ✅ |
 | P1 | 本地查询与 `export bib`；Hub（身份与令牌、查询 API、监听、自动提交、操作与提议框架）；按引用导出与断链检查；skill | ✅（pi 验收待补） |
-| P2 | 执行器与派活（P2-1 ✅、P2-2 ✅、P2-3 ✅、P2-4 ✅、P2-5 ✅、P2-6 ✅）：执行器登记、可靠的派活核心、三种 agent 适配器、任务笔记里的一问一答、例行任务、`lumio-runtime sudo` 审批的门 | ✅（真实 agent 与服务器人工验收待办） |
+| P2 | 执行器与派活（P2-1 ✅、P2-2 ✅、P2-3 ✅、P2-4 ✅、P2-5 ✅、P2-6 ✅）：执行器登记、可靠的派活核心、三种 agent 适配器、任务笔记里的一问一答、例行任务、`lumio-runtime sudo` 审批的门；安装、配对与自检（P2-7 至 P2-9，ADR 0021） | 功能 ✅，安装与自检进行中 |
 | P3 | 飞书 Bot（派活、批准、通知）、审批模型、资产到期提醒、多维表格镜像；Chrome 插件入库论文 | |
-| P4 | Web Dashboard、Docker / Nix、对外 SDK、手机端 | |
+| P4 | Web Dashboard、Docker / Nix 安装、对外 SDK、手机端 | |

@@ -10,7 +10,7 @@
 
 ## 现在在哪一步（2026-10-25）
 
-P0 与 P0-7（真实 vault 迁移）已完成；P1-1 至 P1-4 已完成（P1-4 的链接部分由 ADR 0018 取代）；P1-5（按引用导出、断链检查、Hub 备份）已完成；P1 已完成（skill 在 Claude Code、Codex 上验收通过，pi 待补）；P2 已设计完（ADR 0019），P2-1（执行器骨架）已完成，实验室服务器已作为执行器在线；P2-2（派活的可靠核心）已完成；P2-3（agent 适配器）已完成；P2-4（任务笔记里的一问一答，`related` 与 `link.add` 已删除）已完成，P2 已能日常使用；P2-5（例行任务）已完成；P2-6（`lumio-runtime sudo` 审批门，ADR 0020）已完成，P2 的开发全部完成，Codex 已交叉 review P2-3 至 P2-5 并修复；下一步是人工验收，然后规划 P3。需要人类动手的验收见 [`tasks/README.md`](tasks/README.md) 的"等人类回来处理"。阶段表见 [`DESIGN.md`](DESIGN.md) 第 8 节。
+P0 与 P0-7（真实 vault 迁移）已完成；P1-1 至 P1-4 已完成（P1-4 的链接部分由 ADR 0018 取代）；P1-5（按引用导出、断链检查、Hub 备份）已完成；P1 已完成（skill 在 Claude Code、Codex 上验收通过，pi 待补）；P2 已设计完（ADR 0019），P2-1（执行器骨架）已完成，实验室服务器已作为执行器在线；P2-2（派活的可靠核心）已完成；P2-3（agent 适配器）已完成；P2-4（任务笔记里的一问一答，`related` 与 `link.add` 已删除）已完成，P2 已能日常使用；P2-5（例行任务）已完成；P2-6（`lumio-runtime sudo` 审批门，ADR 0020）已完成，P2 的功能全部完成，Codex 已交叉 review P2-3 至 P2-5 并修复。第一次人工验收卡在安装上，因此先做 **P2-7 至 P2-9：一条命令安装、服务器配对、自检**（ADR 0021），之后再验收、规划 P3。需要人类动手的验收见 [`tasks/README.md`](tasks/README.md) 的"等人类回来处理"。阶段表见 [`DESIGN.md`](DESIGN.md) 第 8 节。
 
 ## 文档各管什么
 
@@ -64,6 +64,7 @@ P0 与 P0-7（真实 vault 迁移）已完成；P1-1 至 P1-4 已完成（P1-4 �
 | [0018](adr/0018-links-in-body-ai-recommends.md) | 链接写在正文里；AI 只推荐不写链接；`related` 弃用 | Implemented |
 | [0019](adr/0019-hub-runtimes-tasks-rounds.md) | 执行器只能领活和回报；AI 的汇报不能派活；`lumio sudo` 需要批准 | Accepted（P2） |
 | [0020](adr/0020-privileged-exec-signed-approvals.md) | 高权限命令：Hub 签名的一次性批准凭据，root 助手程序自己验证 | Implemented |
+| [0021](adr/0021-install-pairing-selftest.md) | 安装、配对与自检：发布编译好的程序，Mac 一行、服务器一行，`doctor`/`selftest` 代替手动清单 | Accepted（P2-7 至 P2-9） |
 
 **安全**
 | 编号 | 一句话 | 状态 |
