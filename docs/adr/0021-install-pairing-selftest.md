@@ -1,6 +1,6 @@
 # 0021 安装、配对与自检：用户不需要手抄命令
 
-- 状态：Accepted（人类 2026-10-28 确认方向：仓库公开，用 GitHub Releases 发布；Mac 上继续用 launchd；Nix 以后再做）；第 2、3 节按 ADR 0022 修订
+- 状态：Accepted（人类 2026-10-28 确认方向：仓库公开，用 GitHub Releases 发布；Mac 上继续用 launchd；Nix 以后再做）；第 2、3 节按 ADR 0022 修订。第 1、2 节已实现（P2-7）
 - 日期：2026-10-28
 - 领域：Hub 与运行、安全、流程
 - 影响：ADR 0017（部署）、ADR 0019（执行器登记）、ADR 0020（root 助手的安装）；`packages/schema` 新增 setup.ts
@@ -68,3 +68,4 @@ P2 的功能都已实现，但第一次手动验收就卡在安装上：
 
 ## 修订记录
 - 2026-10-28：按 ADR 0022 修订第 2、3 节（人类批准）：不再假设 Mac 与 iCloud/Obsidian；setup 同时支持 macOS 与 Linux，并在本机装执行器；`--server` 服务器模式；Tailscale 降为补充；配对地址统一取 `LUMIO_PUBLIC_URL`；执行器在 macOS 上用 launchd；新增 `lumio login`。
+- 2026-10-28：P2-7 合并（#39），第 1、2 节标为已实现；真实安装待人工验收
