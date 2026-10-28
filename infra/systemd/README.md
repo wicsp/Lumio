@@ -9,7 +9,28 @@ CLI 自动读取 `~/.config/lumio/config.json`；执行器 PATH 取安装时的 
 日志：`journalctl --user -u lumio-hub -u lumio-runtime -n 30`。
 没有可用的 systemd 用户服务时，安装命令会打印手动运行的方法。
 需要退出登录后继续运行时，请管理员运行 `loginctl enable-linger <用户名>`。
-HTTPS 见 [Caddy 示例](../README.md#caddy-反向代理)。远程配对由 P2-8 提供。
+HTTPS 见 [Caddy 示例](../README.md#caddy-反向代理)。
+
+## 加一台执行器或 CLI
+
+在已配置好的 CLI 上运行 `lumio runtime add server`，把输出的一行命令粘到目标机器上运行。
+配对码 10 分钟内有效且只能用一次；程序会下载、保存配置并启动执行器，成功后显示检测到的 agent。
+Hub 必须先设置其他机器可访问的 `LUMIO_PUBLIC_URL`（可重新运行 `lumio-hub setup --server`）。
+同名执行器重新配对会吊销全部旧令牌；移除设备用 `lumio runtime remove server`，历史 Job 保留。
+
+已有程序时也可直接运行 `lumio-runtime join --hub <Hub 地址> --code <配对码>`。
+`runtime.env` 保留标签、允许命令等其他设置，PATH 更新为当前 shell 的 PATH。
+没有 systemd 用户服务时，join 输出 nohup / crontab 的手动启动方法；启动超时用上面的日志命令排查，
+修好后运行 `lumio-runtime install-service`，无需重新配对。
+macOS 同样支持配对，使用 `io.lumio.runtime` launchd 服务，日志在执行器状态目录。
+
+另一台机器上的 CLI：在已登录的 CLI 上运行 `lumio login-code --name cli@macbook`，
+将输出的 `lumio login <Hub 地址> --code <配对码>` 命令粘到新机器上运行。
+需要在本机创建笔记时追加 `--vault <本机 vault 路径>`。已有配置必须在交互终端确认覆盖。
+配置保存在 `~/.config/lumio/config.json`（0600），`lumio logout` 移除其中的令牌；环境变量仍优先于配置文件。
+
+有 root 权限的 Linux 服务器还可运行 `sudo ~/.local/bin/lumio-runtime install-sudo-helper`，
+按 [提权助手说明](../sudo-helper.md) 核对指纹后安装。
 
 ## 手动安装
 

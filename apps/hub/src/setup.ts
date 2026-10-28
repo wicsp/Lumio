@@ -218,5 +218,5 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
   // The installer only prints service status; keep credentials out even on child failure.
   for (const line of installed.stdout.split("\n").filter(Boolean)) if (!line.includes(token) && !line.includes(runtimeToken)) log(line);
   if (options.server) log("Caddy 示例（按实际域名与监听地址修改）：\nlumio.example.org {\n  reverse_proxy 127.0.0.1:" + config.port + "\n}");
-  log(`vault：${vault}\nHub：${url}${config.publicUrl ? `\n对外地址：${config.publicUrl}` : ""}\n日志：${platform === "linux" ? "journalctl --user -u lumio-hub -u lumio-runtime" : state}\n本机执行器：${name}\n加一台执行器：lumio runtime add <名称>（P2-8）`);
+  log(`vault：${vault}\nHub：${url}${config.publicUrl ? `\n对外地址：${config.publicUrl}` : ""}\n日志：${platform === "linux" ? "journalctl --user -u lumio-hub -u lumio-runtime" : state}\n本机执行器：${name}\n加一台执行器：lumio runtime add <名称>`);
 }

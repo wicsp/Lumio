@@ -4,7 +4,7 @@ import { ApiClientError, createClient } from "../src/index.ts";
 
 const note = { type: "idea", title: "中文 / #", path: "research/ideas/test.md" } as const;
 function mock(body: unknown, status = 200, inspect?: (url: URL, init: RequestInit | undefined) => void): typeof fetch {
-  return (async (url: URL, init?: RequestInit) => { inspect?.(url, init); return Response.json(body, { status }); }) as typeof fetch;
+  return (async (url: URL, init?: RequestInit) => { inspect?.(url, init); return Response.json(body, { status }); }) as unknown as typeof fetch;
 }
 
 test("client encodes references/options and validates all success schemas", async () => {
@@ -113,4 +113,26 @@ test("job client validates request defaults, Job output and errors at all four e
   const client = createClient({ url: "http://localhost", token: "synthetic", fetch: mock(job, 200, () => { throw new Error("must not send invalid input"); }) });
   await expect(Promise.resolve().then(() => client.submitJob({ runtime: "Bad Name", run: { kind: "command", argv: [] } }))).rejects.toMatchObject({ code: "INVALID" });
   await expect(Promise.resolve().then(() => client.job("bad"))).rejects.toMatchObject({ code: "INVALID" });
+});
+
+test("pairing client validates invites and join, omits anonymous authorization, and supports empty 204 removal", async () => {
+  const actor = "act_00000000000000000000000001", code = "a".repeat(26);
+  const invite = { name: "server", actor, code, expires: "2026-10-28T00:10:00Z", hub_url: "https://synthetic.example", command: "synthetic-command" };
+  const cases = [
+    { path: "/v1/runtime-invites", body: invite, payload: { name: "server" }, call: (c: ReturnType<typeof createClient>) => c.runtimeInvite("server") },
+    { path: "/v1/client-invites", body: { name: "cli@synthetic", code, expires: invite.expires, hub_url: invite.hub_url, command: "synthetic-command" }, payload: { name: "cli@synthetic" }, call: (c: ReturnType<typeof createClient>) => c.clientInvite("cli@synthetic") },
+    { path: "/v1/client/join", body: { actor, token: "synthetic-token" }, payload: { code }, call: (c: ReturnType<typeof createClient>) => c.clientJoin(code) },
+  ];
+  for (const row of cases) {
+    const client = createClient({ url: "https://synthetic.example", fetch: mock(row.body, 200, (url, init) => {
+      expect(url.pathname).toBe(row.path); expect(init?.method).toBe("POST"); expect(new Headers(init?.headers).has("Authorization")).toBe(false); expect(JSON.parse(String(init?.body))).toEqual(row.payload);
+    }) });
+    expect(await row.call(client)).toEqual(row.body);
+    await expect(row.call(createClient({ url: "https://synthetic.example", fetch: mock({ ...row.body, extra: "secret-response" }) }))).rejects.toMatchObject({ code: "INTERNAL" });
+    await expect(row.call(createClient({ url: "https://synthetic.example", fetch: mock({ error: { code: "UNAUTHENTICATED", message: "pairing failed" } }, 401) }))).rejects.toMatchObject({ code: "UNAUTHENTICATED", status: 401 });
+  }
+  const client = createClient({ url: "https://synthetic.example", token: "synthetic", fetch: (async (url: URL, init: RequestInit) => {
+    expect(url.pathname).toBe("/v1/runtimes/server"); expect(init.method).toBe("DELETE"); expect(new Headers(init.headers).get("Authorization")).toBe("Bearer synthetic"); return new Response(null, { status: 204 });
+  }) as unknown as typeof fetch });
+  expect(await client.removeRuntime("server")).toBeUndefined();
 });

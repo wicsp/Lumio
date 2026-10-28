@@ -1,8 +1,27 @@
-# 高权限命令助手（P2-6，Linux）
+# 高权限命令助手（Linux）
 
 只在自己的、有 root 权限的服务器安装。学校服务器不配置，申请会立即返回“此执行器不支持提权”。
 
-先在 Mac 上运行 `lumio-hub signing-key`，得到 32 字节原始 Ed25519 公钥（base64url）；
+## 自动安装与升级
+
+执行器配对并连上 Hub 后，在 Hub 所在机器运行 `lumio-hub signing-key` 查看公钥和指纹，
+在执行器所在服务器以执行器账号运行：
+
+```sh
+sudo ~/.local/bin/lumio-runtime install-sudo-helper
+```
+
+核对两边显示的指纹一致后输入 `yes`。非交互终端、未确认指纹或 sudoers 校验失败时不会安装。
+安装命令取得当前执行器身份，复制程序、保存公钥配置、校验并安装 sudoers，自动设置 runtime.env 和重启用户服务。
+程序与配置由 root 所有，运行账号的配置在降回该账号后更新。重启失败会打印手动重启提示。
+升级时重新运行同一条安装命令。
+
+卸载：`sudo ~/.local/bin/lumio-runtime install-sudo-helper --uninstall`。
+卸载会移除助手、配置、sudoers 和 runtime.env 中的提权命令，保留 `/var/lib/lumio-sudo/used`，避免旧批准凭据被再次使用。
+
+## 手动安装
+
+先在 Hub 所在机器运行 `lumio-hub signing-key`，得到 32 字节原始 Ed25519 公钥（base64url）；
 用 `lumio runtime list --json` 找到服务器的 `actor`（`act_…`）。公钥不是密钥；Hub 私钥只在 hub.sqlite 中，备份权限为 0600。
 
 在服务器构建 `bun run --cwd apps/runtime build`，然后由人用 root 完成下面的安装（替换占位值）：

@@ -1,15 +1,23 @@
 import type { Actor } from "@lumio/schema";
 
+export const PAIRING_OPERATIONS = ["runtime.invite", "runtime.join", "client.invite", "client.join", "runtime.remove", "runtime.signing-key"] as const;
+export type PairingOperation = typeof PAIRING_OPERATIONS[number];
+
 export const QUERY_OPERATIONS = ["search", "show", "links", "check", "status"] as const;
 export type QueryOperation = (typeof QUERY_OPERATIONS)[number];
 export const EXISTING_OPERATIONS = [...QUERY_OPERATIONS, "health", "operations", "actors", "proposals", "proposal.accept", "proposal.reject", "task.dispatch", "routine.followup", "routines", "exec.privileged"] as const;
 export const RUNTIME_OPERATIONS = ["runtime.register", "runtime.sync", "runtime.ack", "runtime.results", "runtimes", "runtime.privileged.status", "runtime.privileged.report"] as const;
 export const JOB_OPERATIONS = ["job.submit", "jobs", "job.show", "job.cancel"] as const;
-export interface AuthorizationRequest { operation: (typeof EXISTING_OPERATIONS)[number] | (typeof RUNTIME_OPERATIONS)[number] | (typeof JOB_OPERATIONS)[number]; includePrivate?: boolean }
+export interface AuthorizationRequest { operation: (typeof EXISTING_OPERATIONS)[number] | (typeof RUNTIME_OPERATIONS)[number] | (typeof JOB_OPERATIONS)[number] | PairingOperation; includePrivate?: boolean }
 export type Decision = { result: "allow" } | { result: "deny"; reason: string } | { result: "needs_approval" };
 
 // One rule table is the only place that decides access. Public health is explicit.
 export const AUTHORIZATION_RULES = [
+  ...PAIRING_OPERATIONS.flatMap((operation) => ([null, "human", "agent", "runtime"] as const).map((role) => ({
+    role, operation, includePrivate: false,
+    decision: (operation.endsWith(".join") ? role === null : operation === "runtime.signing-key" ? role === "runtime" : role === "human")
+      ? { result: "allow" as const } : { result: "deny" as const, reason: "请求未获授权" },
+  }))),
   { role: null, operation: "health", includePrivate: false, decision: { result: "allow" } },
   ...(["human", "agent"] as const).map((role) => ({ role, operation: "health", includePrivate: false, decision: { result: "allow" } } as const)),
   ...EXISTING_OPERATIONS.flatMap((operation) => [false, true].map((includePrivate) => ({

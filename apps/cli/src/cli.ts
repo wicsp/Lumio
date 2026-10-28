@@ -1,3 +1,4 @@
+import { runPairing } from "./pairing.ts";
 import { randomBytes } from "node:crypto";
 import { parseArgs } from "node:util";
 import {
@@ -25,7 +26,7 @@ export interface CliOptions {
 export async function runCli(args: string[], options: CliOptions = {}): Promise<number> {
   try { return await executeCli(args, options); }
   catch (cause) {
-    if (!["job", "task", "routine", "proposals"].includes(args[0] ?? "") || !args.includes("--json")) throw cause;
+    if (!["job", "task", "routine", "proposals", "runtime"].includes(args[0] ?? "") || !args.includes("--json")) throw cause;
     const error = cause instanceof ApiClientError ? {
       code: cause.code, message: cause.message, operation: cause.operation, reason: cause.reason, proposal: cause.proposal,
     } : { code: "INVALID", message: cause instanceof Error ? cause.message : "无法执行命令" };
@@ -37,6 +38,7 @@ export async function runCli(args: string[], options: CliOptions = {}): Promise<
 async function executeCli(args: string[], options: CliOptions): Promise<number> {
   const log = options.log ?? console.log;
   if (args.length === 1 && args[0] === "--version") { log(version); return 0; }
+  if (["login", "login-code", "logout"].includes(args[0] ?? "") || (args[0] === "runtime" && ["add", "remove"].includes(args[1] ?? ""))) return runPairing(args, { log, warn: options.warn });
   if (args[0] === "job") return runJobs(args.slice(1), log);
   if (args[0] === "task") return runTasks(args.slice(1), log);
   if (args[0] === "routine") return runRoutines(args.slice(1), log);

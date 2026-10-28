@@ -1,3 +1,4 @@
+import { signingKey } from "./pairing.ts";
 import { Privileged } from "./privileged.ts";
 import { parseArgs } from "node:util";
 import { ActorRole } from "@lumio/schema";
@@ -17,7 +18,7 @@ export async function runManagement(args: string[], log: (line: string) => void 
   }
   if (kind === "signing-key" && positionals.length === 1 && !Object.keys(values).length) {
     const store = await HubStore.open(stateDirectory());
-    try { log(new Privileged(store).publicKey()); } finally { store.close(); }
+    try { const key = signingKey(new Privileged(store).publicKey()); log(`${key.public_key}\n指纹：${key.fingerprint}`); } finally { store.close(); }
     return;
   }
   const actorCreate = kind === "actor" && action === "create" && positionals.length === 3 && values.actor === undefined && ActorRole.safeParse(values.role).success;
