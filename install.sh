@@ -85,7 +85,7 @@ case ":${PATH-}:" in
 esac
 [ "$setup" = yes ] || exit 0
 if [ "$mode" = runtime ]; then
-  "$bin/lumio-runtime" join --hub "$hub" --code "$code" || fail 'lumio-runtime join（配对在 P2-8 实现，请确认版本支持）'
+  "$bin/lumio-runtime" join --hub "$hub" --code "$code" || fail 'lumio-runtime join'
 else
   set -- "$bin/lumio-hub" setup
   if [ "$server" = yes ]; then set -- "$@" --server; fi

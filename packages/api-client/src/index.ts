@@ -1,3 +1,4 @@
+import { ClientInvite, ClientInviteRequest, ClientJoin, ClientJoinRequest, RuntimeInvite, RuntimeInviteRequest } from "@lumio/schema";
 import { JobRun, Job, JobSpec, JobStatus, RoutineInfo, RuntimeName, RuntimeInfo, Actor, OperationRequest, OperationResult, Proposal, ProposalStatus, ApiError, CheckResult, LinksResult, NoteDetail, SearchResult, type ApiErrorCode, type NoteRef } from "@lumio/schema";
 
 export class ApiClientError extends Error {
@@ -24,18 +25,19 @@ export interface SubmitJobInput {
 export interface QueryOptions { includePrivate?: boolean }
 export interface SearchOptions extends QueryOptions { type?: NoteRef["type"]; limit?: number }
 
-export function createClient(options: { url: string; token: string; fetch?: typeof globalThis.fetch }) {
+export function createClient(options: { url: string; token?: string; fetch?: typeof globalThis.fetch }) {
   const fetcher = options.fetch ?? globalThis.fetch;
   const base = options.url.replace(/\/+$/, "");
-  async function request<T>(path: string, params: Record<string, string>, schema: { parse(value: unknown): T }, body?: unknown): Promise<T> {
+  async function request<T>(path: string, params: Record<string, string>, schema: { parse(value: unknown): T }, body?: unknown, method?: string): Promise<T> {
     try {
       const url = new URL(`${base}${path}`);
       for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
       const response = await fetcher(url, {
-        method: body === undefined ? "GET" : "POST",
-        headers: { Authorization: `Bearer ${options.token}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+        method: method ?? (body === undefined ? "GET" : "POST"),
+        headers: { ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}), ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }), redirect: "error",
       });
+      if (response.status === 204 && response.ok) return schema.parse(undefined);
       const responseBody: unknown = await response.json();
       if (!response.ok) throw new ApiClientError(ApiError.parse(responseBody).error, response.status);
       return schema.parse(responseBody);
@@ -52,6 +54,10 @@ export function createClient(options: { url: string; token: string; fetch?: type
   }
   const queryParams = (options: QueryOptions): Record<string, string> => options.includePrivate === undefined ? {} : { include_private: String(options.includePrivate) };
   return {
+    runtimeInvite(name: string) { return request("/v1/runtime-invites", {}, RuntimeInvite, validate(RuntimeInviteRequest, { name })); },
+    clientInvite(name: string) { return request("/v1/client-invites", {}, ClientInvite, validate(ClientInviteRequest, { name })); },
+    clientJoin(code: string) { return request("/v1/client/join", {}, ClientJoin, validate(ClientJoinRequest, { code })); },
+    removeRuntime(name: string) { return request(`/v1/runtimes/${encodeURIComponent(validate(RuntimeName, name))}`, {}, { parse: () => undefined }, undefined, "DELETE"); },
     submitJob(input: SubmitJobInput) { return request("/v1/jobs", {}, Job, validate(SubmitJob, input)); },
     jobs(status?: JobStatus, task?: string, routine?: string) {
       return request("/v1/jobs", { ...(status === undefined ? {} : { status: validate(JobStatus, status) }), ...(task === undefined ? {} : { task }),

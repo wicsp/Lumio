@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Actor, ApiError, CheckResult, LinksResult, NoteDetail, SearchResult, Timestamp, type ApiErrorCode } from "@lumio/schema";
-import { AUTHORIZATION_RULES, JOB_OPERATIONS, RUNTIME_OPERATIONS, authorize, type AuthorizationRequest } from "../src/authorize.ts";
+import { AUTHORIZATION_RULES, JOB_OPERATIONS, RUNTIME_OPERATIONS, PAIRING_OPERATIONS, authorize, type AuthorizationRequest } from "../src/authorize.ts";
 import { readConfig } from "../src/config.ts";
 import { ROUTES, startHub } from "../src/server.ts";
 import type { HubStatus } from "../src/watch.ts";
@@ -48,21 +48,22 @@ test("default binding is loopback; public health and every registered route call
   expect(hub!.server.hostname).toBe("127.0.0.1");
   const first = hub!.store.createProposal({ op: "task.dispatch", args: { task: "task_00000000000000000000000012", trigger: "cli" } }, "fixture", hub!.store.actors()[0]!.id);
   const second = hub!.store.createProposal({ op: "task.dispatch", args: { task: "task_00000000000000000000000013", trigger: "cli" } }, "fixture", hub!.store.actors()[0]!.id);
-  const paths = { check: "/v1/check", actors: "/v1/actors", proposals: "/v1/proposals", operations: "/v1/operations", "proposal.accept": `/v1/proposals/${first.id}/accept`, "proposal.reject": `/v1/proposals/${second.id}/reject`, status: "/v1/status", health: "/health", search: "/v1/search?q=index", show: "/v1/notes/Main", links: "/v1/notes/Main/links", routines: "/v1/routines" };
+  const paths = { "runtime.invite": "/v1/runtime-invites", "client.invite": "/v1/client-invites", "runtime.join": "/v1/runtime/join", "client.join": "/v1/client/join", "runtime.signing-key": "/v1/runtime/signing-key", "runtime.remove": "/v1/runtimes/missing", check: "/v1/check", actors: "/v1/actors", proposals: "/v1/proposals", operations: "/v1/operations", "proposal.accept": `/v1/proposals/${first.id}/accept`, "proposal.reject": `/v1/proposals/${second.id}/reject`, status: "/v1/status", health: "/health", search: "/v1/search?q=index", show: "/v1/notes/Main", links: "/v1/notes/Main/links", routines: "/v1/routines" };
   const existingRoutes = ROUTES.filter((route) => !([...RUNTIME_OPERATIONS, ...JOB_OPERATIONS] as readonly string[]).includes(route.operation));
   for (const route of existingRoutes) {
     const response = route.operation === "operations"
       ? await fetch(`${base()}/v1/operations`, { method: "POST", headers: { Authorization: `Bearer ${human}`, "Content-Type": "application/json" }, body: JSON.stringify({ operation: { op: "task.dispatch", args: { task: "task_00000000000000000000000012", trigger: "cli" } } }) })
-      : await request(paths[route.operation as keyof typeof paths], route.operation === "health" ? undefined : human, {}, "method" in route ? route.method : "GET");
+      : await request(paths[route.operation as keyof typeof paths], (route.operation === "health" || route.operation.endsWith(".join")) ? undefined : human, {}, "method" in route ? route.method : "GET");
     // 合成 vault 里的 Task 没有 assignee，派活会在授权之后被拒绝（400）；这里只验证每条路由都先经过 authorize。
-    expect(response.status).toBe(route.operation === "operations" || route.operation === "proposal.accept" ? 400 : 200);
+    const pairingStatus = { "runtime.invite": 400, "client.invite": 400, "runtime.join": 401, "client.join": 401, "runtime.signing-key": 403, "runtime.remove": 404 };
+    expect(response.status).toBe(pairingStatus[route.operation as keyof typeof pairingStatus] ?? (route.operation === "operations" || route.operation === "proposal.accept" ? 400 : 200));
     if (route.operation === "health") expect(await response.json()).toEqual({ ok: true, version: "0.0.0-dev" });
     expect(decisions.at(-1)?.operation).toBe(route.operation === "operations" ? "task.dispatch" : route.operation);
   }
   expect(decisions).toHaveLength(existingRoutes.length);
 });
 
-test("authentication is required everywhere except health, including unknown routes", async () => {
+test("authentication is required for queries and unknown routes", async () => {
   for (const path of ["/v1/check", "/v1/search?q=index", "/v1/notes/Main", "/v1/notes/Main/links", "/missing"]) {
     for (const token of [undefined, "wrong", `lumio_${"x".repeat(43)}`, revoked]) await error(path, token, 401, "UNAUTHENTICATED");
   }
@@ -156,7 +157,9 @@ test("authorization table is exhaustively checked, including private=false", () 
     const actor = rule.role === null ? null : Actor.parse({ id: "act_00000000000000000000000001", name: "test", role: rule.role, created: "2026-01-01T00:00:00Z" });
     const decision = authorize(actor, { operation: rule.operation, includePrivate: rule.includePrivate });
     expect(decision).toEqual(rule.decision);
-    const expected = rule.operation === "exec.privileged" && rule.role === "runtime" && !rule.includePrivate ? "needs_approval" : (RUNTIME_OPERATIONS as readonly string[]).includes(rule.operation)
+    const expected = (PAIRING_OPERATIONS as readonly string[]).includes(rule.operation)
+      ? ((rule.operation.endsWith(".join") ? rule.role === null : rule.operation === "runtime.signing-key" ? rule.role === "runtime" : rule.role === "human") ? "allow" : "deny")
+      : rule.operation === "exec.privileged" && rule.role === "runtime" && !rule.includePrivate ? "needs_approval" : (RUNTIME_OPERATIONS as readonly string[]).includes(rule.operation)
       ? ((rule.operation === "runtimes" ? rule.role === "human" : rule.role === "runtime") ? "allow" : "deny")
       : (JOB_OPERATIONS as readonly string[]).includes(rule.operation) ? (rule.role === "human" ? "allow" : "deny")
       : rule.role === "runtime" || rule.operation === "exec.privileged" ? "deny" : rule.role !== "agent" ? "allow"

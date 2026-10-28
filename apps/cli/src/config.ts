@@ -9,12 +9,12 @@ export const setupHint = "还没有配置，请先运行 install.sh 或 lumio-hu
 export function readCliConfig(options: { env?: NodeJS.ProcessEnv; home?: string; warn?: (line: string) => void } = {}) {
   const env = options.env ?? process.env;
   const path = join(options.home ?? env.HOME ?? homedir(), ".config/lumio/config.json");
-  let file: CliConfig | undefined;
+  let file: { hub_url: string; token?: string; vault?: string } | undefined;
   try {
     const mode = statSync(path).mode & 0o777;
     let value: unknown;
     try { value = JSON.parse(readFileSync(path, "utf8")); } catch { throw new Error("CLI 配置无法解析，请重新运行 lumio-hub setup"); }
-    const parsed = CliConfig.safeParse(value);
+    const parsed = CliConfig.partial({ token: true }).safeParse(value);
     if (!parsed.success) throw new Error("CLI 配置格式不合法，请重新运行 lumio-hub setup");
     file = parsed.data;
     if (mode !== 0o600) (options.warn ?? console.error)(`配置文件权限不是 0600，请运行 chmod 600 '${path.replaceAll("'", "'\\''")}'`);

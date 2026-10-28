@@ -3,7 +3,7 @@ import { chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/prom
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ApiError, JOB_PROTOCOL_VERSION, RuntimeHeartbeat, RuntimeInfo, RuntimeRegistration, RuntimeSync } from "@lumio/schema";
-import { authorize, EXISTING_OPERATIONS, RUNTIME_OPERATIONS } from "../src/authorize.ts";
+import { authorize, EXISTING_OPERATIONS, RUNTIME_OPERATIONS, PAIRING_OPERATIONS } from "../src/authorize.ts";
 import { readConfig } from "../src/config.ts";
 import { ROUTES, startHub } from "../src/server.ts";
 import { HubStore } from "../src/store.ts";
@@ -89,7 +89,7 @@ test("malformed JSON, wrong protocol and unknown fields return INVALID without c
 });
 
 test("runtime is denied at every existing endpoint before body parsing; other roles cannot register or sync", async () => {
-  for (const route of ROUTES.filter((route) => route.operation !== "operations" && !(RUNTIME_OPERATIONS as readonly string[]).includes(route.operation))) {
+  for (const route of ROUTES.filter((route) => route.operation !== "operations" && !(PAIRING_OPERATIONS as readonly string[]).includes(route.operation) && !(RUNTIME_OPERATIONS as readonly string[]).includes(route.operation))) {
     const path = { "job.submit": "/v1/jobs", jobs: "/v1/jobs", "job.show": "/v1/jobs/missing", "job.cancel": "/v1/jobs/missing/cancel", operations: "/v1/operations", actors: "/v1/actors", proposals: "/v1/proposals", "proposal.accept": "/v1/proposals/missing/accept", "proposal.reject": "/v1/proposals/missing/reject",
       status: "/v1/status", health: "/health", search: "/v1/search", check: "/v1/check", links: "/v1/notes/Main/links", show: "/v1/notes/Main", routines: "/v1/routines" };
     const response = await request(path[route.operation as keyof typeof path], runtime, "method" in route && route.method === "POST" ? "{" : undefined);
