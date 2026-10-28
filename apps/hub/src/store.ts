@@ -16,7 +16,7 @@ export class HubStore {
     const db = new Database(path, { create: true, strict: true });
     try {
       await chmod(path, 0o600);
-      db.exec(`PRAGMA foreign_keys=ON;
+      db.exec(`PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;
         CREATE TABLE IF NOT EXISTS actors (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, role TEXT NOT NULL, created TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS tokens (label TEXT PRIMARY KEY, actor_id TEXT NOT NULL REFERENCES actors(id), hash TEXT NOT NULL UNIQUE,
           created TEXT NOT NULL, revoked TEXT);
@@ -54,6 +54,17 @@ export class HubStore {
     this.db.query("INSERT INTO tokens VALUES (?, ?, ?, ?, NULL)")
       .run(label, actor.id, createHash("sha256").update(token).digest("hex"), new Date().toISOString());
     return token;
+  }
+
+  /** Preserve old token labels for audit while invalidating their credentials. */
+  replaceToken(label: string, actorName: string): string {
+    return this.db.transaction(() => {
+      if (this.tokens().some((token) => token.label === label)) {
+        this.revokeToken(label);
+        this.db.query("UPDATE tokens SET label=? WHERE label=?").run(`${label}#${newId("act", new Date(), randomBytes)}`, label);
+      }
+      return this.createToken(label, actorName);
+    })();
   }
 
   tokens() { return this.db.query<{ label: string; actor_id: string; created: string; revoked: string | null }, []>("SELECT label, actor_id, created, revoked FROM tokens ORDER BY created, label").all(); }

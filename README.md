@@ -22,7 +22,41 @@
 | `sdk/python` | 实验侧的薄客户端（后期），类型从导出的 JSON Schema 生成 |
 | `infra/` | Docker / Nix（后期） |
 
-## 开始
+## 安装
+
+macOS arm64、Linux x64/arm64，无需安装 Bun：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/wicsp/Lumio/main/install.sh | sh
+```
+
+程序装到 `~/.local/bin`；按终端提示把它加入 PATH。默认单机模式会配置 Hub、本机执行器和 CLI，
+vault 默认在 `~/.config/lumio/vault`，可用 `lumio-hub setup --vault /已有的笔记目录` 指定。
+安装可重复运行，CLI 配置文件会自动更新，令牌不显示在终端。
+指定已有 vault 也可以只运行一行：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/wicsp/Lumio/main/install.sh | sh -s -- --vault "/已有的笔记目录"
+```
+
+安装脚本会尝试从终端询问设置；没有终端时使用已有配置或默认值，并打印实际配置与修改方法。
+`setup` 和 `install-service` 须用安装后的独立程序运行，源码入口会拒绝安装后台服务。
+
+服务器模式（Hub 与 vault 在服务器上）：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/wicsp/Lumio/main/install.sh | sh -s -- --server
+```
+
+设置监听地址与对外地址，HTTPS 交给反向代理，见 [Caddy 示例](infra/README.md#caddy-反向代理)。
+没有公网地址时，Tailscale 是一种办法；检测到已安装时 setup 可以帮助配置。
+加执行器使用 `lumio runtime add <名称>`（P2-8 提供）。安装到的版本须已包含相应命令。
+
+只下载程序或指定版本：在安装脚本参数里使用 `--no-setup` 或 `--version vX.Y.Z`。
+后台服务、日志与手动安装见 [macOS](infra/launchd/README.md)、[Linux](infra/systemd/README.md)。
+数据可用任意 Markdown 编辑器编辑，Lumio 不管理编辑器配置。
+
+## 源码开发
 
 ```sh
 bun install

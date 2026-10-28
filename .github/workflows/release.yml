@@ -1,0 +1,41 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+      - name: Compile, sign, and package
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=${GITHUB_REF_NAME#v}
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][a-zA-Z0-9.-]+)?$ ]] || exit 1
+          mkdir -p release
+          for platform in darwin-arm64 linux-x64 linux-arm64; do
+            mkdir -p "build/$platform"
+            for app in cli hub runtime; do
+              binary=lumio-$app
+              if [ "$app" = cli ]; then binary=lumio; fi
+              bun build --compile --target="bun-$platform" --define "LUMIO_VERSION=\"$VERSION\"" "apps/$app/src/main.ts" --outfile "build/$platform/$binary"
+              if [ "$platform" = darwin-arm64 ]; then
+                codesign --force --sign - "build/$platform/$binary"
+                codesign --verify "build/$platform/$binary"
+              fi
+            done
+            tar -czf "release/lumio-$platform.tar.gz" -C "build/$platform" lumio lumio-hub lumio-runtime
+          done
+          (cd release && shasum -a 256 lumio-*.tar.gz > SHA256SUMS)
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" release/* --verify-tag --generate-notes

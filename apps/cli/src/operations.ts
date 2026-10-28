@@ -1,3 +1,4 @@
+import { hubCredentials } from "./config.ts";
 import { createClient } from "@lumio/api-client";
 import { ProposalStatus, type Proposal } from "@lumio/schema";
 
@@ -9,8 +10,7 @@ export async function runOperations(args: string[], values: { reason?: string; s
   if ((!list && !decision) || values.reason !== undefined || (!list && values.status !== undefined)) {
     throw new Error("用法：lumio proposals [--status pending|accepted|rejected] [--json]；lumio proposals accept|reject <ID> [--json]");
   }
-  const url = process.env.LUMIO_HUB_URL, token = process.env.LUMIO_TOKEN;
-  if (!url || !token) throw new Error("提议必须经过 Hub 执行授权与安全写入，请设置 LUMIO_HUB_URL 和 LUMIO_TOKEN");
+  const { url, token } = hubCredentials();
   const client = createClient({ url, token });
   async function render(proposals: Proposal[]) {
     const names = new Map((await client.actors()).map((actor) => [actor.id, actor.name]));
