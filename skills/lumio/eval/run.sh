@@ -47,7 +47,7 @@ status=$?
 set -e
 if [ "$status" -ne 0 ]; then
   keep=1
-  echo "agent 退出码：$status（137 表示被系统强制结束）" >&2
+  echo "agent 退出码：${status}（137 表示被系统强制结束）" >&2
   echo "---- agent 的 stderr（最后 40 行，已去掉 Node 的文件描述符警告）----" >&2
   grep -v -e 'unmanaged mode' -e 'trace-warnings' "$work/err.txt" | tail -40 >&2
 fi
