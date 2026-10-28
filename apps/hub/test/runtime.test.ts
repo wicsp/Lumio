@@ -130,7 +130,7 @@ test("real daemon with fake PATH survives Hub restart, detects agents once and b
     await chmod(path, 0o700);
   }
   const child = Bun.spawn([process.execPath, new URL("../../runtime/src/main.ts", import.meta.url).pathname], { env: {
-    PATH: bin, LUMIO_HUB_URL: base(), LUMIO_TOKEN: runtime, LUMIO_RUNTIME_NAME: registration.name,
+    HOME: temp, PATH: bin, LUMIO_HUB_URL: base(), LUMIO_TOKEN: runtime, LUMIO_RUNTIME_NAME: registration.name,
     LUMIO_RUNTIME_TAGS: "gpu:4,lab", LUMIO_RUNTIME_MAX_CONCURRENT: "2", LUMIO_RUNTIME_POLL_SECONDS: "0.05", LUMIO_RUNTIME_STATE_DIR: join(temp, "runtime-state"),
   }, stdout: "pipe", stderr: "pipe" });
   daemon = child;

@@ -38,7 +38,7 @@ async function localCount(query: string) {
 }
 async function startRuntime(url = base(), binary?: string) {
   const child = Bun.spawn(binary ? [binary] : [process.execPath, new URL("../../runtime/src/main.ts", import.meta.url).pathname], { env: {
-    PATH: temp, LUMIO_HUB_URL: url, LUMIO_TOKEN: runtime, LUMIO_RUNTIME_NAME: "server", LUMIO_RUNTIME_MAX_CONCURRENT: "1", LUMIO_RUNTIME_POLL_SECONDS: "0.03",
+    HOME: temp, PATH: temp, LUMIO_HUB_URL: url, LUMIO_TOKEN: runtime, LUMIO_RUNTIME_NAME: "server", LUMIO_RUNTIME_MAX_CONCURRENT: "1", LUMIO_RUNTIME_POLL_SECONDS: "0.03",
     LUMIO_RUNTIME_STATE_DIR: runtimeState, LUMIO_RUNTIME_ALLOWED_COMMANDS: process.execPath,
   }, stdout: "pipe", stderr: "pipe" });
   daemons.push(child); output.push(new Response(child.stdout).text()); errors.push(new Response(child.stderr).text());

@@ -10,7 +10,8 @@ import { runJobs } from "./jobs.ts";
 import { runTasks } from "./tasks.ts";
 import { runRoutines } from "./routines.ts";
 import { runOperations } from "./operations.ts";
-import { version } from "../package.json";
+import { version } from "./version.ts";
+import { readCliConfig, hubCredentials, localVault } from "./config.ts";
 import { syncVault } from "./sync.ts";
 import { fetchPaperSource, type PaperFetcher } from "./paper-source.ts";
 import { runQuery } from "./query.ts";
@@ -35,6 +36,7 @@ export async function runCli(args: string[], options: CliOptions = {}): Promise<
 
 async function executeCli(args: string[], options: CliOptions): Promise<number> {
   const log = options.log ?? console.log;
+  if (args.length === 1 && args[0] === "--version") { log(version); return 0; }
   if (args[0] === "job") return runJobs(args.slice(1), log);
   if (args[0] === "task") return runTasks(args.slice(1), log);
   if (args[0] === "routine") return runRoutines(args.slice(1), log);
@@ -52,8 +54,7 @@ async function executeCli(args: string[], options: CliOptions): Promise<number> 
     if (positionals.length !== 2 || positionals[1] !== "list" || Object.keys(values).some((key) => key !== "json")) {
       throw new Error("用法：lumio runtime list [--json]");
     }
-    const url = process.env.LUMIO_HUB_URL, token = process.env.LUMIO_TOKEN;
-    if (!url || !token) throw new Error("runtime list 需要设置非空的 LUMIO_HUB_URL 和 LUMIO_TOKEN");
+    const { url, token } = hubCredentials(readCliConfig({ warn: options.warn }));
     const runtimes = await createClient({ url, token }).runtimes();
     if (values.json) log(JSON.stringify(runtimes));
     else for (const runtime of runtimes) {
@@ -69,8 +70,7 @@ async function executeCli(args: string[], options: CliOptions): Promise<number> 
   if (values.reason !== undefined || values.status !== undefined) throw new Error("reason 和 status 只用于链接与提议命令");
   if (command === "hub" && positionals[1] === "status") {
     if (positionals.length !== 2 || Object.keys(values).length) throw new Error("用法：lumio hub status");
-    const url = process.env.LUMIO_HUB_URL, token = process.env.LUMIO_TOKEN;
-    if (!url || !token) throw new Error("hub status 需要设置非空的 LUMIO_HUB_URL 和 LUMIO_TOKEN");
+    const { url, token } = hubCredentials(readCliConfig({ warn: options.warn }));
     const endpoint = new URL(url);
     if (!["http:", "https:"].includes(endpoint.protocol) || endpoint.username || endpoint.password) throw new Error("LUMIO_HUB_URL 必须是 HTTP(S) 地址");
     endpoint.pathname = `${endpoint.pathname.replace(/\/$/, "")}/v1/status`;
@@ -90,13 +90,13 @@ async function executeCli(args: string[], options: CliOptions): Promise<number> 
       || (bib && (values.json !== undefined || values["include-private"] !== undefined))) {
       throw new Error("用法：lumio search <查询> [--type 类型] [--limit N] [--include-private] [--json]；lumio show|links <引用> [--include-private] [--json]；lumio check [--include-private] [--json]；lumio export bib [--from 引用] [--out 路径]");
     }
-    const url = process.env.LUMIO_HUB_URL;
-    const token = process.env.LUMIO_TOKEN;
+    const config = readCliConfig({ warn: options.warn });
+    const { url, token } = config;
     if (query && ((url !== undefined) !== (token !== undefined) || url === "" || token === "")) {
-      throw new Error("远程查询需要同时设置非空的 LUMIO_HUB_URL 和 LUMIO_TOKEN");
+      throw new Error("还没有配置，请先运行 install.sh 或 lumio-hub setup；远程查询需要同时设置非空的 LUMIO_HUB_URL 和 LUMIO_TOKEN");
     }
     const remote = query && url && token ? createClient({ url, token }) : undefined;
-    return runQuery(remote ? undefined : resolveVault(values.vault, process.env.LUMIO_VAULT), {
+    return runQuery(remote ? undefined : resolveVault(localVault(values.vault, config), undefined), {
       command: bib ? "export" : command as "search" | "show" | "links" | "check", argument: positionals[1] ?? "",
       type: values.type, limit: values.limit, out: values.out, from: values.from,
       includePrivate: values["include-private"], json: values.json,
@@ -110,7 +110,7 @@ async function executeCli(args: string[], options: CliOptions): Promise<number> 
     || [values.type, values.limit, values.out, values.from, values.json, values["include-private"]].some((v) => v !== undefined)) {
     throw new Error("用法：lumio sync [--vault <路径>] [--dry-run]；lumio new idea <标题> [--vault <路径>]；lumio new paper <输入> [--vault <路径>] [--abbr <缩写>]");
   }
-  const root = resolveVault(values.vault, process.env.LUMIO_VAULT);
+  const root = resolveVault(localVault(values.vault, readCliConfig({ warn: options.warn })), undefined);
   const now = new Date();
   const ctx = {
     now, tz: Intl.DateTimeFormat().resolvedOptions().timeZone,

@@ -56,7 +56,7 @@ test("default binding is loopback; public health and every registered route call
       : await request(paths[route.operation as keyof typeof paths], route.operation === "health" ? undefined : human, {}, "method" in route ? route.method : "GET");
     // 合成 vault 里的 Task 没有 assignee，派活会在授权之后被拒绝（400）；这里只验证每条路由都先经过 authorize。
     expect(response.status).toBe(route.operation === "operations" || route.operation === "proposal.accept" ? 400 : 200);
-    if (route.operation === "health") expect(await response.json()).toEqual({ ok: true, version: "0.0.0" });
+    if (route.operation === "health") expect(await response.json()).toEqual({ ok: true, version: "0.0.0-dev" });
     expect(decisions.at(-1)?.operation).toBe(route.operation === "operations" ? "task.dispatch" : route.operation);
   }
   expect(decisions).toHaveLength(existingRoutes.length);
@@ -171,7 +171,7 @@ test("authorization table is exhaustively checked, including private=false", () 
 });
 
 async function spawnCli(args: string[], remote: boolean, extraEnv: Record<string, string | undefined> = {}) {
-  const process = Bun.spawn([Bun.which("bun")!, cliMain, ...args], { env: { ...globalThis.process.env,
+  const process = Bun.spawn([Bun.which("bun")!, cliMain, ...args], { env: { ...globalThis.process.env, HOME: temp,
     LUMIO_VAULT: remote ? undefined : vault, LUMIO_STATE_DIR: join(temp, "cli-state"),
     LUMIO_HUB_URL: remote ? base() : undefined, LUMIO_TOKEN: remote ? human : undefined, ...extraEnv,
   }, stdout: "pipe", stderr: "pipe" });
@@ -250,7 +250,7 @@ test("status is authenticated, shares private authorization, and CLI prints its 
   expect(cli.code).toBe(0); expect(cli.stderr).toBe(""); expect(JSON.parse(cli.stdout)).toEqual(status);
   for (const remote of [false, true]) {
     const missing = await spawnCli(["hub", "status"], remote, { LUMIO_TOKEN: undefined });
-    expect(missing.code).toBe(1); expect(missing.stderr).toContain("LUMIO_HUB_URL"); expect(missing.stdout).toBe("");
+    expect(missing.code).toBe(1); expect(missing.stderr).toContain("lumio-hub setup"); expect(missing.stdout).toBe("");
   }
   const denied = await spawnCli(["hub", "status"], true, { LUMIO_TOKEN: "invalid" });
   expect(denied.code).toBe(1); expect(denied.stderr).toContain("401");

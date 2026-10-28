@@ -1,3 +1,4 @@
+import { hubCredentials } from "./config.ts";
 import { parseArgs } from "node:util";
 import { createClient } from "@lumio/api-client";
 import { RoutineFollowup, type Job } from "@lumio/schema";
@@ -20,8 +21,7 @@ export async function runRoutines(args: string[], log: (line: string) => void): 
   const list = action === "list" && positionals.length === 1;
   const followup = action === "followup" && positionals.length === 3 && reference && date;
   if (!list && !followup) throw new Error(usage);
-  const url = process.env.LUMIO_HUB_URL, token = process.env.LUMIO_TOKEN;
-  if (!url || !token) throw new Error("routine 命令需要设置非空的 LUMIO_HUB_URL 和 LUMIO_TOKEN");
+  const { url, token } = hubCredentials();
   const client = createClient({ url, token });
   const routines = await client.routines();
   if (list) {

@@ -1,3 +1,4 @@
+import { hubCredentials } from "./config.ts";
 import { parseArgs } from "node:util";
 import { createClient } from "@lumio/api-client";
 import { Job, TaskDispatch } from "@lumio/schema";
@@ -11,8 +12,7 @@ export async function runTasks(args: string[], log: (line: string) => void): Pro
   const { values, positionals } = parseArgs({ args, allowPositionals: true, strict: true, options: { json: { type: "boolean" } } });
   const [action, reference] = positionals;
   if (positionals.length !== 2 || !reference || (action !== "continue" && action !== "show")) throw new Error(usage);
-  const url = process.env.LUMIO_HUB_URL, token = process.env.LUMIO_TOKEN;
-  if (!url || !token) throw new Error("task 命令需要设置非空的 LUMIO_HUB_URL 和 LUMIO_TOKEN");
+  const { url, token } = hubCredentials();
   const client = createClient({ url, token });
   const note = await client.show(reference);
   if (note.note.type !== "task" || !note.note.id) throw new Error("这不是一篇有 ID 的任务笔记");

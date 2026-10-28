@@ -1,10 +1,20 @@
-# Mac 登录后启动 Hub
+# macOS 后台服务
 
-这是模板，不会自动安装。Hub 只讲 HTTP，默认监听 `127.0.0.1:7420`。
+通常使用仓库根目录的 `install.sh`：下载已签名的程序后，`lumio-hub setup` 自动安装 Hub 和本机执行器。
+可重复运行来修复配置或更换 vault：`lumio-hub setup --vault /已有目录`。
+服务为 `io.lumio.hub` 与 `io.lumio.runtime`；配置在 `~/Library/LaunchAgents/`。
+Hub 日志在 `~/.local/share/lumio/hub.log`、`hub.err.log`，执行器日志在
+`~/.local/share/lumio-runtime/runtime.log`、`runtime.err.log`。登录后自动启动；重启后需要登录用户会话。
+CLI 自动读取 `~/.config/lumio/config.json`，环境变量可以覆盖其中的配置。
+服务器模式与 HTTPS 见 [Caddy 示例](../README.md#caddy-反向代理)。
+
+## 手动安装
+
+以下保留模板安装方法。Hub 只讲 HTTP，默认监听 `127.0.0.1:7420`。
 
 1. 用 Bun 1.3.x 在 `apps/hub` 中运行 `bun run build`，将 `dist/lumio-hub` 放到固定的绝对路径。
 2. 复制 `io.lumio.hub.plist` 到 `~/Library/LaunchAgents/`，替换所有 `/ABSOLUTE/PATH/TO/…`。
-   launchd 不展开 `~` 或 shell 变量。状态目录必须在 vault/iCloud 外，先创建该目录以便 launchd 打开日志文件。
+   launchd 不展开 `~` 或 shell 变量。状态目录必须在 vault 和外部同步目录之外，先创建该目录以便 launchd 打开日志文件。
 3. 使用同一个 `LUMIO_STATE_DIR` 初始化身份和令牌：
    ```sh
    lumio-hub actor create owner --role human
@@ -19,7 +29,7 @@
    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.lumio.hub.plist
    launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/io.lumio.hub.plist
    ```
-5. 检查 `curl http://127.0.0.1:7420/health`。远程访问由 `tailscale serve` 转发并提供 HTTPS，Hub 仍绑定 loopback。
+5. 检查 `curl http://127.0.0.1:7420/health`。远程访问可由反向代理提供 HTTPS。
    仅在明确配置可信代理时设置 `LUMIO_TRUSTED_PROXY` 为该代理的单个 IP；只有来自该 IP 的请求才能采用
    `X-Forwarded-For` 的第一个有效 IP，其他转发头不参与身份或授权。
 

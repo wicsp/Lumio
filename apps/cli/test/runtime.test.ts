@@ -1,5 +1,7 @@
+import { isolatedHome } from "./test-home.ts";
 import { expect, test } from "bun:test";
 import { RuntimeInfo } from "@lumio/schema";
+const cliHome = isolatedHome();
 
 const main = new URL("../src/main.ts", import.meta.url).pathname;
 const info = RuntimeInfo.parse({ actor: "act_00000000000000000000000001", registration: {
@@ -17,7 +19,7 @@ test("runtime list renders online/offline, last_seen, engines and tags, with sch
     try {
       for (const json of [false, true]) {
         const child = Bun.spawn([process.execPath, main, "runtime", "list", ...(json ? ["--json"] : [])], {
-          env: { ...process.env, LUMIO_HUB_URL: `http://127.0.0.1:${server.port}`, LUMIO_TOKEN: "synthetic-token", LUMIO_VAULT: undefined }, stdout: "pipe", stderr: "pipe",
+          env: { ...process.env, HOME: cliHome, LUMIO_HUB_URL: `http://127.0.0.1:${server.port}`, LUMIO_TOKEN: "synthetic-token", LUMIO_VAULT: undefined }, stdout: "pipe", stderr: "pipe",
         });
         const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
         expect(code).toBe(0); expect(stderr).toBe("");
@@ -34,8 +36,8 @@ test("runtime list requires Hub credentials and rejects unrelated arguments/opti
     [["runtime", "list"], { LUMIO_HUB_URL: "http://localhost:7420", LUMIO_TOKEN: undefined }],
     [["runtime", "list", "extra"], {}], [["runtime", "list", "--vault", "/tmp"], {}], [["runtime", "unknown"], {}],
   ] as const) {
-    const result = Bun.spawnSync([process.execPath, main, ...args], { env: { ...process.env, ...env }, stdout: "pipe", stderr: "pipe" });
+    const result = Bun.spawnSync([process.execPath, main, ...args], { env: { ...process.env, HOME: cliHome, ...env }, stdout: "pipe", stderr: "pipe" });
     expect(result.exitCode).toBe(1); expect(result.stdout.toString()).toBe("");
-    expect(result.stderr.toString()).toContain("runtime list");
+    expect(result.stderr.toString()).toContain(args.length === 2 && args[1] === "list" ? "lumio-hub setup" : "runtime list");
   }
 });

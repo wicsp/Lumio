@@ -1,3 +1,4 @@
+import { isolatedHome } from "./test-home.ts";
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -8,6 +9,7 @@ import { Paper } from "@lumio/schema";
 import { runCli, type CliOptions } from "../src/cli.ts";
 import type { PaperFetcher } from "../src/paper-source.ts";
 import { fixtureFetcher, paperFixture as fixture } from "./paper-fixtures.ts";
+const cliHome = isolatedHome();
 
 const main = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 let vault: string;
@@ -16,10 +18,17 @@ afterEach(async () => { await rm(vault, { recursive: true, force: true }); });
 
 async function run(args: string[], overrides: CliOptions = {}) {
   const output: string[] = [];
-  const code = await runCli([...args, "--vault", vault], {
-    fetcher: fixtureFetcher, log: (line) => output.push(line), ...overrides,
-  });
-  return { code, output };
+  const previousHome = process.env.HOME;
+  process.env.HOME = cliHome;
+  try {
+    const code = await runCli([...args, "--vault", vault], {
+      fetcher: fixtureFetcher, log: (line) => output.push(line), ...overrides,
+    });
+    return { code, output };
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+  }
 }
 
 test.each([
@@ -70,7 +79,7 @@ test.each([
 test("a real CLI process with piped stdin adds a paper without flags or reading stdin", async () => {
   const preload = fileURLToPath(new URL("./preload-paper-fetch.ts", import.meta.url));
   const proc = Bun.spawn([process.execPath, "--preload", preload, main, "new", "paper", "2403.14720"], {
-    env: { ...process.env, LUMIO_VAULT: vault }, stdin: "pipe", stdout: "pipe", stderr: "pipe",
+    env: { ...process.env, HOME: cliHome, LUMIO_VAULT: vault }, stdin: "pipe", stdout: "pipe", stderr: "pipe",
   });
   const timeout = setTimeout(() => proc.kill(), 3000);
   try {

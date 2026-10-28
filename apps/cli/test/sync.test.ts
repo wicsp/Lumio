@@ -1,3 +1,4 @@
+import { isolatedHome } from "./test-home.ts";
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { cp, lstat, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -6,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { parseFrontmatter, writeFileAtomic } from "@lumio/core";
 import { Idea, Paper } from "@lumio/schema";
 import { syncVault } from "../src/sync.ts";
+const cliHome = isolatedHome();
 
 const fixture = fileURLToPath(new URL("../../../fixtures/sync-vault", import.meta.url));
 const main = fileURLToPath(new URL("../src/main.ts", import.meta.url));
@@ -21,7 +23,7 @@ afterEach(async () => { await rm(temp, { recursive: true, force: true }); });
 
 async function run(args: string[], envVault?: string) {
   const proc = Bun.spawn([process.execPath, main, ...args], {
-    cwd: temp, env: { ...process.env, LUMIO_VAULT: envVault, TZ: "Asia/Singapore" },
+    cwd: temp, env: { ...process.env, HOME: cliHome, LUMIO_VAULT: envVault, TZ: "Asia/Singapore" },
     stdout: "pipe", stderr: "pipe",
   });
   const [stdout, stderr, code] = await Promise.all([
@@ -103,8 +105,8 @@ test("LUMIO_VAULT is used, explicit --vault wins, missing vault explains setup",
   expect(explicit.stdout).toBe("完成：扫描 0 个，补全 0 个，问题 0 个，跳过 0 个\n");
   const missing = await run(["sync"]);
   expect(missing.code).toBe(1);
-  expect(missing.stderr).toContain("--vault <路径>");
-  expect(missing.stderr).toContain("LUMIO_VAULT");
+  expect(missing.stderr).toContain("lumio-hub setup");
+  expect(missing.stderr).toContain("install.sh");
   expect(await snapshot()).toEqual(before);
 });
 

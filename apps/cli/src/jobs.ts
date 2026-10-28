@@ -1,3 +1,4 @@
+import { hubCredentials } from "./config.ts";
 import { parseArgs } from "node:util";
 import { createClient } from "@lumio/api-client";
 import { AgentRun, JobStatus, type Job } from "@lumio/schema";
@@ -24,8 +25,7 @@ export async function runJobs(args: string[], log: (line: string) => void) {
   } else if (action === "show" || action === "cancel") {
     if (positionals.length !== 2 || split >= 0 || keys.some((k) => k !== "json")) throw new Error(usage);
   } else throw new Error(usage);
-  const url = process.env.LUMIO_HUB_URL, token = process.env.LUMIO_TOKEN;
-  if (!url || !token) throw new Error("job 命令需要设置非空的 LUMIO_HUB_URL 和 LUMIO_TOKEN");
+  const { url, token } = hubCredentials();
   const client = createClient({ url, token });
   let result: Job | Job[];
   if (action === "submit") {

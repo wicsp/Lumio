@@ -1,3 +1,4 @@
+import { isolatedHome } from "./test-home.ts";
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -6,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { parseFrontmatter } from "@lumio/core";
 import { Idea } from "@lumio/schema";
 import cases from "../../../fixtures/new-idea/cases.json";
+const cliHome = isolatedHome();
 
 const main = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 let vault: string;
@@ -14,7 +16,7 @@ afterEach(async () => { await rm(vault, { recursive: true, force: true }); });
 
 async function run(args: string[]) {
   const proc = Bun.spawn([process.execPath, main, ...args], {
-    env: { ...process.env, LUMIO_VAULT: vault, TZ: "Asia/Singapore" }, stdout: "pipe", stderr: "pipe",
+    env: { ...process.env, HOME: cliHome, LUMIO_VAULT: vault, TZ: "Asia/Singapore" }, stdout: "pipe", stderr: "pipe",
   });
   const [stdout, stderr, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
   return { stdout, stderr, code };

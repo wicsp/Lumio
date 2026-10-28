@@ -1,9 +1,11 @@
+import { isolatedHome } from "./test-home.ts";
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { cp, mkdir, mkdtemp, readFile, rename, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CheckResult, LinksResult, NoteDetail, SearchResult } from "@lumio/schema";
+const cliHome = isolatedHome();
 
 const fixture = fileURLToPath(new URL("../../../fixtures/query-vault", import.meta.url));
 const main = fileURLToPath(new URL("../src/main.ts", import.meta.url));
@@ -17,7 +19,7 @@ afterEach(async () => { await rm(temp, { recursive: true, force: true }); });
 
 function cli(args: string[]) {
   const result = Bun.spawnSync([process.execPath, main, ...args], {
-    env: { ...process.env, LUMIO_VAULT: vault, LUMIO_STATE_DIR: state, LUMIO_HUB_URL: undefined, LUMIO_TOKEN: undefined },
+    env: { ...process.env, HOME: cliHome, LUMIO_VAULT: vault, LUMIO_STATE_DIR: state, LUMIO_HUB_URL: undefined, LUMIO_TOKEN: undefined },
     stdout: "pipe", stderr: "pipe",
   });
   return { code: result.exitCode, stdout: result.stdout.toString(), stderr: result.stderr.toString() };

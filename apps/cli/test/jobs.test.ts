@@ -1,9 +1,11 @@
+import { isolatedHome } from "./test-home.ts";
 import { expect, test } from "bun:test";
 import { Job } from "@lumio/schema";
 const main = new URL("../src/main.ts", import.meta.url).pathname;
+const cliHome = isolatedHome();
 const job = Job.parse({ spec: { protocol_version: 2, id: "job_00000000000000000000000001", runtime: "act_00000000000000000000000001", lease: "synthetic_lease_123456", run: { kind: "command", argv: ["/usr/bin/test", "--literal"] }, workdir: "~", timeout_seconds: 7200, created: "2026-01-01T00:00:00Z" }, status: "queued" });
 async function cli(args: string[], url: string) {
-  const child = Bun.spawn([process.execPath, main, "job", ...args], { env: { ...process.env, LUMIO_HUB_URL: url, LUMIO_TOKEN: "synthetic-token", LUMIO_VAULT: undefined }, stdout: "pipe", stderr: "pipe" });
+  const child = Bun.spawn([process.execPath, main, "job", ...args], { env: { ...process.env, HOME: cliHome, LUMIO_HUB_URL: url, LUMIO_TOKEN: "synthetic-token", LUMIO_VAULT: undefined }, stdout: "pipe", stderr: "pipe" });
   const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
   return { stdout, stderr, code };
 }

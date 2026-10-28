@@ -1,5 +1,7 @@
+import { isolatedHome } from "./test-home.ts";
 import { expect, test } from "bun:test";
 import { Proposal } from "@lumio/schema";
+const cliHome = isolatedHome();
 
 const proposal = Proposal.parse({ id: "prop_00000000000000000000000001", operation: { op: "task.dispatch", args: { task: "task_00000000000000000000000012", trigger: "cli" } }, reason: "合成提议", author: "act_00000000000000000000000001", status: "accepted", created: "2026-01-01T00:00:00Z", decided: "2026-01-01T00:00:01Z", decided_by: "act_00000000000000000000000002" });
 
@@ -17,7 +19,7 @@ test("proposal rendering uses actors for author/decider names and falls back to 
     } });
     try {
       const child = Bun.spawn([process.execPath, new URL("../src/main.ts", import.meta.url).pathname, "proposals", "--status", "accepted"], {
-        env: { ...process.env, LUMIO_HUB_URL: `http://127.0.0.1:${server.port}`, LUMIO_TOKEN: "synthetic-token" }, stdout: "pipe", stderr: "pipe",
+        env: { ...process.env, HOME: cliHome, LUMIO_HUB_URL: `http://127.0.0.1:${server.port}`, LUMIO_TOKEN: "synthetic-token" }, stdout: "pipe", stderr: "pipe",
       });
       const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
       expect(code).toBe(0); expect(stderr).toBe(""); expect(calls).toContain("/v1/actors");
@@ -40,7 +42,7 @@ test("privileged proposal renders the command, runtime, task title, round and re
     return Response.json({ note: { id: "task_00000000000000000000000001", type: "task", title: "安装软件", path: "plan/tasks/install.md" }, frontmatter: {}, body: "" });
   } });
   try {
-    const child = Bun.spawn([process.execPath, new URL("../src/main.ts", import.meta.url).pathname, "proposals"], { env: { ...process.env, LUMIO_HUB_URL: `http://127.0.0.1:${server.port}`, LUMIO_TOKEN: "fixture" }, stdout: "pipe", stderr: "pipe" });
+    const child = Bun.spawn([process.execPath, new URL("../src/main.ts", import.meta.url).pathname, "proposals"], { env: { ...process.env, HOME: cliHome, LUMIO_HUB_URL: `http://127.0.0.1:${server.port}`, LUMIO_TOKEN: "fixture" }, stdout: "pipe", stderr: "pipe" });
     const out = await new Response(child.stdout).text(); expect(await child.exited).toBe(0);
     expect(out).toContain('在 server 上以 root 执行：/bin/echo "hello world" "$(touch x)"');
     expect(out).toContain("来源：安装软件 · 第 2 轮"); expect(out).toContain("理由：合成提议");

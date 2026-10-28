@@ -11,3 +11,13 @@
 - **实验室服务器作为执行器**：Mac 在 NAT 后面，用 Tailscale 给 Hub 一个服务器能访问的地址（`lumio-hub setup` 里选 Tailscale），
   再 `lumio runtime add server`。学校服务器没有 root，不装提权助手。
 - **以后**：两台服务器都会装 Nix；私人服务器有 root，可以装提权助手。
+
+安装时先用软件的 `install.sh` 下载三个程序，再运行：
+
+```sh
+lumio-hub setup --vault "$HOME/Library/Mobile Documents/iCloud~md~obsidian/Documents/Lumio"
+```
+
+这是作者指定已有 vault 的配置，不是默认路径。首次发布前可从源码编译并签名，再运行同一条 setup。
+服务读取目录被系统拒绝时，按 setup 的提示为程序开启完全磁盘访问权限，再重跑 setup。
+CLI 配置写在 `~/.config/lumio/config.json`，以后终端不需要手动 export 令牌。

@@ -1,4 +1,6 @@
 import { SudoGate } from "./sudo.ts";
+import { privateFile } from "./service.ts";
+import { join } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { RuntimeAck, RuntimeInfo, RuntimeRegistration, RuntimeSync } from "@lumio/schema";
 import type { RuntimeConfig } from "./config.ts";
@@ -93,7 +95,9 @@ export async function runRuntime(config: RuntimeConfig, options: {
       let justAcked = false;
       try {
         if (!registered) {
-          actor = (await post("/v1/runtime/register", registration, RuntimeInfo)).actor;
+          const info = await post("/v1/runtime/register", registration, RuntimeInfo);
+          actor = info.actor;
+          await privateFile(join(config.stateDir, "registered.json"), JSON.stringify(info));
           registered = true;
           log("执行器登记成功");
           if (disconnected) log("Hub 连接已恢复");
