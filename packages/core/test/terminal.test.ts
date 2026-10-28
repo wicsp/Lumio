@@ -13,7 +13,8 @@ test("without a terminal it reports non-interactive instead of blocking", () => 
   expect(askTerminal({ path: "/nonexistent/tty" }, "?")).toBeUndefined();
 });
 
-test.skipIf(!script)("inside a real pseudo-terminal, with stdin a pipe, the answer typed at the terminal is read", async () => {
+// macOS 的 script 在 CI（标准输入不是终端）里不能可靠地转发输入；macOS 上由人工在真实终端验证（PR #46）。
+test.skipIf(!script || process.platform !== "linux")("inside a real pseudo-terminal, with stdin a pipe, the answer typed at the terminal is read", async () => {
   const dir = await mkdtemp(join(tmpdir(), "lumio-tty-"));
   try {
     const program = join(dir, "ask.ts"), out = join(dir, "answer.txt");
