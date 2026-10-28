@@ -1,8 +1,7 @@
 name: Check
+# 只在 PR 上检查：所有改动都经 PR 合并，检查通过后才合并（自动合并）。发布前 release.yml 在 macOS 上再跑一遍。
 on:
   pull_request:
-  push:
-    branches: [main]
 permissions:
   contents: read
 jobs:
