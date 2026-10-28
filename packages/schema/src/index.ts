@@ -22,7 +22,7 @@ import { Asset, Experiment, Idea, Paper, Post, Project, Routine, Source, Task } 
 import { Job, JobResult, JobSpec, RoutineInfo, RuntimeAck, RuntimeHeartbeat, RuntimeInfo, RuntimeRegistration, RuntimeSync } from "./job.ts";
 import { Operation } from "./operation.ts";
 import { PrivilegedApproval, PrivilegedReport, PrivilegedStatus } from "./privileged.ts";
-import { CliConfig, HubSigningKey, RuntimeInvite, RuntimeInviteRequest, RuntimeJoin, RuntimeJoinRequest } from "./setup.ts";
+import { CliConfig, ClientInvite, ClientInviteRequest, ClientJoin, ClientJoinRequest, HubSigningKey, RuntimeInvite, RuntimeInviteRequest, RuntimeJoin, RuntimeJoinRequest } from "./setup.ts";
 import { Proposal } from "./proposal.ts";
 import { CheckResult, LinksResult, NoteDetail, SearchResult } from "./query.ts";
 
@@ -55,6 +55,10 @@ export const CONTRACTS = {
   "runtime-join-request": RuntimeJoinRequest,
   "runtime-join": RuntimeJoin,
   "hub-signing-key": HubSigningKey,
+  "client-invite-request": ClientInviteRequest,
+  "client-invite": ClientInvite,
+  "client-join-request": ClientJoinRequest,
+  "client-join": ClientJoin,
   "search-result": SearchResult,
   "links-result": LinksResult,
   "note-detail": NoteDetail,

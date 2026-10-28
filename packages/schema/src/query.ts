@@ -31,13 +31,16 @@ export const SearchResult = z.strictObject({
   total: z.number().int().nonnegative(),
 });
 
-/** 链接来源：正文中的 [[名称]]（ADR 0018：related 已删除）。保留这个字段，以后有新来源时再扩展。 */
-export const LinkSource = z.enum(["wikilink"]);
+/**
+ * 链接来源（ADR 0018、0022）：正文中的 `[[名称]]`（按文件名解析），或标准 Markdown 链接 `[文字](相对路径.md)`（按路径解析）。
+ * 两种都识别，用哪种由人决定。
+ */
+export const LinkSource = z.enum(["wikilink", "markdown"]);
 
 export const Link = z.strictObject({
   source: LinkSource,
   note: NoteRef.optional().describe("链接解析到的笔记；悬空链接时缺省"),
-  target: z.string().describe("原始链接目标：[[ ]] 中去掉别名和标题后的名称"),
+  target: z.string().describe("原始链接目标：[[ ]] 中去掉别名和标题后的名称；Markdown 链接为解码、去掉 #标题 后的路径"),
   dangling: z.boolean().describe("目标无法解析为 vault 中的笔记"),
 });
 

@@ -15,7 +15,7 @@
 ## 1. 总体结构
 
 ```
- Obsidian（Mac / iPad / 手机）── 直接编辑文件 ──┐
+ 任意编辑器 / 以后的官方 GUI ── 直接编辑文件 ──┐
                                                 ▼
 ┌──── 程序入口（可替换）────┐      ┌───────────────────────────────┐
 │ CLI │ 飞书 Bot │ Web/插件  │─API─▶│ Hub（程序写入的唯一裁判）       │
@@ -23,7 +23,7 @@
                                     │  监听文件变化 → 补全与索引      │
                                     │  任务与轮次 · 例行任务 · 搜索   │
                                     └───────▲───────────┬───────────┘
-      执行器主动轮询（Tailscale）           │           │ 自动提交
+      执行器主动连接、轮询               │           │ 自动提交
                    ┌────────────────────────┘           ▼
             ┌──────┴────────┐                vault 的 git（只做历史与备份，
             │ 执行器@每台设备 │ 本地队列、定时、  .git 在同步目录之外）
@@ -31,8 +31,10 @@
             └───────────────┘
 ```
 
-- **vault 是知识的唯一事实来源**：Markdown + YAML frontmatter，就是 Obsidian vault，当前放在 iCloud（ADR 0001、0007）。
-- **一套系统只有一个 Hub，vault 只放在 Hub 所在的机器上，没有第二份**（ADR 0017）。
+- **vault 是知识的唯一事实来源**：一个装 Markdown + YAML frontmatter 的普通文件夹，任何编辑器都能改；Lumio 不依赖、不读写任何编辑器的配置。
+  用外部编辑器改文件是一直支持但最不正式的用法，正式的编辑方式以后由官方 GUI 提供（ADR 0001、0007、0022）。默认位置 `~/.config/lumio/vault`，安装时可改。
+- **一套系统只有一个 Hub**，vault 在 Hub 所在的机器上。这个文件夹可以被任何外部工具（git、Syncthing、iCloud……）同步到别的设备上编辑，
+  同步进来的修改等同于人改文件；Lumio 不做自己的同步（ADR 0017、0022）。
 - SQLite 只是派生索引，可随时删除重建；`refs.bib` 是生成物（ADR 0007、0014）。
 
 ## 2. 工程基础
@@ -93,7 +95,7 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 
 ### 3.3 元数据规则
 
-- **元数据由 Lumio 负责，Obsidian 只是编辑器**，不依赖 Obsidian 的模板或插件（ADR 0009）。
+- **元数据由 Lumio 负责，编辑器只是编辑器**，不依赖任何编辑器的模板或插件（ADR 0009、0022）。
 - 两种创建方式结果相同：`lumio new <类型>`，或直接在类型目录里随手写，再由补全器补齐；两者共用同一个补全器（ADR 0009）。
 - **补全器只补缺失的字段**，不覆盖已有的值，不改正文和链接。缺失包括值为空（`null`）的情况（ADR 0008、0009）。
 - 补全规则：类型取自目录，标题缺失时取文件名，`created` 取文件创建时间，`id` 新生成；无法推断的必填项只报告、不猜（ADR 0009）。
@@ -114,11 +116,12 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 
 ### 3.5 链接与 AI 区块
 
-- **链接只写在正文里**：标准的 `[[文件名]]`（去掉 `|别名`、`#标题` 后按文件名解析），由人在写作时写，并在句子里说明关系（ADR 0018）。
+- **链接只写在正文里**，由人在写作时写，并在句子里说明关系（ADR 0018）。两种写法都识别，用哪种由人决定（ADR 0022）：
+  `[[文件名]]`（去掉 `|别名`、`#标题` 后按文件名解析）；标准 Markdown 链接 `[文字](相对路径.md)`（按路径解析，忽略图片与外部地址；P2-10 实现）。
 - frontmatter 的 `related` **已删除**：旧笔记里的值作为未知字段原样保留，但不计入链接图（ADR 0018）。
-- **改名只在 Obsidian（打开"自动更新内部链接"）或自己的客户端里进行**；其他方式改名造成的断链，Lumio 只负责列出，不自动修复（ADR 0018）。
+- **改名**：用任何编辑器改名都可以（有的编辑器会自动更新链接）；造成的断链由 `lumio check` 列出，不自动修复；以后官方 GUI 经 Hub 改名并同时更新引用（ADR 0018）。
 - 解析不到的标为悬空链接，不报错；代码块里的 `[[ ]]` 忽略。
-- 导出参考文献时从正文找引用：`lumio export bib --from <笔记>` 只导出该笔记里 `[[citekey]]` 或 `\cite{citekey}` 引用到的论文（ADR 0018）。
+- 导出参考文献时从正文找引用：`lumio export bib --from <笔记>` 只导出该笔记里 `[[citekey]]`、指向论文笔记的 Markdown 链接或 `\cite{citekey}` 引用到的论文（ADR 0018）。
 - AI 生成的内容写在正文的标记区块里（ADR 0012）：
   ```
   <!-- lumio:ai start name=summary model=<模型> generated=<时间> -->
@@ -136,7 +139,7 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 - 查询两种模式都支持：设置 `LUMIO_HUB_URL` 时走 Hub，否则直接读本地 vault；查询逻辑在 `packages/core`，两边共用。
 
 ### 4.2 存放
-- Hub 的运行数据放在 `~/.local/share/lumio/`（可配置），**不在 vault、不在 iCloud**：
+- Hub 的运行数据放在 `~/.local/share/lumio/`（可配置），**不在 vault、不在同步目录里**：
   `index.sqlite`（派生索引，可重建）、`hub.sqlite`（身份、令牌、提议、审计记录、以后的 job，需要单独备份：`lumio-hub backup <目标文件>`，Hub 运行中也可执行）（ADR 0014、0016）。
 
 ### 4.3 自动提交（ADR 0014）
@@ -150,17 +153,20 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 - 索引用 WAL，遇到锁时等待（最多 5 秒）；Hub 与本地 CLI 可以同时使用同一个索引。
 - 没有 ID 的笔记照样能搜到，结果里**不带 `id`**，只能按文件名引用；不生成替代 ID。
 
-### 4.5 部署（ADR 0007、0017）
-- **只做单用户、单机模式**：Hub 与 vault 都在 Mac 上，Mac 开着才能用。iPad、手机经 iCloud 同步来的修改等同于人直接改文件。
-- 以后的服务器模式：Hub 与 vault 都搬到服务器上，其他设备都是客户端；**不存在两边各有一份、互相同步的模式**。
-  服务器模式下 Obsidian 怎么用尚未决定（ADR 0017 第 5 节）。
-- **安装**（ADR 0021）：打 `v*` 标签时 CI 编译 `lumio`、`lumio-hub`、`lumio-runtime` 发布到 GitHub Releases；`install.sh` 下载、校验、装到 `~/.local/bin`。
-  Mac 上运行 `lumio-hub setup`（可重复运行）：身份、CLI 配置文件 `~/.config/lumio/config.json`、launchd、Tailscale 转发。
-  加服务器：`lumio runtime add <名称>` 生成一次性配对码（10 分钟、一次有效），服务器上 `lumio-runtime join` 换取令牌并装好 systemd 用户服务。
-  `lumio doctor`、`lumio-runtime doctor` 检查安装；`lumio selftest` 用真实 agent 验证关键路径；`upgrade` 升级。Nix 以后作为另一种安装方式。
-- **远程访问用 Tailscale**：Hub 仍只监听 `127.0.0.1`，由 `tailscale serve` 转发并提供 HTTPS；服务器上的 Runtime 也这样访问。
-- **Hub 只讲 HTTP**；以后上公网时由反向代理（Caddy、Cloudflare Tunnel）负责 HTTPS，代码不改。
-- 所有地址可配置；只信任配置过的反向代理传来的客户端信息。
+### 4.5 部署（ADR 0007、0017、0021、0022）
+- **两种模式，都只有一个 Hub**：
+  - **单机模式（默认）**：Hub、vault、执行器在同一台机器（macOS 或 Linux），Hub 只听 `127.0.0.1`，不需要任何网络配置。
+  - **服务器模式（标准）**：Hub 与 vault 在服务器上，像普通自托管软件一样部署；其他机器作为 CLI 客户端和执行器主动连接 Hub。
+- **网络由部署者负责**：Hub 只讲 HTTP；监听地址（`LUMIO_HUB_LISTEN`）与对外地址（`LUMIO_PUBLIC_URL`）由部署者设置，
+  HTTPS 推荐放 Caddy 等反向代理（文档有示例）。非本机监听且对外地址是 `http://` 时只警告、不拒绝。
+  Tailscale 等私有网络是补充：`setup` 检测到时可以帮忙填对外地址，核心代码不依赖它。
+- **安装**（ADR 0021）：打 `v*` 标签时 CI 编译 `lumio`、`lumio-hub`、`lumio-runtime` 发布到 GitHub Releases；`install.sh` 下载、校验、装到 `~/.local/bin`，
+  再运行 `lumio-hub setup`（可重复运行；`--server` 为服务器模式）：vault 路径、身份、CLI 配置文件 `~/.config/lumio/config.json`、
+  Hub 与本机执行器的后台服务（macOS：launchd；Linux：systemd 用户服务）。
+  加执行器：`lumio runtime add <名称>` 生成一次性配对码（10 分钟、一次有效），那台机器上 `lumio-runtime join` 换取令牌并装好后台服务；
+  另一台机器上的 CLI 用 `lumio login`。`lumio doctor`、`lumio-runtime doctor` 检查安装；`lumio selftest` 用真实 agent 验证关键路径；`upgrade` 升级。
+  Nix 以后作为另一种安装方式。作者自己的用法见 `docs/personal-setup.md`。
+- 只信任配置过的反向代理传来的客户端信息。
 - 飞书 Bot 用官方 SDK 的长连接，不需要公网回调地址。
 
 ### 4.6 给 AI 派活（P2，ADR 0005、0019）
@@ -217,10 +223,10 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 - **卡号防护**（ADR 0012）：写法像卡号（连续 13–19 位，或 4-4-4-4 / 4-6-5 分组）且通过 Luhn 校验即视为疑似卡号。
   - asset 校验报错；Hub 自动提交前和建索引前检查**所有文件**，命中的不提交、不索引，提醒人删除；
   - 错误和日志里永远不出现这串数字；判定函数在 `packages/schema/src/secrets.ts`。
-  - 局限：文件本身已同步到 iCloud，需要人手动删除。
+  - 局限：文件本身可能已被同步工具同步出去，需要人手动删除。
 - **`life/` 只放记录和提醒**；真正敏感的内容（密码、完整卡号、证件号）放在密码管理器里，不进 vault。
 - **密钥**：代码和配置里只写占位符（如 `${secret:openai}`），由运行时注入；令牌不进日志（AGENTS.md、ADR 0007）。
-- vault 的 `.gitignore` 排除 Obsidian 插件设置文件（可能含明文密钥）。
+- 编辑器的插件设置可能含明文密钥：建议在 vault 的 `.gitignore` 里排除（Lumio 不管理编辑器配置，ADR 0022）。
 - **派活的安全底线**（ADR 0019）：
   - 执行器用普通账号运行，不用 root；工作目录不能在笔记库里；能用 agent 自带沙箱的就打开，每一轮记录隔离级别。
   - 高权限命令只能在一轮之内经 `lumio-runtime sudo` 发起，成为需要批准的操作 `exec.privileged`；人接受后 Hub 签发一次性、10 分钟内有效的
@@ -244,6 +250,6 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 | P0 | `lumio new paper`、`lumio new idea`、`lumio sync`；vault 目录结构；source / post / asset 契约 | ✅ |
 | P0-7 | 迁移真实 vault 到新目录 | ✅ |
 | P1 | 本地查询与 `export bib`；Hub（身份与令牌、查询 API、监听、自动提交、操作与提议框架）；按引用导出与断链检查；skill | ✅（pi 验收待补） |
-| P2 | 执行器与派活（P2-1 ✅、P2-2 ✅、P2-3 ✅、P2-4 ✅、P2-5 ✅、P2-6 ✅）：执行器登记、可靠的派活核心、三种 agent 适配器、任务笔记里的一问一答、例行任务、`lumio-runtime sudo` 审批的门；安装、配对与自检（P2-7 至 P2-9，ADR 0021） | 功能 ✅，安装与自检进行中 |
+| P2 | 执行器与派活（P2-1 ✅、P2-2 ✅、P2-3 ✅、P2-4 ✅、P2-5 ✅、P2-6 ✅）：执行器登记、可靠的派活核心、三种 agent 适配器、任务笔记里的一问一答、例行任务、`lumio-runtime sudo` 审批的门；安装、配对与自检（P2-7 至 P2-9，ADR 0021、0022）；识别 Markdown 链接（P2-10） | 功能 ✅，安装与自检进行中 |
 | P3 | 飞书 Bot（派活、批准、通知）、审批模型、资产到期提醒、多维表格镜像；Chrome 插件入库论文 | |
-| P4 | Web Dashboard、Docker / Nix 安装、对外 SDK、手机端 | |
+| P4 | 官方 GUI（Web：浏览、编辑笔记与任务、批准提议）、Docker / Nix 安装、对外 SDK、手机端 | |
