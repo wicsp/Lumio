@@ -37,18 +37,19 @@ P1 的设计决定见 ADR 0014、0016、0017、0018；P2 见 ADR 0019、0020、0
 
 开发期间人类不在电脑旁；需要人动手的验收与交叉 review 集中记在这里，处理完一项删一项。
 
-**2026-10-28 起暂停下面的手动验收**：第一次验收卡在安装上（ADR 0021）。P2-7 至 P2-9 做完后，安装只需装 Hub 一行、每台执行器一行，大部分项目由 `lumio selftest` 自动验证，P2-9 会把这张表改写成只剩自检覆盖不到的几项。
+**2026-10-28 第一次验收（Mac 单机模式，`install.sh` v0.1.0 安装）**：已通过——三个真实 agent（执行、续接会话、提问、取消）、
+任务笔记的一问一答、例行任务（触发、`context: previous`、followup）、pi 的 skill 行为（见下方说明）。发现的问题见 P2-11。
 
 | 事项 | 来自 | 怎么做 |
 |---|---|---|
-| P2-6 手动验收 | P2-6 | 按 `infra/sudo-helper.md` 在自己的服务器安装助手，让 agent 申请安装一个软件包，在 Mac 查看命令并批准，确认安装成功；再拒绝一次确认不执行 |
-| 服务器上的执行器升级到最新版 | P2-2 起 | 服务器上 `git pull` 后重新 `bun run --cwd apps/runtime build`，替换 `~/.local/bin/lumio-runtime`，`systemctl --user restart lumio-runtime` |
-| Mac 上的 Hub 重启一次 | P2-1 review 起 | 让新代码（心跳不写审计、Job 接口等）生效 |
-| P2-2 手动验收 | P2-2 | 执行器配置 `LUMIO_RUNTIME_ALLOWED_COMMANDS=/usr/bin/nvidia-smi`；`lumio job submit --runtime server -- /usr/bin/nvidia-smi`，合上 Mac 几分钟再打开，`lumio job show <job>` 有结果 |
-| pi 的 skill 验收 | P1-6 | 在自己的终端直接运行 `skills/lumio/eval/run.sh pi` |
-| P2-3 真实 agent 验证 | P2-3 | 适配器的参数按文档写成，自动测试用的是假 agent。在服务器上对 codex、claude、pi 各派一轮（`lumio job submit --runtime server --agent <名称> --workdir <临时 git 仓库> --session <id> "新建一个文件并提交"`），再用 `--resume` 追问一次，确认：能执行、取到汇报、能接上会话、`<lumio-question>` 能识别。重点核对：codex 的 `exec resume` 参数顺序与 `--json` 里的 `thread.started`；pi 的 `--session-id` 能否和 `-p` 一起用；claude 的 `--session-id` 需要 UUID。不对的话把实际输出贴给 Claude 改适配器 |
-| P2-4 手动验收 | P2-4 | 在真实 vault 的 `plan/tasks/` 新建一个任务：`assignee: {agent: codex, device: server}`、`workdir: <服务器上的目录>`、写好要求后把 `turn` 改成 `agent`；约半分钟后应派出，结果写回笔记，`turn` 变回 `human`。再写一句意见、改 `turn: agent`，确认第 2 轮接着上一轮。Obsidian 和 iPad 上都看一眼。另外：`related` 不再计入链接，`lumio check` 的悬空链接数可能变少（索引版本升到 2，首次运行会自动重建）；vault 的 git log 里派出与写回各有一个带 `Lumio-Job` 的提交 |
-| P2-5 手动验收 | P2-5 | 服务器执行器升级后，在 `plan/routines/` 建一个每 10 分钟执行一次的例行任务（`schedule: "*/10 * * * *"`、`assignee: {agent: codex, device: server}`、`workdir`）；`lumio routine list` 应显示下次时间。合上 Mac 半小时后打开，笔记里应有补写的结果。再试一次 `lumio routine followup <例行任务> <日期>` |
+| 开机自启动 | P2-7 | 重启 Mac 后不做任何事，`lumio runtime list` 显示本机执行器在线 |
+| 实验室服务器接入 | P2-8 | P2-11 合并并发布 v0.1.1 后：Mac 上 `lumio-hub setup --public-url <Tailscale 地址>`（见 `docs/personal-setup.md`），`lumio runtime add server`，在服务器上运行打印的命令，`lumio runtime list` 显示在线 |
+| 合上 Mac 期间例行任务照常执行 | P2-5 | 服务器接入后，建一个 `device: server`、每 10 分钟的例行任务，合上 Mac 半小时后打开，笔记里应有补写的结果 |
+| P2-2 普通命令 | P2-2 | 服务器 `runtime.env` 加 `LUMIO_RUNTIME_ALLOWED_COMMANDS=/usr/bin/nvidia-smi` 并重启执行器；`lumio job submit --runtime server -- /usr/bin/nvidia-smi` |
+| P2-6 提权 | P2-6 | 在有 root 的私人服务器上：配对后 `sudo ~/.local/bin/lumio-runtime install-sudo-helper`，核对指纹；让 agent 申请安装一个软件包，`lumio proposals` 查看并批准；再拒绝一次确认不执行 |
+
+pi 的 skill 验收说明：pi 的回答完全正确（推荐了 `[[渲染格式与来源判断]]`、没有写入、没有泄露），但回答完之后 pi 进程被 `SIGKILL`（退出码 137），
+在自己的终端里直接运行也一样，不是 Lumio 的问题。验收脚本把退出码作为提醒而不是失败。若以后派给 pi 的任务出现"汇报正常但状态为失败（signal SIGKILL）"，再处理。
 
 2026-10-26 已完成 #27–#30 的 Codex 交叉 review，问题与修复见 [review 报告](../reviews/2026-10-26-p2-3-to-p2-5.md)，修复（#33–#35）已合并。
 
