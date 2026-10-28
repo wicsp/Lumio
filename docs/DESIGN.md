@@ -102,7 +102,7 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 - 唯一例外是 **schema 中声明的"程序字段"**（如 post 的发布结果、asset 顺延的 `renews_on`），程序可以更新；
   这类更新必须经过 Hub（ADR 0009、0014）。
 - 可选字段留空视为没填，带默认值的字段留空取默认值，必填字段留空报错；协议（job）不适用这条（ADR 0008）。
-- 默认值不写进文件，读取时由 schema 补上。
+- 默认值不写进文件，读取时由 schema 补上。例外是需要人拨动的开关：任务与例行任务的 `status`、负责人是 agent 的任务的 `turn`，缺失时补全器写上默认值（ADR 0023）。
 
 ### 3.4 论文 citekey（ADR 0004）
 
