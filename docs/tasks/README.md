@@ -48,12 +48,11 @@ P2-9 用自检覆盖执行、会话续接、提问、取消和任务笔记写回
 | 事项 | 来自 | 怎么做 |
 |---|---|---|
 | 开机自启动 | P2-7 | 重启 Mac 后不做任何事，`lumio doctor` 显示 Hub 与本机执行器正常 |
-| P2-2 普通命令 | P2-2 | 服务器 `runtime.env` 加 `LUMIO_RUNTIME_ALLOWED_COMMANDS=/usr/bin/nvidia-smi` 并重启执行器；`lumio job submit --runtime server -- /usr/bin/nvidia-smi` |
-| iPad 查看笔记 | P2-4 | 在 iPad 上打开自检笔记，确认结果区块与正文可读 |
 | 合上 Mac 期间例行任务补写 | P2-5 | 服务器接入后，建一个 `device: server`、每 10 分钟的例行任务，合上 Mac 半小时后打开，确认结果补写 |
 | 提权助手真实安装与审批 | P2-6 / P2-8 | 在有 root 的私人服务器配对后运行 `sudo ~/.local/bin/lumio-runtime install-sudo-helper`，核对指纹；让 agent 申请安装软件包，用 `lumio proposals` 批准，再拒绝一次确认不执行。升级后按提示更新助手程序 |
 
 2026-10-28 第一次 Mac 单机安装已人工通过三个真实 agent、任务笔记的一问一答与例行任务；当时发现的问题已记录为 P2-11。2026-10-29 v0.1.4：Mac 重装、实验室服务器（`server`，只有 pi）经 Tailscale 配对接入，`lumio doctor` 与 `lumio selftest --runtime server --agents pi --notes` 已人工通过。过程中修复：systemd `EnvironmentFile` 引号（#52）、发布测试的时序（#47、#54）；改进见 P2-12。
+同日人工通过：服务器执行器跑普通命令（P2-2，`nvidia-smi`）、在 iPad 上查看任务笔记（P2-4），已从上表移除。
 
 pi 的 skill 验收说明：pi 的回答完全正确（推荐了 `[[渲染格式与来源判断]]`、没有写入、没有泄露），但回答完之后 pi 进程被 `SIGKILL`（退出码 137），
 在自己的终端里直接运行也一样，不是 Lumio 的问题。验收脚本把退出码作为提醒而不是失败。若以后派给 pi 的任务出现"汇报正常但状态为失败（signal SIGKILL）"，再处理。
