@@ -1,6 +1,92 @@
 import type { Link } from "@lumio/schema";
+import { posix } from "node:path";
 
-export interface RawLink { source: Link["source"]; target: string }
+export type RawLink = { source: "wikilink"; target: string }
+  | { source: "markdown"; target: string; fromPath: string };
+
+/** Paths are vault-relative POSIX paths, independent of the host filesystem. */
+export function resolveMarkdownPath(fromPath: string, target: string): string | undefined {
+  const file = posix.extname(target) ? target : `${target}.md`;
+  const path = posix.normalize(target.startsWith("/") ? file.slice(1) : posix.join(posix.dirname(fromPath), file));
+  return path === ".." || path.startsWith("../") || posix.isAbsolute(path) ? undefined : path;
+}
+
+function escaped(text: string, index: number): boolean {
+  let slashes = 0;
+  while (index > 0 && text[--index] === "\\") slashes++;
+  return slashes % 2 === 1;
+}
+
+/** Read one inline destination, including balanced parentheses and an optional title. */
+function destination(text: string, opening: number): { target: string; end: number } | undefined {
+  let cursor = opening + 1;
+  while (/\s/.test(text[cursor] ?? "")) cursor++;
+  let target: string;
+  if (text[cursor] === "<") {
+    const start = ++cursor;
+    while (cursor < text.length && (text[cursor] !== ">" || escaped(text, cursor))) {
+      if (text[cursor] === "\n" || text[cursor] === "<") return;
+      cursor++;
+    }
+    if (cursor === text.length) return;
+    target = text.slice(start, cursor++);
+  } else {
+    const start = cursor;
+    let depth = 0;
+    while (cursor < text.length) {
+      const char = text[cursor]!;
+      if (!escaped(text, cursor)) {
+        if (/\s/.test(char)) break;
+        if (char === "(") depth++;
+        if (char === ")") { if (!depth) break; depth--; }
+        if (char === "<") return;
+      }
+      cursor++;
+    }
+    if (depth) return;
+    target = text.slice(start, cursor);
+  }
+  const afterTarget = cursor;
+  while (/\s/.test(text[cursor] ?? "")) cursor++;
+  if (text[cursor] !== ")") {
+    // A title must be separated from the destination by whitespace.
+    const quote = text[cursor];
+    if (cursor === afterTarget || (quote !== '"' && quote !== "'" && quote !== "(")) return;
+    const closing = quote === "(" ? ")" : quote;
+    cursor++;
+    while (cursor < text.length && (text[cursor] !== closing || escaped(text, cursor))) cursor++;
+    if (cursor === text.length) return;
+    cursor++;
+    while (/\s/.test(text[cursor] ?? "")) cursor++;
+  }
+  return text[cursor] === ")" ? { target, end: cursor } : undefined;
+}
+
+function markdownLinks(text: string, fromPath: string): RawLink[] {
+  const links: RawLink[] = [];
+  for (let cursor = 0; cursor < text.length; cursor++) {
+    if (text[cursor] !== "[" || text[cursor + 1] === "[" || text[cursor - 1] === "[" || escaped(text, cursor)) continue;
+    const image = text[cursor - 1] === "!" && !escaped(text, cursor - 1);
+    let labelEnd = cursor + 1, depth = 1;
+    for (; labelEnd < text.length; labelEnd++) {
+      if (escaped(text, labelEnd)) continue;
+      if (text[labelEnd] === "[") depth++;
+      if (text[labelEnd] === "]" && --depth === 0) break;
+    }
+    if (depth || text[labelEnd + 1] !== "(") continue;
+    const parsed = destination(text, labelEnd + 1);
+    if (!parsed) continue;
+    cursor = parsed.end;
+    if (image) continue;
+    let target = parsed.target.replace(/\\([!"#$%&'()*+,\-./:;<=>?@[\]\\^_`{|}~])/g, "$1").split(/[?#]/, 1)[0]!;
+    try { target = decodeURIComponent(target); } catch { /* Keep malformed URL escapes verbatim. */ }
+    if (!target || target.endsWith("/") || target.includes("\0") || target.startsWith("//") || /^[a-z][a-z\d+.-]*:/i.test(target)) continue;
+    const extension = posix.extname(target);
+    if (extension && extension !== ".md") continue;
+    links.push({ source: "markdown", target, fromPath });
+  }
+  return links;
+}
 
 function withoutCode(body: string): string {
   let fence: { character: string; length: number } | undefined;
@@ -27,19 +113,19 @@ function withoutCode(body: string): string {
   return result + lines.slice(cursor);
 }
 
-export interface Citation { source: "wikilink" | "cite"; target: string }
+export interface Citation { source: Link["source"] | "cite"; target: string }
 
 /** Count citation commands as occurrences, even when a command contains several keys. */
-export function extractCitations(body: string): { citations: Citation[]; ignored: number } {
+export function extractCitations(body: string, fromPath = ""): { citations: Citation[]; ignored: number } {
   const text = withoutCode(body);
   const ai = /<!--\s*lumio:ai start\b[^>]*-->[\s\S]*?(?:<!--\s*lumio:ai end\b[^>]*-->|$)/g;
   const commands = /\\(?:cite|citep|citet|parencite|textcite)\s*(?:\[[^\]]*\]\s*)*\{([^{}]*)\}/g;
   let ignored = 0;
   const human = text.replace(ai, (block) => {
-    ignored += extractLinks({}, block.replace(/<!--[^>]*-->/g, "")).length + [...block.matchAll(commands)].length;
+    ignored += extractLinks({}, block.replace(/<!--[^>]*-->/g, ""), fromPath).length + [...block.matchAll(commands)].length;
     return "";
   });
-  const citations: Citation[] = extractLinks({}, human).map((link) => ({ source: "wikilink", target: link.target }));
+  const citations: Citation[] = extractLinks({}, human, fromPath);
   for (const match of human.matchAll(commands)) {
     for (const key of match[1]!.split(",")) {
       const target = key.trim();
@@ -50,8 +136,8 @@ export function extractCitations(body: string): { citations: Citation[]; ignored
 }
 
 /** Remove code and AI-owned blocks before extracting human-owned links. */
-export function extractLinks(frontmatter: Record<string, unknown>, body: string): RawLink[] {
-  // 链接只来自正文的 [[ ]]（ADR 0018）；frontmatter 里遗留的 related 不再计入。
+export function extractLinks(frontmatter: Record<string, unknown>, body: string, fromPath = ""): RawLink[] {
+  // 链接只来自正文（ADR 0018、0022）；frontmatter 里遗留的 related 不再计入。
   void frontmatter;
   const links: RawLink[] = [];
   const human = withoutCode(body)
@@ -60,7 +146,7 @@ export function extractLinks(frontmatter: Record<string, unknown>, body: string)
     const target = match[1]!.split(/[|#]/, 1)[0]!.trim();
     if (target) links.push({ source: "wikilink", target });
   }
-  return links;
+  return [...links, ...markdownLinks(human, fromPath)];
 }
 
 /** Search snippets contain text, with Markdown/HTML presentation removed. */
