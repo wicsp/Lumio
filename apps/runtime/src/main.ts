@@ -1,4 +1,8 @@
 #!/usr/bin/env bun
+import { parseArgs } from "node:util";
+import { doctor } from "./doctor.ts";
+import { printChecks } from "./diagnostics.ts";
+import { runUpgrade } from "./upgrade.ts";
 import { joinRuntime } from "./pairing.ts";
 import { configureSudoEnvironment, installSudoHelper } from "./sudo-install.ts";
 import { installService, runtimeEnvironment } from "./service.ts";
@@ -11,6 +15,15 @@ import { runWorker } from "./worker.ts";
 
 if (process.argv[2] === "--version") {
   console.log(version);
+} else if (process.argv[2] === "doctor" || process.argv[2] === "upgrade") {
+  try {
+    if (process.argv[2] === "upgrade") process.exitCode = await runUpgrade(process.argv.slice(3), true);
+    else {
+      const { values, positionals } = parseArgs({ args: process.argv.slice(3), allowPositionals: true, options: { json: { type: "boolean" } } });
+      if (positionals.length) throw new RuntimeError("用法：lumio-runtime doctor [--json]");
+      process.exitCode = printChecks(await doctor(), Boolean(values.json), console.log);
+    }
+  } catch (cause) { console.error(cause instanceof Error ? cause.message : "执行器检查或升级失败"); process.exitCode = 1; }
 } else if (process.argv[2] === "join" || process.argv[2] === "install-sudo-helper") {
   try {
     if (process.argv[2] === "join") await joinRuntime(process.argv.slice(3));
