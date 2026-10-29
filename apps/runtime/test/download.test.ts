@@ -26,7 +26,7 @@ test("connection and low-speed deadlines abort without exposing URLs or response
 });
 test("a slow but active stream refreshes progress once per second without a fixed total download deadline", async () => {
   const lines: string[] = [];
-  const stream = new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new Uint8Array(2048)); setTimeout(() => { c.enqueue(new Uint8Array(2048)); c.close(); }, 1100); } });
+  const stream = new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new Uint8Array(2048)); setTimeout(() => { c.enqueue(new Uint8Array(2048)); c.close(); }, 2300); } }); // 每秒的刷新恰好落在 1 秒边界时可能少一次，留出两个刷新周期
   await downloadRelease("https://synthetic.example/release", { tty: true, progress: (line) => lines.push(line), fetch: (async () => new Response(stream)) as unknown as typeof fetch });
   expect(lines.length).toBeGreaterThanOrEqual(2); expect(lines[0]).toContain("2048"); expect(lines.at(-1)).toContain("4096");
 });

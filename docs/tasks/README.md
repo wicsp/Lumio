@@ -30,7 +30,7 @@
 | [P2-9](P2-9-doctor-selftest-upgrade.md) ✅ | `lumio doctor`、`lumio selftest`、`upgrade` | 后端（Codex） | P2-8 |
 | [P2-10](P2-10-markdown-links.md) | 同时识别标准 Markdown 链接（ADR 0022） | 后端（Codex） | 无 |
 | [P2-11](P2-11-acceptance-fixes.md) ✅ | 第一次验收发现的问题：终端输入、Tailscale 询问、重新登录、写出开关字段（ADR 0023） | 后端（Codex） | P2-8 |
-| [P2-12](P2-12-install-feedback.md) | 安装与配对：下载进度、配对失败说出原因、发现另一个 Hub | 后端（Codex） | P2-9 |
+| [P2-12](P2-12-install-feedback.md) ✅ | 安装与配对：下载进度、配对失败说出原因、发现另一个 Hub | 后端（Codex） | P2-9 |
 
 P1 的设计决定见 ADR 0014、0016、0017、0018；P2 见 ADR 0019、0020、0021、0022 与修订后的 ADR 0005；契约见 `packages/schema/src/` 中的 `query.ts`、`actor.ts`、`operation.ts`、`proposal.ts`、`api.ts`。
 
@@ -53,7 +53,7 @@ P2-9 用自检覆盖执行、会话续接、提问、取消和任务笔记写回
 | 合上 Mac 期间例行任务补写 | P2-5 | 服务器接入后，建一个 `device: server`、每 10 分钟的例行任务，合上 Mac 半小时后打开，确认结果补写 |
 | 提权助手真实安装与审批 | P2-6 / P2-8 | 在有 root 的私人服务器配对后运行 `sudo ~/.local/bin/lumio-runtime install-sudo-helper`，核对指纹；让 agent 申请安装软件包，用 `lumio proposals` 批准，再拒绝一次确认不执行。升级后按提示更新助手程序 |
 
-2026-10-28 第一次 Mac 单机安装已人工通过三个真实 agent、任务笔记的一问一答与例行任务；当时发现的问题已记录为 P2-11。P2-9 已由 Claude review 并合并（#49），真实安装上的 `doctor`/`selftest` 待人工运行。
+2026-10-28 第一次 Mac 单机安装已人工通过三个真实 agent、任务笔记的一问一答与例行任务；当时发现的问题已记录为 P2-11。2026-10-29 v0.1.4：Mac 重装、实验室服务器（`server`，只有 pi）经 Tailscale 配对接入，`lumio doctor` 与 `lumio selftest --runtime server --agents pi --notes` 已人工通过。过程中修复：systemd `EnvironmentFile` 引号（#52）、发布测试的时序（#47、#54）；改进见 P2-12。
 
 pi 的 skill 验收说明：pi 的回答完全正确（推荐了 `[[渲染格式与来源判断]]`、没有写入、没有泄露），但回答完之后 pi 进程被 `SIGKILL`（退出码 137），
 在自己的终端里直接运行也一样，不是 Lumio 的问题。验收脚本把退出码作为提醒而不是失败。若以后派给 pi 的任务出现"汇报正常但状态为失败（signal SIGKILL）"，再处理。
