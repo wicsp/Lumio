@@ -63,3 +63,32 @@ test("runtime service files preserve shared directory permissions and use approp
     expect((await stat(join(home, ".config/lumio-runtime/runtime.env"))).mode & 0o777).toBe(0o600);
   }
 });
+
+// 接入实验室服务器时发现（2026-10-29）：EnvironmentFile= 加了引号会被 systemd 当成相对路径而忽略，执行器拿不到 runtime.env 的 PATH，找不到 agent。
+const analyze = Bun.which("systemd-analyze");
+test("systemd accepts the generated unit, including EnvironmentFile (verified with systemd-analyze when available)", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "lumio-unit-"));
+  try {
+    const binary = join(dir, "lumio-runtime"), env = join(dir, "runtime.env"), unit = join(dir, "lumio-runtime.service");
+    await writeFile(binary, "#!/bin/sh\n", { mode: 0o755 }); await writeFile(env, 'PATH="/usr/bin"\n');
+    const content = runtimeUnit(binary, env);
+    expect(content).toContain(`EnvironmentFile=${env}\n`);
+    expect(() => runtimeUnit(binary, join(dir, "with space", "runtime.env"))).toThrow("空白");
+    await writeFile(unit, content);
+    if (analyze) {
+      const result = Bun.spawnSync([analyze, "verify", unit], { stdout: "pipe", stderr: "pipe" });
+      expect(result.stdout.toString() + result.stderr.toString()).not.toContain("EnvironmentFile");
+    }
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test("runtime.env PATH wins over the service manager's default PATH", async () => {
+  const home = await mkdtemp(join(tmpdir(), "lumio-env-"));
+  try {
+    await mkdir(join(home, ".config/lumio-runtime"), { recursive: true });
+    await writeFile(join(home, ".config/lumio-runtime/runtime.env"), 'PATH="/home/x/.local/bin:/usr/bin"\nLUMIO_RUNTIME_NAME="server"\n');
+    const env = await runtimeEnvironment(home, { PATH: "/usr/bin:/bin", LUMIO_RUNTIME_NAME: "override" });
+    expect(env.PATH).toBe("/home/x/.local/bin:/usr/bin");
+    expect(env.LUMIO_RUNTIME_NAME).toBe("override");
+  } finally { await rm(home, { recursive: true, force: true }); }
+});

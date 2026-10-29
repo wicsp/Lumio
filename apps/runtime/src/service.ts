@@ -39,6 +39,11 @@ export function parseEnvironment(content: string): Record<string, string> {
 export function xml(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
 }
+/** systemd 的 EnvironmentFile= 不认引号（加了引号会被当成相对路径而忽略），只能原样写；因此不允许空白字符。 */
+function unitPath(value: string): string {
+  if (/\s/.test(value)) throw new RuntimeError("服务配置文件的路径不能包含空白字符");
+  return value.replaceAll("%", "%%");
+}
 function unitString(value: string): string { return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("%", "%%")}"`; }
 export function runtimePlist(binary: string, env: Record<string, string>, state: string): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -53,7 +58,7 @@ export function runtimePlist(binary: string, env: Record<string, string>, state:
 </dict></plist>\n`;
 }
 export function runtimeUnit(binary: string, envFile: string): string {
-  return `[Unit]\nDescription=Lumio runtime\nAfter=network.target\n\n[Service]\nExecStart=${unitString(binary)}\nEnvironmentFile=${unitString(envFile)}\nRestart=always\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n`;
+  return `[Unit]\nDescription=Lumio runtime\nAfter=network.target\n\n[Service]\nExecStart=${unitString(binary)}\nEnvironmentFile=${unitPath(envFile)}\nRestart=always\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n`;
 }
 export interface ServiceOptions {
   home?: string; platform?: string; binary?: string; uid?: number; user?: string;
@@ -113,6 +118,13 @@ export async function installService(options: ServiceOptions = {}): Promise<void
 }
 
 export async function runtimeEnvironment(home = process.env.HOME ?? homedir(), env = process.env): Promise<NodeJS.ProcessEnv> {
-  try { return { ...parseEnvironment(await readFile(join(home, ".config/lumio-runtime/runtime.env"), "utf8")), ...Object.fromEntries(Object.entries(env).filter(([, value]) => value !== undefined)) }; }
+  try {
+    const file = parseEnvironment(await readFile(join(home, ".config/lumio-runtime/runtime.env"), "utf8"));
+    // 环境变量优先，但 PATH 例外：后台服务（systemd、launchd）给的 PATH 是系统默认值，找不到 agent；
+    // runtime.env 里的 PATH 是配对时从人的终端记下来的（P2-8）。
+    const merged = { ...file, ...Object.fromEntries(Object.entries(env).filter(([, value]) => value !== undefined)) };
+    if (file.PATH) merged.PATH = file.PATH;
+    return merged;
+  }
   catch (cause) { if ((cause as NodeJS.ErrnoException).code === "ENOENT") return env; throw cause; }
 }
