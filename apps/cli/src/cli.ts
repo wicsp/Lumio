@@ -1,3 +1,7 @@
+import { doctor } from "./doctor.ts";
+import { printChecks } from "./diagnostics.ts";
+import { runSelftest } from "./selftest.ts";
+import { runUpgrade } from "./upgrade.ts";
 import { runPairing } from "./pairing.ts";
 import { randomBytes } from "node:crypto";
 import { parseArgs } from "node:util";
@@ -37,6 +41,13 @@ export async function runCli(args: string[], options: CliOptions = {}): Promise<
 
 async function executeCli(args: string[], options: CliOptions): Promise<number> {
   const log = options.log ?? console.log;
+  if (args[0] === "doctor") {
+    const { values, positionals } = parseArgs({ args: args.slice(1), allowPositionals: true, options: { json: { type: "boolean" } } });
+    if (positionals.length) throw new Error("用法：lumio doctor [--json]");
+    return printChecks(await doctor(), Boolean(values.json), log);
+  }
+  if (args[0] === "selftest") return runSelftest(args.slice(1), log);
+  if (args[0] === "upgrade") return runUpgrade(args.slice(1), false, log);
   if (args.length === 1 && args[0] === "--version") { log(version); return 0; }
   if (["login", "login-code", "logout"].includes(args[0] ?? "") || (args[0] === "runtime" && ["add", "remove"].includes(args[1] ?? ""))) return runPairing(args, { log, warn: options.warn });
   if (args[0] === "job") return runJobs(args.slice(1), log);

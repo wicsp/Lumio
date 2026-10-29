@@ -35,18 +35,22 @@ P1 的设计决定见 ADR 0014、0016、0017、0018；P2 见 ADR 0019、0020、0
 
 ## 等人类回来处理
 
-开发期间人类不在电脑旁；需要人动手的验收与交叉 review 集中记在这里，处理完一项删一项。
+P2-9 用自检覆盖执行、会话续接、提问、取消和任务笔记写回。真实安装按下面的顺序验收：
 
-**2026-10-28 第一次验收（Mac 单机模式，`install.sh` v0.1.0 安装）**：已通过——三个真实 agent（执行、续接会话、提问、取消）、
-任务笔记的一问一答、例行任务（触发、`context: previous`、followup）、pi 的 skill 行为（见下方说明）。发现的问题见 P2-11。
+1. Hub 所在机器：`curl -fsSL https://raw.githubusercontent.com/wicsp/Lumio/main/install.sh | sh`；服务器模式加 `-s -- --server`。已有安装可运行 `lumio upgrade`。
+2. 每台额外执行器：在已配置的 CLI 上运行 `lumio runtime add <名称>`，在目标机器运行打印的一行安装命令。已有安装可运行 `lumio-runtime upgrade`。
+3. 运行 `lumio doctor`；有失败项时按提示修复。在执行器机器上用 `lumio-runtime doctor` 检查服务、PATH、权限与提权助手。
+4. 在 Hub 所在机器运行 `lumio selftest --runtime <名称> --notes`（只有一个执行器时可省略 `--runtime`）。默认验证该执行器检测到的全部 agent，可用 `--agents codex,claude-code,pi` 选择。每项显示耗时和 job 编号，失败时用 `lumio job show <job>` 查看；`--json` 可保存结构化结果。自检笔记保留并标为 `done`。
+
+自检覆盖不到的项目仍需人工验收：
 
 | 事项 | 来自 | 怎么做 |
 |---|---|---|
-| 开机自启动 | P2-7 | 重启 Mac 后不做任何事，`lumio runtime list` 显示本机执行器在线 |
-| 实验室服务器接入 | P2-8 | P2-11 合并并发布 v0.1.1 后：Mac 上 `lumio-hub setup --public-url <Tailscale 地址>`（见 `docs/personal-setup.md`），`lumio runtime add server`，在服务器上运行打印的命令，`lumio runtime list` 显示在线 |
-| 合上 Mac 期间例行任务照常执行 | P2-5 | 服务器接入后，建一个 `device: server`、每 10 分钟的例行任务，合上 Mac 半小时后打开，笔记里应有补写的结果 |
-| P2-2 普通命令 | P2-2 | 服务器 `runtime.env` 加 `LUMIO_RUNTIME_ALLOWED_COMMANDS=/usr/bin/nvidia-smi` 并重启执行器；`lumio job submit --runtime server -- /usr/bin/nvidia-smi` |
-| P2-6 提权 | P2-6 | 在有 root 的私人服务器上：配对后 `sudo ~/.local/bin/lumio-runtime install-sudo-helper`，核对指纹；让 agent 申请安装一个软件包，`lumio proposals` 查看并批准；再拒绝一次确认不执行 |
+| iPad 查看笔记 | P2-4 | 在 iPad 上打开自检笔记，确认结果区块与正文可读 |
+| 合上 Mac 期间例行任务补写 | P2-5 | 服务器接入后，建一个 `device: server`、每 10 分钟的例行任务，合上 Mac 半小时后打开，确认结果补写 |
+| 提权助手真实安装与审批 | P2-6 / P2-8 | 在有 root 的私人服务器配对后运行 `sudo ~/.local/bin/lumio-runtime install-sudo-helper`，核对指纹；让 agent 申请安装软件包，用 `lumio proposals` 批准，再拒绝一次确认不执行。升级后按提示更新助手程序 |
+
+2026-10-28 第一次 Mac 单机安装已人工通过三个真实 agent、任务笔记的一问一答与例行任务；当时发现的问题已记录为 P2-11。P2-9 的真实安装验收与 Claude 交叉 review 待进行。
 
 pi 的 skill 验收说明：pi 的回答完全正确（推荐了 `[[渲染格式与来源判断]]`、没有写入、没有泄露），但回答完之后 pi 进程被 `SIGKILL`（退出码 137），
 在自己的终端里直接运行也一样，不是 Lumio 的问题。验收脚本把退出码作为提醒而不是失败。若以后派给 pi 的任务出现"汇报正常但状态为失败（signal SIGKILL）"，再处理。
