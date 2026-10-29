@@ -30,6 +30,7 @@ export function warnHttp(url: string, log: (line: string) => void) {
 }
 export async function joinRuntime(args: string[], options: ServiceOptions & {
   env?: NodeJS.ProcessEnv; fetch?: typeof globalThis.fetch;
+  warn?: (line: string) => void;
   install?: (options: ServiceOptions) => Promise<void>;
 } = {}) {
   let values: { hub?: string; code?: string };
@@ -46,7 +47,7 @@ export async function joinRuntime(args: string[], options: ServiceOptions & {
   const state = resolve(previous.LUMIO_RUNTIME_STATE_DIR ?? join(home, ".local/share/lumio-runtime"));
   environmentText({ ...previous, PATH: env.PATH ?? "/usr/bin:/bin" });
   readConfig({ ...previous, LUMIO_HUB_URL: url, LUMIO_TOKEN: "pending-pairing", LUMIO_RUNTIME_NAME: "pending", LUMIO_RUNTIME_STATE_DIR: state });
-  const joined = await pair(url, values.code!, "runtime", RuntimeJoin, options.fetch);
+  const joined = await pair(url, values.code!, "runtime", RuntimeJoin, options.fetch, options.warn);
   const merged = { ...previous, LUMIO_HUB_URL: url, LUMIO_TOKEN: joined.token, LUMIO_RUNTIME_NAME: joined.name,
     LUMIO_RUNTIME_STATE_DIR: state, PATH: env.PATH ?? "/usr/bin:/bin" };
   readConfig(merged);

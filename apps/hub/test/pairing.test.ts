@@ -7,6 +7,7 @@ import { authorize, PAIRING_OPERATIONS } from "../src/authorize.ts";
 import { readConfig } from "../src/config.ts";
 import { startHub } from "../src/server.ts";
 import { HubStore } from "../src/store.ts";
+import { Pairing } from "../src/pairing.ts";
 let root: string, state: string, vault: string, hub: Awaited<ReturnType<typeof startHub>>, now: number;
 let human: string, agent: string, runtime: string, logs: string[];
 let daemon: ReturnType<typeof Bun.spawn> | undefined;
@@ -29,6 +30,18 @@ beforeEach(async () => {
   human = store.createToken("owner", "owner"); agent = store.createToken("agent", "agent"); runtime = store.createToken("old-runtime", "server"); store.close(); hub = await boot();
 });
 afterEach(async () => { if (daemon) { daemon.kill("SIGTERM"); await daemon.exited; daemon = undefined; } await hub.stop(); await rm(root, { recursive: true, force: true }); });
+
+test("runtime installation commands pin the Hub release, while development and client invitations omit a version", async () => {
+  const identity = hub.store.authenticate(`Bearer ${human}`)!;
+  for (const version of ["0.1.4", "0.1.5-rc.1", "0.0.0-dev"]) {
+    const pairing = new Pairing(hub.store, { publicUrl: "https://synthetic.example" }, () => new Date(now), version);
+    const runtime = RuntimeInvite.parse(pairing.invite("runtime", "server", identity));
+    expect(runtime.command).toBe(`curl -fsSL https://raw.githubusercontent.com/wicsp/Lumio/main/install.sh | sh -s -- runtime${version === "0.0.0-dev" ? "" : ` --version v${version}`} --hub https://synthetic.example --code ${runtime.code}`);
+    const client = ClientInvite.parse(pairing.invite("client", "cli@mac", identity));
+    expect(client.command).toBe(`lumio login https://synthetic.example --code ${client.code}`);
+  }
+  expect((await invite()).command).not.toContain("--version");
+});
 
 test("explicit authorization table permits only public join, human invites/removal, runtime signing key", async () => {
   for (const operation of PAIRING_OPERATIONS) for (const role of [null, "human", "agent", "runtime"] as const) {

@@ -5,6 +5,7 @@ import type { HubConfig } from "./config.ts";
 import { HubError } from "./errors.ts";
 import type { Privileged } from "./privileged.ts";
 import type { HubStore, Identity } from "./store.ts";
+import { version } from "./version.ts";
 
 const hash = (code: string) => createHash("sha256").update(code).digest("hex");
 const quote = (value: string) => /^[a-zA-Z0-9:/._-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;
@@ -26,7 +27,7 @@ export function signingKey(publicKey: string): HubSigningKey {
 export class Pairing {
   private failures: number[] = [];
   private blockedUntil = 0;
-  constructor(private store: HubStore, private config: Pick<HubConfig, "publicUrl">, private now: () => Date = () => new Date()) {
+  constructor(private store: HubStore, private config: Pick<HubConfig, "publicUrl">, private now: () => Date = () => new Date(), private hubVersion = version) {
     store.db.exec(`CREATE TABLE IF NOT EXISTS pairing_codes (hash TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL,
       actor TEXT NOT NULL REFERENCES actors(id), expires TEXT NOT NULL, used INTEGER NOT NULL DEFAULT 0);`);
   }
@@ -53,7 +54,7 @@ export class Pairing {
       this.store.audit(identity, JSON.stringify({ operation: `${kind}.invite`, name, actor: actor.id }), "allow", undefined, "applied");
       const common = { name, code, expires, hub_url: url };
       return kind === "runtime" ? RuntimeInvite.parse({ ...common, actor: actor.id,
-        command: `curl -fsSL https://raw.githubusercontent.com/wicsp/Lumio/main/install.sh | sh -s -- runtime --hub ${quote(url)} --code ${code}` })
+        command: `curl -fsSL https://raw.githubusercontent.com/wicsp/Lumio/main/install.sh | sh -s -- runtime${this.hubVersion === "0.0.0-dev" ? "" : ` --version ${quote(`v${this.hubVersion}`)}`} --hub ${quote(url)} --code ${code}` })
         : ClientInvite.parse({ ...common, command: `lumio login ${quote(url)} --code ${code}` });
     })();
   }

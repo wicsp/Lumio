@@ -44,7 +44,7 @@ export async function runPairing(args: string[], options: {
     const hub_url = url.href.replace(/\/+$/, "");
     const request = ClientJoinRequest.safeParse({ code: values.code });
     if (!request.success) throw new PairingError("配对码格式不合法，请重新运行 lumio login-code");
-    const joined = await pair(hub_url, request.data.code, "client", ClientJoin, options.fetch);
+    const joined = await pair(hub_url, request.data.code, "client", ClientJoin, options.fetch, options.warn);
     await writeConfig(path, CliConfig.parse({ hub_url, token: joined.token, ...(values.vault ? { vault: resolve(values.vault) } : {}) }));
     log("CLI 已登录"); return 0;
   }
