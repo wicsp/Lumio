@@ -1,3 +1,4 @@
+import { extraServices, healthVersion, publicHubChecks } from "./hub-checks.ts";
 import { join } from "node:path";
 import { createClient } from "@lumio/api-client";
 import { CliConfig } from "@lumio/schema";
@@ -38,13 +39,15 @@ export async function doctor(options: DiagnosticOptions = {}): Promise<Check[]> 
   await check("Hub 地址与令牌配置", "运行 lumio-hub setup 或 lumio login", async () => {
     if (!url || !token) throw new Error(); base = httpURL(url).href.replace(/\/+$/, "");
   });
+  let hubVersion = version;
   const client = createClient({ url: base ?? "http://invalid", token, fetch: io.fetch });
   await check("Hub /health", "检查 Hub 服务、地址和网络；运行 lumio-hub setup 修复本机安装", async () => {
     if (!base) throw new Error();
     const r = await io.fetch(`${base}/health`); const body = await r.json() as { ok?: boolean; version?: string };
     if (!r.ok || body.ok !== true || typeof body.version !== "string") throw new Error();
-    checks.push({ name: `Hub 版本 ${body.version} / CLI ${version}`, ok: body.version === version,
-      ...(body.version !== version ? { problem: "版本不一致", fix: "运行 lumio upgrade" } : {}) });
+    hubVersion = healthVersion(body);
+    checks.push({ name: `Hub 版本 ${hubVersion} / CLI ${version}`, ok: hubVersion === version,
+      ...(hubVersion !== version ? { problem: localAddress(new URL(base)) ? "端口上是另一个 Hub，版本不一致" : "版本不一致", fix: "运行 lumio upgrade" } : {}) });
   });
   await check("Hub 令牌", "运行 lumio login 重新登录或 lumio-hub setup", async () => { if (!base) throw new Error(); await client.actors(); });
   await check("vault 状态", "检查 Hub 对 vault 的读写权限并查看 Hub 日志", async () => {
@@ -55,6 +58,7 @@ export async function doctor(options: DiagnosticOptions = {}): Promise<Check[]> 
     for (const issue of status.issues as string[]) checks.push({ name: "Hub 问题", ok: false, problem: issue, fix: "按提示修复笔记或 vault 权限，查看 Hub 日志" });
   });
   if (base && localAddress(new URL(base))) {
+    checks.push(...await extraServices(io));
     for (const service of ["hub", "runtime"] as const) await check(`本机 ${service} 后台服务`, `运行 lumio-hub setup（${service} 服务未启动）`, async () => {
       if ((await io.run(serviceCommand(io.platform, io.uid, service, "status"))).code !== 0) throw new Error();
     });
@@ -63,12 +67,13 @@ export async function doctor(options: DiagnosticOptions = {}): Promise<Check[]> 
   if (!publicUrl && base && localAddress(new URL(base))) {
     try { publicUrl = environment(await io.read(join(io.home, ".config/lumio/hub.env"))).LUMIO_PUBLIC_URL; } catch { /* no local Hub configuration */ }
   }
-  if (publicUrl) await check("对外地址 /health", "检查 LUMIO_PUBLIC_URL、反向代理和防火墙", async () => {
-    const u = httpURL(publicUrl!);
-    if (u.protocol === "http:" && !localAddress(u)) checks.push({ name: "对外地址警告", ok: true, problem: "非本机地址使用 HTTP", fix: "建议配置 HTTPS 反向代理或使用可信私网" });
-    const r = await io.fetch(`${u.href.replace(/\/+$/, "")}/health`);
-    if (!r.ok || (await r.json() as { ok?: boolean }).ok !== true) throw new Error();
-  });
+  if (publicUrl) {
+    try {
+      const u = httpURL(publicUrl);
+      if (u.protocol === "http:" && !localAddress(u)) checks.push({ name: "对外地址警告", ok: true, problem: "非本机地址使用 HTTP", fix: "建议配置 HTTPS 反向代理或使用可信私网" });
+      checks.push(...await publicHubChecks(io, publicUrl, hubVersion, base ? Number(new URL(base).port || (new URL(base).protocol === "https:" ? 443 : 80)) : 7420));
+    } catch { checks.push({ name: "对外地址 /health", ok: false, problem: "地址不合法", fix: "检查 LUMIO_PUBLIC_URL" }); }
+  }
   await check("执行器列表", "检查 Hub 认证；用 lumio runtime add 登记执行器", async () => {
     if (!base) throw new Error(); const runtimes = await client.runtimes();
     if (!runtimes.length) checks.push({ name: "执行器", ok: false, problem: "尚无已登记的执行器", fix: "运行 lumio-hub setup 或 lumio runtime add <名称>" });

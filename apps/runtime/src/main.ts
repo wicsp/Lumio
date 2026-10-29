@@ -3,6 +3,7 @@ import { parseArgs } from "node:util";
 import { doctor } from "./doctor.ts";
 import { printChecks } from "./diagnostics.ts";
 import { runUpgrade } from "./upgrade.ts";
+import { PairingError } from "./pairing-feedback.ts";
 import { joinRuntime } from "./pairing.ts";
 import { configureSudoEnvironment, installSudoHelper } from "./sudo-install.ts";
 import { installService, runtimeEnvironment } from "./service.ts";
@@ -28,7 +29,7 @@ if (process.argv[2] === "--version") {
   try {
     if (process.argv[2] === "join") await joinRuntime(process.argv.slice(3));
     else await installSudoHelper(process.argv.slice(3));
-  } catch (cause) { console.error(cause instanceof RuntimeError ? cause.message : "执行器安装失败，请检查配置与权限"); process.exitCode = 1; }
+  } catch (cause) { console.error((cause instanceof RuntimeError || cause instanceof PairingError) ? cause.message : "执行器安装失败，请检查配置与权限"); process.exitCode = 1; }
 } else if (process.argv[2] === "--configure-sudo-helper") {
   try {
     if (process.getuid?.() === 0 || !process.env.HOME || process.argv.length > 4) throw new RuntimeError("请通过提权助手安装命令更新配置");

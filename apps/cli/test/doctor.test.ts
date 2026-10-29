@@ -10,7 +10,7 @@ function fixture() {
   const modes: Record<string, number> = {};
   const bodies: Record<string, unknown> = { "/health": { ok: true, version: "0.0.0-dev" }, "/v1/actors": [], "/v1/status": { watching: true, issues: [] }, "/v1/runtimes": [runtime], "/v1/routines": [routine], "/v1/proposals": [] };
   const fail = new Set<string>(), commands: string[][] = [], urls: string[] = [];
-  const options: DiagnosticOptions = { home: "/synthetic", env: {}, uid: 501, platform: "darwin",
+  const options: DiagnosticOptions = { home: "/synthetic", env: {}, uid: 501, find: () => null, platform: "darwin",
     read: async (p) => { if (!(p in files)) throw new Error(token); return files[p]!; },
     stat: async (p) => { if (!(p in files)) throw new Error(token); return { mode: modes[p] ?? 0o600, uid: 501, isFile: () => true, isDirectory: () => false }; },
     run: async (argv) => { commands.push(argv); return { code: fail.has("service") ? 1 : 0, stdout: "", stderr: token }; },
@@ -26,7 +26,7 @@ test("CLI doctor reports every item, HTTP warning and pending proposals without 
   const f = fixture();
   let checks = await doctor(f.options); expect(checks.every((c) => c.ok)).toBe(true);
   expect(checks.some((c) => c.name === "对外地址警告")).toBe(true);
-  expect(f.commands).toEqual([["launchctl", "print", "gui/501/io.lumio.hub"], ["launchctl", "print", "gui/501/io.lumio.runtime"]]);
+  expect(f.commands).toEqual([["launchctl", "list"], ["launchctl", "print", "gui/501/io.lumio.hub"], ["launchctl", "print", "gui/501/io.lumio.runtime"]]);
   const output: string[] = []; expect(printChecks(checks, false, (l) => output.push(l))).toBe(0); expect(output.at(-1)).toMatch(/项通过/);
   f.bodies["/v1/proposals"] = [{ id: "prop_00000000000000000000000001", author: runtime.actor, reason: "synthetic", status: "pending", created: runtime.last_seen,
     operation: { op: "task.dispatch", args: { task: "task_00000000000000000000000001", trigger: "cli" } } }];
@@ -72,4 +72,24 @@ test("CLI version ranges stay aligned with runtime adapters without cross-app im
     expect(supported(engine as keyof typeof verifiedVersions, min)).toBe(true); expect(supported(engine as keyof typeof verifiedVersions, below)).toBe(false);
   }
   expect(supported("pi", "garbage")).toBe(false);
+});
+
+test("doctor diagnoses another Hub, extra services, public health mismatch and Tailscale port mismatch independently", async () => {
+  const f = fixture(); f.options.find = (name) => name === "tailscale" ? "/synthetic/tailscale" : null;
+  f.bodies["/health"] = { ok: true, version: "0.1.0" };
+  f.options.run = async (argv) => { f.commands.push(argv); return { code: 0, stdout: argv.includes("list") ? "10 0 io.lumio.hub.p2-1\n20 0 io.lumio.runtime" : argv.includes("serve") ? "|-- / proxy http://localhost:7421" : "", stderr: token }; };
+  const originalFetch = f.options.fetch!;
+  f.options.fetch = (async (input, init) => String(input).startsWith("http://remote.synthetic") ? Response.json({ ok: true, version: "0.2.0" }) : originalFetch(input, init)) as typeof fetch;
+  const checks = await doctor(f.options);
+  expect(checks.find((c) => c.name.startsWith("Hub 版本"))!.problem).toContain("端口上是另一个 Hub");
+  expect(checks.find((c) => c.name.includes("io.lumio.hub.p2-1"))!.fix).toContain("launchctl bootout gui/501/io.lumio.hub.p2-1");
+  expect(checks.find((c) => c.name === "对外地址 /health")!.problem).toContain("对外地址指向的不是这个 Hub");
+  expect(checks.find((c) => c.name === "Tailscale serve status")!.fix).toContain("tailscale serve --bg 7420");
+  expect(f.commands.some((argv) => argv.includes("bootout") || argv.includes("--bg"))).toBe(false);
+  expect(JSON.stringify(checks)).not.toContain(token);
+});
+test("duplicated installation helpers stay aligned across app boundaries", async () => {
+  for (const [local, other] of [["download", "runtime"], ["pairing-feedback", "runtime"], ["hub-checks", "hub"]]) {
+    expect(await readFile(new URL(`../src/${local}.ts`, import.meta.url), "utf8")).toBe(await readFile(new URL(`../../${other}/src/${local}.ts`, import.meta.url), "utf8"));
+  }
 });

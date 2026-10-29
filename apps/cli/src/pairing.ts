@@ -4,7 +4,8 @@ import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { createClient } from "@lumio/api-client";
 import { askTerminal, openTerminal } from "@lumio/core";
-import { CliConfig } from "@lumio/schema";
+import { pair, PairingError } from "./pairing-feedback.ts";
+import { CliConfig, ClientJoin, ClientJoinRequest } from "@lumio/schema";
 import { hubCredentials, readCliConfig } from "./config.ts";
 
 async function confirmOverwrite(): Promise<boolean> {
@@ -41,7 +42,9 @@ export async function runPairing(args: string[], options: {
     if (exists && !await (options.confirm ?? confirmOverwrite)()) { log("已取消登录"); return 0; }
     if (url.protocol === "http:" && !/^(localhost|\[::1\]|127\.\d+\.\d+\.\d+)$/.test(url.hostname)) (options.warn ?? console.error)("警告：Hub 使用 HTTP，令牌会以明文传输");
     const hub_url = url.href.replace(/\/+$/, "");
-    const joined = await createClient({ url: hub_url, fetch: options.fetch }).clientJoin(values.code);
+    const request = ClientJoinRequest.safeParse({ code: values.code });
+    if (!request.success) throw new PairingError("配对码格式不合法，请重新运行 lumio login-code");
+    const joined = await pair(hub_url, request.data.code, "client", ClientJoin, options.fetch);
     await writeConfig(path, CliConfig.parse({ hub_url, token: joined.token, ...(values.vault ? { vault: resolve(values.vault) } : {}) }));
     log("CLI 已登录"); return 0;
   }

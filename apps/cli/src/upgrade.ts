@@ -1,3 +1,4 @@
+import { downloadRelease, DownloadError, type DownloadOptions } from "./download.ts";
 import { createHash } from "node:crypto";
 import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -8,6 +9,7 @@ import { diagnosticIO, environment, httpURL, localAddress, serviceCommand, type 
 // Kept identical in CLI and runtime: apps cannot import one another (DESIGN §2).
 export class UpgradeError extends Error { readonly code = "UPGRADE_FAILED"; }
 export interface UpgradeOptions extends DiagnosticOptions {
+  tty?: boolean; progress?: DownloadOptions["progress"];
   arch?: string; version?: string; runtimeOnly?: boolean; releaseBase?: string;
   log?: (line: string) => void; now?: () => number; sleep?: (ms: number) => Promise<void>;
 }
@@ -32,13 +34,10 @@ export async function upgrade(options: UpgradeOptions = {}): Promise<void> {
   }
   const stages: string[] = [], replaced: string[] = [], backups = new Set<string>();
   try {
-    log(`下载 Lumio（${platform}）…`);
-    const payload = await releaseFetch(`${download}/${archive}`, { redirect: "follow", signal: AbortSignal.timeout(300_000) });
-    if (!payload.ok) throw new UpgradeError("下载压缩包失败，请检查网络与版本");
-    const bytes = Buffer.from(await payload.arrayBuffer());
-    const sums = await releaseFetch(`${download}/SHA256SUMS`, { redirect: "follow", signal: AbortSignal.timeout(30_000) });
-    if (!sums.ok) throw new UpgradeError("下载 SHA256SUMS 失败");
-    const matches = (await sums.text()).split(/\r?\n/).map((line) => line.trim().split(/\s+/)).filter((parts) => parts[1] === archive);
+    log(`下载 Lumio ${options.version ?? "最新版本"}（${platform}）…`);
+    const bytes = await downloadRelease(`${download}/${archive}`, { fetch: releaseFetch, tty: options.tty, progress: options.progress });
+    const sumsText = (await downloadRelease(`${download}/SHA256SUMS`, { fetch: releaseFetch, tty: false })).toString("utf8");
+    const matches = sumsText.split(/\r?\n/).map((line) => line.trim().split(/\s+/)).filter((parts) => parts[1] === archive);
     if (matches.length !== 1 || matches[0]!.length !== 2 || !/^[0-9a-fA-F]{64}$/.test(matches[0]![0]!)) throw new UpgradeError("SHA256SUMS 缺少或重复校验记录，未替换程序");
     if (createHash("sha256").update(bytes).digest("hex") !== matches[0]![0]!.toLowerCase()) throw new UpgradeError("SHA256 校验失败，未替换任何程序");
     const tar = join(temp, archive), extracted = join(temp, "extracted");
@@ -107,6 +106,7 @@ export async function upgrade(options: UpgradeOptions = {}): Promise<void> {
     if (sudoConfigured) log("还需运行 `sudo lumio-runtime install-sudo-helper` 更新助手程序");
   } catch (cause) {
     if (cause instanceof UpgradeError) throw cause;
+    if (cause instanceof DownloadError) throw new UpgradeError(cause.message);
     throw new UpgradeError("升级失败，请检查网络、下载源、程序权限与后台服务日志");
   } finally {
     await Promise.all(stages.map((p) => rm(p, { force: true })));

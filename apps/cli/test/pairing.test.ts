@@ -14,6 +14,7 @@ test("login validates join, writes private config with local vault, and asks bef
   const { home, path } = await fixture(), logs: string[] = [];
   let calls = 0;
   const fetcher = (async (url: URL, init: RequestInit) => {
+    if (String(url).endsWith("/health")) return Response.json({ ok: true, version: "0.0.0-dev" });
     calls++; expect(url.href).toBe("https://synthetic.example/v1/client/join"); expect(new Headers(init.headers).has("Authorization")).toBe(false); expect(init.redirect).toBe("error"); expect(JSON.parse(String(init.body))).toEqual({ code }); return Response.json(joined);
   }) as unknown as typeof fetch;
   await runPairing(["login", "https://synthetic.example/", "--code", code, "--vault", join(home, "local-vault")], { home, fetch: fetcher, log: (line) => logs.push(line) });
@@ -45,7 +46,7 @@ test("runtime add supports human text and strict JSON; login-code uses a label; 
 test("login failures keep existing config and hide untrusted response data", async () => {
   const { home, path } = await fixture(); await mkdir(dirname(path), { recursive: true }); const old = '{"hub_url":"https://synthetic.example","token":"old-token"}'; await writeFile(path, old);
   for (const body of [{ private: "sensitive-response" }, { actor, token: "secret", extra: true }]) {
-    await expect(runPairing(["login", "https://synthetic.example", "--code", code], { home, confirm: async () => true, fetch: (async () => Response.json(body)) as unknown as typeof fetch })).rejects.toThrow("Hub 返回了不合法的响应");
+    await expect(runPairing(["login", "https://synthetic.example", "--code", code], { home, confirm: async () => true, fetch: (async (url: unknown) => Response.json(String(url).endsWith("/health") ? { ok: true, version: "0.0.0-dev" } : body)) as unknown as typeof fetch })).rejects.toThrow("Hub 返回了不合法的响应");
     expect(await readFile(path, "utf8")).toBe(old);
   }
 });
@@ -56,7 +57,7 @@ test.skipIf(!script || process.platform !== "linux")("lumio login asks the overw
   const { home, path } = await fixture();
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, JSON.stringify({ hub_url: "http://127.0.0.1:1", token: "old-token" }), { mode: 0o600 });
-  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => Response.json(joined) });
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: (req) => Response.json(new URL(req.url).pathname === "/health" ? { ok: true, version: "0.0.0-dev" } : joined) });
   try {
     const main = new URL("../src/main.ts", import.meta.url).pathname;
     const command = `echo piped | HOME=${JSON.stringify(home)} ${JSON.stringify(process.execPath)} ${JSON.stringify(main)} login http://127.0.0.1:${server.port} --code ${code}`;

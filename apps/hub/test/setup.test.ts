@@ -17,7 +17,7 @@ async function fixture(platform = "darwin") {
     env: { HOME: home, USER: "synthetic", PATH: `${home}/agents:/usr/bin:/bin` }, uid: 123,
     find: (name) => name === "git" ? "/opt/git/bin/git" : null,
     run: async (argv) => { commands.push(argv); return { code: 0, stdout: argv[0]?.endsWith("lumio-runtime") ? "已连上 Hub；检测到：codex 0.163.0" : "Linger=yes", stderr: "" }; },
-    fetch: (async () => Response.json({ ok: true })), log: (line) => logs.push(line),
+    fetch: (async () => Response.json({ ok: true, version: "0.0.0-dev" })), log: (line) => logs.push(line),
   };
   return { home, options, commands, logs, config: async () => CliConfig.parse(JSON.parse(await readFile(join(home, ".config/lumio/config.json"), "utf8"))) };
 }
@@ -199,4 +199,38 @@ test("the Hub's systemd unit writes EnvironmentFile without quotes (systemd igno
   const { hubUnit } = await import("../src/setup.ts");
   expect(hubUnit("/opt/lumio-hub", "/home/x/.config/lumio/hub.env")).toContain("EnvironmentFile=/home/x/.config/lumio/hub.env\n");
   expect(() => hubUnit("/opt/lumio-hub", "/home/a b/hub.env")).toThrow("空白");
+});
+
+test("setup rejects another Hub on the port before installing runtime and reports extra services", async () => {
+  const f = await fixture();
+  await expect(setup({ ...f.options,
+    fetch: async () => Response.json({ ok: true, version: "0.1.0" }),
+    run: async (argv) => {
+      f.commands.push(argv);
+      return { code: 0, stdout: argv.join(" ") === "launchctl list" ? "123\t0\tio.lumio.hub.p2-1\n456\t0\tio.lumio.hub\n" : "", stderr: "" };
+    },
+  })).rejects.toThrow("端口 7420 上是另一个 Hub");
+  expect(f.commands.some((argv) => argv.includes("install-service"))).toBe(false);
+  expect(f.logs.join("\n")).toContain("launchctl bootout gui/123/io.lumio.hub.p2-1");
+  expect(f.commands.some((argv) => argv.includes("gui/123/io.lumio.hub.p2-1"))).toBe(false);
+});
+test("setup checks public health and diagnoses Tailscale forwarding ports without changing old services", async () => {
+  const f = await fixture();
+  await setup({ ...f.options, publicUrl: "https://public.synthetic", find: (name) => name === "tailscale" ? "/synthetic/tailscale" : null,
+    fetch: async (url) => Response.json({ ok: true, version: url.startsWith("https://public.synthetic") ? "0.1.0" : "0.0.0-dev" }),
+    run: async (argv) => { f.commands.push(argv); return { code: 0, stdout: argv.includes("serve") ? "|-- / proxy http://127.0.0.1:7421\nsecret-do-not-echo" : "", stderr: "" }; },
+  });
+  expect(f.logs.join("\n")).toContain("对外地址指向的不是这个 Hub");
+  expect(f.logs.join("\n")).toContain("转发目标端口：7421；Hub 端口：7420");
+  expect(f.logs.join("\n")).toContain("tailscale serve --bg 7420");
+  expect(f.logs.join("\n")).not.toContain("secret-do-not-echo");
+  expect(f.commands).toContainEqual(["/synthetic/tailscale", "serve", "status"]);
+  expect(f.commands.some((argv) => argv.includes("--bg"))).toBe(false);
+});
+test("Linux setup lists legacy Lumio user services outside the standard lumio-*.service names", async () => {
+  const f = await fixture("linux");
+  await setup({ ...f.options, run: async (argv) => { f.commands.push(argv); return { code: 0, stdout: argv.includes("list-units") ? "old-lumio.service loaded active running legacy\nlumio-hub.service loaded active running hub\nlumio-custom.service loaded active running custom\n" : "Linger=yes", stderr: "" }; } });
+  expect(f.logs.join("\n")).toContain("systemctl --user stop old-lumio.service");
+  expect(f.logs.join("\n")).not.toContain("stop lumio-custom.service");
+  expect(f.commands.some((argv) => argv.includes("stop"))).toBe(false);
 });
