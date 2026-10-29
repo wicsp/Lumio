@@ -7,9 +7,9 @@ import { Citekey, Id, textContainsCardNumber, type NoteRef } from "@lumio/schema
 import { CoreError } from "../errors.ts";
 import { parseFrontmatter } from "../frontmatter.ts";
 import { scanVault } from "../vault.ts";
-import { extractLinks, plainText } from "./links.ts";
+import { extractLinks, plainText, resolveMarkdownPath } from "./links.ts";
 
-const VERSION = 2; // 2：链接只来自正文（ADR 0018），旧索引自动重建
+const VERSION = 3; // 3：同时索引按路径解析的 Markdown 链接（P2-10），旧索引自动重建
 export interface IndexOptions {
   stateDir?: string;
   /** Dependency injection lets tests assert unchanged notes are never parsed again. */
@@ -173,12 +173,23 @@ export async function withIndex<T>(root: string, options: IndexOptions, query: (
           .run(n.path, n.id, n.type, n.title, n.citekey, n.filename, n.private, change.mtime, change.size, n.frontmatter, n.body, n.search_text);
         database.query("INSERT INTO fulltext(rowid, title, body, authors, citekey, tags) VALUES (?, ?, ?, ?, ?, ?)")
           .run(result.lastInsertRowid, n.title, n.body, change.authors!, n.citekey ?? "", change.tags!);
-        for (const link of extractLinks(JSON.parse(n.frontmatter), n.body)) {
+        for (const link of extractLinks(JSON.parse(n.frontmatter), n.body, n.path)) {
           database.query("INSERT INTO links VALUES (?, ?, ?, NULL)").run(n.path, link.source, link.target);
         }
       }
       {
-        database.exec(`UPDATE links SET resolved_path = (SELECT min(path) FROM notes WHERE filename=links.target HAVING count(*)=1)`);
+        database.exec(`UPDATE links SET resolved_path = (SELECT min(path) FROM notes WHERE filename=links.target HAVING count(*)=1)
+          WHERE source='wikilink'`);
+        // Resolve every Markdown edge again: an unchanged source may gain or lose a target.
+        const markdown = database.query<{ rowid: number; from_path: string; target: string }, []>(
+          "SELECT rowid, from_path, target FROM links WHERE source='markdown'",
+        ).all();
+        const find = database.query<{ path: string }, [string]>("SELECT path FROM notes WHERE path=?");
+        const update = database.query("UPDATE links SET resolved_path=? WHERE rowid=?");
+        for (const link of markdown) {
+          const path = resolveMarkdownPath(link.from_path, link.target);
+          update.run(path ? find.get(path)?.path ?? null : null, link.rowid);
+        }
       }
     }).immediate();
     return query(database);
