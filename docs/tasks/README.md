@@ -27,7 +27,7 @@
 | [P2-6](P2-6-sudo-gate.md) ✅ | `lumio-runtime sudo`：高权限命令的审批门（ADR 0020） | 后端（Codex） | P2-4 |
 | [P2-7](P2-7-release-and-setup.md) ✅ | 发布编译好的程序；一条命令装好 Hub、CLI 与本机执行器（ADR 0021、0022） | 后端（Codex） | P2-6 |
 | [P2-8](P2-8-runtime-pairing.md) ✅ | 加一台执行器、另一台机器上的 CLI：一次性配对码；一条命令装提权助手 | 后端（Codex） | P2-7 |
-| [P2-9](P2-9-doctor-selftest-upgrade.md) | `lumio doctor`、`lumio selftest`、`upgrade` | 后端（Codex） | P2-8 |
+| [P2-9](P2-9-doctor-selftest-upgrade.md) ✅ | `lumio doctor`、`lumio selftest`、`upgrade` | 后端（Codex） | P2-8 |
 | [P2-10](P2-10-markdown-links.md) | 同时识别标准 Markdown 链接（ADR 0022） | 后端（Codex） | 无 |
 | [P2-11](P2-11-acceptance-fixes.md) ✅ | 第一次验收发现的问题：终端输入、Tailscale 询问、重新登录、写出开关字段（ADR 0023） | 后端（Codex） | P2-8 |
 | [P2-12](P2-12-install-feedback.md) | 安装与配对：下载进度、配对失败说出原因、发现另一个 Hub | 后端（Codex） | P2-9 |
@@ -47,11 +47,13 @@ P2-9 用自检覆盖执行、会话续接、提问、取消和任务笔记写回
 
 | 事项 | 来自 | 怎么做 |
 |---|---|---|
+| 开机自启动 | P2-7 | 重启 Mac 后不做任何事，`lumio doctor` 显示 Hub 与本机执行器正常 |
+| P2-2 普通命令 | P2-2 | 服务器 `runtime.env` 加 `LUMIO_RUNTIME_ALLOWED_COMMANDS=/usr/bin/nvidia-smi` 并重启执行器；`lumio job submit --runtime server -- /usr/bin/nvidia-smi` |
 | iPad 查看笔记 | P2-4 | 在 iPad 上打开自检笔记，确认结果区块与正文可读 |
 | 合上 Mac 期间例行任务补写 | P2-5 | 服务器接入后，建一个 `device: server`、每 10 分钟的例行任务，合上 Mac 半小时后打开，确认结果补写 |
 | 提权助手真实安装与审批 | P2-6 / P2-8 | 在有 root 的私人服务器配对后运行 `sudo ~/.local/bin/lumio-runtime install-sudo-helper`，核对指纹；让 agent 申请安装软件包，用 `lumio proposals` 批准，再拒绝一次确认不执行。升级后按提示更新助手程序 |
 
-2026-10-28 第一次 Mac 单机安装已人工通过三个真实 agent、任务笔记的一问一答与例行任务；当时发现的问题已记录为 P2-11。P2-9 的真实安装验收与 Claude 交叉 review 待进行。
+2026-10-28 第一次 Mac 单机安装已人工通过三个真实 agent、任务笔记的一问一答与例行任务；当时发现的问题已记录为 P2-11。P2-9 已由 Claude review 并合并（#49），真实安装上的 `doctor`/`selftest` 待人工运行。
 
 pi 的 skill 验收说明：pi 的回答完全正确（推荐了 `[[渲染格式与来源判断]]`、没有写入、没有泄露），但回答完之后 pi 进程被 `SIGKILL`（退出码 137），
 在自己的终端里直接运行也一样，不是 Lumio 的问题。验收脚本把退出码作为提醒而不是失败。若以后派给 pi 的任务出现"汇报正常但状态为失败（signal SIGKILL）"，再处理。
