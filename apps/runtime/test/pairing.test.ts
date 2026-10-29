@@ -17,7 +17,8 @@ test("join validates both contracts, persists private env and current shell PATH
   await writeFile(path, environmentText(previous), { mode: 0o666 }); await chmod(path, 0o666);
   const logs: string[] = []; let installed = false;
   const fetcher = (async (url: string, init: RequestInit) => {
-    expect(url).toBe("http://synthetic.example/v1/runtime/join"); expect(init.redirect).toBe("error"); expect(new Headers(init.headers).has("Authorization")).toBe(false);
+    if (String(url).endsWith("/health")) return Response.json({ ok: true, version: "0.0.0-dev" });
+    expect(String(url)).toBe("http://synthetic.example/v1/runtime/join"); expect(init.redirect).toBe("error"); expect(new Headers(init.headers).has("Authorization")).toBe(false);
     expect(JSON.parse(String(init.body))).toEqual({ code }); return Response.json(joined);
   }) as unknown as typeof fetch;
   await joinRuntime(["--hub", "http://synthetic.example/", "--code", code], { home, env: { PATH: '/agents/with spaces:$HOME:`literal`:"quoted":\\bin' }, fetch: fetcher, log: (l) => logs.push(l), install: async (opts) => { expect(opts.home).toBe(home); installed = true; } });
@@ -28,7 +29,7 @@ test("join validates both contracts, persists private env and current shell PATH
 });
 test("fresh join uses absolute default state, loopback HTTP is quiet, bad responses and redirects never print secrets", async () => {
   const { home, path } = await fixture(); const logs: string[] = [];
-  await joinRuntime(["--hub", "http://127.0.0.1:7420", "--code", code], { home, env: { PATH: "/test/path" }, fetch: (async () => Response.json(joined)) as unknown as typeof fetch, log: (l) => logs.push(l), install: async () => {} });
+  await joinRuntime(["--hub", "http://127.0.0.1:7420", "--code", code], { home, env: { PATH: "/test/path" }, fetch: (async (url: unknown) => Response.json(String(url).endsWith("/health") ? { ok: true, version: "0.0.0-dev" } : joined)) as unknown as typeof fetch, log: (l) => logs.push(l), install: async () => {} });
   expect(parseEnvironment(await readFile(path, "utf8")).LUMIO_RUNTIME_STATE_DIR).toBe(join(home, ".local/share/lumio-runtime")); expect(logs).toEqual([]);
   const existing = await readFile(path, "utf8");
   for (const fetcher of [(async () => Response.json({ token: "sensitive-response" })) as unknown as typeof fetch, (async () => { throw new Error("sensitive-response"); }) as unknown as typeof fetch, (async () => Response.json({ private: "sensitive-response" }, { status: 401 })) as unknown as typeof fetch]) {

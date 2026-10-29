@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 export interface Check { name: string; ok: boolean; problem?: string; fix?: string }
 export interface CommandResult { code: number; stdout: string; stderr: string }
 export interface DiagnosticOptions {
+  find?: (name: string) => string | null;
   home?: string; env?: NodeJS.ProcessEnv; platform?: string; uid?: number;
   read?: (path: string) => Promise<string>;
   stat?: (path: string) => Promise<{ mode: number; uid: number; isFile(): boolean; isDirectory(): boolean }>;
@@ -12,7 +13,7 @@ export interface DiagnosticOptions {
 }
 export function diagnosticIO(options: DiagnosticOptions = {}) {
   const env = options.env ?? process.env;
-  return { env, home: options.home ?? env.HOME ?? homedir(), platform: options.platform ?? process.platform,
+  return { find: options.find ?? ((name: string) => Bun.which(name)), env, home: options.home ?? env.HOME ?? homedir(), platform: options.platform ?? process.platform,
     uid: options.uid ?? process.getuid?.() ?? -1,
     read: options.read ?? ((path: string) => readFile(path, "utf8")), stat: options.stat ?? lstat,
     run: options.run ?? (async (argv: string[], commandEnv?: NodeJS.ProcessEnv) => {

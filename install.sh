@@ -48,9 +48,11 @@ umask 077
 tmp=$(mktemp -d) || fail '无法创建临时目录'
 trap 'rm -rf "$tmp"' EXIT
 trap 'exit 1' HUP INT TERM
-printf '下载 Lumio（%s）…\n' "$platform"
-curl -fsSL "$base/$archive" -o "$tmp/$archive" || fail '下载程序压缩包，请检查网络与版本'
-curl -fsSL "$base/SHA256SUMS" -o "$tmp/SHA256SUMS" || fail '下载 SHA256SUMS'
+printf '下载 Lumio %s（%s）…\n' "${version:-最新版本}" "$platform"
+# Progress belongs on stderr; redirected installation logs stay quiet.
+if [ -t 2 ]; then set -- -fL --progress-bar; else set -- -fsSL; fi
+curl "$@" --connect-timeout 20 --speed-limit 1024 --speed-time 60 "$base/$archive" -o "$tmp/$archive" || fail '下载太慢或卡住，请检查网络或代理（https_proxy）后重试；也请确认版本存在'
+curl -fsSL --connect-timeout 20 --speed-limit 1024 --speed-time 60 "$base/SHA256SUMS" -o "$tmp/SHA256SUMS" || fail '下载 SHA256SUMS 失败，下载太慢或卡住，请检查网络或代理（https_proxy）后重试'
 expected=$(awk -v file="$archive" '$2 == file { print $1; count++ } END { if (count != 1) exit 1 }' "$tmp/SHA256SUMS") || fail 'SHA256SUMS 缺少或重复的校验记录'
 [ "${#expected}" -eq 64 ] || fail 'SHA256SUMS 格式不合法'
 case "$expected" in *[!0-9a-fA-F]*) fail 'SHA256SUMS 格式不合法' ;; esac

@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { RuntimeJoin, RuntimeJoinRequest } from "@lumio/schema";
+import { pair } from "./pairing-feedback.ts";
 import { RuntimeError, readConfig } from "./config.ts";
 import { installService, parseEnvironment, privateFile, type ServiceOptions } from "./service.ts";
 
@@ -29,6 +30,7 @@ export function warnHttp(url: string, log: (line: string) => void) {
 }
 export async function joinRuntime(args: string[], options: ServiceOptions & {
   env?: NodeJS.ProcessEnv; fetch?: typeof globalThis.fetch;
+  warn?: (line: string) => void;
   install?: (options: ServiceOptions) => Promise<void>;
 } = {}) {
   let values: { hub?: string; code?: string };
@@ -45,15 +47,7 @@ export async function joinRuntime(args: string[], options: ServiceOptions & {
   const state = resolve(previous.LUMIO_RUNTIME_STATE_DIR ?? join(home, ".local/share/lumio-runtime"));
   environmentText({ ...previous, PATH: env.PATH ?? "/usr/bin:/bin" });
   readConfig({ ...previous, LUMIO_HUB_URL: url, LUMIO_TOKEN: "pending-pairing", LUMIO_RUNTIME_NAME: "pending", LUMIO_RUNTIME_STATE_DIR: state });
-  let joined: RuntimeJoin;
-  try {
-    const response = await (options.fetch ?? globalThis.fetch)(`${url}/v1/runtime/join`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: values.code }),
-      redirect: "error", signal: AbortSignal.timeout(10_000),
-    });
-    if (!response.ok) throw new Error();
-    joined = RuntimeJoin.parse(await response.json());
-  } catch { throw new RuntimeError("执行器配对失败，请检查 Hub 地址并生成新的配对码后重试"); }
+  const joined = await pair(url, values.code!, "runtime", RuntimeJoin, options.fetch, options.warn);
   const merged = { ...previous, LUMIO_HUB_URL: url, LUMIO_TOKEN: joined.token, LUMIO_RUNTIME_NAME: joined.name,
     LUMIO_RUNTIME_STATE_DIR: state, PATH: env.PATH ?? "/usr/bin:/bin" };
   readConfig(merged);

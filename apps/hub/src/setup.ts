@@ -1,3 +1,5 @@
+import { extraServices, healthVersion, publicHubChecks } from "./hub-checks.ts";
+import { version } from "./version.ts";
 import * as files from "node:fs/promises";
 import { homedir, hostname } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -171,6 +173,9 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
   if (!config.publicUrl) delete serviceEnv.LUMIO_PUBLIC_URL;
   if (env.LUMIO_TRUSTED_PROXY) Object.assign(serviceEnv, { LUMIO_TRUSTED_PROXY: env.LUMIO_TRUSTED_PROXY });
   await privateFile(envFile, environmentText(serviceEnv));
+  const diagnostics = { platform, uid: options.uid ?? process.getuid?.() ?? -1, run, find, fetch: fetcher };
+  const report = (items: Awaited<ReturnType<typeof extraServices>>) => { for (const item of items) if (!item.ok || item.problem) log(`${item.name}：${item.problem ?? ""}${item.fix ? `；${item.fix}` : ""}`); };
+  report(await extraServices(diagnostics));
   let managed = true;
   if (platform === "darwin") {
     const path = join(home, "Library/LaunchAgents/io.lumio.hub.plist");
@@ -195,17 +200,21 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
   }
   if (managed) {
     const now = options.now ?? Date.now, sleep = options.sleep ?? Bun.sleep, until = now() + 20_000;
-    let ready = false;
+    let ready = false, otherHub: string | undefined;
     while (now() < until) {
       try {
         const health = await fetcher(`${url}/health`, { redirect: "error", signal: AbortSignal.timeout(1000) });
-        if (health.ok && (await health.json() as { ok?: boolean }).ok) {
+        const body = await health.json() as { ok?: boolean; version?: unknown };
+        if (health.ok && body.ok) {
+          const actual = healthVersion(body);
+          if (actual !== version) { otherHub = actual; break; }
           const actors = await fetcher(`${url}/v1/actors`, { headers: { Authorization: `Bearer ${token}` }, redirect: "error", signal: AbortSignal.timeout(1000) });
           if (actors.ok) { ready = true; break; }
         }
       } catch { /* diagnose after the deadline */ }
       await sleep(500);
     }
+    if (otherHub) throw new HubError("INVALID", `端口 ${config.port} 上是另一个 Hub：Hub 是 ${otherHub}，本程序是 ${version}；请检查并停用旧服务后重试`);
     if (!ready) {
       const logPath = join(state, "hub.err.log");
       let errors = (await optional(logPath) ?? "").slice(-8192);
@@ -215,6 +224,7 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
       throw new HubError("INVALID", `Hub 启动超时；日志：${platform === "linux" ? "journalctl --user -u lumio-hub -n 30" : logPath}`);
     }
   }
+  if (config.publicUrl) report(await publicHubChecks(diagnostics, config.publicUrl, version, config.port));
   const runtimeEnvFile = join(home, ".config/lumio-runtime/runtime.env");
   const runtimeEnv = { ...parseEnvironment(await optional(runtimeEnvFile) ?? ""), LUMIO_HUB_URL: url, LUMIO_TOKEN: runtimeToken,
     LUMIO_RUNTIME_NAME: name, LUMIO_RUNTIME_STATE_DIR: join(home, ".local/share/lumio-runtime"), PATH: env.PATH ?? "/usr/bin:/bin" };
