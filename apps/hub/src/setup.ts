@@ -15,6 +15,11 @@ async function runCommand(argv: string[]): Promise<CommandResult> {
   return { code, stdout, stderr };
 }
 export function xml(value: string): string { return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;"); }
+/** systemd 的 EnvironmentFile= 不认引号（加了引号会被当成相对路径而忽略），只能原样写；因此不允许空白字符。 */
+function unitPath(value: string): string {
+  if (/\s/.test(value)) throw new HubError("INVALID", "服务配置文件的路径不能包含空白字符");
+  return value.replaceAll("%", "%%");
+}
 function unitString(value: string): string { return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("%", "%%")}"`; }
 export function environmentText(env: Record<string, string>): string {
   return Object.entries(env).map(([key, value]) => {
@@ -50,7 +55,7 @@ export function hubPlist(binary: string, env: Record<string, string>, state: str
 </dict></plist>\n`;
 }
 export function hubUnit(binary: string, envFile: string): string {
-  return `[Unit]\nDescription=Lumio Hub\nAfter=network.target\n\n[Service]\nExecStart=${unitString(binary)}\nEnvironmentFile=${unitString(envFile)}\nRestart=always\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n`;
+  return `[Unit]\nDescription=Lumio Hub\nAfter=network.target\n\n[Service]\nExecStart=${unitString(binary)}\nEnvironmentFile=${unitPath(envFile)}\nRestart=always\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n`;
 }
 export function runtimeName(host: string): string {
   return RuntimeName.parse(host.toLowerCase().replace(/[^a-z0-9._-]/g, "-").replace(/^[^a-z0-9]+/, "").slice(0, 64) || "local");

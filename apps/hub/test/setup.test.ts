@@ -194,3 +194,9 @@ test("single-machine setup never asks about Tailscale; --public-url sets the add
   expect(parseEnvironment(await readFile(join(f.home, ".config/lumio/hub.env"), "utf8")).LUMIO_PUBLIC_URL).toBe("https://mac.synthetic.ts.net"); // 重跑沿用
 });
 
+
+test("the Hub's systemd unit writes EnvironmentFile without quotes (systemd ignores a quoted path)", async () => {
+  const { hubUnit } = await import("../src/setup.ts");
+  expect(hubUnit("/opt/lumio-hub", "/home/x/.config/lumio/hub.env")).toContain("EnvironmentFile=/home/x/.config/lumio/hub.env\n");
+  expect(() => hubUnit("/opt/lumio-hub", "/home/a b/hub.env")).toThrow("空白");
+});
