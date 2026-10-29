@@ -30,6 +30,7 @@
 | [P2-9](P2-9-doctor-selftest-upgrade.md) | `lumio doctor`、`lumio selftest`、`upgrade` | 后端（Codex） | P2-8 |
 | [P2-10](P2-10-markdown-links.md) | 同时识别标准 Markdown 链接（ADR 0022） | 后端（Codex） | 无 |
 | [P2-11](P2-11-acceptance-fixes.md) ✅ | 第一次验收发现的问题：终端输入、Tailscale 询问、重新登录、写出开关字段（ADR 0023） | 后端（Codex） | P2-8 |
+| [P2-12](P2-12-install-feedback.md) | 安装与配对：下载进度、配对失败说出原因、发现另一个 Hub | 后端（Codex） | P2-9 |
 
 P1 的设计决定见 ADR 0014、0016、0017、0018；P2 见 ADR 0019、0020、0021、0022 与修订后的 ADR 0005；契约见 `packages/schema/src/` 中的 `query.ts`、`actor.ts`、`operation.ts`、`proposal.ts`、`api.ts`。
 
