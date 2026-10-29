@@ -109,6 +109,11 @@ test("real Hub + CLI runtime add + join with temporary HOME connects a foregroun
   while (Date.now() < deadline && !hub.store.runtimes(new Date(now)).some((r) => r.registration.name === "e2e")) await Bun.sleep(25);
   expect(hub.store.runtimes(new Date(now)).find((r) => r.registration.name === "e2e")?.online).toBe(true);
   const content = await readFile(join(root, ".config/lumio-runtime/runtime.env"), "utf8"); expect(content).toContain('LUMIO_RUNTIME_NAME="e2e"'); expect(content).not.toContain(invitation.code);
+  // Hub 看到登记 ≠ 执行器已写好登记回执；先等回执，再停（否则慢机器上 join 还在等回执时被停掉，退出码为 1）。
+  const receipt = join(root, ".local/share/lumio-runtime/registered.json"), receiptDeadline = Date.now() + 7000;
+  while (Date.now() < receiptDeadline && !await Bun.file(receipt).exists()) await Bun.sleep(25);
+  expect(await Bun.file(receipt).exists()).toBe(true);
+  await Bun.sleep(100);
   daemon.kill("SIGTERM"); expect(await daemon.exited).toBe(0); daemon = undefined;
   expect(await new Response(child.stderr).text()).toBe(""); expect(await new Response(child.stdout).text()).toContain("已连上 Hub");
 }, 15_000);
