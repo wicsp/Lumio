@@ -49,7 +49,7 @@ beforeEach(async () => {
   store.createActor("server", "runtime");
   human = store.createToken("owner-mac", "owner"); agent = store.createToken("codex-mac", "codex"); other = store.createToken("other-mac", "other");
   const runtime = store.createToken("server", "server"); store.close();
-  hub = await startHub({ ...readConfig({ LUMIO_VAULT: vault, LUMIO_STATE_DIR: state }), port: 0, autosaveIdle: 3600 }, {
+  hub = await startHub({ ...readConfig({ LUMIO_VAULT: vault, LUMIO_STATE_DIR: state }), port: 0, autosaveIdle: 3600, localRuntime: "server" }, {
     log() {}, authorize: approvalRules, tasks: { tickMs: 3_600_000 },
     watch: { watch: ((_p, _o, _cb) => Object.assign(new EventEmitter(), { close() {} }) as FSWatcher) as typeof watch },
   });
@@ -70,7 +70,7 @@ test("needs_approval creates a proposal without executing; only humans decide; a
   const accepted = await decide(p, "accept") as Proposal;
   expect(accepted).toMatchObject({ status: "accepted", decided_by: owner.id });
   expect(await jobs()).toHaveLength(1);
-  expect(parseFrontmatter(await readFile(join(vault, path))).data.turn).toBe("agent");
+  expect(parseFrontmatter(await readFile(join(vault, path))).data.assignee).toBe("pi@server");
   expect((await decide(accepted, "accept", human, 409) as ApiError["error"]).code).toBe("CONFLICT");
   expect(await jobs()).toHaveLength(1);
 });
@@ -91,7 +91,7 @@ test("rejection executes nothing; duplicates are refused; reason is required; ag
 test("proposals persist across restarts; actors are listed for both roles; audit records every step with actor IDs only", async () => {
   const p = await propose();
   await hub!.stop();
-  hub = await startHub({ ...readConfig({ LUMIO_VAULT: vault, LUMIO_STATE_DIR: state }), port: 0, autosaveIdle: 3600 }, {
+  hub = await startHub({ ...readConfig({ LUMIO_VAULT: vault, LUMIO_STATE_DIR: state }), port: 0, autosaveIdle: 3600, localRuntime: "server" }, {
     log() {}, authorize: approvalRules, tasks: { tickMs: 3_600_000 },
     watch: { watch: ((_p, _o, _cb) => Object.assign(new EventEmitter(), { close() {} }) as FSWatcher) as typeof watch },
   });
@@ -110,7 +110,7 @@ test("proposals persist across restarts; actors are listed for both roles; audit
 
 test("with the real rules agents cannot dispatch at all: 403, nothing written, no proposal", async () => {
   await hub!.stop();
-  hub = await startHub({ ...readConfig({ LUMIO_VAULT: vault, LUMIO_STATE_DIR: state }), port: 0, autosaveIdle: 3600 }, {
+  hub = await startHub({ ...readConfig({ LUMIO_VAULT: vault, LUMIO_STATE_DIR: state }), port: 0, autosaveIdle: 3600, localRuntime: "server" }, {
     log() {}, tasks: { tickMs: 3_600_000 },
     watch: { watch: ((_p, _o, _cb) => Object.assign(new EventEmitter(), { close() {} }) as FSWatcher) as typeof watch },
   });
@@ -122,7 +122,7 @@ test("with the real rules agents cannot dispatch at all: 403, nothing written, n
   expect(hub!.store.proposals("pending")).toHaveLength(0);
 });
 
-test("without assignee.device an offline runtime still gets the round; it waits on the Hub until that runtime polls", async () => {
+test("the configured local offline runtime still gets the round; it waits on the Hub until that runtime polls", async () => {
   await writeFile(join(vault, path), (await readFile(join(vault, path), "utf8")).replace("{agent: pi, device: server}", "{agent: pi}"));
   const later = Date.now() + 3_600_000; // 执行器一小时没心跳：已离线
   expect(hub!.store.runtimes(new Date(later)).every((r) => !r.online)).toBe(true);

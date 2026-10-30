@@ -6,7 +6,7 @@ import {
   CoreError, entityDirectory, humanPart, parseFrontmatter, scanVault, setFields, showNote, upsertBlock,
   type GitTrailers,
 } from "@lumio/core";
-import { textContainsCardNumber, type AgentRun, type Job, type Operation, type RuntimeInfo } from "@lumio/schema";
+import { parseAssignee, textContainsCardNumber, type AgentRun, type Job, type Operation, type RuntimeInfo } from "@lumio/schema";
 import type { HubConfig } from "./config.ts";
 import { HubError } from "./errors.ts";
 import type { Jobs } from "./jobs.ts";
@@ -17,10 +17,10 @@ import { editNote } from "./commit.ts";
 /**
  * 任务笔记里的一问一答（ADR 0019 第 2、3、4 节，P2-4）。
  *
- * - 人把 `turn` 改成 `agent` → 笔记安静 `quietMs` 后派出下一轮（`task.dispatch`，trigger `turn`）。
+ * - 人把 `assignee` 改成 agent → 笔记安静 `quietMs` 后派出下一轮（`task.dispatch`，trigger `assignee`）。
  * - `lumio task continue` → 立即派出（trigger `cli`，经 /v1/operations）。
- * - 一轮的结果写回笔记里的一个 AI 区块，`turn` 改回 `human`。
- * - 程序状态（上次看到的 turn、会话编号、派出时的快照、轮数）存在 hub.sqlite，不写进笔记。
+ * - 一轮的结果写回笔记里的一个 AI 区块，`assignee` 改回 `human`。
+ * - 程序状态（上次看到的 assignee、会话编号、派出时的快照、轮数）存在 hub.sqlite，不写进笔记。
  *
  * 所有读写笔记的动作都在 Hub 的写入队列里执行（与补全、自动保存串行）。
  */
@@ -75,18 +75,17 @@ export function workdirInVault(vault: string, workdir: string): boolean {
   return !inside || (!inside.startsWith("..") && !inside.startsWith("/"));
 }
 
-/**
- * 选执行器：`device` 给出时用它；否则挑在线且装了该 agent 的；都不在线就交给最近见过的那个，它上线后领取（相当于在 Hub 排队）。
- * 找不到时抛出以"没有可用的执行器"开头的错误。
- */
-export function pickRuntime(store: HubStore, now: Date, engine: AgentRun["engine"], device: string | undefined): RuntimeInfo {
-  const all = store.runtimes(now);
-  const runtimes = all.filter((r) => r.registration.engines.some((e) => e.name === engine));
-  const runtime = device ? all.find((r) => r.registration.name === device)
-    : runtimes.find((r) => r.online) ?? [...runtimes].sort((a, b) => Date.parse(b.last_seen) - Date.parse(a.last_seen))[0];
-  if (!runtime) throw new HubError("INVALID", device ? `没有可用的执行器：${device} 未登记` : `没有可用的执行器：没有登记过装了 ${engine} 的执行器`);
+/** 未指定 device 时只使用 Hub 配置里的本机执行器。 */
+export function pickRuntime(store: HubStore, now: Date, engine: AgentRun["engine"], device: string | undefined, localRuntime?: string): RuntimeInfo {
+  const runtime = store.runtimes(now).find((r) => r.registration.name === (device ?? localRuntime));
+  if (!runtime) throw new HubError("INVALID", device ? `没有可用的执行器：${device} 未登记` : "这台 Hub 没有本机执行器，请写 pi@<执行器名称>");
   if (!runtime.registration.engines.some((e) => e.name === engine)) throw new HubError("INVALID", `执行器 ${runtime.registration.name} 上没有登记 ${engine}`);
   return runtime;
+}
+
+function assigneeKey(value: unknown): string {
+  const a = parseAssignee(value ?? "human");
+  return a === "human" ? a : `${a.agent}${a.device ? `@${a.device}` : ""}`;
 }
 
 export const OUTCOME: Record<string, string> = {
@@ -114,7 +113,7 @@ export class TaskRounds {
     `);
   }
 
-  /** 启动时把所有任务笔记过一遍：Hub 没运行期间人改了 turn 的，照样能派出。 */
+  /** 启动时把所有任务笔记过一遍：Hub 没运行期间人改了 assignee 的，照样能派出。 */
   async start(): Promise<void> {
     for (const file of await scanVault(this.config.vault, ["task"])) await this.noteChanged(file.relativePath);
     this.schedule();
@@ -150,19 +149,18 @@ export class TaskRounds {
     const s = this.state(id) ?? { task: id, path, last_turn: null, session: null, snapshot: null, rounds: 0, pending_since: null };
     s.path = path;
     const active = this.jobs.activeForTask(id);
-    const turn = typeof data.turn === "string" ? data.turn : null;
     if (active && (data.status === "paused" || data.status === "cancelled")) this.jobs.cancel(active.spec.id);
-    if (turn === "agent" && s.last_turn !== "agent") {
-      if (s.pending_since === null) s.pending_since = now;
-    } else if (turn !== "agent") {
-      if (turn === "human" && s.last_turn === "agent" && active) {
-        this.issue(path, `跳过  ${path}  这一轮还在执行，turn 只能由 Hub 改回 human`);
-      } else {
-        s.pending_since = null;
-        s.last_turn = turn;
-      }
+    let assignee: string;
+    try { assignee = assigneeKey(data.assignee); }
+    catch (cause) { s.pending_since = null; this.issue(path, `跳过  ${path}  ${(cause as Error).message}`); this.save(s); return; }
+    if (active) {
+      if (assignee !== s.last_turn) this.issue(path, `跳过  ${path}  这一轮还在执行，修改 assignee 不生效；结束后会交回 human`);
+      s.pending_since = null;
+    } else {
+      if (assignee !== "human" && assignee !== s.last_turn) s.pending_since = now;
+      if (assignee === "human") s.pending_since = null;
+      s.last_turn = assignee;
     }
-    if (turn !== null && turn !== "agent" && turn !== "human") this.issue(path, `跳过  ${path}  turn 只能是 human 或 agent`);
     this.save(s);
   }
 
@@ -174,27 +172,26 @@ export class TaskRounds {
       const owner = this.owner();
       if (!owner) { this.issue(s.path, `跳过  ${s.path}  Hub 中没有 human 身份，无法派出任务`); continue; }
       try {
-        await this.dispatch(s.task, "turn", owner, now);
-        this.store.audit(owner, JSON.stringify({ op: "task.dispatch", args: { task: s.task, trigger: "turn" } }), "allow", undefined, "applied");
+        await this.dispatch(s.task, "assignee", owner, now);
+        this.store.audit(owner, JSON.stringify({ op: "task.dispatch", args: { task: s.task, trigger: "assignee" } }), "allow", undefined, "applied");
       }
       catch (cause) {
-        if (cause instanceof HubError && cause.code === "CONFLICT") { s.pending_since = null; s.last_turn = "agent"; this.save(s); continue; }
-        if (cause instanceof HubError && cause.message.startsWith("没有可用的执行器")) continue; // 等执行器上线
+        if (cause instanceof HubError && cause.code === "CONFLICT") { s.pending_since = null; this.save(s); continue; }
         await this.refuse(s, cause instanceof HubError || cause instanceof CoreError ? cause.message : "无法派出任务");
       }
     }
     await this.writeResults();
   }
 
-  /** 派不出去：写一个说明区块，turn 交回给人，避免每次 tick 重复尝试。 */
+  /** 派不出去：写一个说明区块，assignee 交回给人，避免每次 tick 重复尝试。 */
   private async refuse(s: TaskState, message: string) {
     s.pending_since = null; s.last_turn = "human"; this.save(s);
     this.issue(s.path, `跳过  ${s.path}  ${message}`);
-    await this.edit(s.path, (bytes) => setFields(upsertBlock(bytes, "dispatch-error", "", `### 无法派出\n${message}`), { turn: "human" }));
+    await this.edit(s.path, (bytes) => setFields(upsertBlock(bytes, "dispatch-error", "", `### 无法派出\n${message}`), { assignee: "human" }));
   }
 
   /** 派出下一轮。调用方负责在写入队列中执行、已通过授权，并写审计。 */
-  async dispatch(task: string, trigger: TaskTrigger, identity: Identity, nowMs = this.clock.now()): Promise<Job> {
+  async dispatch(task: string, trigger: TaskTrigger, identity: Identity, nowMs = this.clock.now(), to?: Extract<Operation, { op: "task.dispatch" }>["args"]["to"]): Promise<Job> {
     const now = new Date(nowMs);
     let s = this.state(task);
     if (!s) {
@@ -207,22 +204,34 @@ export class TaskRounds {
     const parsed = parseFrontmatter(bytes);
     const data = parsed.data;
     if (data.id !== task) throw new HubError("CONFLICT", "任务笔记在处理中被修改，请重试");
-    const assignee = data.assignee as { agent?: unknown; device?: unknown } | undefined;
-    if (!assignee || typeof assignee !== "object" || typeof assignee.agent !== "string") throw new HubError("INVALID", "任务的负责人不是 agent（assignee: {agent: …}）");
-    const engine = assignee.agent as AgentRun["engine"];
-    if (!["codex", "claude-code", "pi"].includes(engine)) throw new HubError("INVALID", `未知的 agent：${engine}`);
-    if (typeof data.workdir !== "string" || !data.workdir) throw new HubError("INVALID", "任务没有写 workdir（执行器上的工作目录）");
     if (this.jobs.activeForTask(task)) throw new HubError("CONFLICT", "这个任务已有一轮在执行");
-    if (workdirInVault(this.config.vault, data.workdir)) throw new HubError("INVALID", "工作目录不能在笔记库里（ADR 0019）");
-    const runtime = pickRuntime(this.store, now, engine, typeof assignee.device === "string" ? assignee.device : undefined);
+    const previous = this.jobs.list(undefined, task).at(-1);
+    let target: unknown = data.assignee ?? "human";
+    if (trigger === "cli") {
+      if (to !== undefined) target = to;
+      else if (previous?.spec.run.kind === "agent") {
+        const device = this.store.runtimes(now).find((r) => r.actor === previous.spec.runtime)?.registration.name;
+        if (!device) throw new HubError("INVALID", "上一轮的执行器未登记，请用 --to pi@server 指定负责人");
+        target = `${previous.spec.run.engine}@${device}`;
+      }
+    }
+    let assignee;
+    try { assignee = parseAssignee(target); } catch (cause) { throw new HubError("INVALID", (cause as Error).message); }
+    if (assignee === "human") throw new HubError("INVALID", "请用 --to pi@server 指定 agent 负责人，不能派给 human");
+    const engine = assignee.agent;
+    const workdir = data.workdir == null ? "~" : data.workdir;
+    if (typeof workdir !== "string" || !workdir) throw new HubError("INVALID", "workdir 必须是非空的工作目录");
+    if (workdirInVault(this.config.vault, workdir)) throw new HubError("INVALID", "工作目录不能在笔记库里（ADR 0019）");
+    const runtime = pickRuntime(this.store, now, engine, assignee.device, this.config.localRuntime);
+    const targetKey = assigneeKey(target);
 
     const round = s.rounds + 1;
-    const previous = this.jobs.list(undefined, task).at(-1);
     const human = humanPart(parsed.body.toString("utf8"));
     const title = typeof data.title === "string" ? data.title : task;
     let session: AgentRun["session"];
-    if (engine === "pi") session = { id: task, resume: s.rounds > 0 };
-    else if (s.session) session = { id: s.session, resume: true };
+    const sameAgent = previous?.spec.run.kind === "agent" && previous.spec.run.engine === engine && previous.spec.runtime === runtime.actor;
+    if (sameAgent && s.session) session = { id: s.session, resume: true };
+    else if (engine === "pi") session = { id: previous ? randomUUID() : task, resume: false };
     else if (engine === "claude-code") session = { id: randomUUID(), resume: false };
     const resumable = Boolean(session?.resume);
     let content: string;
@@ -243,22 +252,22 @@ export class TaskRounds {
       try { report = this.jobs.get(origin).result?.report; } catch { /* 记录已不在 */ }
       if (report) content += `\n\n## 例行任务那一次的汇报\n\n${report.slice(0, 20_000)}`;
     }
-    const prompt = `${INSTRUCTIONS({ round, title, id: task, workdir: data.workdir })}\n${content}\n`;
+    const prompt = `${INSTRUCTIONS({ round, title, id: task, workdir })}\n${content}\n`;
     const timeout = typeof data.timeout_minutes === "number" && data.timeout_minutes > 0 ? data.timeout_minutes * 60 : 7200;
     const gpus = Array.isArray(data.gpus) && data.gpus.every((g) => Number.isInteger(g) && g >= 0) ? data.gpus as number[] : undefined;
     const job = this.jobs.create({
-      runtime: runtime.actor, workdir: data.workdir, timeout_seconds: timeout, ...(gpus ? { gpus } : {}),
+      runtime: runtime.actor, workdir, timeout_seconds: timeout, ...(gpus ? { gpus } : {}),
       run: { kind: "agent", engine, prompt, ...(typeof data.model === "string" && data.model ? { model: data.model } : {}), ...(session ? { session } : {}) },
       source: { task, round, ...(previous ? { previous: previous.spec.id } : {}) },
     }, now);
-    if (engine === "claude-code" && session && !session.resume) s.session = session.id;
-    s.rounds = round; s.snapshot = human; s.pending_since = null; s.last_turn = "agent";
+    s.session = session?.id ?? null;
+    s.rounds = round; s.snapshot = human; s.pending_since = null; s.last_turn = targetKey;
     this.save(s);
     this.store.db.query("INSERT OR IGNORE INTO task_rounds VALUES (?, ?, ?, 0)").run(job.spec.id, task, round);
     await this.edit(s.path, (b) => {
       const d = parseFrontmatter(b).data;
       const patch: Record<string, string> = {};
-      if (d.turn !== "agent") patch.turn = "agent";
+      if (trigger === "cli") patch.assignee = targetKey;
       if (d.status === undefined || d.status === null || d.status === "todo") patch.status = "active";
       return Object.keys(patch).length ? setFields(b, patch) : b;
     }, { message: `lumio: task.dispatch ${title} 第 ${round} 轮`, trailers: { "Lumio-Actor": identity.actor.id, "Lumio-Job": job.spec.id } });
@@ -276,14 +285,14 @@ export class TaskRounds {
       if (!s) { this.markWritten(row.job); continue; }
       const block = this.render(job, row.round);
       try {
-        await this.edit(s.path, (b) => setFields(upsertBlock(b, `round-${row.round}`, `job=${job.spec.id}`, block), { turn: "human" }),
+        await this.edit(s.path, (b) => setFields(upsertBlock(b, `round-${row.round}`, `job=${job.spec.id}`, block), { assignee: "human" }),
           { message: `lumio: 第 ${row.round} 轮结果 ${job.status}`, trailers: { "Lumio-Actor": job.spec.runtime, "Lumio-Job": job.spec.id } });
       } catch (cause) {
         if (cause instanceof CoreError && cause.code === "FILE_CHANGED") continue;
         this.issue(s.path, `跳过  ${s.path}  无法写回第 ${row.round} 轮的结果`);
         continue;
       }
-      s.last_turn = "human";
+      s.last_turn = "human"; s.pending_since = null;
       if (job.result?.session_id) s.session = job.result.session_id;
       this.save(s);
       this.markWritten(row.job);

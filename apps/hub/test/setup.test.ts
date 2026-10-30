@@ -3,7 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/pr
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CliConfig } from "@lumio/schema";
-import { networkWarning, readConfig } from "../src/config.ts";
+import { networkWarning, readConfig, rememberLocalRuntime } from "../src/config.ts";
 import { environmentText, parseEnvironment, runtimeName, setup, type SetupOptions } from "../src/setup.ts";
 import { HubStore } from "../src/store.ts";
 
@@ -23,6 +23,7 @@ async function fixture(platform = "darwin") {
 }
 test("first setup creates default vault, private config, launchd services and local runtime; rerun preserves identity and rotates credentials", async () => {
   const f = await fixture(); await setup(f.options);
+  expect(JSON.parse(await readFile(join(f.home, ".local/share/lumio/config.json"), "utf8"))).toEqual({ localRuntime: "my-mac.local" });
   const config = await f.config(); expect(config.vault).toBe(join(f.home, ".config/lumio/vault"));
   expect(await readFile(join(config.vault!, "README.md"), "utf8")).toContain("Lumio vault");
   for (const path of [".config/lumio/config.json", ".config/lumio/hub.env", ".config/lumio-runtime/runtime.env"]) expect((await stat(join(f.home, path))).mode & 0o777).toBe(0o600);
@@ -233,4 +234,13 @@ test("Linux setup lists legacy Lumio user services outside the standard lumio-*.
   expect(f.logs.join("\n")).toContain("systemctl --user stop old-lumio.service");
   expect(f.logs.join("\n")).not.toContain("stop lumio-custom.service");
   expect(f.commands.some((argv) => argv.includes("stop"))).toBe(false);
+});
+
+
+test("upgraded Hub persists the setup hostname rule once and reuses the stored local runtime", async () => {
+  const f = await fixture(); const state = join(f.home, "state");
+  const inferred = await rememberLocalRuntime(state);
+  expect(await rememberLocalRuntime(state)).toBe(inferred);
+  expect(await rememberLocalRuntime(state, "synthetic-host")).toBe("synthetic-host");
+  expect(await rememberLocalRuntime(state)).toBe("synthetic-host");
 });

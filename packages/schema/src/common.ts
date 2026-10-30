@@ -62,11 +62,25 @@ export const Base = z.looseObject({
 
 export const AGENTS = ["claude-code", "codex", "pi"] as const;
 
-/** 任务的负责人：`human` 表示自己，或指定某个 AI agent。 */
-export const Assignee = z.union([
-  z.literal("human"),
-  z.strictObject({
-    agent: z.enum(AGENTS),
-    device: z.string().optional().describe("指定设备；省略则由调度决定"),
-  }),
+/** 执行器名称（设备名），如 server、mac。 */
+export const RuntimeName = z.string().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/, "执行器名称只能用小写字母、数字和 . _ -");
+
+const ASSIGNEE_MESSAGE = "负责人必须是 human、agent 或 agent@执行器，例如 pi@server";
+export const AgentAssignee = z.union([
+  z.string().regex(new RegExp(`^(${AGENTS.join("|")})(@[a-z0-9][a-z0-9._-]{0,31})?$`), ASSIGNEE_MESSAGE),
+  z.strictObject({ agent: z.enum(AGENTS), device: RuntimeName.optional() }),
 ]);
+export const Assignee = z.union([z.literal("human"), AgentAssignee]);
+
+export class AssigneeError extends Error {
+  readonly code = "INVALID_ASSIGNEE";
+  constructor() { super(ASSIGNEE_MESSAGE); this.name = "AssigneeError"; }
+}
+/** 集中解析字符串与兼容的旧对象写法（ADR 0024）。 */
+export function parseAssignee(value: unknown): "human" | { agent: typeof AGENTS[number]; device?: string } {
+  const parsed = Assignee.safeParse(value);
+  if (!parsed.success) throw new AssigneeError();
+  if (parsed.data === "human" || typeof parsed.data === "object") return parsed.data;
+  const [agent, device] = parsed.data.split("@");
+  return { agent: agent as typeof AGENTS[number], ...(device ? { device } : {}) };
+}

@@ -201,3 +201,12 @@ test("BibTeX extraction respects section boundaries and ignores headings inside 
   expect((await exportBib(vault)).count).toBe(3);
   expect(await readFile(join(vault, "library/refs.bib"), "utf8")).toContain("% unchanged comment");
 });
+
+
+test("empty search lists visible notes and can filter tasks without changing SearchResult", async () => {
+  const result = SearchResult.parse(await searchNotes(vault, "", { stateDir, type: "task" }));
+  expect(result.total).toBe(1); expect(result.hits[0]!.note.type).toBe("task");
+  const all = await searchNotes(vault, "", { stateDir, limit: 1 });
+  expect(all.total).toBeGreaterThan(1); expect(all.hits).toHaveLength(1);
+  expect((await searchNotes(vault, "", { stateDir, limit: all.total })).hits.some((h) => h.note.type === "asset")).toBe(false);
+});

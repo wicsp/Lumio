@@ -17,7 +17,7 @@ function resolveReference(db: Database, reference: string, includePrivate = fals
 }
 
 export async function searchNotes(root: string, query: string, options: SearchOptions = {}): Promise<SearchResult> {
-  if (!query.trim()) throw new CoreError("INVALID_QUERY", "查询不能为空");
+  if (query && !query.trim()) throw new CoreError("INVALID_QUERY", "查询不能只包含空白");
   const limit = options.limit ?? 20;
   if (!Number.isSafeInteger(limit) || limit < 1) throw new CoreError("INVALID_LIMIT", "limit 必须是正整数");
   return withIndex(root, options, (db) => {

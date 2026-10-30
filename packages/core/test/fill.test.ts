@@ -73,7 +73,7 @@ test.each(["paper", "idea", "project", "task", "experiment"] as EntityType[])("f
   expect(CONTRACTS[type].safeParse({ ...frontmatter, ...patch }).success).toBe(true);
   // 任务的 status 是开关，要写出来（ADR 0023）；其他类型的默认值不写进文件。
   if (type === "task") expect(patch.status).toBe("todo"); else expect(patch).not.toHaveProperty("status");
-  expect(patch).not.toHaveProperty("assignee");
+  if (type === "task") expect(patch.assignee).toBe("human"); else expect(patch).not.toHaveProperty("assignee");
   expect(patch).not.toHaveProperty("turn");
 });
 
@@ -81,7 +81,7 @@ test("switch fields are written for tasks and routines (ADR 0023)", () => {
   const routine = fillMetadata({ ...base, type: "routine", frontmatter: { schedule: "0 9 * * *", assignee: { agent: "pi" } } }, ctx).patch;
   expect(routine.status).toBe("active");
   const agentTask = fillMetadata({ ...base, type: "task", frontmatter: { assignee: { agent: "codex", device: "server" }, status: null } }, ctx).patch;
-  expect(agentTask).toMatchObject({ status: "todo", turn: "human" });
+  expect(agentTask).toMatchObject({ status: "todo" });
   const human = fillMetadata({ ...base, type: "task", frontmatter: { assignee: "human" } }, ctx).patch;
   expect(human.status).toBe("todo"); expect(human).not.toHaveProperty("turn");
   const kept = fillMetadata({ ...base, type: "task", frontmatter: { assignee: { agent: "pi" }, status: "active", turn: "agent" } }, ctx).patch;
@@ -143,4 +143,15 @@ test("complete paper requires no patch and passes the contract", () => {
   };
   expect(Paper.safeParse(frontmatter).success).toBe(true);
   expect(fillMetadata({ ...base, type: "paper", frontmatter }, ctx)).toEqual({ patch: {}, issues: [] });
+});
+
+test("task assignee is a visible switch, null is missing, existing values and old turn are untouched", () => {
+  for (const assignee of [undefined, null]) {
+    const { patch, issues } = fillMetadata({ ...base, type: "task", frontmatter: { assignee } }, ctx);
+    expect(patch.assignee).toBe("human"); expect(patch).not.toHaveProperty("turn"); expect(issues).toEqual([]);
+  }
+  for (const assignee of ["human", "pi", "pi@server", { agent: "pi", device: "server" }]) {
+    const { patch, issues } = fillMetadata({ ...base, type: "task", frontmatter: { assignee, turn: "legacy" } }, ctx);
+    expect(patch).not.toHaveProperty("assignee"); expect(patch).not.toHaveProperty("turn"); expect(issues).toEqual([]);
+  }
 });

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { idOf } from "./common.ts";
+import { AgentAssignee, idOf } from "./common.ts";
 
 /**
  * 操作（ADR 0016 第 2 节）：程序对 vault 的每一次修改都表示为一个有名字的操作。
@@ -13,13 +13,14 @@ export const TaskDispatch = z.strictObject({
   op: z.literal("task.dispatch"),
   args: z.strictObject({
     task: idOf("task"),
-    trigger: z.enum(["turn", "cli", "followup"]).describe("turn：人在笔记里把 turn 改成 agent；cli：lumio task continue；followup：routine followup"),
+    trigger: z.enum(["assignee", "cli", "followup"]).describe("assignee：人把负责人改成 agent；cli：lumio task continue；followup：routine followup"),
+    to: AgentAssignee.optional().describe("CLI 指定的负责人；缺省用最近一轮的 agent 与执行器"),
   }),
 });
 
 /**
  * 从例行任务的某一次结果开出一个普通任务（ADR 0019 第 6 节，P2-5）。Hub 在 `plan/tasks/` 新建任务笔记，
- * 负责人与执行配置照抄例行任务，`turn: human`，等人写下追问后再派出。
+ * 执行配置照抄例行任务，`assignee: human`，等人写下追问后再派出。
  */
 export const RoutineFollowup = z.strictObject({
   op: z.literal("routine.followup"),

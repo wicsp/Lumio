@@ -49,7 +49,7 @@ P0 与 P0-7（真实 vault 迁移）已完成；P1-1 至 P1-4 已完成（P1-4 �
 | 编号 | 一句话 | 状态 |
 |---|---|---|
 | [0005](adr/0005-runtime-execution-semantics.md) | 给 AI 派活不怕中断：一轮只执行一次，状态不明就交给人 | Accepted（P2） |
-| [0019](adr/0019-hub-runtimes-tasks-rounds.md) | Hub 与执行器；任务的 status/turn；一个任务很多轮；例行任务；派活的安全底线 | Accepted（P2） |
+| [0019](adr/0019-hub-runtimes-tasks-rounds.md) | Hub 与执行器；任务生命周期（交接现见 0024）；一个任务很多轮；例行任务；派活的安全底线 | Accepted（P2） |
 | [0007](adr/0007-hub-as-single-writer.md) | Hub 是程序写入的唯一裁判；git 只做备份；只讲 HTTP | 部分实现 |
 | [0014](adr/0014-hub-and-ai-access.md) | Hub 的存放、链接、搜索、写入路径、自动提交 | 部分实现（第 4、5 节） |
 | [0016](adr/0016-operations-actors-authorization.md) | 每次修改都是一个操作，统一授权；审计与 git trailer | Implemented |
@@ -66,7 +66,9 @@ P0 与 P0-7（真实 vault 迁移）已完成；P1-1 至 P1-4 已完成（P1-4 �
 | [0020](adr/0020-privileged-exec-signed-approvals.md) | 高权限命令：Hub 签名的一次性批准凭据，root 助手程序自己验证 | Implemented |
 | [0021](adr/0021-install-pairing-selftest.md) | 安装、配对与自检：发布编译好的程序，装 Hub 一行、每台执行器一行，`doctor`/`selftest` 代替手动清单 | Accepted（P2-7 至 P2-9） |
 | [0022](adr/0022-editor-agnostic-deployment-modes.md) | 编辑器无关；单机 / 服务器两种部署模式；网络由部署者负责，Tailscale 只是补充 | Accepted |
-| [0023](adr/0023-write-switch-fields.md) | 补全时把任务、例行任务的 `status` 与派活开关 `turn` 写出来 | Implemented |
+| [0023](adr/0023-write-switch-fields.md) | 补全时写出开关字段（任务交接现见 0024） | Implemented |
+
+| [0024](adr/0024-assignee-string-default-workdir.md) | `assignee: pi@server` 作为交接开关；`workdir` 缺省 `~` | Implemented（P2-13） |
 
 **安全**
 | 编号 | 一句话 | 状态 |

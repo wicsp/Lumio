@@ -149,7 +149,7 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 
 ### 4.4 搜索（ADR 0014）
 - SQLite FTS5 + trigram 分词；**少于 3 个字符的查询改用子串匹配**（trigram 搜不到两个汉字的词）。
-- 范围：标题、正文、作者、citekey、tags。
+- 范围：标题、正文、作者、citekey、tags。空查询列举可见笔记，可配合 `type` 过滤；`lumio task list` 用它列出任务（P2-13）。
 - 索引用 WAL，遇到锁时等待（最多 5 秒）；Hub 与本地 CLI 可以同时使用同一个索引。
 - 没有 ID 的笔记照样能搜到，结果里**不带 `id`**，只能按文件名引用；不生成替代 ID。
 
@@ -173,7 +173,7 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 - **Hub 是中心，每台设备上一个执行器**（`lumio-runtime`）。执行器登记能力（agent 及版本、隔离级别、标签如 `gpu:4`），
   **主动轮询 Hub**；只有 Hub 能派活。执行器的身份角色是 `runtime`：只能领活、回报、登记，不能查询笔记库。
 - **一个任务很多轮**：一轮（Job）= 让某个 agent 执行一次，**只执行一次，不自动重试**；重试由人派出新的一轮。
-- **负责人就是开关**（ADR 0024）：`assignee` 写成 `human`、`<agent>` 或 `<agent>@<执行器>`（旧的 `{agent, device}` 对象仍可读）。
+- **负责人就是开关**（ADR 0024，P2-13）：`assignee` 写成 `human`、`<agent>` 或 `<agent>@<执行器>`（旧的 `{agent, device}` 对象仍可读）。
   人把 `assignee` 从 `human` 改成某个 agent（笔记安静 30 秒后派），或 `lumio task continue <任务> [--to <负责人>]`；都走操作 `task.dispatch`。
   交接只改这一个字段：一轮结束回到 `human`，人再改成另一个 agent 就由它接手（换 agent 开新会话）。agent 不能把任务交给另一个 agent。
   任务已有一轮在执行时不再派。AI 有问题时这一轮以"等你回答"结束，人回答后接着同一个会话继续。

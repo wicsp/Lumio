@@ -58,3 +58,13 @@ test("untrusted report markers cannot become human text, links or citations, or 
 test("AI block attributes cannot inject delimiters or lines", () => {
   for (const attrs of ["--> injected", "job=x\ntext", "<tag>"]) expect(() => upsertBlock(note, "round-1", attrs, "report")).toThrow();
 });
+
+
+test.each(["{agent: pi, device: server} # old", "\n  agent: pi\n  device: server"])("handoff replaces legacy assignee %s without changing any other field or body", (value) => {
+  const source = Buffer.from(`---\ntitle: 合成任务 # keep\nassignee: ${value}\nturn: agent # legacy\nworkdir: /tmp/synthetic\n---\n原文\n`);
+  const out = setFields(source, { assignee: "human" });
+  expect(parseFrontmatter(out).data).toEqual({ ...parseFrontmatter(source).data, assignee: "human" });
+  expect(parseFrontmatter(out).body).toEqual(parseFrontmatter(source).body);
+  expect(out.toString()).toContain("title: 合成任务 # keep\n");
+  expect(out.toString()).toContain("turn: agent # legacy\nworkdir: /tmp/synthetic\n");
+});

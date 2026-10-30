@@ -177,3 +177,15 @@ test("check lists all old wikilinks after rename and reports no dangling links a
   expect(broken.stdout).not.toContain("Private");
   await rename(renamed, old); expect(cli(args).stdout).toBe("没有悬空链接\n");
 });
+
+
+test("check warns about old object assignee and turn without errors, JSON changes or note rewrites", async () => {
+  const path = join(vault, "plan/tasks/Task.md");
+  const original = (await readFile(path, "utf8")).replace("type: task", "type: task\nassignee:\n  agent: pi\n  device: server\nturn: agent");
+  await Bun.write(path, original);
+  const result = cli(["check", "--json"]);
+  expect(result.code).toBe(0); CheckResult.parse(JSON.parse(result.stdout));
+  expect(result.stderr).toContain("assignee: pi@server");
+  expect(result.stderr).toContain("turn 已不再使用，可以删掉");
+  expect(await readFile(path, "utf8")).toBe(original);
+});

@@ -1,3 +1,4 @@
+import { parseAssignee } from "@lumio/schema";
 import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
@@ -128,19 +129,21 @@ export class Routines {
     try { parseCron(routine.schedule); } catch { refuse(`schedule 不合法：${routine.schedule}`); return; }
     if (!validTimeZone(row.timezone)) { refuse(`未知时区：${row.timezone}`); return; }
     if (row.status === "paused") { this.saveRow(row); return; }
-    if (!routine.workdir) { refuse("例行任务没有写 workdir（执行器上的工作目录）"); return; }
-    if (workdirInVault(this.config.vault, routine.workdir)) { refuse("工作目录不能在笔记库里（ADR 0019）"); return; }
+    const workdir = routine.workdir ?? "~";
+    const assignee = parseAssignee(routine.assignee);
+    if (assignee === "human") return;
+    if (workdirInVault(this.config.vault, workdir)) { refuse("工作目录不能在笔记库里（ADR 0019）"); return; }
     let runtime;
-    try { runtime = pickRuntime(this.store, new Date(this.clock.now()), routine.assignee.agent, routine.assignee.device); }
+    try { runtime = pickRuntime(this.store, new Date(this.clock.now()), assignee.agent, assignee.device, this.config.localRuntime); }
     catch (cause) { refuse(cause instanceof HubError ? cause.message : "没有可用的执行器"); return; }
 
-    let prompt = `${ROUTINE_INSTRUCTIONS({ title, id, workdir: routine.workdir })}\n# ${title}\n\n${humanPart(body)}\n`;
+    let prompt = `${ROUTINE_INSTRUCTIONS({ title, id, workdir })}\n# ${title}\n\n${humanPart(body)}\n`;
     if (routine.context === "previous") {
       const last = this.runs(id).filter((r) => r.job.result?.report).at(-1);
       if (last) prompt += `\n## 上一次的结果（${localTime(last.fired_at, row.timezone)}）\n\n${last.job.result!.report!.slice(0, MAX_SUMMARY)}\n`;
     }
-    const run: AgentRun = { kind: "agent", engine: routine.assignee.agent, prompt, ...(routine.model ? { model: routine.model } : {}) };
-    const template = { run, workdir: routine.workdir, ...(routine.gpus ? { gpus: routine.gpus } : {}), timeout_seconds: (routine.timeout_minutes ?? 120) * 60 };
+    const run: AgentRun = { kind: "agent", engine: assignee.agent, prompt, ...(routine.model ? { model: routine.model } : {}) };
+    const template = { run, workdir, ...(routine.gpus ? { gpus: routine.gpus } : {}), timeout_seconds: (routine.timeout_minutes ?? 120) * 60 };
     const revision = createHash("sha256").update(JSON.stringify({ schedule: routine.schedule, timezone: row.timezone, template })).digest("hex").slice(0, 16);
     // lease 跟着"例行任务 + 执行器"走：换了执行器才换 lease，旧执行器交回的结果随之作废。
     const lease = previous?.runtime === runtime.actor && previous.lease ? previous.lease : randomBytes(32).toString("base64url");
@@ -258,7 +261,7 @@ export class Routines {
 
   /**
    * `routine.followup`：从某一次结果开出一个普通任务（ADR 0019 第 6 节）。调用方已授权、在写入队列里执行。
-   * 负责人与执行配置照抄例行任务；`turn: human`，等人写下追问后再派出。那一次的汇报放在一个 AI 区块里，第 1 轮派出时附上。
+   * 执行配置照抄例行任务；`assignee: human`，等人写下追问后再派出。那一次的汇报放在一个 AI 区块里，第 1 轮派出时附上。
    */
   async followup(routineId: string, jobId: string, identity: Identity): Promise<NoteRef> {
     let job: Job;
@@ -278,8 +281,8 @@ export class Routines {
     const id = newId("task", now, randomBytes);
     const title = `${routine.title} · ${when} 追问`;
     const fields: Record<string, unknown> = {
-      id, type: "task", title, created: now.toISOString(), updated: now.toISOString(), status: "todo", turn: "human",
-      assignee: { agent: routine.assignee.agent, ...(routine.assignee.device ? { device: routine.assignee.device } : {}) },
+      id, type: "task", title, created: now.toISOString(), updated: now.toISOString(), status: "todo",
+      assignee: "human",
       ...(routine.workdir ? { workdir: routine.workdir } : {}), ...(routine.model ? { model: routine.model } : {}),
       ...(routine.gpus ? { gpus: routine.gpus } : {}), ...(routine.timeout_minutes ? { timeout_minutes: routine.timeout_minutes } : {}),
       ...(routine.project ? { project: routine.project } : {}), routine: routineId,
@@ -289,7 +292,7 @@ export class Routines {
     const report = job.result?.report ?? "";
     const shown = containsSecret(report) ? `汇报中疑似包含敏感信息，未写入笔记。请用 \`lumio job show ${job.spec.id}\` 查看。`
       : report ? (report.length > 20_000 ? `${report.slice(0, 20_000)}\n\n……（已截断）` : report) : "（这一次没有汇报）";
-    const body = `来自例行任务 [[${basename(path, ".md")}]] 在 ${when} 的结果。在这里写下你的追问，然后把 \`turn\` 改成 \`agent\`。\n\n`;
+    const body = `来自例行任务 [[${basename(path, ".md")}]] 在 ${when} 的结果。在这里写下你的追问，然后把 \`assignee\` 改成 \`pi@server\`。\n\n`;
     let bytes: Buffer = Buffer.from(`---\n${header}\n---\n${body}`, "utf8");
     bytes = upsertBlock(bytes, "routine-run", `job=${job.spec.id}`, `### ${when} 的结果\n\n${shown}`);
     const dir = entityDirectory("task");

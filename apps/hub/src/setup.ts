@@ -5,7 +5,7 @@ import { homedir, hostname } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { askTerminal, openTerminal } from "@lumio/core";
 import { CliConfig, RuntimeName } from "@lumio/schema";
-import { readConfig, isLoopback } from "./config.ts";
+import { readConfig, isLoopback, runtimeName, rememberLocalRuntime } from "./config.ts";
 import { HubError } from "./errors.ts";
 import { HubStore } from "./store.ts";
 
@@ -59,9 +59,7 @@ export function hubPlist(binary: string, env: Record<string, string>, state: str
 export function hubUnit(binary: string, envFile: string): string {
   return `[Unit]\nDescription=Lumio Hub\nAfter=network.target\n\n[Service]\nExecStart=${unitString(binary)}\nEnvironmentFile=${unitPath(envFile)}\nRestart=always\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n`;
 }
-export function runtimeName(host: string): string {
-  return RuntimeName.parse(host.toLowerCase().replace(/[^a-z0-9._-]/g, "-").replace(/^[^a-z0-9]+/, "").slice(0, 64) || "local");
-}
+export { runtimeName } from "./config.ts";
 export interface SetupOptions {
   vault?: string; server?: boolean; yes?: boolean; interactive?: boolean; publicUrl?: string; terminalPath?: string; home?: string; host?: string; platform?: string;
   binary?: string; runtimeBinary?: string; env?: NodeJS.ProcessEnv; uid?: number;
@@ -154,7 +152,7 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
   if (publicUrl.startsWith("http://") && !isLoopback(new URL(publicUrl).hostname)) log("警告：对外地址使用 HTTP，令牌将以明文传输；请配置 HTTPS 反向代理。");
   const store = await HubStore.open(state);
   let token: string, runtimeToken: string;
-  const name = runtimeName(host);
+  const name = await rememberLocalRuntime(state, runtimeName(host));
   try {
     let human = store.actors().find((actor) => actor.role === "human");
     human ??= store.createActor("owner", "human");

@@ -18,7 +18,7 @@ export interface OperationOptions { tasks?: TaskRounds; routines?: Routines; pri
 async function execute(operation: Operation, identity: Identity, options: OperationOptions): Promise<NoteRef | undefined> {
   if (operation.op === "task.dispatch") {
     if (!options.tasks) throw new HubError("INTERNAL", "Hub 未启用任务派活");
-    await options.tasks.dispatch(operation.args.task, operation.args.trigger, identity);
+    await options.tasks.dispatch(operation.args.task, operation.args.trigger, identity, undefined, operation.args.to);
     return;
   }
   if (operation.op === "routine.followup") {

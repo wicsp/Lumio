@@ -1,6 +1,7 @@
-import { buildBib, checkLinks, collectCitations, excludedCardPaths, exportBib, noteLinks, searchNotes, showNote, type SearchOptions } from "@lumio/core";
+import { readFile } from "node:fs/promises";
+import { vaultFileAt, parseFrontmatter, buildBib, checkLinks, collectCitations, excludedCardPaths, exportBib, noteLinks, searchNotes, showNote, type SearchOptions } from "@lumio/core";
 import { createClient } from "@lumio/api-client";
-import { NOTE_TYPES, type NoteRef } from "@lumio/schema";
+import { NOTE_TYPES, parseAssignee, type NoteRef } from "@lumio/schema";
 
 export interface QueryCommand {
   command: "search" | "show" | "links" | "check" | "export";
@@ -36,6 +37,22 @@ export async function runQuery(root: string | undefined, command: QueryCommand, 
   };
   if (command.command === "check") {
     const result = await (remote ? remote.check(options) : checkLinks(root!, options));
+    // 沿用警告通道，JSON 与 Hub 的 CheckResult 契约保持原样。
+    const list = (limit?: number) => remote ? remote.search("", { includePrivate: options.includePrivate, limit }) : searchNotes(root!, "", { ...options, limit });
+    let notes = await list();
+    if (notes.hits.length < notes.total) notes = await list(notes.total);
+    for (const { note } of notes.hits) {
+      const reference = note.id ?? note.citekey ?? note.path.replace(/^.*\//, "").replace(/\.md$/, "");
+      const file = remote ? undefined : await vaultFileAt(root!, note.path);
+      const fm = remote ? (await remote.show(reference, options)).frontmatter : file ? parseFrontmatter(await readFile(file.path)).data : {};
+      if (fm.assignee !== null && typeof fm.assignee === "object") {
+        try {
+          const assignee = parseAssignee(fm.assignee);
+          if (assignee !== "human") warn(`${note.path}  提示：旧 assignee 对象可以改成字符串 assignee: ${assignee.agent}${assignee.device ? `@${assignee.device}` : ""}（例如 pi@server）`);
+        } catch { /* 格式错误由元数据校验报告，不把兼容性提示变成错误。 */ }
+      }
+      if (Object.hasOwn(fm, "turn")) warn(`${note.path}  提示：turn 已不再使用，可以删掉；派活请改 assignee（例如 pi@server）`);
+    }
     if (command.json) log(JSON.stringify(result));
     else if (!result.total) log("没有悬空链接");
     else {

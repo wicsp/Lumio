@@ -144,11 +144,11 @@ describe("Job protocol v2 (ADR 0019)", () => {
 
 describe("Task and Routine (ADR 0019)", () => {
   const base = { id: `task_${ULID}`, title: "加 XML 包装", created: now, updated: now };
-  test("task status is the general lifecycle; turn is separate", () => {
+  test("task status is the general lifecycle; legacy turn is an unknown field", () => {
     const t = Task.parse({ ...base, type: "task", status: "waiting", turn: "agent", assignee: { agent: "codex", device: "server" }, workdir: "~/mas", gpus: [0] });
     expect(t.status).toBe("waiting"); expect(t.turn).toBe("agent");
     expect(Task.safeParse({ ...base, type: "task", status: "review" }).success).toBe(false);
-    expect(Task.safeParse({ ...base, type: "task", turn: "codex" }).success).toBe(false);
+    expect(Task.parse({ ...base, type: "task", turn: "codex" }).turn).toBe("codex");
   });
   test("routine needs a 5-field cron and an agent", () => {
     const r = { type: "routine", id: `rtn_${ULID}`, title: "每周论文汇总", created: now, updated: now, schedule: "0 9 * * 1", assignee: { agent: "claude-code" } };
@@ -166,4 +166,30 @@ describe("JSON Schema export", () => {
     const json = z.toJSONSchema(Paper, { io: "input" }) as { properties: Record<string, { pattern?: string }> };
     expect(json.properties.citekey?.pattern).toBe(CITEKEY_PATTERN.source);
   });
+});
+
+
+test("ADR 0024 assignee strings and legacy objects; optional workdir and unknown turn", async () => {
+  const { Assignee, AgentAssignee, parseAssignee, AssigneeError } = await import("../src/index.ts");
+  expect(parseAssignee("human")).toBe("human");
+  for (const agent of ["pi", "codex", "claude-code"] as const) {
+    expect(parseAssignee(agent)).toEqual({ agent });
+    expect(parseAssignee(`${agent}@server`)).toEqual({ agent, device: "server" });
+    expect(parseAssignee({ agent, device: "server" })).toEqual({ agent, device: "server" });
+    expect(AgentAssignee.safeParse(agent).success).toBe(true);
+  }
+  for (const value of ["pi@", "@server", "gpt@server", "Pi@server", "pi@Server", `pi@${"a".repeat(33)}`, { agent: "gpt" }]) {
+    expect(Assignee.safeParse(value).success).toBe(false);
+    expect(() => parseAssignee(value)).toThrow(AssigneeError);
+    expect(() => parseAssignee(value)).toThrow("pi@server");
+  }
+  expect(AgentAssignee.safeParse("human").success).toBe(false);
+});
+
+
+test("task dispatch uses the assignee trigger and rejects dispatch to human", async () => {
+  const { TaskDispatch } = await import("../src/index.ts");
+  const task = "task_00000000000000000000000001";
+  expect(TaskDispatch.parse({ op: "task.dispatch", args: { task, trigger: "assignee" } }).args.trigger).toBe("assignee");
+  expect(TaskDispatch.safeParse({ op: "task.dispatch", args: { task, trigger: "cli", to: "human" } }).success).toBe(false);
 });

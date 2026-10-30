@@ -53,3 +53,36 @@
 5. 执行中把 `assignee` 改成别的值：不派出新轮、这一轮不取消，`hub status` 出现问题记录，写回后为 `human`。
 6. 旧对象写法与带 `turn` 的旧笔记照常可用；`lumio check` 给出两种提示。
 7. 例行任务写 `assignee: pi@server`、不写 `workdir` 时照常触发。
+
+## 实现后的用法与验收记录（2026-10-30）
+
+任务和例行任务都用字符串负责人，例如：
+
+```yaml
+assignee: pi@server
+```
+
+`workdir` 可以不写，使用执行器上的 `~`。任务结束后由 Hub 写成 `assignee: human`。
+
+```sh
+lumio task list
+lumio task continue <任务> --to codex
+lumio task continue <任务>  # 用最近一轮的 agent 与执行器
+lumio check --json         # 兼容性提示在 stderr，JSON 格式与退出码不变
+```
+
+本机执行器名称由 setup 保存到 Hub 状态目录的 `config.json`；升级时如果没有记录，会用 setup 的主机名规则推导并保存。
+旧负责人对象只在发生交接时更新；补全和 check 不迁移笔记，已有的旧轮次开关作为未知字段保留。
+历史 ADR 原文保留，当前用法以 DESIGN 与 ADR 0024 为准。
+
+自动验证全部使用 `fixtures/` 中的合成 vault 副本和假 agent；真实 agent 与真实设备验收不自动运行。
+
+| 验收项 | 自动验证 | 人工验收步骤 |
+|---|---|---|
+| 1 | Bun 1.3.13 下运行 `bun run check`；运行 `bun run schema:export`，不改 bun.lock | 无 |
+| 2 | 正文新建任务、补全 human、默认 30 秒边界、重复监听/重启去重、改回 human 撤销；假 agent 实际 cwd 为执行器测试 HOME；结束写回 human | **待人工验收**：在独立验收 Hub 的合成 vault 中只写任务正文，等补全后改为 `pi@server`；不写 workdir，等待 30 秒，用 `lumio task show` / `lumio job show` 核对服务器和 `~`，完成后检查 human |
+| 3 | 登记两个假执行器；裸 agent 只派本机；本机未登记时提示规定错误；本机离线仍保留派给它的 Job | **待人工验收**：登记 Hub 本机执行器，写 `assignee: pi`，确认在本机执行；在没有本机执行器的独立验收 Hub 重做，核对错误说明 |
+| 4 | 假 pi@server → 本机假 codex → 同一 codex 三轮；核对第 2 轮新会话、全文与上一轮汇报，第 3 轮恢复会话且仅发新增部分 | **待人工验收**：用真实 pi@server 完成第 1 轮；加意见改为 codex 完成第 2 轮；再加意见改为 codex 完成第 3 轮；检查 Job 的 agent、执行器、session 与 prompt |
+| 5 | 假 agent 执行中改负责人；轮次数不增、当前轮不取消、status 问题列表出现记录、结果写回 human；paused 仍能取消 | **待人工验收**：给真实 agent 一个耗时任务；运行中改负责人，用 `lumio hub status` 与 `lumio task show` 核对问题记录及只有一轮，完成后检查 human |
+| 6 | 契约接受旧对象和未知 turn；块式/流式对象写回测试；check 两种提示、退出码为 0、CheckResult 校验通过且原文件不变 | 无；旧 turn 不再控制派活，旧对象负责人仍可派活 |
+| 7 | 字符串例行任务缺省 workdir 时生成 `~` 计划与 Job，模拟执行器触发并交回；followup 的新任务为 human | **待人工验收**：在独立验收 Hub 的合成 vault 建一分钟一次的例行任务，写 `assignee: pi@server`、不写 workdir；到点后核对服务器 Job、`~` 与追加汇报，随后暂停该例行任务 |

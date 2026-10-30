@@ -10,7 +10,7 @@ import { handleOperation, type OperationOptions } from "./operations.ts";
 import { handleJobs } from "./jobs.ts";
 import { handleRuntime } from "./runtime.ts";
 import { authorize, PAIRING_OPERATIONS, type PairingOperation } from "./authorize.ts";
-import { networkWarning, type HubConfig } from "./config.ts";
+import { networkWarning, rememberLocalRuntime, type HubConfig } from "./config.ts";
 import { HubError } from "./errors.ts";
 import { HubStore, type Identity } from "./store.ts";
 import { Jobs } from "./jobs.ts";
@@ -62,6 +62,7 @@ export async function startHub(config: HubConfig, options: {
   routines?: RoutineOptions;
 } = {}) {
   if (!(await stat(config.vault)).isDirectory()) throw new HubError("INVALID", "LUMIO_VAULT 必须是目录");
+  config = { ...config, localRuntime: await rememberLocalRuntime(config.stateDir, config.localRuntime) };
   const store = await HubStore.open(config.stateDir);
   const privileged = new Privileged(store, options.now);
   const pairing = new Pairing(store, config, options.now);
