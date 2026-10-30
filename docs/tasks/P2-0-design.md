@@ -5,10 +5,10 @@
 - 涉及：`packages/schema`、`docs/`；`packages/core` 的 `VAULT_LAYOUT` 加入 `plan/routines`（契约连带修改）
 
 ## 内容（已完成）
-- ADR 0019：Hub 与执行器、任务的 `status` / `assignee`（交接开关见 ADR 0024）、一个任务很多轮、记录分开存放、一轮只执行一次、例行任务、安全底线。
+- ADR 0019：Hub 与执行器、任务的 `status` / `turn`、一个任务很多轮、记录分开存放、一轮只执行一次、例行任务、安全底线。
 - ADR 0005 修订：一轮只执行一次、不自动重试、lease 取代多次 Attempt 的 fencing 编号、`needs_attention` 并入 `unknown`。
 - 契约：
-  - `entities.ts`：`Task`（`status`、`assignee`、执行配置（ADR 0024）；删去 `job` 字段）、新类型 `Routine`（前缀 `rtn`）。
+  - `entities.ts`：`Task`（新的 `status`、`turn`、执行配置；删去 `job` 字段）、新类型 `Routine`（前缀 `rtn`）。
   - `actor.ts`：角色 `runtime`。
   - `job.ts`：协议第 2 版——`JobSpec`、`JobResult`、`Job`、`RuntimeRegistration`、`RuntimeInfo`、`RuntimeHeartbeat`、
     `RuntimeSync`、`RuntimeAck`、`RoutineSpec`。

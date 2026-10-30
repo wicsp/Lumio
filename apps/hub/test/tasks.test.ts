@@ -179,14 +179,14 @@ test("lumio task continue (CLI trigger) dispatches immediately; agents cannot di
 }, 40_000);
 
 
-test("missing workdir executes in the runtime home and preserves a legacy turn verbatim", async () => {
+test("missing workdir executes in the runtime home and hands the legacy turn back without migrating assignee", async () => {
   await writeNote({ assignee: "{agent: pi, device: server}", turn: "agent" }, "合成要求\n");
   await writeFile(file(), (await note()).replace(/^workdir:.*\n/m, "")); notify(path);
-  await eventually(async () => (await front()).assignee === "human");
+  await eventually(async () => (await front()).turn === "human");
   expect((await rounds())[0]!.spec.workdir).toBe("~");
   const calls = (await readFile(join(temp, "agent-log"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
   expect(calls[0].cwd).toBe(await realpath(temp));
-  expect((await front()).turn).toBe("agent");
+  expect((await front()).assignee).toEqual({ agent: "pi", device: "server" });
   expect(await note()).not.toContain("workdir:");
 }, 30_000);
 

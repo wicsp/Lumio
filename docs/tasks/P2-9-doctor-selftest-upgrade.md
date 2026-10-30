@@ -37,7 +37,7 @@
    - **取消**：第 4 轮让它"等待 120 秒再回复"，提交后取消 → 状态 `cancelled`，且在 30 秒内收到。
    每一轮有总超时（默认 5 分钟），超时记为失败并给出 `lumio job show <job>`。
 5. `--notes`：在 vault 的 `plan/tasks/` 新建一篇 `Lumio 自检 <日期时间>.md`（CLI 本地写入，与 `lumio new` 相同的方式），负责人为第一个可用 agent，
-   `assignee: pi@server`（实际写所选 agent 与执行器，`workdir` 可不写）；等待 Hub 派出并写回第 1 轮（最多 5 分钟）→ 检查区块标题、`assignee` 变回 `human`；最后把这篇笔记的 `status` 改为 `done`（不删除）。
+   `turn: agent`；等待 Hub 派出并写回第 1 轮（最多 5 分钟）→ 检查区块标题、`turn` 变回 `human`；最后把这篇笔记的 `status` 改为 `done`（不删除）。
 6. 输出：每项 `✓/✗`、耗时、失败时的 job 编号与一句原因；`--json` 输出结构化结果。全部通过退出码 0。
 7. 自检不需要 `LUMIO_RUNTIME_ALLOWED_COMMANDS`、不提权、不修改工作目录以外的内容。
 

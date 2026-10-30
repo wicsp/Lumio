@@ -70,7 +70,7 @@ test("needs_approval creates a proposal without executing; only humans decide; a
   const accepted = await decide(p, "accept") as Proposal;
   expect(accepted).toMatchObject({ status: "accepted", decided_by: owner.id });
   expect(await jobs()).toHaveLength(1);
-  expect(parseFrontmatter(await readFile(join(vault, path))).data.assignee).toBe("pi@server");
+  expect(parseFrontmatter(await readFile(join(vault, path))).data).toMatchObject({ turn: "agent", assignee: { agent: "pi", device: "server" } });
   expect((await decide(accepted, "accept", human, 409) as ApiError["error"]).code).toBe("CONFLICT");
   expect(await jobs()).toHaveLength(1);
 });

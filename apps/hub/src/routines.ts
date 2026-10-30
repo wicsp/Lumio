@@ -14,7 +14,7 @@ import { editNote, writeAndCommit } from "./commit.ts";
 import { HubError } from "./errors.ts";
 import type { Jobs } from "./jobs.ts";
 import type { HubStore, Identity } from "./store.ts";
-import { OUTCOME, containsSecret, pickRuntime, workdirInVault } from "./tasks.ts";
+import { OUTCOME, assigneeKey, containsSecret, pickRuntime, workdirInVault } from "./tasks.ts";
 import type { WatchClock } from "./watch.ts";
 
 /**
@@ -292,7 +292,7 @@ export class Routines {
     const report = job.result?.report ?? "";
     const shown = containsSecret(report) ? `汇报中疑似包含敏感信息，未写入笔记。请用 \`lumio job show ${job.spec.id}\` 查看。`
       : report ? (report.length > 20_000 ? `${report.slice(0, 20_000)}\n\n……（已截断）` : report) : "（这一次没有汇报）";
-    const body = `来自例行任务 [[${basename(path, ".md")}]] 在 ${when} 的结果。在这里写下你的追问，然后把 \`assignee\` 改成 \`pi@server\`。\n\n`;
+    const body = `来自例行任务 [[${basename(path, ".md")}]] 在 ${when} 的结果。在这里写下你的追问，然后把 \`assignee\` 改成 \`${assigneeKey(routine.assignee)}\`。\n\n`;
     let bytes: Buffer = Buffer.from(`---\n${header}\n---\n${body}`, "utf8");
     bytes = upsertBlock(bytes, "routine-run", `job=${job.spec.id}`, `### ${when} 的结果\n\n${shown}`);
     const dir = entityDirectory("task");

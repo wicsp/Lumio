@@ -19,7 +19,7 @@ import { editNote } from "./commit.ts";
  *
  * - 人把 `assignee` 改成 agent → 笔记安静 `quietMs` 后派出下一轮（`task.dispatch`，trigger `assignee`）。
  * - `lumio task continue` → 立即派出（trigger `cli`，经 /v1/operations）。
- * - 一轮的结果写回笔记里的一个 AI 区块，`assignee` 改回 `human`。
+ * - 一轮的结果写回笔记里的一个 AI 区块；新笔记 assignee、旧笔记 turn 改回 human。
  * - 程序状态（上次看到的 assignee、会话编号、派出时的快照、轮数）存在 hub.sqlite，不写进笔记。
  *
  * 所有读写笔记的动作都在 Hub 的写入队列里执行（与补全、自动保存串行）。
@@ -83,9 +83,18 @@ export function pickRuntime(store: HubStore, now: Date, engine: AgentRun["engine
   return runtime;
 }
 
-function assigneeKey(value: unknown): string {
+export function assigneeKey(value: unknown): string {
   const a = parseAssignee(value ?? "human");
   return a === "human" ? a : `${a.agent}${a.device ? `@${a.device}` : ""}`;
+}
+
+/** 有旧开关的笔记继续按旧语义运行，避免升级扫描把固定负责人当成派活请求。 */
+function taskAssignee(data: Record<string, unknown>): string {
+  return Object.hasOwn(data, "turn") && data.turn !== "agent" ? "human" : assigneeKey(data.assignee);
+}
+const dispatchBlocked = (data: Record<string, unknown>) => ["done", "cancelled", "paused"].includes(String(data.status));
+function handBack(bytes: Buffer): Buffer {
+  return setFields(bytes, Object.hasOwn(parseFrontmatter(bytes).data, "turn") ? { turn: "human" } : { assignee: "human" });
 }
 
 export const OUTCOME: Record<string, string> = {
@@ -151,7 +160,14 @@ export class TaskRounds {
     const active = this.jobs.activeForTask(id);
     if (active && (data.status === "paused" || data.status === "cancelled")) this.jobs.cancel(active.spec.id);
     let assignee: string;
-    try { assignee = assigneeKey(data.assignee); }
+    if (!active && dispatchBlocked(data)) {
+      s.pending_since = null; s.last_turn = "human"; this.save(s); return;
+    }
+    try {
+      assignee = taskAssignee(data);
+      // 升级前的 last_turn=agent 表示已派出，与当前的具体负责人 key 等价。
+      if (Object.hasOwn(data, "turn") && s.last_turn === "agent") s.last_turn = assigneeKey(data.assignee);
+    }
     catch (cause) { s.pending_since = null; this.issue(path, `跳过  ${path}  ${(cause as Error).message}`); this.save(s); return; }
     if (active) {
       if (assignee !== s.last_turn) this.issue(path, `跳过  ${path}  这一轮还在执行，修改 assignee 不生效；结束后会交回 human`);
@@ -176,7 +192,11 @@ export class TaskRounds {
         this.store.audit(owner, JSON.stringify({ op: "task.dispatch", args: { task: s.task, trigger: "assignee" } }), "allow", undefined, "applied");
       }
       catch (cause) {
-        if (cause instanceof HubError && cause.code === "CONFLICT") { s.pending_since = null; this.save(s); continue; }
+        if (cause instanceof HubError && cause.code === "CONFLICT") {
+          s.pending_since = null; this.save(s);
+          // 重新读取开关与状态；监听漏掉的暂停或交回不能留下陈旧的派活状态。
+          await this.noteChanged(s.path); continue;
+        }
         await this.refuse(s, cause instanceof HubError || cause instanceof CoreError ? cause.message : "无法派出任务");
       }
     }
@@ -187,7 +207,7 @@ export class TaskRounds {
   private async refuse(s: TaskState, message: string) {
     s.pending_since = null; s.last_turn = "human"; this.save(s);
     this.issue(s.path, `跳过  ${s.path}  ${message}`);
-    await this.edit(s.path, (bytes) => setFields(upsertBlock(bytes, "dispatch-error", "", `### 无法派出\n${message}`), { assignee: "human" }));
+    await this.edit(s.path, (bytes) => handBack(upsertBlock(bytes, "dispatch-error", "", `### 无法派出\n${message}`)));
   }
 
   /** 派出下一轮。调用方负责在写入队列中执行、已通过授权，并写审计。 */
@@ -204,6 +224,8 @@ export class TaskRounds {
     const parsed = parseFrontmatter(bytes);
     const data = parsed.data;
     if (data.id !== task) throw new HubError("CONFLICT", "任务笔记在处理中被修改，请重试");
+    if (dispatchBlocked(data)) throw new HubError("CONFLICT", "任务已完成、已取消或已暂停；请先把 status 改回 active 或 todo");
+    if (trigger === "assignee" && (taskAssignee(data) === "human" || taskAssignee(data) !== s.last_turn)) throw new HubError("CONFLICT", "派活开关已变化，请等待重新触发");
     if (this.jobs.activeForTask(task)) throw new HubError("CONFLICT", "这个任务已有一轮在执行");
     const previous = this.jobs.list(undefined, task).at(-1);
     let target: unknown = data.assignee ?? "human";
@@ -267,7 +289,13 @@ export class TaskRounds {
     await this.edit(s.path, (b) => {
       const d = parseFrontmatter(b).data;
       const patch: Record<string, string> = {};
-      if (trigger === "cli") patch.assignee = targetKey;
+      if (trigger === "cli") {
+        if (Object.hasOwn(d, "turn")) {
+          patch.turn = "agent";
+          // 指定不同负责人是人的显式修改；普通 continue 不改写旧对象。
+          if (to !== undefined && assigneeKey(d.assignee) !== targetKey) patch.assignee = targetKey;
+        } else patch.assignee = targetKey;
+      }
       if (d.status === undefined || d.status === null || d.status === "todo") patch.status = "active";
       return Object.keys(patch).length ? setFields(b, patch) : b;
     }, { message: `lumio: task.dispatch ${title} 第 ${round} 轮`, trailers: { "Lumio-Actor": identity.actor.id, "Lumio-Job": job.spec.id } });
@@ -285,7 +313,7 @@ export class TaskRounds {
       if (!s) { this.markWritten(row.job); continue; }
       const block = this.render(job, row.round);
       try {
-        await this.edit(s.path, (b) => setFields(upsertBlock(b, `round-${row.round}`, `job=${job.spec.id}`, block), { assignee: "human" }),
+        await this.edit(s.path, (b) => handBack(upsertBlock(b, `round-${row.round}`, `job=${job.spec.id}`, block)),
           { message: `lumio: 第 ${row.round} 轮结果 ${job.status}`, trailers: { "Lumio-Actor": job.spec.runtime, "Lumio-Job": job.spec.id } });
       } catch (cause) {
         if (cause instanceof CoreError && cause.code === "FILE_CHANGED") continue;

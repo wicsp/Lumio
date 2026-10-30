@@ -173,3 +173,25 @@ test("string routine assignee without workdir creates a home-directory plan and 
   expect((await request("/v1/runtime/results", runtime, result(id, plan.lease))).status).toBe(200);
   await eventually(async () => (await note()).includes("### 2026-10-26 10:10 的结果"));
 });
+
+
+test.each([
+  ["codex", "codex"],
+  ["claude-code@mac", "claude-code@mac"],
+  ["{agent: codex, device: laptop}", "codex@laptop"],
+])("routine.followup describes the routine's own assignee %s", async (assignee, expected) => {
+  await writeRoutine();
+  await eventually(async () => (await sync()).routines.length === 1);
+  const plan = (await sync()).routines[0]!;
+  const id = routineJobId(R, fire("10:10"));
+  expect((await request("/v1/runtime/results", runtime, result(id, plan.lease))).status).toBe(200);
+  await writeRoutine({ assignee, status: "paused" });
+  const response = await request("/v1/operations", human, { operation: { op: "routine.followup", args: { routine: R, job: id } } });
+  expect(response.status).toBe(200);
+  const applied = OperationResult.parse(await response.json());
+  if (applied.status !== "applied" || !applied.note) throw new Error("expected a note");
+  const bytes = await readFile(join(vault, applied.note.path));
+  expect(Task.parse(parseFrontmatter(bytes).data).assignee).toBe("human");
+  expect(bytes.toString()).toContain(`把 \`assignee\` 改成 \`${expected}\``);
+  expect(bytes.toString()).not.toContain("改成 `pi@server`");
+});
