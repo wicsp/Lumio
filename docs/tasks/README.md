@@ -31,7 +31,7 @@
 | [P2-10](P2-10-markdown-links.md) ✅ | 同时识别标准 Markdown 链接（ADR 0022） | 后端（Codex） | 无 |
 | [P2-11](P2-11-acceptance-fixes.md) ✅ | 第一次验收发现的问题：终端输入、Tailscale 询问、重新登录、写出开关字段（ADR 0023） | 后端（Codex） | P2-8 |
 | [P2-12](P2-12-install-feedback.md) ✅ | 安装与配对：下载进度、配对失败说出原因、发现另一个 Hub | 后端（Codex） | P2-9 |
-| [P2-13](P2-13-assignee-workdir-last-round.md) | 负责人写成 `pi@server`、`workdir` 缺省为 `~`、frontmatter 里的 `last_round`（ADR 0024，待批准） | 后端（Codex） | P2-12 |
+| [P2-13](P2-13-assignee-handoff.md) | 负责人写成 `pi@server` 并作为交接开关（删除 `turn`）、`workdir` 缺省为 `~`（ADR 0024） | 后端（Codex） | P2-12 |
 
 P1 的设计决定见 ADR 0014、0016、0017、0018；P2 见 ADR 0019、0020、0021、0022 与修订后的 ADR 0005；契约见 `packages/schema/src/` 中的 `query.ts`、`actor.ts`、`operation.ts`、`proposal.ts`、`api.ts`。
 
@@ -67,6 +67,7 @@ pi 的 skill 验收说明：pi 的回答完全正确（推荐了 `[[渲染格式
 |---|---|---|
 | 论文笔记半手动补全：手写的笔记里有 `arxiv` 或 `doi` 时，联网取元数据补齐其余字段 | P1 之后 | 联网放在 CLI 或 Hub，不进 core |
 | 语义搜索 / RAG：按意思找笔记，方便按想法引用论文 | P2 之后 | 向量和 `index.sqlite` 放在一起；本地模型还是 API 到时再定 |
+| 在 frontmatter 里看得到上一轮的结果（完成 / 有问题 / 失败），方便总览 | 打磨期 | 和 `status` 有重叠，人类要求想清楚再定（ADR 0024 讨论） |
 | 测试能否调用真实 AI | P2 | 未决定；P2-3、P2-4 的自动测试一律用假的 agent，真实 agent 只做人工验证 |
 | Python 实验 SDK | 不做 | 实验结果怎么记由各项目自己的 `AGENTS.md` 决定（ADR 0019 背景） |
 | 完整的 AI 权限系统与 Agent 身份生命周期 | P3 之后 | 接在 ADR 0016 预留的 `authorize`、操作、提议上 |
