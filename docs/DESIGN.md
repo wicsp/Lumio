@@ -85,7 +85,7 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 | source | `src` | 网页、视频、播客、课程、书；`kind`、`url`、`author`、`site` |
 | idea | `idea` | `status`；可关联 `project` |
 | project | `prj` | `status`、`goal`、`repo`、`deadline` |
-| task | `task` | `status`（todo/active/waiting/paused/done/cancelled，只由人改）、`turn`（human/agent）、`assignee`、`due`；派给 AI 时的 `workdir`、`model`、`gpus`、`timeout_minutes`（ADR 0019） |
+| task | `task` | `status`（todo/active/waiting/paused/done/cancelled，只由人改）、`assignee`（`human` / `pi` / `pi@server`，同时是"现在轮到谁"）、`due`；派给 AI 时可选的 `workdir`（缺省 `~`）、`model`、`gpus`、`timeout_minutes`（ADR 0019、0024） |
 | routine | `rtn` | 例行任务：`schedule`（5 段 cron）、`assignee`（agent）、`context`（none/previous）与执行配置；每次结果追加在笔记里（ADR 0019） |
 | experiment | `exp` | `project` 必填；`hypothesis`、`metrics`、`artifacts` |
 | post | `post` | `format` 必填（无默认值）；`media` 按角色命名；`targets` 每个平台一个，发布结果由程序写入 |
@@ -102,7 +102,7 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 - 唯一例外是 **schema 中声明的"程序字段"**（如 post 的发布结果、asset 顺延的 `renews_on`），程序可以更新；
   这类更新必须经过 Hub（ADR 0009、0014）。
 - 可选字段留空视为没填，带默认值的字段留空取默认值，必填字段留空报错；协议（job）不适用这条（ADR 0008）。
-- 默认值不写进文件，读取时由 schema 补上。例外是需要人拨动的开关：任务与例行任务的 `status`、负责人是 agent 的任务的 `turn`，缺失时补全器写上默认值（ADR 0023）。
+- 默认值不写进文件，读取时由 schema 补上。例外是需要人拨动的开关：任务与例行任务的 `status`、任务的 `assignee`（`human`），缺失时补全器写上默认值（ADR 0023、0024）。
 
 ### 3.4 论文 citekey（ADR 0004）
 
@@ -173,23 +173,25 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 - **Hub 是中心，每台设备上一个执行器**（`lumio-runtime`）。执行器登记能力（agent 及版本、隔离级别、标签如 `gpu:4`），
   **主动轮询 Hub**；只有 Hub 能派活。执行器的身份角色是 `runtime`：只能领活、回报、登记，不能查询笔记库。
 - **一个任务很多轮**：一轮（Job）= 让某个 agent 执行一次，**只执行一次，不自动重试**；重试由人派出新的一轮。
-- **派下一轮**：在笔记里把 `turn` 改成 `agent`（笔记安静 30 秒后派），或 `lumio task continue`；都走操作 `task.dispatch`。
+- **负责人就是开关**（ADR 0024）：`assignee` 写成 `human`、`<agent>` 或 `<agent>@<执行器>`（旧的 `{agent, device}` 对象仍可读）。
+  人把 `assignee` 从 `human` 改成某个 agent（笔记安静 30 秒后派），或 `lumio task continue <任务> [--to <负责人>]`；都走操作 `task.dispatch`。
+  交接只改这一个字段：一轮结束回到 `human`，人再改成另一个 agent 就由它接手（换 agent 开新会话）。agent 不能把任务交给另一个 agent。
   任务已有一轮在执行时不再派。AI 有问题时这一轮以"等你回答"结束，人回答后接着同一个会话继续。
-- **派给哪个执行器**：`assignee.device` 指定时用它；否则挑在线且装了该 agent 的；都不在线时交给最近见过的那个，它上线后领取。
-  `workdir` 必须写，且不能在笔记库里。第一次派出时 `status` 从 `todo` 改成 `active`；人在执行中改成 `paused`/`cancelled` 会取消这一轮。
-- **写回**：每轮结果写进正文末尾的 `round-N` AI 区块，`turn` 改回 `human`；汇报疑似含卡号或密钥时不写入笔记，只提示用 `lumio job show` 查看。
+- **派给哪个执行器**：写了 `@<执行器>` 时用它；否则用 Hub 所在机器上的本机执行器，没有时拒绝（ADR 0024）。不在线时 Job 等它上线后领取。
+  `workdir` 缺省为执行器上的 `~`，不能在笔记库里。执行中人改 `assignee` 不生效，只记入 `hub status` 的问题列表。第一次派出时 `status` 从 `todo` 改成 `active`；人在执行中改成 `paused`/`cancelled` 会取消这一轮。
+- **写回**：每轮结果写进正文末尾的 `round-N` AI 区块，`assignee` 改回 `human`；汇报疑似含卡号或密钥时不写入笔记，只提示用 `lumio job show` 查看。
   Hub 的这两次写入（派出、写回）各自单独提交；目标笔记里人还没提交的修改先作为一次自动保存提交。
 - **上下文**：能接上原会话时只发人新写的部分；接不上时发人写的部分加最近一轮的汇报。
 - **记录分开**：笔记里是每一轮的汇报摘要（AI 区块）；Hub 数据库里是每一轮的完整记录（配置、状态、时间、退出码、
   会话编号、开始与结束时的 git 提交、完整汇报）；完整日志在执行器本地。
 - **断开后能接上**：执行器先把 Job 写进本地队列再确认；确认后这一轮归它负责，失联时 Hub 不转给别人。
   结果先存"待交回"，Hub 确认后才删；重复交回只记一次。Hub 只接受被指派的执行器、带着当前 lease 的回报。
-  执行器重启时，执行到一半的标为 `unknown`，`turn` 改回 `human`。
+  执行器重启时，执行到一半的标为 `unknown`，`assignee` 改回 `human`。
 - **例行任务**（`plan/routines/`）：`status: active` 的例行任务由 Hub 做成计划同步给执行器（选执行器的规则同上），
   到点由执行器自己触发（Hub 离线也照常），Job 编号由"例行任务 + 计划触发时间"确定，重复生成只有一个；每次是独立的新会话，
   `context: previous` 时带上上一次的摘要。执行器离线错过的只补跑最近一次，其余在结果里注明跳过了几次。
   结果按时间追加在这篇笔记的 `run-<日期时间>` AI 区块里。`lumio routine list` 列出计划；
-  `lumio routine followup <例行任务> <日期>`（操作 `routine.followup`）从某一次开出普通任务：负责人与执行配置照抄，`turn: human`。
+  `lumio routine followup <例行任务> <日期>`（操作 `routine.followup`）从某一次开出普通任务：执行配置照抄，`assignee: human`。
 - **高权限申请**（ADR 0020）：每轮单独的本地 socket 凭据经 `lumio-runtime sudo -- <绝对路径程序>` 发起；人用 `lumio proposals` 查看并批准或拒绝。批准后 Hub 签发 10 分钟有效的一次性凭据，root 助手独立验证并在执行前记为已用；输出只返回调用者，执行状态离线时保留交回。安装见 `infra/sudo-helper.md`。
 - **适配器**：`codex exec`、`claude -p`、`pi -p` 的非交互模式；锁定验证过的版本；如实声明隔离级别（`os`/`none`）。
   不经过 shell；command 类型只执行登记过的程序；密钥在执行节点上才解析。
@@ -213,7 +215,7 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 - **审计**：每次授权与执行都记入 `hub.sqlite`；Hub 执行的操作立即单独提交，提交信息带 `Lumio-Actor`，
   经提议执行的还带 `Lumio-Proposal`、`Lumio-Approved-By`；派出一轮、写回一轮结果的提交带 `Lumio-Job`。自动保存的提交不带身份。
 - **执行器**（ADR 0019）：身份角色 `runtime`，只能领取派给自己的活、回报结果、登记能力；看不到笔记库，只看到 Job 里带的内容。
-- **AI 的汇报只是资料**：不能改 `turn`、不能派新活、不能改状态；`turn` 只能由人改成 `agent`、由 Hub 改成 `human`。
+- **AI 的汇报只是资料**：不能改 `assignee`、不能派新活、不能改状态；`assignee` 只能由人改成 agent、由 Hub 在一轮结束时改回 `human`（ADR 0024）。
 - **私密实体**（`life/` 下）：默认不出现在任何查询结果中；`agent` 令牌在任何情况下都拿不到；
   `human` 令牌须显式加 `--include-private`。`refs.bib`、报告等不得引用私密实体（ADR 0012、0014）。
 - **局限**：不经过 Hub、直接读文件的 AI 拦不住，需要在 agent 的沙箱配置里排除 `life/`。
