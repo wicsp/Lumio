@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { cp, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ApiError, Job, JobResult, RuntimeAck, RuntimeInfo, RuntimeSync } from "@lumio/schema";
+import { ApiError, Job, JobResult, RuntimeAck, RuntimeInfo, RuntimeSync, StoredArtifact, RunLogEvent, BackupManifest } from "@lumio/schema";
 import { startHub } from "../src/server.ts";
 import { readConfig } from "../src/config.ts";
 import { HubStore } from "../src/store.ts";
@@ -132,6 +132,45 @@ test("Hub stops mid-command; execution continues and durable outbox delivers aft
   hub = await boot(port);
   await eventually(async () => (await get(job.spec.id)).status === "done");
   expect((await readFile(calls, "utf8")).match(/start/g)).toHaveLength(1);
+});
+
+test("file archival is independently durable: failed upload does not block results, restart confirms once, business backup restores both", async () => {
+  let allowUpload = false;
+  proxy = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(req) {
+    const path = new URL(req.url).pathname;
+    if (path.startsWith("/v2/execution/artifacts/") && req.method === "PUT" && !allowUpload) return new Response("synthetic offline file store", { status: 503 });
+    return fetch(`${base()}${path}`, { method: req.method, headers: req.headers, ...(req.method === "GET" ? {} : { body: await req.arrayBuffer() }) });
+  } });
+  const daemon = await startRuntime(`http://127.0.0.1:${proxy.port}`), calls = join(temp, "archive-calls"), job = await submit("output", calls);
+  await eventually(async () => (await get(job.spec.id)).status === "done");
+  const files = async () => StoredArtifact.array().parse(await (await request(`/v2/execution/jobs/${job.spec.id}/artifacts`)).json());
+  await eventually(async () => (await files()).length === 2);
+  expect((await files()).every((file) => file.status === "staged")).toBe(true);
+  await eventually(async () => await localCount("SELECT count(*) AS count FROM outbox") === 0);
+  expect(await localCount("SELECT count(*) AS count FROM archive_outbox WHERE state='pending'")).toBe(2);
+  await stop(daemon); allowUpload = true; await startRuntime(`http://127.0.0.1:${proxy.port}`);
+  await eventually(async () => (await files()).every((file) => file.status === "ready"));
+  await eventually(async () => await localCount("SELECT count(*) AS count FROM archive_outbox WHERE state='confirmed'") === 2);
+  const raw = (await files()).find((file) => file.media_type === "text/plain")!, trace = (await files()).find((file) => file.media_type === "application/vnd.lumio.runlog+jsonl")!;
+  const content = async (id: string) => (await request(`/v2/execution/artifacts/${id}/content`)).text();
+  expect(await content(raw.id)).toBe(await readFile((await get(job.spec.id)).result!.log!, "utf8"));
+  const events = (await content(trace.id)).trim().split("\n").map((line) => RunLogEvent.parse(JSON.parse(line)));
+  expect(events.map((event) => event.sequence)).toEqual(events.map((_, index) => index + 1));
+  expect(events.at(-1)!.payload.status).toBe("done"); expect(events.some((event) => event.type === "output" && event.payload.stream === "stderr")).toBe(true);
+  expect((await readFile(calls, "utf8")).match(/start/g)).toHaveLength(1);
+  expect((await request(`/v2/execution/artifacts/${raw.id}/content`, agent)).status).toBe(403);
+  for (const child of [...daemons]) await stop(child);
+  const main = new URL("../src/main.ts", import.meta.url).pathname, backup = join(temp, "business-backup"), restored = join(temp, "restored");
+  async function manage(args: string[]) {
+    const child = Bun.spawn([process.execPath, main, ...args], { env: { HOME: temp, PATH: temp, LUMIO_STATE_DIR: state }, stdout: "pipe", stderr: "pipe" });
+    const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    expect(stderr).toBe(""); expect(code).toBe(0); return BackupManifest.parse(JSON.parse(stdout));
+  }
+  expect((await manage(["backup", "business", backup])).files).toHaveLength(2);
+  await manage(["backup", "verify", backup]); await manage(["restore", "business", backup, restored]);
+  await hub!.stop(); hub = await startHub({ ...readConfig({ LUMIO_STATE_DIR: restored }), port: 0 }, { log() {} }); port = hub.server.port!;
+  expect((await get(job.spec.id)).status).toBe("done"); expect(await content(raw.id)).toContain("stderr only");
+  expect(await files()).toHaveLength(2);
 });
 
 test("crash before ack: committed local queue survives, Hub resends and command executes exactly once", async () => {

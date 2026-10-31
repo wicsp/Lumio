@@ -4,7 +4,7 @@ import { mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseFrontmatter } from "@lumio/core";
+import { parseFrontmatter } from "@lumio/knowledge";
 import { Idea } from "@lumio/schema";
 import cases from "../../../fixtures/new-idea/cases.json";
 const cliHome = isolatedHome();

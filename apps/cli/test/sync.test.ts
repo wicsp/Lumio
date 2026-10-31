@@ -4,7 +4,8 @@ import { cp, lstat, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeF
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseFrontmatter, writeFileAtomic } from "@lumio/core";
+import { parseFrontmatter } from "@lumio/knowledge";
+import { writeFileAtomic } from "@lumio/storage";
 import { Idea, Paper } from "@lumio/schema";
 import { syncVault } from "../src/sync.ts";
 const cliHome = isolatedHome();

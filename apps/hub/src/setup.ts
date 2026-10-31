@@ -3,7 +3,7 @@ import { version } from "./version.ts";
 import * as files from "node:fs/promises";
 import { homedir, hostname } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { askTerminal, openTerminal } from "@lumio/core";
+import { askTerminal, openTerminal } from "@lumio/platform";
 import { CliConfig, RuntimeName } from "@lumio/schema";
 import { readConfig, isLoopback, runtimeName, rememberLocalRuntime } from "./config.ts";
 import { HubError } from "./errors.ts";

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
-import { parsePaperInput } from "@lumio/core";
+import { parsePaperInput } from "@lumio/knowledge";
 import { fetchPaperSource, type PaperFetcher } from "../src/paper-source.ts";
 
 const fixture = (name: string) => readFile(new URL(`../../../fixtures/papers/${name}`, import.meta.url), "utf8");

@@ -18,8 +18,11 @@
       },
       "dependencies": {
         "@lumio/api-client": "workspace:*",
-        "@lumio/core": "workspace:*",
+        "@lumio/foundation": "workspace:*",
+        "@lumio/knowledge": "workspace:*",
+        "@lumio/platform": "workspace:*",
         "@lumio/schema": "workspace:*",
+        "@lumio/storage": "workspace:*",
       },
     },
     "apps/feishu-bot": {
@@ -33,16 +36,25 @@
       "name": "@lumio/hub",
       "version": "0.0.0",
       "dependencies": {
-        "@lumio/core": "workspace:*",
+        "@lumio/assistant": "workspace:*",
+        "@lumio/execution": "workspace:*",
+        "@lumio/foundation": "workspace:*",
+        "@lumio/knowledge": "workspace:*",
+        "@lumio/platform": "workspace:*",
         "@lumio/schema": "workspace:*",
+        "@lumio/storage": "workspace:*",
+        "@lumio/work": "workspace:*",
       },
     },
     "apps/runtime": {
       "name": "@lumio/runtime",
       "version": "0.0.0",
       "dependencies": {
-        "@lumio/core": "workspace:*",
+        "@lumio/execution": "workspace:*",
+        "@lumio/foundation": "workspace:*",
+        "@lumio/platform": "workspace:*",
         "@lumio/schema": "workspace:*",
+        "@lumio/storage": "workspace:*",
       },
     },
     "packages/api-client": {
@@ -52,13 +64,55 @@
         "@lumio/schema": "workspace:*",
       },
     },
+    "packages/assistant": {
+      "name": "@lumio/assistant",
+      "version": "0.0.0",
+      "dependencies": {
+        "@lumio/schema": "workspace:*",
+      },
+    },
     "packages/core": {
       "name": "@lumio/core",
       "version": "0.0.0",
       "dependencies": {
+        "@lumio/execution": "workspace:*",
+        "@lumio/foundation": "workspace:*",
+        "@lumio/knowledge": "workspace:*",
+        "@lumio/platform": "workspace:*",
+        "@lumio/schema": "workspace:*",
+        "@lumio/storage": "workspace:*",
+      },
+    },
+    "packages/execution": {
+      "name": "@lumio/execution",
+      "version": "0.0.0",
+      "dependencies": {
+        "@lumio/foundation": "workspace:*",
+        "@lumio/schema": "workspace:*",
+      },
+    },
+    "packages/foundation": {
+      "name": "@lumio/foundation",
+      "version": "0.0.0",
+      "dependencies": {
+        "@lumio/schema": "workspace:*",
+      },
+    },
+    "packages/knowledge": {
+      "name": "@lumio/knowledge",
+      "version": "0.0.0",
+      "dependencies": {
+        "@lumio/foundation": "workspace:*",
         "@lumio/schema": "workspace:*",
         "fast-xml-parser": "^5.11.2",
         "yaml": "^2.9.1",
+      },
+    },
+    "packages/platform": {
+      "name": "@lumio/platform",
+      "version": "0.0.0",
+      "dependencies": {
+        "@lumio/schema": "workspace:*",
       },
     },
     "packages/schema": {
@@ -71,21 +125,54 @@
         "yaml": "^2.9.1",
       },
     },
+    "packages/storage": {
+      "name": "@lumio/storage",
+      "version": "0.0.0",
+      "dependencies": {
+        "@lumio/assistant": "workspace:*",
+        "@lumio/execution": "workspace:*",
+        "@lumio/foundation": "workspace:*",
+        "@lumio/knowledge": "workspace:*",
+        "@lumio/schema": "workspace:*",
+        "@lumio/work": "workspace:*",
+      },
+    },
+    "packages/work": {
+      "name": "@lumio/work",
+      "version": "0.0.0",
+      "dependencies": {
+        "@lumio/schema": "workspace:*",
+      },
+    },
   },
   "packages": {
     "@lumio/api-client": ["@lumio/api-client@workspace:packages/api-client"],
+
+    "@lumio/assistant": ["@lumio/assistant@workspace:packages/assistant"],
 
     "@lumio/cli": ["@lumio/cli@workspace:apps/cli"],
 
     "@lumio/core": ["@lumio/core@workspace:packages/core"],
 
+    "@lumio/execution": ["@lumio/execution@workspace:packages/execution"],
+
     "@lumio/feishu-bot": ["@lumio/feishu-bot@workspace:apps/feishu-bot"],
 
+    "@lumio/foundation": ["@lumio/foundation@workspace:packages/foundation"],
+
     "@lumio/hub": ["@lumio/hub@workspace:apps/hub"],
+
+    "@lumio/knowledge": ["@lumio/knowledge@workspace:packages/knowledge"],
+
+    "@lumio/platform": ["@lumio/platform@workspace:packages/platform"],
 
     "@lumio/runtime": ["@lumio/runtime@workspace:apps/runtime"],
 
     "@lumio/schema": ["@lumio/schema@workspace:packages/schema"],
+
+    "@lumio/storage": ["@lumio/storage@workspace:packages/storage"],
+
+    "@lumio/work": ["@lumio/work@workspace:packages/work"],
 
     "@nodable/entities": ["@nodable/entities@3.1.0", "", {}, "sha512-LsS/DjHr+uDM647Gru/cA8+J3a3HfhttwCKLyuoyN7yXTFCxKBtSgMQBvrW9yNPa2/zDRUNuGPaH5QUFoa4arQ=="],
 

@@ -1,6 +1,1 @@
-export class CoreError extends Error {
-  constructor(public readonly code: string, message: string, options?: ErrorOptions) {
-    super(message, options);
-    this.name = "CoreError";
-  }
-}
+export { CoreError } from "@lumio/foundation";

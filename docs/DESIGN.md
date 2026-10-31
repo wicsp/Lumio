@@ -4,38 +4,52 @@
 > 想知道"为什么"时再去查；平时不需要读 ADR。
 > 修改规则：改了 ADR 就要在同一个 PR 里同步改本文件（ADR 0015）。本文件与 ADR 不一致时，说明有一方没同步，告诉人类。
 
+> **已批准、实施中的重构**：[ADR 0025](adr/0025-four-module-architecture.md)（Accepted，2026-10-31 人类批准）规定知识、工作、执行、助手四模块与混合存储；
+> [实施说明 R0-0](tasks/R0-0-four-module-refactor.md)。本分支已实现四模块边界、业务存储、日志备份与显式迁移；验收证据见 R0-0。必要契约由 Claude 起草，不迁移真实数据；ADR 的合并状态在 PR 合并时更新。
+
 ## 0. 目标与非目标
 
 **目标**：在一个地方管理论文笔记、外部资料、想法、项目与任务、实验结果、发布内容和个人资产；
 把想法通过链接串成报告；把工作派给 Mac 或服务器上的 AI，并支持定时工作流。
 
-**非目标**（至少在 P3 之前）：自己写编辑器、自己写 agent 循环（以后会做，作为执行器的一种引擎，ADR 0019）、多用户与托管服务、完整的 AI 权限系统
+**非目标**（至少在 P3 之前）：自己写编辑器、复杂的多 agent 协作与模型路由、多用户与托管服务、完整的 AI 权限系统
 （只预留接口，见第 5 节）、与飞书双向同步正文、同步第二份 vault。
 
 ## 1. 总体结构
 
+```mermaid
+flowchart TD
+  Clients[CLI / 后续 GUI 与 Bot] -->|HTTP + 身份| Hub[Hub：授权、审计、模块组装与跨模块协调]
+  Hub --> K[Knowledge：知识文档与链接]
+  Hub --> W[Work：Project / Task / 讨论 / 显式派活]
+  Hub --> E[Execution：Job / Routine / 设备能力]
+  Hub --> A[Assistant：对话 / 记忆 / 工具循环]
+  K -->|知识端口| S[Storage：文件、索引、SQLite、日志与产物适配]
+  W -->|工作端口| S
+  E -->|执行端口| S
+  A -->|助手端口| S
+  S --> MD[Markdown：知识正文]
+  S --> DB[SQLite：各模块拥有的结构化表]
+  S --> Files[JSONL / 原始日志 / 文件产物]
+  Hub <-->|HTTP + Job 协议 2| Runtime[Runtime：本地队列、引擎、可靠交付]
+  Editors[外部编辑器] --> MD
 ```
- 任意编辑器 / 以后的官方 GUI ── 直接编辑文件 ──┐
-                                                ▼
-┌──── 程序入口（可替换）────┐      ┌───────────────────────────────┐
-│ CLI │ 飞书 Bot │ Web/插件  │─API─▶│ Hub（程序写入的唯一裁判）       │
-└──────────────────────────┘令牌  │  校验 → 执行 AI 边界 → 写文件   │
-                                    │  监听文件变化 → 补全与索引      │
-                                    │  任务与轮次 · 例行任务 · 搜索   │
-                                    └───────▲───────────┬───────────┘
-      执行器主动连接、轮询               │           │ 自动提交
-                   ┌────────────────────────┘           ▼
-            ┌──────┴────────┐                vault 的 git（只做历史与备份，
-            │ 执行器@每台设备 │ 本地队列、定时、  .git 在同步目录之外）
-            │ 调用 agent CLI │ 待交回的结果
-            └───────────────┘
-```
+
+四个业务模块互不导入实现。每个模块内部由业务用例组织规则，通过注入的存储/模型/工具端口使用外部能力；
+Storage 实现持久化，Hub 完成组装和跨模块协调。共用一个 SQLite 文件是为本地事务服务，不表示各模块可以互读内部表。
+跨模块通过稳定 ID、ResourceRef 与公开接口协作，Work 与 Execution 的关联由 Hub 在同一事务内协调。
+
+Foundation 提供 ID 和错误；Platform 提供终端、诊断、下载与升级。Schema 是唯一格式来源，API Client 只负责 HTTP。
+网络和进程能力留在应用/适配器中，领域包不做 I/O。Runtime 是独立应用，不能 import Hub，也不要求有 Task 或知识目录。
+
 
 - **vault 是知识的唯一事实来源**：一个装 Markdown + YAML frontmatter 的普通文件夹，任何编辑器都能改；Lumio 不依赖、不读写任何编辑器的配置。
   用外部编辑器改文件是一直支持但最不正式的用法，正式的编辑方式以后由官方 GUI 提供（ADR 0001、0007、0022）。默认位置 `~/.config/lumio/vault`，安装时可改。
 - **一套系统只有一个 Hub**，vault 在 Hub 所在的机器上。这个文件夹可以被任何外部工具（git、Syncthing、iCloud……）同步到别的设备上编辑，
   同步进来的修改等同于人改文件；Lumio 不做自己的同步（ADR 0017、0022）。
-- SQLite 只是派生索引，可随时删除重建；`refs.bib` 是生成物（ADR 0007、0014）。
+- `index.sqlite` 是可重建的知识索引，`refs.bib` 是生成物；`hub.sqlite` 保存身份、执行记录以及新版 Work/Assistant 业务数据，不能删除后靠 vault 重建（ADR 0014、0025）。
+- **知识与工作独立**：知识正文仍由文件负责，数据库任务与项目由 Work 负责；Work 可以在未配置 `LUMIO_VAULT` 时使用。
+  Task 描述使用 Markdown 语法，但不因此成为知识笔记；各模块通过 ID 和公开接口协作（ADR 0025）。
 
 ## 2. 工程基础
 
@@ -48,18 +62,41 @@
 | 模块 | 职责 | 可以依赖 |
 |---|---|---|
 | `packages/schema` | 契约 | 仅 zod |
-| `packages/core` | vault 解析、补全、链接、索引、BibTeX；纯本地，**不联网** | schema |
+| `packages/knowledge` | 知识规则、解析/补全/链接、论文创建与查询用例；不做 I/O | schema, foundation，已有 YAML/XML 解析依赖 |
+| `packages/work` | 数据库项目/任务、依赖、讨论、输入快照、显式派活用例；不做 I/O | schema |
+| `packages/execution` | Job 生命周期、设备名称/能力/在线事实、取消与执行有效性、数据库 Routine 计划与历史输入、cron；不做 I/O | schema, foundation |
+| `packages/assistant` | 对话、上下文、Agent 循环、工具记录与恢复；通过接口调用模型 | schema |
+| `packages/storage` | 各领域的 SQLite、知识文件与索引适配器 | schema 与业务包公开接口 |
+| `packages/foundation` | 稳定 ID 与带 code 的基础错误 | schema |
+| `packages/platform` | 终端、下载、升级回退、诊断与配对/Hub 检查；显示和版本由应用传入 | schema |
+| `packages/core` | 旧包兼容转发入口，已无上述具体实现；应用禁止再依赖 | 上述内部包 |
 | `packages/api-client` | 调用 Hub 的 SDK | schema |
-| `apps/cli` | `lumio` 命令行；联网获取论文元数据 | core, schema |
-| `apps/hub` | Hub：API、监听、提议、自动提交；以后可加 MCP 适配层 | core, schema |
-| `apps/runtime` | 设备 daemon，与 Hub 只走 HTTP | schema |
+| `apps/cli` | `lumio` 命令行；联网获取论文元数据、本地知识模式、Hub 客户端 | api-client, knowledge, storage, foundation, platform, schema |
+| `apps/hub` | API、模块组装、跨模块协调、身份与旧路径兼容 | 业务包、storage、foundation、platform、schema |
+| `apps/runtime` | 设备 daemon，与 Hub 只走 HTTP | execution 的纯计划能力、platform、schema |
 | `apps/feishu-bot`、`apps/web` 等 | 各个客户端 | api-client |
 
-依赖方向由 `bun run lint:deps` 强制：`packages` 不依赖 `apps`，`apps` 之间不互相依赖。
+依赖方向由 `bun run lint:deps` 强制：`packages` 不依赖 `apps`，`apps` 之间不互相依赖；四个业务包不导入其他业务包实现或具体适配器，禁止文件/网络/SQLite/进程 I/O；应用不依赖 Core 兼容汇总入口（ADR 0025）。
 
 ## 3. 数据
 
+### 3.0 存储权威与备份
+
+| 数据 | 权威来源 | 其他格式的作用 |
+|---|---|---|
+| 知识正文、知识元数据、人的链接 | vault 中 Markdown + frontmatter | index.sqlite / refs.bib 可重建 |
+| Project / Task / 描述 / 讨论 / 依赖 / 派活关联 | hub.sqlite 中 Work 表 | 描述采用 Markdown 语法；外部编辑的是带版本副本，状态和负责人经 Lumio 修改 |
+| Job / Routine / 输入计划 / 设备能力 | hub.sqlite 中 Execution 表 | Runtime 本地 SQLite 保存队列、结果与归档待交付记录 |
+| 助手对话 / 轮次 / 工具状态 / 显式记忆 | hub.sqlite 中 Assistant 表 | 模型供应商的会话不是本地权威 |
+| 执行过程、原始输出、附件 | 有格式版本的 JSONL / 原始日志 / 文件 | SQLite 保存归属、摘要、大小和 staged/ready 状态；日志不决定任务当前状态 |
+
+正文用 Markdown 语法，不意味着每个业务对象必须对应一份知识文件。JSON 用于配置、快照和接口，JSONL 用于逐行过程记录与分段交付；
+二者都不作为反向修改 Task 状态的控制入口。知识目录单独备份；业务库必须连同其引用文件做一致性快照并验证清单，不能删除重建。
+旧 Task/Project/Routine Markdown 只在迁移前走兼容路径，切换后是保留原文和链接的历史来源；不与数据库双向同步。
+
 ### 3.1 vault 目录（ADR 0012）
+
+下列 Task/Project/Routine 目录保留旧笔记兼容与显式迁移来源；新版业务对象在数据库中，不要求在这些目录里有文件（ADR 0025）。
 
 ```
 library/   papers/ → paper     sources/ → source     refs.bib（生成物）
@@ -70,12 +107,14 @@ life/      assets/ → asset（私密）
 files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是实体，不扫描
 ```
 
-- **类型由所在的类型目录决定**；映射表 `VAULT_LAYOUT`（`packages/core`）是唯一来源，其他代码不得写死路径。
+- **类型由所在的类型目录决定**；映射表 `VAULT_LAYOUT`（`packages/knowledge`）是唯一来源，其他代码不得写死路径。
 - 类型目录下可以自由建子文件夹，只用于浏览，不影响类型。每个实体只对应一个 `.md` 文件。
 - 扫描时跳过隐藏文件、`*.excalidraw.md` 和 frontmatter 含 `excalidraw-plugin` 的文件。
 - 大文件（视频原片等）不进 vault，用 `media://<相对路径>` 引用，由各设备配置媒体根目录。
 
 ### 3.2 实体类型
+
+本表描述知识目录中的文件格式；Project/Task/Routine 保留旧格式兼容，新业务对象与数据库规则见第 4.7 节。
 
 所有实体共有：`id`（`<前缀>_<ULID>`）、`type`、`title`、`created`、`updated`（ISO 8601 带时区）、`tags`。（`related` 已删除，旧笔记里的值原样保留但不计入链接图，ADR 0018。）
 
@@ -136,11 +175,29 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 - **程序写入的唯一裁判**：修改已有内容的程序写入（接受提议、更新程序字段）必须经过 Hub，没有 Hub 时不能用。
 - **人可以直接改文件**：Hub 监听 vault，自动补全并重建索引；frontmatter 不合法时提醒人，不拒绝、不覆盖人的改动。
 - 新建笔记和补全元数据（`lumio new`、`lumio sync`）不需要 Hub，性质等同于人新建文件。
-- 查询两种模式都支持：设置 `LUMIO_HUB_URL` 时走 Hub，否则直接读本地 vault；查询逻辑在 `packages/core`，两边共用。
+- 知识查询两种模式都支持：设置 `LUMIO_HUB_URL` 时走 Hub，否则直接读本地 vault；规则与用例在 Knowledge，文件和索引在 Storage，两边共用。
+- 数据库 Work/Assistant 经 Hub 使用；未配置知识目录时 Hub 不启动文件监听，知识查询给出未配置说明（ADR 0025）。
 
 ### 4.2 存放
 - Hub 的运行数据放在 `~/.local/share/lumio/`（可配置），**不在 vault、不在同步目录里**：
-  `index.sqlite`（派生索引，可重建）、`hub.sqlite`（身份、令牌、提议、审计记录、以后的 job，需要单独备份：`lumio-hub backup <目标文件>`，Hub 运行中也可执行）（ADR 0014、0016）。
+  `index.sqlite`（派生索引，可重建）、`hub.sqlite`（身份、令牌、提议、审计、Job、数据库 Work 和 Assistant，需要备份）。
+  `lumio-hub backup <目标文件>` 仍提供旧数据库单文件备份；完整业务备份用 `lumio-hub backup business <新目录>`，
+  以数据库一致性快照确定 ready 托管文件，复制文件并生成校验清单（ADR 0014、0016、0025）。
+- `lumio-hub backup verify <目录>` 校验清单、数据库和引用文件；`lumio-hub restore business <备份目录> <新状态目录>` 只恢复到新目录。
+  拒绝缺失或被篡改的文件、重复清单与符号链接，不覆盖已有状态。知识目录与安装配置单独备份，索引可重建（ADR 0025）。
+- Hub 与离线迁移通过同一业务目录的 SQLite OS 租约互斥；进程崩溃自动释放锁，不删除锁文件或凭 PID 猜测锁失效。
+
+### 4.2.1 日志与托管文件（ADR 0025）
+
+- Runtime 保留原始输出，同时写分段 JSONL（RunLogEvent v1）；每次运行独占日志目录，事件顺序从 1 连续递增。
+  原始 stdout/stderr 的 JSONL output 负载用 base64 表达，避免二进制和 UTF-8 分块造成内容损坏。
+- 活跃日志末行不完整可报告；封存日志截断、行损坏、事件重复或缺失必须失败。恢复中断运行只封存完整前缀并记 recovery，Job 仍由数据库标为 unknown，不从日志重新执行。
+- 自有日志归档 MIME 为 `application/vnd.lumio.runlog+jsonl`，按完整运行流再次校验；原始输出以 text/plain 独立归档。
+- Runtime 为文件保留独立交付记录；Hub 校验大小与 SHA-256，先发布字节再登记 ready。登记冲突保留文件待核查，重复交付不重复登记。
+  Job 结果确认与文件确认互不替代，上传失败不阻塞结果交回；确认后原始文件仍留在 Runtime。
+- 文件接口在 `/v2/execution/` 下；runtime 只能上传自己已接手的 Job 的文件。读取只授予 human，私密产物需显式 include_private。
+  `lumio job artifacts <Job ID>` 查看 staged/ready；`lumio job download <文件 ID> --output <新文件>` 流式校验后保存，不覆盖目标。
+- Job 协议仍为 2；旧 Runtime 不归档文件，新 Runtime 遇到旧 Hub 时保留待交付文件并重试，不影响旧结果协议。
 
 ### 4.3 自动提交（ADR 0014）
 - vault 安静 5 分钟（可配置）后自动提交一次；没有 git 仓库时跳过。任何非隐藏文件的变化都会重新计时（报告、附件也会被提交），补全只处理笔记。
@@ -149,7 +206,8 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 
 ### 4.4 搜索（ADR 0014）
 - SQLite FTS5 + trigram 分词；**少于 3 个字符的查询改用子串匹配**（trigram 搜不到两个汉字的词）。
-- 范围：标题、正文、作者、citekey、tags。空查询列举可见笔记，可配合 `type` 过滤；`lumio task list` 用它列出任务（P2-13）。
+- 范围：标题、正文、作者、citekey、tags。空查询列举可见笔记，可配合 `type` 过滤；旧任务可用 `lumio task list --legacy` 列举。
+  新版 `lumio task list` 使用独立 Work 查询，不伪造笔记路径（ADR 0025）。
 - 索引用 WAL，遇到锁时等待（最多 5 秒）；Hub 与本地 CLI 可以同时使用同一个索引。
 - 没有 ID 的笔记照样能搜到，结果里**不带 `id`**，只能按文件名引用；不生成替代 ID。
 
@@ -169,7 +227,13 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 - 只信任配置过的反向代理传来的客户端信息。
 - 飞书 Bot 用官方 SDK 的长连接，不需要公网回调地址。
 
-### 4.6 给 AI 派活（P2，ADR 0005、0019）
+### 4.6 Runtime 与旧任务笔记兼容（P2，ADR 0005、0019）
+
+本节的文件开关和写回语义仅适用于尚未执行 v2 apply 的旧模式；Job 的可靠执行协议继续共用。
+数据库 Work 的负责人、显式派活与结果规则见第 4.7 节。
+
+本节关于修改笔记负责人触发、元数据交接和 AI 区块写回的条款适用于旧笔记路径；新版数据库 Work 使用第 4.7 节。
+Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用（ADR 0025）。
 - **Hub 是中心，每台设备上一个执行器**（`lumio-runtime`）。执行器登记能力（agent 及版本、隔离级别、标签如 `gpu:4`），
   **主动轮询 Hub**；只有 Hub 能派活。执行器的身份角色是 `runtime`：只能领活、回报、登记，不能查询笔记库。
 - **一个任务很多轮**：一轮（Job）= 让某个 agent 执行一次，**只执行一次，不自动重试**；重试由人派出新的一轮。
@@ -199,6 +263,34 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
   不经过 shell；command 类型只执行登记过的程序；密钥在执行节点上才解析。
 - **不做**：跨设备调用工具、每一轮单独的权限、上下文管理、模型路由；留给以后自研的 agent（作为执行器里的一种引擎接入）。
 
+### 4.7 数据库 Work 与内置 Assistant（ADR 0025，分支内实现）
+
+- `/v2/work/commands` 使用 `WorkCommandRequest` 与 `WorkCommandResult`；Task/Project 查询返回严格业务对象，不含路径。
+- Task/Project 描述在数据库中；状态、负责人、依赖、讨论、执行关联各有明确归属。修改负责人或保存描述不隐式派活。
+- 更新带 `expected_revision`；请求用 `request_id` 去重。派活在同一事务内保存 Job、Work 关联和请求回执；同一任务默认只有一轮待完成。
+- 运行结果作为 Work 进展追加一次，不自动把 Task 标成 done，不强制改变负责人。旧 v1 派活接口拒绝操作数据库任务。
+- 数据库 Routine 使用 `/v2/execution/routines` 与 `/v2/execution/commands`；计划在 Execution，独立于 Task 与知识目录。
+  Runtime 继续使用 Job 协议 2，本地触发与 outbox 不变。已交付计划保留历史快照，旧结果按原 lease 匹配输入；心跳无 lease 时不猜测多份历史计划。
+- Work 派活与 Routine 修改的业务数据、请求回执和成功审计参加同一数据库事务；审计失败不交付半个派活。
+- 设备登记规则和在线时限由 Execution 判断，Runtime 表与 Job 表由 Storage 适配；Hub 的身份和 HTTP 入口只组装并转发。
+  审批通过 Execution 查询 Job 是否仍有效，取消请求已登记时即拒绝开启高权限工作，不直接读取执行表。
+- CLI：`project new/list/show/update/edit/status`，`task new/list/show/update/edit/status/assign/comment/continue`；`--legacy` 明确使用旧任务笔记。
+  `edit` 打开带版本的外部编辑副本；用 `--file` 提交已有正文时必须带 `--revision`，冲突保留内容。
+- `routine new/list/show/update/edit/status/followup` 使用数据库路径；`--legacy` 选择旧笔记。
+  新版追问从指定执行创建人工 Work 任务并保留执行来源；旧 v1 followup 拒绝数据库 Routine。
+- `lumio-hub migrate plan/apply/sources/source` 提供显式迁移，完整步骤见 [切换与回退](migration-v2.md)。
+  apply 要求匹配的完整备份、源摘要和设备准备确认，并与 Hub 独占同一状态目录；原始字节和未知字段进入来源档案。
+  第一次成功 apply 后关闭整个工作区的旧 Task/Routine 文件控制与旧派活/追问；知识文件继续可编辑，不再由旧字段覆盖数据库。
+- Runtime 与离线准备也持有独占状态租约。`prepare-migration --state-dir <目录>` 只在执行器停止且无待执行/交付数据时清空派生计划缓存。
+  迁移仅导入已处理历史关联与已经暂停的 Routine，不生成 Job 或重放工具/审批；下一轮取历史最高轮次加一。
+- `/v2/assistant/chat` 支持 JSON 与 NDJSON；对话、轮次、工具调用和记忆归 Assistant。CLI 用 `chat`、`chat list/show`。
+  模型和工具通过注入接口提供。Hub 的兼容 Chat Completions 适配器须配置 LUMIO_ASSISTANT_BASE_URL 与 LUMIO_ASSISTANT_MODEL，凭据仅运行时环境注入；无默认供应商或模型。支持 SSE 与 JSON 响应，限制响应字节/时限，工具仅在完整响应校验后交付，不自动重试。
+  模型设置和显式记忆见 [助手使用说明](assistant.md)；默认不启用生产业务工具或新增委托权限。
+- `chat memory list/remember/forget` 经严格 v2 记忆命令显式管理偏好；仅 human 可操作自己拥有的记忆，行、幂等回执和成功审计同事务提交。遗忘会清除活动记忆和回执中的内容，重放旧请求返回 tombstone；既有对话和历史备份独立保留。
+- 工具执行使用持久的独立 agent 身份，human 仅作为对话所有者；默认没有生产工具或来源读取适配器。带来源记忆在保存、重放与使用时以 agent 权限重查，无法访问或私密内容不交付模型。
+- 助手持久化工具调用状态；中断或写操作结果不明标为 unknown，不自动重放。最终空回复明确失败，工具调用中间消息可无文本。
+- 新 v2 工作与助手入口目前仅 human 可访问，不自动放宽 agent/runtime 权限；搜索来源与私密规则继续适用。
+
 ## 5. AI 协作与权限（ADR 0014、0016、0018）
 
 - **AI 只推荐，不写链接**（ADR 0018）：AI 可以查询、新建想法和论文笔记、重写 AI 区块；它检索已有笔记，在对话里告诉人
@@ -217,7 +309,8 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 - **审计**：每次授权与执行都记入 `hub.sqlite`；Hub 执行的操作立即单独提交，提交信息带 `Lumio-Actor`，
   经提议执行的还带 `Lumio-Proposal`、`Lumio-Approved-By`；派出一轮、写回一轮结果的提交带 `Lumio-Job`。自动保存的提交不带身份。
 - **执行器**（ADR 0019）：身份角色 `runtime`，只能领取派给自己的活、回报结果、登记能力；看不到笔记库，只看到 Job 里带的内容。
-- **AI 的汇报只是资料**：不能改 `assignee`、不能派新活、不能改状态；`assignee` 只能由人改成 agent、由 Hub 在一轮结束时改回 `human`（ADR 0024）。
+- **AI 的汇报只是资料**：不能自行派新活或决定 Task 完成。旧笔记模式在一轮结束时把交接开关改回 human（ADR 0024）；
+  数据库 Work 不强制改变负责人，修改负责人和派活分开（ADR 0025）。
 - **私密实体**（`life/` 下）：默认不出现在任何查询结果中；`agent` 令牌在任何情况下都拿不到；
   `human` 令牌须显式加 `--include-private`。`refs.bib`、报告等不得引用私密实体（ADR 0012、0014）。
 - **局限**：不经过 Hub、直接读文件的 AI 拦不住，需要在 agent 的沙箱配置里排除 `life/`。

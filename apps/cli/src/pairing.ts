@@ -3,7 +3,7 @@ import { homedir, hostname } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { createClient } from "@lumio/api-client";
-import { askTerminal, openTerminal } from "@lumio/core";
+import { askTerminal, openTerminal } from "@lumio/platform";
 import { pair, PairingError } from "./pairing-feedback.ts";
 import { CliConfig, ClientJoin, ClientJoinRequest } from "@lumio/schema";
 import { hubCredentials, readCliConfig } from "./config.ts";

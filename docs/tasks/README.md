@@ -3,6 +3,15 @@
 每份任务说明是一个**纵向切片**：做完后能直接使用，并且可以独立验证。
 按编号顺序实现，后一个切片可以依赖前一个切片的代码。
 
+**实施中的重构**：[R0-0 四模块重构](R0-0-four-module-refactor.md)列出后续切片、迁移与验收要求；
+依据 [ADR 0025](../adr/0025-four-module-architecture.md)（Accepted，2026-10-31 人类批准并授权持续实施）。
+具体契约由 Claude 起草，按切片实现并同步 DESIGN，不读取真实 vault。
+
+已落地的分支切片：[R0-3 公共维护](R0-3-platform-maintenance.md)、[R0-5 设备登记](R0-5-runtime-registry.md)、
+[R0-7 显式记忆](R0-7-assistant-memory.md)、[R0-7 模型适配](R0-7-model-adapter.md)、[R0-1 契约](R0-1-contracts.md)、[R0-5 数据库 Routine](R0-5-execution-routines.md)、
+[R0-6 日志、文件与业务备份](R0-6-storage-files.md)、[R0-8 显式迁移](R0-8-legacy-import.md)。剩余工作与最终验收以 R0-0 为准。
+真实切换另见[迁移与回退说明](../migration-v2.md)，不会在重构测试中执行。
+
 | 编号 | 内容 | 负责 | 依赖 |
 |---|---|---|---|
 | [P0-1](P0-1-sync.md) ✅ | 补全器 + `lumio sync` | 后端（Codex） | — |

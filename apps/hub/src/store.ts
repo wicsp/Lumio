@@ -2,13 +2,22 @@ import { Database } from "bun:sqlite";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { chmod, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { newId } from "@lumio/core";
+import { newId } from "@lumio/foundation";
 import { Actor, Proposal, type Operation, type ProposalStatus, type ActorRole, RuntimeRegistration, RuntimeInfo } from "@lumio/schema";
 import { HubError } from "./errors.ts";
+import { ExecutionRuntimes } from "@lumio/execution";
+import { SqliteRuntimeRegistry, SqliteExecutionStore } from "@lumio/storage";
 
 export interface Identity { actor: Actor; label: string }
 export class HubStore {
-  private constructor(public readonly db: Database) {}
+  readonly executionStore: SqliteExecutionStore;
+  private readonly runtimeRegistry: ExecutionRuntimes;
+  private constructor(public readonly db: Database) {
+    this.runtimeRegistry = new ExecutionRuntimes(new SqliteRuntimeRegistry(db));
+    this.executionStore = new SqliteExecutionStore(db, {
+      runtimes: (now) => this.runtimeRegistry.list(now), syncRuntime: (actor, now) => this.runtimeRegistry.sync(actor, now),
+    });
+  }
 
   static async open(stateDir: string): Promise<HubStore> {
     await mkdir(stateDir, { recursive: true, mode: 0o700 });
@@ -22,14 +31,26 @@ export class HubStore {
           created TEXT NOT NULL, revoked TEXT);
         CREATE TABLE IF NOT EXISTS proposals (id TEXT PRIMARY KEY, operation TEXT NOT NULL, reason TEXT NOT NULL,
           author TEXT NOT NULL REFERENCES actors(id), status TEXT NOT NULL, created TEXT NOT NULL, decided TEXT, decided_by TEXT REFERENCES actors(id));
-        CREATE TABLE IF NOT EXISTS runtimes (actor TEXT PRIMARY KEY REFERENCES actors(id), name TEXT NOT NULL UNIQUE,
-          registration TEXT NOT NULL, last_seen TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, record TEXT NOT NULL, cancel INTEGER NOT NULL DEFAULT 0);
         CREATE TABLE IF NOT EXISTS audit (time TEXT NOT NULL, actor_id TEXT NOT NULL REFERENCES actors(id), token_label TEXT NOT NULL,
           operation TEXT NOT NULL, authorization TEXT NOT NULL, proposal_id TEXT, execution_result TEXT);
       `);
       return new HubStore(db);
     } catch (cause) { db.close(); throw cause; }
+  }
+
+  /** A stable internal agent identity is separate from the conversation owner; it receives no token or human delegation. */
+  assistantActor(): Actor {
+    return this.db.transaction(() => {
+      this.db.exec("CREATE TABLE IF NOT EXISTS internal_actors(purpose TEXT PRIMARY KEY,actor TEXT NOT NULL REFERENCES actors(id))");
+      const binding = this.db.query<{ actor: string }, []>("SELECT actor FROM internal_actors WHERE purpose='assistant-tools'").get();
+      if (binding) {
+        const actor = this.actors().find((value) => value.id === binding.actor);
+        if (!actor || actor.role !== "agent") throw new HubError("INVALID", "助手工具身份配置无效");
+        return actor;
+      }
+      const actor = this.createActor(`assistant-${randomBytes(6).toString("hex")}`, "agent");
+      this.db.query("INSERT INTO internal_actors(purpose,actor) VALUES('assistant-tools',?)").run(actor.id); return actor;
+    })();
   }
 
   createActor(name: string, role: ActorRole): Actor {
@@ -128,30 +149,9 @@ export class HubStore {
       .run(new Date().toISOString(), identity.actor.id, identity.label, operation, authorization, proposal ?? null, execution ?? null);
   }
 
-  registerRuntime(actor: string, registration: RuntimeRegistration, now: Date): RuntimeInfo {
-    return this.db.transaction(() => {
-      const existing = this.db.query<{ name: string }, [string]>("SELECT name FROM runtimes WHERE actor=?").get(actor);
-      if (existing && existing.name !== registration.name) throw new HubError("CONFLICT", "同一执行器身份不能更换名称");
-      const named = this.db.query<{ actor: string }, [string]>("SELECT actor FROM runtimes WHERE name=?").get(registration.name);
-      if (named && named.actor !== actor) throw new HubError("CONFLICT", "执行器名称已被另一身份使用");
-      this.db.query(`INSERT INTO runtimes VALUES (?, ?, ?, ?)
-        ON CONFLICT(actor) DO UPDATE SET registration=excluded.registration, last_seen=excluded.last_seen`)
-        .run(actor, registration.name, JSON.stringify(registration), now.toISOString());
-      return RuntimeInfo.parse({ actor, registration, last_seen: now.toISOString(), online: true });
-    })();
-  }
-
-  syncRuntime(actor: string, now: Date): void {
-    const result = this.db.query("UPDATE runtimes SET last_seen=? WHERE actor=?").run(now.toISOString(), actor);
-    if (!result.changes) throw new HubError("NOT_FOUND", "执行器尚未登记");
-  }
-
-  runtimes(now: Date): RuntimeInfo[] {
-    return this.db.query<{ actor: string; registration: string; last_seen: string }, []>(
-      "SELECT actor, registration, last_seen FROM runtimes ORDER BY name",
-    ).all().map((row) => RuntimeInfo.parse({ ...row, registration: JSON.parse(row.registration),
-      online: now.getTime() - Date.parse(row.last_seen) <= 180_000 }));
-  }
+  registerRuntime(actor: string, registration: RuntimeRegistration, now: Date): RuntimeInfo { return this.runtimeRegistry.register(actor, registration, now); }
+  syncRuntime(actor: string, now: Date): void { this.runtimeRegistry.sync(actor, now); }
+  runtimes(now: Date): RuntimeInfo[] { return this.runtimeRegistry.list(now); }
 
   close(): void { this.db.close(); }
 }

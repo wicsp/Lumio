@@ -5,15 +5,17 @@ import { runUpgrade } from "./upgrade.ts";
 import { runPairing } from "./pairing.ts";
 import { randomBytes } from "node:crypto";
 import { parseArgs } from "node:util";
-import {
-  createIdea, createPaper, generateCitekey, newId, parseArxivMetadata,
-  parseCrossrefMetadata, parsePaperInput, resolveVault,
-} from "@lumio/core";
+import { createIdea, createPaper } from "@lumio/storage";
+import { generateCitekey, parseArxivMetadata, parseCrossrefMetadata, parsePaperInput, resolveVault } from "@lumio/knowledge";
+import { newId } from "@lumio/foundation";
 import { ApiClientError, createClient } from "@lumio/api-client";
 import { ApiError } from "@lumio/schema";
 import { runJobs } from "./jobs.ts";
 import { runTasks } from "./tasks.ts";
+import { runWork } from "./work.ts";
+import { runAssistant } from "./assistant.ts";
 import { runRoutines } from "./routines.ts";
+import { runExecutionRoutines } from "./execution-routines.ts";
 import { runOperations } from "./operations.ts";
 import { version } from "./version.ts";
 import { readCliConfig, hubCredentials, localVault } from "./config.ts";
@@ -30,7 +32,7 @@ export interface CliOptions {
 export async function runCli(args: string[], options: CliOptions = {}): Promise<number> {
   try { return await executeCli(args, options); }
   catch (cause) {
-    if (!["job", "task", "routine", "proposals", "runtime"].includes(args[0] ?? "") || !args.includes("--json")) throw cause;
+    if (!["job", "task", "project", "chat", "routine", "proposals", "runtime"].includes(args[0] ?? "") || !args.includes("--json")) throw cause;
     const error = cause instanceof ApiClientError ? {
       code: cause.code, message: cause.message, operation: cause.operation, reason: cause.reason, proposal: cause.proposal,
     } : { code: "INVALID", message: cause instanceof Error ? cause.message : "无法执行命令" };
@@ -51,8 +53,10 @@ async function executeCli(args: string[], options: CliOptions): Promise<number> 
   if (args.length === 1 && args[0] === "--version") { log(version); return 0; }
   if (["login", "login-code", "logout"].includes(args[0] ?? "") || (args[0] === "runtime" && ["add", "remove"].includes(args[1] ?? ""))) return runPairing(args, { log, warn: options.warn });
   if (args[0] === "job") return runJobs(args.slice(1), log);
-  if (args[0] === "task") return runTasks(args.slice(1), log);
-  if (args[0] === "routine") return runRoutines(args.slice(1), log);
+  if (args[0] === "task") return (await runWork("task", args.slice(1), log)) ?? runTasks(args.slice(1).filter((arg) => arg !== "--legacy"), log);
+  if (args[0] === "project") return (await runWork("project", args.slice(1), log))!;
+  if (args[0] === "chat") return runAssistant(args.slice(1), log);
+  if (args[0] === "routine") return (await runExecutionRoutines(args.slice(1), log)) ?? runRoutines(args.slice(1).filter((arg) => arg !== "--legacy"), log);
   const { values, positionals } = parseArgs({
     args, allowPositionals: true, strict: true,
     options: {

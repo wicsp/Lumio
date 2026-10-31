@@ -2,10 +2,10 @@ import { parseAssignee } from "@lumio/schema";
 import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
-import {
-  dueFires, entityDirectory, humanPart, idTime, newId, nextFire, parseCron, parseFrontmatter, routineJobId, scanVault, showNote,
-  upsertBlock, validTimeZone, writeFileAtomic,
-} from "@lumio/core";
+import { dueFires, nextFire, parseCron, routineJobId, validTimeZone } from "@lumio/execution";
+import { entityDirectory, humanPart, parseFrontmatter, upsertBlock } from "@lumio/knowledge";
+import { idTime, newId } from "@lumio/foundation";
+import { scanVault, showNote, writeFileAtomic } from "@lumio/storage";
 import {
   JOB_PROTOCOL_VERSION, Job, NoteRef, Routine, RoutineInfo, RoutineSpec, type AgentRun,
 } from "@lumio/schema";
@@ -25,7 +25,7 @@ import type { WatchClock } from "./watch.ts";
  * - 执行器交回结果时，Hub 按编号认出它属于哪个例行任务（`adopt`），补建 Job 记录，再把结果按日期追加到这篇笔记。
  * - 程序状态（计划、lease、每一次的记录）存在 hub.sqlite，不写进笔记。
  */
-export interface RoutineOptions { clock?: WatchClock; tickMs?: number; timezone?: string }
+export interface RoutineOptions { clock?: WatchClock; tickMs?: number; timezone?: string; isManaged?: (path: string, id?: string) => boolean }
 interface PlanRow {
   routine: string; path: string; title: string; status: string; schedule: string; timezone: string;
   runtime: string | null; lease: string | null; spec: string | null; problem: string | null;
@@ -57,10 +57,12 @@ export class Routines {
   private readonly clock: WatchClock;
   private readonly tickMs: number;
   private readonly defaultZone: string;
+  private readonly isManaged: NonNullable<RoutineOptions["isManaged"]>;
 
   constructor(private config: HubConfig, private store: HubStore, private jobs: Jobs,
     private run: <T>(action: () => Promise<T>) => Promise<T>, private issue: (path: string, line: string) => void,
     options: RoutineOptions = {}) {
+    this.isManaged = options.isManaged ?? (() => false);
     this.clock = options.clock ?? { now: Date.now, set: (cb, ms) => setTimeout(cb, ms), clear: (t) => clearTimeout(t as ReturnType<typeof setTimeout>) };
     this.tickMs = options.tickMs ?? 5_000;
     this.defaultZone = options.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -103,6 +105,7 @@ export class Routines {
   /** 文件监听处理完一篇笔记之后调用（已在写入队列里）。 */
   async noteChanged(path: string): Promise<void> {
     if (!path.startsWith(`${entityDirectory("routine")}/`) || !path.endsWith(".md")) return;
+    if (this.isManaged(path)) return;
     let bytes: Buffer;
     try { bytes = await readFile(join(this.config.vault, path)); }
     catch { this.store.db.query("DELETE FROM routine_plans WHERE path=?").run(path); return; }
@@ -110,6 +113,7 @@ export class Routines {
     try { const parsed = parseFrontmatter(bytes); data = parsed.data; body = parsed.body.toString("utf8"); } catch { return; }
     if (typeof data.id !== "string" || !ROUTINE_ID.test(data.id)) return; // 等补全 ID 之后再处理
     const id = data.id;
+    if (this.isManaged(path, id)) return;
     // 同一篇笔记换了 ID：旧计划作废。
     this.store.db.query("DELETE FROM routine_plans WHERE path=? AND routine<>?").run(path, id);
     const previous = this.row(id);
@@ -272,6 +276,7 @@ export class Routines {
       try { path = (await showNote(this.config.vault, routineId, { stateDir: this.config.stateDir })).note.path; }
       catch { throw new HubError("NOT_FOUND", "找不到这个例行任务"); }
     }
+    if (this.isManaged(path, routineId)) throw new HubError("CONFLICT", "这个来源已由数据库管理，请使用新版 routine followup");
     const parsed = Routine.safeParse(parseFrontmatter(await readFile(join(this.config.vault, path))).data);
     if (!parsed.success) throw new HubError("INVALID", "例行任务格式不对，无法照抄负责人与执行配置");
     const routine = parsed.data;
