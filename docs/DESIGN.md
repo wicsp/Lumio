@@ -59,7 +59,7 @@
 | `packages/assistant` | 对话、上下文、Agent 循环、工具记录与恢复；通过接口调用模型 | schema |
 | `packages/storage` | 各领域的 SQLite、知识文件与索引适配器 | schema 与业务包公开接口 |
 | `packages/foundation` | 稳定 ID 与带 code 的基础错误 | schema |
-| `packages/platform` | 终端等系统适配；安装维护共用能力按切片加入 | schema |
+| `packages/platform` | 终端、下载、升级回退、诊断与配对/Hub 检查；显示和版本由应用传入 | schema |
 | `packages/core` | 旧包兼容转发入口，已无上述具体实现；应用禁止再依赖 | 上述内部包 |
 | `packages/api-client` | 调用 Hub 的 SDK | schema |
 | `apps/cli` | `lumio` 命令行；联网获取论文元数据、本地知识模式、Hub 客户端 | api-client, knowledge, storage, foundation, platform, schema |
