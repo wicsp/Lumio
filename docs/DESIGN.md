@@ -157,6 +157,8 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 - Hub 的运行数据放在 `~/.local/share/lumio/`（可配置），**不在 vault、不在同步目录里**：
   `index.sqlite`（派生索引，可重建）、`hub.sqlite`（身份、令牌、提议、审计、Job、数据库 Work 和 Assistant，需要备份）。
   现有 `lumio-hub backup <目标文件>` 可在 Hub 运行中备份数据库；包含托管文件的完整业务备份随 R0 后续切片加入，完成前不切换真实数据（ADR 0014、0016、0025）。
+- Storage 已提供分段 JSONL、staged/ready 托管文件与配套快照备份/校验/新目录恢复；Hub/Runtime 与管理命令接入仍在实施中。
+  恢复拒绝缺失或被篡改的文件、重复清单与符号链接，不覆盖已有状态目录（ADR 0025）。
 
 ### 4.3 自动提交（ADR 0014）
 - vault 安静 5 分钟（可配置）后自动提交一次；没有 git 仓库时跳过。任何非隐藏文件的变化都会重新计时（报告、附件也会被提交），补全只处理笔记。

@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./logs": "./src/logs.ts",
     "./knowledge": "./src/knowledge/index.ts",
     "./index-store": "./src/knowledge/index/store.ts",
     "./index-query": "./src/knowledge/index/query.ts"

@@ -3,3 +3,8 @@ export * from "./assistant.ts";
 export * from "./knowledge/index.ts";
 export * from "./execution.ts";
 export * from "./routines.ts";
+export * from "./errors.ts";
+export * from "./logs.ts";
+export * from "./artifacts.ts";
+export * from "./backup.ts";
+export * from "./lease.ts";
