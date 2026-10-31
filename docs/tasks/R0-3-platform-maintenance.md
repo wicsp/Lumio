@@ -21,3 +21,5 @@
 
 - Platform 基础：Bun 1.3.13，完整检查 785 pass、3 skip、0 fail（788 tests / 91 files）。
   包内 9 项维护测试直接覆盖下载/超时/回退、调用方版本隔离和错误脱敏；应用接入仍待逐个完成。
+- CLI 接入：完整检查 783 pass、3 skip、0 fail（786 tests / 91 files）。两项仅要求复制文件逐字相同的旧断言已移除，
+  全部功能测试保留，并由 Platform 独立测试覆盖共享实现；终端显示仍由 CLI 提供。Runtime/Hub 接入待完成。

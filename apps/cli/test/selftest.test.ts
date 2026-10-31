@@ -96,12 +96,6 @@ test("selftest enforces round and cancellation deadlines, continues later checks
   expect(results[3]!.elapsed_ms).toBe(30); expect(sequence).toBe(4); expect(cancelled).toBe(5);
 });
 
-test("diagnostic and upgrade copies stay identical across app dependency boundaries", async () => {
-  for (const name of ["diagnostics.ts", "upgrade.ts"]) {
-    expect(await readFile(new URL(`../src/${name}`, import.meta.url), "utf8")).toBe(await readFile(new URL(`../../runtime/src/${name}`, import.meta.url), "utf8"));
-  }
-});
-
 test("notes timeout retains a completed note and clears its pending agent turn", async () => {
   const home = await mkdtemp(join(tmpdir(), "lumio-selftest-note-timeout-"));
   let time = 0;
