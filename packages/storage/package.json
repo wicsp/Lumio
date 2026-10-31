@@ -1,0 +1,20 @@
+{
+  "name": "@lumio/storage",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./knowledge": "./src/knowledge/index.ts",
+    "./index-store": "./src/knowledge/index/store.ts",
+    "./index-query": "./src/knowledge/index/query.ts"
+  },
+  "dependencies": {
+    "@lumio/schema": "workspace:*",
+    "@lumio/work": "workspace:*",
+    "@lumio/assistant": "workspace:*",
+    "@lumio/foundation": "workspace:*",
+    "@lumio/knowledge": "workspace:*",
+    "@lumio/execution": "workspace:*"
+  }
+}

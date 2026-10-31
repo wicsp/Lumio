@@ -1,5 +1,5 @@
 import type { Privileged } from "./privileged.ts";
-import { CoreError } from "@lumio/core";
+import { CoreError } from "@lumio/foundation";
 import { Actor, OperationRequest, OperationResult, Proposal, ProposalStatus, type NoteRef, type Operation } from "@lumio/schema";
 import { authorize } from "./authorize.ts";
 import type { HubConfig } from "./config.ts";
@@ -12,11 +12,12 @@ import type { Routines } from "./routines.ts";
  * 统一的操作入口（ADR 0016）：先授权（允许 / 拒绝 / 需要批准），再执行；需要批准的原样存成提议，人接受后执行同一个操作。
  * 现在的操作：task.dispatch（P2-4）、routine.followup（P2-5）。exec.privileged 由 P2-6 加入。link.add 已删除（ADR 0018）。
  */
-export interface OperationOptions { tasks?: TaskRounds; routines?: Routines; privileged?: Privileged }
+export interface OperationOptions { tasks?: TaskRounds; routines?: Routines; privileged?: Privileged; isManagedTask?: (id: string) => boolean }
 
 /** 执行一个已经获准的操作。直接执行与接受提议共用这一个函数。 */
 async function execute(operation: Operation, identity: Identity, options: OperationOptions): Promise<NoteRef | undefined> {
   if (operation.op === "task.dispatch") {
+    if (options.isManagedTask?.(operation.args.task)) throw new HubError("CONFLICT", "这个任务由数据库管理，请使用新版 work.task.dispatch 接口");
     if (!options.tasks) throw new HubError("INTERNAL", "Hub 未启用任务派活");
     await options.tasks.dispatch(operation.args.task, operation.args.trigger, identity, undefined, operation.args.to);
     return;

@@ -1,8 +1,6 @@
 /**
- * @lumio/core —— vault 解析、链接图、索引、BibTeX。
- *
- * 纯本地逻辑，不做网络请求（由 lint:deps 部分强制，其余靠 review）。
- * P0：vault 扫描、frontmatter 读写与元数据补全。
+ * @lumio/core —— 旧包的兼容转发入口（ADR 0025）。
+ * 实现已归 Knowledge / Storage / Execution / Foundation / Platform；应用不得再依赖此汇总入口。
  */
 export * from "./errors.ts";
 export * from "./ids.ts";

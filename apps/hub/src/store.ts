@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { chmod, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { newId } from "@lumio/core";
+import { newId } from "@lumio/foundation";
 import { Actor, Proposal, type Operation, type ProposalStatus, type ActorRole, RuntimeRegistration, RuntimeInfo } from "@lumio/schema";
 import { HubError } from "./errors.ts";
 

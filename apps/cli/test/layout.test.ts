@@ -3,7 +3,7 @@ import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseFrontmatter } from "@lumio/core";
+import { parseFrontmatter } from "@lumio/knowledge";
 import { Entity } from "@lumio/schema";
 import { syncVault } from "../src/sync.ts";
 

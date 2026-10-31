@@ -15,8 +15,21 @@ export * from "./api.ts";
 export * from "./secrets.ts";
 export * from "./privileged.ts";
 export * from "./setup.ts";
+export * from "./work.ts";
+export * from "./execution.ts";
+export * from "./assistant.ts";
+export * from "./storage.ts";
 
 import { Actor } from "./actor.ts";
+import {
+  AssistantChatRequest, AssistantChatResult, AssistantConversation, AssistantConversationDetail, AssistantEvent,
+  AssistantMemory, AssistantMessage, AssistantModelRequest, AssistantModelResponse, AssistantToolCall, AssistantTurn,
+} from "./assistant.ts";
+import { ExecutionRoutine, ExecutionRoutineCommandRequest, ExecutionRoutineInfo } from "./execution.ts";
+import { BackupManifest, MigrationPlan, RunLogEvent, StoredArtifact } from "./storage.ts";
+import {
+  ResourceRef, WorkComment, WorkCommandRequest, WorkCommandResult, WorkExecution, WorkProject, WorkTask, WorkTaskDetail,
+} from "./work.ts";
 import { ApiError, OperationRequest, OperationResult } from "./api.ts";
 import { Asset, Experiment, Idea, Paper, Post, Project, Routine, Source, Task } from "./entities.ts";
 import { Job, JobResult, JobSpec, RoutineInfo, RuntimeAck, RuntimeHeartbeat, RuntimeInfo, RuntimeRegistration, RuntimeSync } from "./job.ts";
@@ -69,4 +82,31 @@ export const CONTRACTS = {
   "operation-result": OperationResult,
   proposal: Proposal,
   "api-error": ApiError,
+  // v2 业务对象（ADR 0025，R0-1）
+  "resource-ref": ResourceRef,
+  "work-project": WorkProject,
+  "work-task": WorkTask,
+  "work-comment": WorkComment,
+  "work-execution": WorkExecution,
+  "work-task-detail": WorkTaskDetail,
+  "work-command-request": WorkCommandRequest,
+  "work-command-result": WorkCommandResult,
+  "execution-routine": ExecutionRoutine,
+  "execution-routine-info": ExecutionRoutineInfo,
+  "execution-routine-command-request": ExecutionRoutineCommandRequest,
+  "assistant-conversation": AssistantConversation,
+  "assistant-message": AssistantMessage,
+  "assistant-turn": AssistantTurn,
+  "assistant-tool-call": AssistantToolCall,
+  "assistant-memory": AssistantMemory,
+  "assistant-chat-request": AssistantChatRequest,
+  "assistant-conversation-detail": AssistantConversationDetail,
+  "assistant-chat-result": AssistantChatResult,
+  "assistant-model-request": AssistantModelRequest,
+  "assistant-model-response": AssistantModelResponse,
+  "assistant-event": AssistantEvent,
+  "run-log-event": RunLogEvent,
+  "stored-artifact": StoredArtifact,
+  "backup-manifest": BackupManifest,
+  "migration-plan": MigrationPlan,
 } as const;

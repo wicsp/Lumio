@@ -1,0 +1,11 @@
+export * from "./vault.ts";
+export * from "./write.ts";
+export * from "./create.ts";
+export * from "./paper.ts";
+export * from "./sync.ts";
+export * from "./git.ts";
+export * from "./export-bib.ts";
+export * from "./index/query.ts";
+export { updateIndex } from "./index/store.ts";
+export type { IndexOptions } from "./index/store.ts";
+export * from "./adapter.ts";

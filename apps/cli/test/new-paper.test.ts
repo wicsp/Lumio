@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseFrontmatter } from "@lumio/core";
+import { parseFrontmatter } from "@lumio/knowledge";
 import { Paper } from "@lumio/schema";
 import { runCli, type CliOptions } from "../src/cli.ts";
 import type { PaperFetcher } from "../src/paper-source.ts";

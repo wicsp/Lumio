@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { CoreError, openVaultGit, writeFileAtomic, type GitTrailers } from "@lumio/core";
+import { CoreError } from "@lumio/foundation";
+import { openVaultGit, writeFileAtomic, type GitTrailers } from "@lumio/storage";
 import { textContainsCardNumber } from "@lumio/schema";
 
 /**

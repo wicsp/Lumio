@@ -1,4 +1,6 @@
 import { ClientInvite, ClientInviteRequest, ClientJoin, ClientJoinRequest, RuntimeInvite, RuntimeInviteRequest } from "@lumio/schema";
+import { WorkCommandRequest, WorkCommandResult, WorkTask, WorkTaskDetail, WorkProject,
+  AssistantChatRequest, AssistantChatResult, AssistantConversation, AssistantConversationDetail, AssistantEvent, idOf } from "@lumio/schema";
 import { JobRun, Job, JobSpec, JobStatus, RoutineInfo, RuntimeName, RuntimeInfo, Actor, OperationRequest, OperationResult, Proposal, ProposalStatus, ApiError, CheckResult, LinksResult, NoteDetail, SearchResult, type ApiErrorCode, type NoteRef } from "@lumio/schema";
 
 export class ApiClientError extends Error {
@@ -29,6 +31,7 @@ export function createClient(options: { url: string; token?: string; fetch?: typ
   const fetcher = options.fetch ?? globalThis.fetch;
   const base = options.url.replace(/\/+$/, "");
   async function request<T>(path: string, params: Record<string, string>, schema: { parse(value: unknown): T }, body?: unknown, method?: string): Promise<T> {
+    let status: number | undefined;
     try {
       const url = new URL(`${base}${path}`);
       for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
@@ -37,6 +40,7 @@ export function createClient(options: { url: string; token?: string; fetch?: typ
         headers: { ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}), ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }), redirect: "error",
       });
+      status = response.status;
       if (response.status === 204 && response.ok) return schema.parse(undefined);
       const responseBody: unknown = await response.json();
       if (!response.ok) throw new ApiClientError(ApiError.parse(responseBody).error, response.status);
@@ -44,7 +48,7 @@ export function createClient(options: { url: string; token?: string; fetch?: typ
     } catch (cause) {
       if (cause instanceof ApiClientError) throw cause;
       // Fetch/schema errors can contain request URLs or response data. Do not expose them.
-      throw new ApiClientError({ code: "INTERNAL", message: "无法调用 Hub，或 Hub 返回了不合法的响应" });
+      throw new ApiClientError({ code: "INTERNAL", message: "无法调用 Hub，或 Hub 返回了不合法的响应" }, status);
     }
   }
   function validate<T>(schema: { safeParse(value: unknown): { success: true; data: T } | { success: false } }, value: unknown): T {
@@ -54,6 +58,48 @@ export function createClient(options: { url: string; token?: string; fetch?: typ
   }
   const queryParams = (options: QueryOptions): Record<string, string> => options.includePrivate === undefined ? {} : { include_private: String(options.includePrivate) };
   return {
+    workCommand(input: WorkCommandRequest) { return request("/v2/work/commands", {}, WorkCommandResult, validate(WorkCommandRequest, input)); },
+    workTasks(filter: { project?: string; status?: string; query?: string } = {}) {
+      return request("/v2/work/tasks", { ...(filter.project ? { project: validate(idOf("prj"), filter.project) } : {}),
+        ...(filter.status ? { status: filter.status } : {}), ...(filter.query ? { q: filter.query } : {}) }, WorkTask.array());
+    },
+    workTask(id: string) { return request(`/v2/work/tasks/${validate(idOf("task"), id)}`, {}, WorkTaskDetail); },
+    workProjects() { return request("/v2/work/projects", {}, WorkProject.array()); },
+    workProject(id: string) { return request(`/v2/work/projects/${validate(idOf("prj"), id)}`, {}, WorkProject); },
+    assistantChat(input: AssistantChatRequest) { return request("/v2/assistant/chat", {}, AssistantChatResult, validate(AssistantChatRequest, input)); },
+    conversations() { return request("/v2/assistant/conversations", {}, AssistantConversation.array()); },
+    conversation(id: string) { return request(`/v2/assistant/conversations/${validate(idOf("conv"), id)}`, {}, AssistantConversationDetail); },
+    async *assistantEvents(input: AssistantChatRequest, signal?: AbortSignal): AsyncGenerator<AssistantEvent> {
+      const payload = validate(AssistantChatRequest, input);
+      let release: (() => Promise<void>) | undefined;
+      try {
+        const response = await fetcher(`${base}/v2/assistant/chat`, { method: "POST", redirect: "error", signal,
+          headers: { ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}), "Content-Type": "application/json", Accept: "application/x-ndjson" }, body: JSON.stringify(payload) });
+        if (!response.ok) throw new ApiClientError(ApiError.parse(await response.json()).error, response.status);
+        if (!response.body) throw new Error("missing stream");
+        const reader = response.body.getReader();
+        release = async () => { await reader.cancel().catch(() => {}); reader.releaseLock(); };
+        const decoder = new TextDecoder(); let pending = "", terminal = false;
+        while (true) {
+          const chunk = await reader.read(); pending += decoder.decode(chunk.value, { stream: !chunk.done });
+          let end: number;
+          while ((end = pending.indexOf("\n")) !== -1) {
+            const line = pending.slice(0, end); pending = pending.slice(end + 1);
+            if (line.trim()) {
+              if (terminal) throw new Error("event after final result");
+              const event = AssistantEvent.parse(JSON.parse(line));
+              terminal = event.type === "result" || event.type === "error";
+              yield event;
+            }
+          }
+          if (chunk.done) break;
+        }
+        if (pending.trim() || !terminal) throw new Error("truncated assistant stream");
+      } catch (cause) {
+        if (cause instanceof ApiClientError) throw cause;
+        throw new ApiClientError({ code: "INTERNAL", message: "助手连接中断或返回了不合法的事件；请查询已保存的对话，勿自动重试操作" });
+      } finally { await release?.(); }
+    },
     runtimeInvite(name: string) { return request("/v1/runtime-invites", {}, RuntimeInvite, validate(RuntimeInviteRequest, { name })); },
     clientInvite(name: string) { return request("/v1/client-invites", {}, ClientInvite, validate(ClientInviteRequest, { name })); },
     clientJoin(code: string) { return request("/v1/client/join", {}, ClientJoin, validate(ClientJoinRequest, { code })); },

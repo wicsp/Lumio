@@ -3,10 +3,15 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "exports": { ".": "./src/index.ts" },
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "dependencies": {
     "@lumio/schema": "workspace:*",
-    "fast-xml-parser": "^5.11.2",
-    "yaml": "^2.9.1"
+    "@lumio/foundation": "workspace:*",
+    "@lumio/knowledge": "workspace:*",
+    "@lumio/storage": "workspace:*",
+    "@lumio/execution": "workspace:*",
+    "@lumio/platform": "workspace:*"
   }
 }

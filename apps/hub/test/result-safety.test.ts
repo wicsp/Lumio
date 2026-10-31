@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { cp, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { routineJobId } from "@lumio/core";
+import { routineJobId } from "@lumio/execution";
 import { Job, JobResult } from "@lumio/schema";
 import { readConfig } from "../src/config.ts";
 import { startHub } from "../src/server.ts";

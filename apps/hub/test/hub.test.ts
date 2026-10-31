@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Actor, ApiError, CheckResult, LinksResult, NoteDetail, SearchResult, Timestamp, type ApiErrorCode } from "@lumio/schema";
-import { AUTHORIZATION_RULES, JOB_OPERATIONS, RUNTIME_OPERATIONS, PAIRING_OPERATIONS, authorize, type AuthorizationRequest } from "../src/authorize.ts";
+import { AUTHORIZATION_RULES, JOB_OPERATIONS, RUNTIME_OPERATIONS, PAIRING_OPERATIONS, V2_OPERATIONS, authorize, type AuthorizationRequest } from "../src/authorize.ts";
 import { readConfig } from "../src/config.ts";
 import { ROUTES, startHub } from "../src/server.ts";
 import type { HubStatus } from "../src/watch.ts";
@@ -159,6 +159,7 @@ test("authorization table is exhaustively checked, including private=false", () 
     expect(decision).toEqual(rule.decision);
     const expected = (PAIRING_OPERATIONS as readonly string[]).includes(rule.operation)
       ? ((rule.operation.endsWith(".join") ? rule.role === null : rule.operation === "runtime.signing-key" ? rule.role === "runtime" : rule.role === "human") ? "allow" : "deny")
+      : (V2_OPERATIONS as readonly string[]).includes(rule.operation) ? (rule.role === "human" ? "allow" : "deny")
       : rule.operation === "exec.privileged" && rule.role === "runtime" && !rule.includePrivate ? "needs_approval" : (RUNTIME_OPERATIONS as readonly string[]).includes(rule.operation)
       ? ((rule.operation === "runtimes" ? rule.role === "human" : rule.role === "runtime") ? "allow" : "deny")
       : (JOB_OPERATIONS as readonly string[]).includes(rule.operation) ? (rule.role === "human" ? "allow" : "deny")
@@ -216,8 +217,9 @@ test("management commands create/list/revoke with only a temporary state directo
   expect(await readFile(join(temp, "management", "hub.sqlite"), "utf8")).not.toContain(created.stdout.trim());
 });
 
-test("config rejects missing vault, malformed listen and non-IP proxy", () => {
-  for (const env of [{}, { LUMIO_VAULT: vault, LUMIO_HUB_LISTEN: "https://host:42" }, { LUMIO_VAULT: vault, LUMIO_HUB_LISTEN: "host:99999" }, { LUMIO_VAULT: vault, LUMIO_TRUSTED_PROXY: "proxy.example" }]) expect(() => readConfig(env)).toThrow();
+test("config permits Work without Knowledge and rejects malformed listen and non-IP proxy", () => {
+  expect(readConfig({}).vault).toBe("");
+  for (const env of [{ LUMIO_VAULT: vault, LUMIO_HUB_LISTEN: "https://host:42" }, { LUMIO_VAULT: vault, LUMIO_HUB_LISTEN: "host:99999" }, { LUMIO_VAULT: vault, LUMIO_TRUSTED_PROXY: "proxy.example" }]) expect(() => readConfig(env)).toThrow();
 });
 
 

@@ -5,7 +5,7 @@
 | Lumio 现在是怎么设计的、有哪些规则 | [`DESIGN.md`](DESIGN.md)（**唯一的现行设计说明**） |
 | AI 必须遵守什么 | [`../AGENTS.md`](../AGENTS.md) |
 | 接下来要做什么 | [`tasks/README.md`](tasks/README.md) |
-| 四模块重构的待审批方案与实施顺序 | [ADR 0025](adr/0025-four-module-architecture.md)（Proposed）、[R0-0](tasks/R0-0-four-module-refactor.md) |
+| 四模块重构的目标与实施顺序 | [ADR 0025](adr/0025-four-module-architecture.md)（Accepted，实施中）、[R0-0](tasks/R0-0-four-module-refactor.md) |
 | 某条规则**为什么**这样定 | `adr/` 中对应的 ADR（DESIGN.md 里每条规则都标了编号） |
 | 数据格式的精确定义 | `packages/schema` |
 
@@ -35,7 +35,7 @@ P0 与 P0-7（真实 vault 迁移）已完成；P1-1 至 P1-4 已完成（P1-4 �
 | [0001](adr/0001-monorepo-and-separate-vault.md) | 代码放一个仓库；笔记放独立的 vault | Implemented |
 | [0002](adr/0002-typescript-on-bun.md) | 全部用 TypeScript + Bun（研究后放弃 Rust） | Implemented |
 | [0003](adr/0003-zod-as-contract.md) | 数据格式用 Zod 写，导出 JSON Schema 给其他语言 | Implemented |
-| [0025](adr/0025-four-module-architecture.md) | 知识、工作、执行、助手四模块；数据库、Markdown 与 JSONL 分工 | Proposed（尚未生效） |
+| [0025](adr/0025-four-module-architecture.md) | 知识、工作、执行、助手四模块；数据库、Markdown 与 JSONL 分工 | Accepted（实施中） |
 
 **数据**
 | 编号 | 一句话 | 状态 |

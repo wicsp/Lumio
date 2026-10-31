@@ -4,7 +4,7 @@ import type { FSWatcher, watch } from "node:fs";
 import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseFrontmatter } from "@lumio/core";
+import { parseFrontmatter } from "@lumio/knowledge";
 import { Actor, ApiError, Job, OperationResult, Proposal, type Operation } from "@lumio/schema";
 import { authorize } from "../src/authorize.ts";
 import { readConfig } from "../src/config.ts";

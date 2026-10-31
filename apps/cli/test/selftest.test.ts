@@ -3,7 +3,7 @@ import { chmod, cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createClient } from "@lumio/api-client";
-import { parseFrontmatter } from "@lumio/core";
+import { parseFrontmatter } from "@lumio/knowledge";
 import { Job, Task } from "@lumio/schema";
 import { selftest } from "../src/selftest.ts";
 import { doctor } from "../src/doctor.ts";

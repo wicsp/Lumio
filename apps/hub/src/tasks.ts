@@ -2,10 +2,9 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, relative, resolve } from "node:path";
-import {
-  CoreError, entityDirectory, humanPart, parseFrontmatter, scanVault, setFields, showNote, upsertBlock,
-  type GitTrailers,
-} from "@lumio/core";
+import { CoreError } from "@lumio/foundation";
+import { entityDirectory, humanPart, parseFrontmatter, setFields, upsertBlock } from "@lumio/knowledge";
+import { scanVault, showNote, type GitTrailers } from "@lumio/storage";
 import { parseAssignee, textContainsCardNumber, type AgentRun, type Job, type Operation, type RuntimeInfo } from "@lumio/schema";
 import type { HubConfig } from "./config.ts";
 import { HubError } from "./errors.ts";

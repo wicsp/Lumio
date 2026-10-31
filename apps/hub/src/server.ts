@@ -2,7 +2,8 @@ import { Pairing, handlePairing } from "./pairing.ts";
 import { Privileged, handlePrivileged } from "./privileged.ts";
 import { stat } from "node:fs/promises";
 import { isIP } from "node:net";
-import { CoreError, checkLinks, noteLinks, searchNotes, showNote, type SearchOptions } from "@lumio/core";
+import { CoreError } from "@lumio/foundation";
+import { checkLinks, noteLinks, searchNotes, showNote, type SearchOptions } from "@lumio/storage";
 import { ApiError, NOTE_TYPES, type ApiErrorCode } from "@lumio/schema";
 import { version } from "./version.ts";
 import { startVaultWatch, type WatchOptions } from "./watch.ts";
@@ -17,6 +18,12 @@ import { Jobs } from "./jobs.ts";
 import { TaskRounds, type TaskOptions } from "./tasks.ts";
 import { Routines, type RoutineOptions } from "./routines.ts";
 import type { RoutineHooks } from "./jobs.ts";
+import { BusinessModules } from "./modules.ts";
+import { V2_ROUTES, handleV2 } from "./v2.ts";
+import { WriteCoordinator } from "./coordinator.ts";
+import type { AssistantModel, AssistantTool } from "@lumio/assistant";
+import { KnowledgeService } from "@lumio/knowledge";
+import { FileKnowledgeRepository } from "@lumio/storage";
 
 // Routes share authentication, authorization and logging before dispatch.
 export const ROUTES = [
@@ -60,10 +67,13 @@ export async function startHub(config: HubConfig, options: {
   operations?: OperationOptions;
   tasks?: TaskOptions;
   routines?: RoutineOptions;
+  assistantModel?: AssistantModel;
+  assistantTools?: AssistantTool[];
 } = {}) {
-  if (!(await stat(config.vault)).isDirectory()) throw new HubError("INVALID", "LUMIO_VAULT 必须是目录");
+  if (config.vault && !(await stat(config.vault)).isDirectory()) throw new HubError("INVALID", "LUMIO_VAULT 必须是目录");
   config = { ...config, localRuntime: await rememberLocalRuntime(config.stateDir, config.localRuntime) };
   const store = await HubStore.open(config.stateDir);
+  const knowledge = config.vault ? new KnowledgeService(new FileKnowledgeRepository(config.vault, { stateDir: config.stateDir })) : undefined;
   const privileged = new Privileged(store, options.now);
   const pairing = new Pairing(store, config, options.now);
   const log = options.log ?? console.log;
@@ -74,15 +84,24 @@ export async function startHub(config: HubConfig, options: {
   let vaultWatch: Awaited<ReturnType<typeof startVaultWatch>> | undefined;
   let tasks: TaskRounds | undefined;
   let routines: Routines | undefined;
+  let modules: BusinessModules | undefined;
   const hooks: RoutineHooks = { plans: (actor) => routines?.plans(actor) ?? [], adopt: (actor, id, now) => routines?.adopt(actor, id, now) };
   try {
-    vaultWatch = await startVaultWatch(config, { ...options.watch, log,
-      onNote: async (path) => { await options.watch?.onNote?.(path); await tasks?.noteChanged(path); await routines?.noteChanged(path); } });
+    const writes = new WriteCoordinator();
+    vaultWatch = config.vault ? await startVaultWatch(config, { ...options.watch, log,
+      onNote: async (path) => { await options.watch?.onNote?.(path); await tasks?.noteChanged(path); await routines?.noteChanged(path); } }) : {
+        exclusive: <T>(action: () => Promise<T>) => writes.exclusive(action),
+        notify: (_path: string) => {}, issue: (_path: string, line: string) => log(line), drain: () => writes.drain(),
+        status: async () => ({ watching: false, last_full_sync: null, pending_files: 0, issues: [] }), stop: () => writes.drain(),
+      };
     const watch = vaultWatch;
     tasks = new TaskRounds(config, store, new Jobs(store, hooks), (action) => watch.exclusive(action), (path, line) => watch.issue(path, line), options.tasks);
     routines = new Routines(config, store, new Jobs(store, hooks), (action) => watch.exclusive(action), (path, line) => watch.issue(path, line), options.routines);
-    await watch.exclusive(() => tasks!.start());
-    await watch.exclusive(() => routines!.start());
+    if (config.vault) {
+      await watch.exclusive(() => tasks!.start());
+      await watch.exclusive(() => routines!.start());
+    }
+    modules = new BusinessModules(config, store, options);
     server = Bun.serve({
       hostname: config.hostname, port: config.port,
       async fetch(request, server) {
@@ -92,8 +111,9 @@ export async function startHub(config: HubConfig, options: {
         let identity: Identity | null = null;
         let status = 500;
         // Logging uses route templates, so references (or secrets in a URL) cannot leak.
-        const route = ROUTES.find((route) => request.method === ("method" in route ? route.method : "GET") && route.pattern.test(url.pathname));
-        const path = route && (PAIRING_OPERATIONS as readonly string[]).includes(route.operation) ? `/pairing/${route.operation}` : route?.operation === "runtime.privileged.status" ? "/v1/runtime/privileged/<id>" : route?.operation === "runtime.privileged.report" ? "/v1/runtime/privileged" : route?.operation === "job.submit" || route?.operation === "jobs" ? "/v1/jobs" : route?.operation === "job.show" ? "/v1/jobs/<id>" : route?.operation === "job.cancel" ? "/v1/jobs/<id>/cancel" : route?.operation === "runtime.ack" ? "/v1/runtime/ack" : route?.operation === "runtime.results" ? "/v1/runtime/results" : route?.operation === "runtime.register" ? "/v1/runtime/register" : route?.operation === "runtime.sync" ? "/v1/runtime/sync" : route?.operation === "runtimes" ? "/v1/runtimes" : route?.operation === "routines" ? "/v1/routines" : route?.operation === "status" ? "/v1/status" : route?.operation === "health" ? "/health" : route?.operation === "search" ? "/v1/search"
+        const v2 = V2_ROUTES.find((route) => request.method === route.method && route.pattern.test(url.pathname));
+        const route = v2 ?? ROUTES.find((route) => request.method === ("method" in route ? route.method : "GET") && route.pattern.test(url.pathname));
+        const path = v2 ? v2.path : route && (PAIRING_OPERATIONS as readonly string[]).includes(route.operation) ? `/pairing/${route.operation}` : route?.operation === "runtime.privileged.status" ? "/v1/runtime/privileged/<id>" : route?.operation === "runtime.privileged.report" ? "/v1/runtime/privileged" : route?.operation === "job.submit" || route?.operation === "jobs" ? "/v1/jobs" : route?.operation === "job.show" ? "/v1/jobs/<id>" : route?.operation === "job.cancel" ? "/v1/jobs/<id>/cancel" : route?.operation === "runtime.ack" ? "/v1/runtime/ack" : route?.operation === "runtime.results" ? "/v1/runtime/results" : route?.operation === "runtime.register" ? "/v1/runtime/register" : route?.operation === "runtime.sync" ? "/v1/runtime/sync" : route?.operation === "runtimes" ? "/v1/runtimes" : route?.operation === "routines" ? "/v1/routines" : route?.operation === "status" ? "/v1/status" : route?.operation === "health" ? "/health" : route?.operation === "search" ? "/v1/search"
           : route?.operation === "check" ? "/v1/check" : route?.operation === "show" ? "/v1/notes/<reference>" : route?.operation === "links" ? "/v1/notes/<reference>/links" : route?.operation === "operations" ? "/v1/operations"
             : route?.operation === "actors" ? "/v1/actors" : route?.operation === "proposals" ? "/v1/proposals"
               : route?.operation === "proposal.accept" ? "/v1/proposals/<id>/accept" : route?.operation === "proposal.reject" ? "/v1/proposals/<id>/reject" : "<unmatched>";
@@ -109,6 +129,10 @@ export async function startHub(config: HubConfig, options: {
             if (!identity) throw new HubError("UNAUTHENTICATED", "需要有效的 Bearer 令牌");
           }
           if (!route) throw new HubError("NOT_FOUND", "找不到端点");
+          if (v2) {
+            const response = await handleV2(request, v2, identity!, store, modules!, decide);
+            status = response.status; return response;
+          }
           if ((PAIRING_OPERATIONS as readonly string[]).includes(route.operation)) {
             const response = await handlePairing(request, route.operation as PairingOperation, route.pattern.exec(url.pathname)?.[1], identity, store, decide, pairing, privileged);
             status = response.status; return response;
@@ -126,6 +150,7 @@ export async function startHub(config: HubConfig, options: {
             status = response.status;
             // 结果到了就尽快写回笔记（失败的留给定时任务重试）。
             if (route.operation === "runtime.results" && response.status === 200) {
+              modules!.reconcile();
               void vaultWatch!.exclusive(async () => { await tasks!.writeResults(); await routines!.writeResults(); }).catch(() => {});
             }
             return response;
@@ -149,7 +174,8 @@ export async function startHub(config: HubConfig, options: {
           if (route.operation === "operations" || route.operation === "actors" || route.operation === "proposals" || route.operation === "proposal.accept" || route.operation === "proposal.reject") {
             const response = await vaultWatch!.exclusive(() => handleOperation(request,
               route.operation,
-              route.pattern.exec(url.pathname)?.[1], identity!, store, config, decide, { ...options.operations, tasks, routines, privileged }));
+              route.pattern.exec(url.pathname)?.[1], identity!, store, config, decide, { ...options.operations, tasks, routines, privileged,
+                isManagedTask: (id) => modules!.workStore.task(id) !== undefined }));
             status = response.status;
             return response;
           }
@@ -164,24 +190,25 @@ export async function startHub(config: HubConfig, options: {
           if (route.operation === "health") { status = 200; return Response.json({ ok: true, version }); }
           if (privateValue !== null && privateValue !== "true" && privateValue !== "false") throw new HubError("INVALID", "include_private 必须是 true 或 false");
           const queryOptions: SearchOptions = { stateDir: config.stateDir, includePrivate };
+          if (!config.vault && ["search", "show", "links", "check"].includes(route.operation)) throw new HubError("INVALID", "尚未配置知识目录；工作管理和执行功能可独立使用");
           let result: unknown;
           if (route.operation === "status") {
             result = await vaultWatch!.status(includePrivate);
           } else if (route.operation === "check") {
-            result = await checkLinks(config.vault, queryOptions);
+            result = await knowledge!.check(queryOptions);
           } else if (route.operation === "search") {
             const type = url.searchParams.get("type");
             const limit = url.searchParams.get("limit");
             if (type !== null && !NOTE_TYPES.includes(type as SearchOptions["type"] & string)) throw new HubError("INVALID", "未知笔记类型");
             if (limit !== null && (!/^[1-9]\d*$/.test(limit) || !Number.isSafeInteger(Number(limit)))) throw new HubError("INVALID", "limit 必须是正整数");
-            result = await searchNotes(config.vault, url.searchParams.get("q") ?? "", {
+            result = await knowledge!.search(url.searchParams.get("q") ?? "", {
               ...queryOptions, ...(type !== null ? { type: type as SearchOptions["type"] } : {}), ...(limit !== null ? { limit: Number(limit) } : {}),
             });
           } else {
             let reference: string;
             try { reference = decodeURIComponent(route.pattern.exec(url.pathname)![1]!); }
             catch { throw new HubError("INVALID", "引用 URL 编码不合法"); }
-            result = await (route.operation === "show" ? showNote : noteLinks)(config.vault, reference, queryOptions);
+            result = await (route.operation === "show" ? knowledge!.show(reference, queryOptions) : knowledge!.links(reference, queryOptions));
           }
           status = 200;
           return Response.json(result);
@@ -201,6 +228,6 @@ export async function startHub(config: HubConfig, options: {
         }
       },
     });
-  } catch (cause) { tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); throw cause; }
-  return { server, store, tasks: tasks!, routines: routines!, async stop() { await server.stop(true); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); } };
+  } catch (cause) { modules?.stop(); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); throw cause; }
+  return { server, store, tasks: tasks!, routines: routines!, modules: modules!, async stop() { modules?.stop(); await server.stop(true); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); } };
 }

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { Paper } from "@lumio/schema";
-import { generateCitekey, parseArxivMetadata, parseCrossrefMetadata, parseFrontmatter, parsePaperInput, renderPaper } from "@lumio/core";
+import { generateCitekey, parseArxivMetadata, parseCrossrefMetadata, parseFrontmatter, parsePaperInput, renderPaper } from "@lumio/knowledge";
 import { version } from "../package.json";
 import { fetchPaperSource } from "../src/paper-source.ts";
 
