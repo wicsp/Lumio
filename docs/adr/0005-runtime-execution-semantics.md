@@ -1,6 +1,6 @@
 # 0005 Runtime 执行语义
 
-- 状态：Accepted（P2 实现；协议已在 ADR 0019 中补全为 `packages/schema/src/job.ts` 第 2 版）
+- 状态：Implemented（2026-10-31 补记：P2-2、P2-3 实现；协议见 ADR 0019 与 `packages/schema/src/job.ts` 第 2 版）。第 4 条的 transport 只实现了"每台设备一个执行器"（ADR 0019），`ssh` 不做
 - 日期：2026-10-22
 - 领域：Hub 与运行
 
