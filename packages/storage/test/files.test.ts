@@ -5,7 +5,7 @@ import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RunLogEvent, StoredArtifact, BackupManifest } from "@lumio/schema";
-import { RunLogWriter, readRunLog, parseLogSegment } from "../src/logs.ts";
+import { RunLogWriter, readRunLog, parseLogSegment, finalizeInterruptedLog } from "../src/logs.ts";
 import { SqliteArtifacts } from "../src/artifacts.ts";
 import { backupBusiness, restoreBusiness, verifyBusinessBackup } from "../src/backup.ts";
 import { acquireStateLease } from "../src/lease.ts";
@@ -48,6 +48,25 @@ test("JSONL distinguishes active UTF-8 tail truncation from archived truncation,
   expect(() => parseLogSegment(Buffer.from(line.replace('"sequence":1', '"sequence":2')), { run, active: false })).toThrow("顺序");
   expect(() => parseLogSegment(Buffer.from([0xff, 10]), { run, active: true })).toThrow("UTF-8");
 });
+
+test("interrupted traces seal only their complete prefix and record recovery without treating logs as execution state", async () => temporary(async (root) => {
+  await mkdir(join(root, run));
+  const event = RunLogEvent.parse({ schema_version: 1, id: "evt_00000000000000000000000001", run, sequence: 1, time: "2026-11-01T00:00:00Z", type: "status", payload: { status: "running" } });
+  await writeFile(join(root, run, "000001.active.jsonl"), JSON.stringify(event) + "\n{partial");
+  await finalizeInterruptedLog(root, run);
+  const read = await readRunLog(root, run); expect(read.active).toBe(false); expect(read.incomplete).toBe(false);
+  expect(read.events).toHaveLength(2); expect(read.events[1]!.payload).toEqual({ status: "unknown", discarded_tail: true });
+  await finalizeInterruptedLog(root, run); expect((await readRunLog(root, run)).events).toHaveLength(2);
+}));
+
+test("a matching digest cannot make a malformed self-owned JSONL archive ready", async () => temporary(async (root) => {
+  const db = new Database(":memory:"), files = new SqliteArtifacts(db, root), damaged = Buffer.from("{broken}\n");
+  try {
+    files.stage(artifact({ media_type: "application/vnd.lumio.runlog+jsonl", sha256: createHash("sha256").update(damaged).digest("hex"), size: damaged.length }));
+    await expect(files.publish(id, chunks(damaged))).rejects.toMatchObject({ code: "INVALID" });
+    expect(files.get(id).status).toBe("staged"); expect(await Bun.file(join(root, `${id}.bin`)).exists()).toBe(false);
+  } finally { db.close(); }
+}));
 
 test("artifact registration and byte confirmation are distinct; bad uploads stay staged, retries deduplicate and crash recovery validates published bytes", async () => temporary(async (root) => {
   const db = new Database(":memory:");

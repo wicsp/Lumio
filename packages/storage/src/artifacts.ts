@@ -5,6 +5,7 @@ import { lstat, mkdir, open, link, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { StoredArtifact, SafeRelativePath, type ResourceRef } from "@lumio/schema";
 import { StorageError } from "./errors.ts";
+import { validateArchivedRunLog } from "./logs.ts";
 
 /** Refuse symlinks in every component before reading a managed or backup file. */
 export async function safeStoredFile(root: string, key: string): Promise<string> {
@@ -62,6 +63,10 @@ export class SqliteArtifacts {
     if (digest.sha256 !== value.sha256 || digest.size !== value.size) throw new StorageError("CORRUPT", "托管文件校验失败");
     return path;
   }
+  private async validate(path: string, value: StoredArtifact): Promise<void> {
+    if (value.media_type === "application/vnd.lumio.runlog+jsonl") await validateArchivedRunLog(path, value.owner.id);
+  }
+  async drain(): Promise<void> { await Promise.allSettled([...this.pending.values()]); }
   private ready(value: StoredArtifact): StoredArtifact {
     const result = StoredArtifact.parse({ ...value, status: "ready" });
     this.db.query("UPDATE storage_artifacts SET status='ready',record=? WHERE id=?").run(JSON.stringify(result), result.id); return result;
@@ -83,6 +88,8 @@ export class SqliteArtifacts {
         hash.update(chunk); await handle.writeFile(chunk);
       }
       if (size !== value.size || hash.digest("hex") !== value.sha256) throw new StorageError("INVALID", "上传文件大小或校验和与登记不符");
+      try { await this.validate(temporary, value); }
+      catch (cause) { if (cause instanceof StorageError && cause.code === "CORRUPT") throw new StorageError("INVALID", "自有日志格式不合法或归档已截断"); throw cause; }
       await handle.sync(); await handle.close();
       try { await link(temporary, join(this.root, value.key)); }
       catch (cause) {
@@ -104,6 +111,7 @@ export class SqliteArtifacts {
       catch (cause) { if ((cause as NodeJS.ErrnoException).code === "ENOENT") { missing.push(value.id); continue; } throw cause; }
       const digest = await fileDigest(path);
       if (digest.sha256 !== value.sha256 || digest.size !== value.size) throw new StorageError("CORRUPT", "中断归档的文件校验失败");
+      await this.validate(path, value);
       this.ready(value); recovered.push(value.id);
     }
     return { recovered, missing };

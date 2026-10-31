@@ -23,7 +23,7 @@ import { V2_ROUTES, handleV2 } from "./v2.ts";
 import { WriteCoordinator } from "./coordinator.ts";
 import type { AssistantModel, AssistantTool } from "@lumio/assistant";
 import { KnowledgeService } from "@lumio/knowledge";
-import { FileKnowledgeRepository } from "@lumio/storage";
+import { FileKnowledgeRepository, acquireStateLease } from "@lumio/storage";
 
 // Routes share authentication, authorization and logging before dispatch.
 export const ROUTES = [
@@ -59,7 +59,7 @@ export const ROUTES = [
 ] as const;
 const STATUS: Record<ApiErrorCode, number> = { INVALID: 400, UNAUTHENTICATED: 401, FORBIDDEN: 403, NOT_FOUND: 404, CONFLICT: 409, INTERNAL: 500 };
 
-export async function startHub(config: HubConfig, options: {
+async function startHubInstance(config: HubConfig, options: {
   log?: (line: string) => void;
   now?: () => Date;
   authorize?: typeof authorize;
@@ -105,6 +105,7 @@ export async function startHub(config: HubConfig, options: {
       await watch.exclusive(() => routines!.start());
     }
     modules = new BusinessModules(config, store, options);
+    await modules.artifacts.recover();
     server = Bun.serve({
       hostname: config.hostname, port: config.port,
       async fetch(request, server) {
@@ -233,5 +234,14 @@ export async function startHub(config: HubConfig, options: {
       },
     });
   } catch (cause) { modules?.stop(); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); throw cause; }
-  return { server, store, tasks: tasks!, routines: routines!, modules: modules!, async stop() { modules?.stop(); await server.stop(true); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); } };
+  return { server, store, tasks: tasks!, routines: routines!, modules: modules!, async stop() { modules?.stop(); await server.stop(true); await modules?.artifacts.drain(); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); } };
+}
+
+/** One Hub or offline migration owns a state directory. OS locks disappear on crashes, without deleting lock files. */
+export async function startHub(config: HubConfig, options: Parameters<typeof startHubInstance>[1] = {}) {
+  const lease = await acquireStateLease(config.stateDir);
+  try {
+    const hub = await startHubInstance(config, options); let stopped: Promise<void> | undefined;
+    return { ...hub, stop() { stopped ??= hub.stop().finally(() => lease.close()); return stopped; } };
+  } catch (cause) { lease.close(); throw cause; }
 }

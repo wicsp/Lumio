@@ -8,16 +8,16 @@ export type QueryOperation = (typeof QUERY_OPERATIONS)[number];
 export const EXISTING_OPERATIONS = [...QUERY_OPERATIONS, "health", "operations", "actors", "proposals", "proposal.accept", "proposal.reject", "task.dispatch", "routine.followup", "routines", "exec.privileged"] as const;
 export const RUNTIME_OPERATIONS = ["runtime.register", "runtime.sync", "runtime.ack", "runtime.results", "runtimes", "runtime.privileged.status", "runtime.privileged.report"] as const;
 export const JOB_OPERATIONS = ["job.submit", "jobs", "job.show", "job.cancel"] as const;
-export const V2_OPERATIONS = ["work.read", "work.command", "execution.read", "execution.command", "assistant.read", "assistant.chat"] as const;
+export const V2_OPERATIONS = ["work.read", "work.command", "execution.read", "execution.command", "execution.archive", "assistant.read", "assistant.chat"] as const;
 export interface AuthorizationRequest { operation: (typeof EXISTING_OPERATIONS)[number] | (typeof RUNTIME_OPERATIONS)[number] | (typeof JOB_OPERATIONS)[number] | (typeof V2_OPERATIONS)[number] | PairingOperation; includePrivate?: boolean }
 export type Decision = { result: "allow" } | { result: "deny"; reason: string } | { result: "needs_approval" };
 
 // One rule table is the only place that decides access. Public health is explicit.
 export const AUTHORIZATION_RULES = [
-  ...(["human", "agent", "runtime"] as const).flatMap((role) => V2_OPERATIONS.map((operation) => ({
-    role, operation, includePrivate: false,
-    decision: role === "human" ? { result: "allow" as const } : { result: "deny" as const, reason: "请求未获授权" },
-  }))),
+  ...(["human", "agent", "runtime"] as const).flatMap((role) => V2_OPERATIONS.flatMap((operation) => (operation === "execution.read" ? [false, true] : [false]).map((includePrivate) => ({
+    role, operation, includePrivate,
+    decision: (operation === "execution.archive" ? role === "runtime" : role === "human") ? { result: "allow" as const } : { result: "deny" as const, reason: "请求未获授权" },
+  })))),
   ...PAIRING_OPERATIONS.flatMap((operation) => ([null, "human", "agent", "runtime"] as const).map((role) => ({
     role, operation, includePrivate: false,
     decision: (operation.endsWith(".join") ? role === null : operation === "runtime.signing-key" ? role === "runtime" : role === "human")

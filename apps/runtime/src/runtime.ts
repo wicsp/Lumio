@@ -8,6 +8,7 @@ import { detectEngines } from "./engines.ts";
 import { Queue } from "./queue.ts";
 import { Executor } from "./executor.ts";
 import { RoutinePlans } from "./routines.ts";
+import { RuntimeArchives } from "./archive.ts";
 
 class Wake {
   private listeners = new Set<() => void>();
@@ -36,16 +37,17 @@ export async function runRuntime(config: RuntimeConfig, options: {
   const signal = AbortSignal.any([options.signal, shutdown.signal]);
   const log = options.log ?? console.log;
   const fetcher = options.fetch ?? globalThis.fetch;
-  const events = new Wake(), deliveries = new Wake();
+  const events = new Wake(), deliveries = new Wake(), archiveWake = new Wake();
   const wait = options.sleep ?? ((milliseconds, signal) => events.wait(milliseconds, signal));
   await mkdir(config.stateDir, { recursive: true, mode: 0o700 });
   const registration = RuntimeRegistration.parse({ ...config.registration, engines: await detectEngines(options.env) });
   const queue = new Queue(config.stateDir);
   const plans = new RoutinePlans(queue);
+  const archives = new RuntimeArchives(config, queue, fetcher, log);
   const now = options.now ?? (() => new Date());
   let actor: string | undefined;
   const sudo = new SudoGate(config, queue, () => actor, fetcher, signal, log);
-  const executor = new Executor(queue, config, options.env ?? process.env, () => { events.notify(); deliveries.notify(); }, registration.engines, sudo);
+  const executor = new Executor(queue, config, options.env ?? process.env, () => { events.notify(); deliveries.notify(); archiveWake.notify(); }, registration.engines, sudo);
   let registered = false, disconnected = false;
   let backoff = Math.min(config.pollSeconds, 60);
   async function send(path: string, body: unknown) {
@@ -85,11 +87,14 @@ export async function runRuntime(config: RuntimeConfig, options: {
     }
   }
   let delivering: Promise<void> | undefined;
+  let archiving: Promise<void> | undefined;
   let deliveryFailure: unknown;
   try {
     await sudo.start();
     await executor.recover();
     delivering = deliver().catch((cause) => { deliveryFailure = cause; shutdown.abort(); });
+    archiving = (async () => { while (!signal.aborted) { const next = await archives.flush(signal); await archiveWake.wait(Math.max(1, next), signal); } })()
+      .catch(() => { if (!signal.aborted) log("文件归档暂时中断，原始日志与待交付记录已保留"); });
     while (!signal.aborted) {
       let delay = config.pollSeconds;
       let justAcked = false;
@@ -102,6 +107,7 @@ export async function runRuntime(config: RuntimeConfig, options: {
           log("执行器登记成功");
           if (disconnected) log("Hub 连接已恢复");
           disconnected = false;
+          archives.retryNow(); archiveWake.notify();
         } else {
           const sync = await post("/v1/runtime/sync", queue.heartbeat(), RuntimeSync);
           queue.receive(sync.jobs);
@@ -130,6 +136,7 @@ export async function runRuntime(config: RuntimeConfig, options: {
     await executor.shutdown();
     await sudo.close();
     await delivering;
+    await archiving;
     queue.close();
   }
   if (deliveryFailure) throw deliveryFailure;

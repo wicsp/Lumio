@@ -5,6 +5,7 @@ import type { BusinessModules } from "./modules.ts";
 import { HubError } from "./errors.ts";
 import type { HubStore, Identity } from "./store.ts";
 import type { authorize } from "./authorize.ts";
+import { handleArtifacts } from "./artifacts.ts";
 
 export const V2_ROUTES = [
   { operation: "work.read", method: "GET", pattern: /^\/v2\/work\/tasks$/, path: "/v2/work/tasks" },
@@ -15,6 +16,11 @@ export const V2_ROUTES = [
   { operation: "execution.read", method: "GET", pattern: /^\/v2\/execution\/routines$/, path: "/v2/execution/routines" },
   { operation: "execution.read", method: "GET", pattern: /^\/v2\/execution\/routines\/(rtn_[0-9A-HJKMNP-TV-Z]{26})$/, path: "/v2/execution/routines/<id>" },
   { operation: "execution.command", method: "POST", pattern: /^\/v2\/execution\/commands$/, path: "/v2/execution/commands" },
+  { operation: "execution.read", method: "GET", pattern: /^\/v2\/execution\/jobs\/(job_[0-9A-HJKMNP-TV-Z]{26})\/artifacts$/, path: "/v2/execution/jobs/<job>/artifacts" },
+  { operation: "execution.read", method: "GET", pattern: /^\/v2\/execution\/artifacts\/(art_[0-9A-HJKMNP-TV-Z]{26})$/, path: "/v2/execution/artifacts/<artifact>" },
+  { operation: "execution.read", method: "GET", pattern: /^\/v2\/execution\/artifacts\/(art_[0-9A-HJKMNP-TV-Z]{26})\/content$/, path: "/v2/execution/artifacts/<artifact>/content" },
+  { operation: "execution.archive", method: "POST", pattern: /^\/v2\/execution\/artifacts$/, path: "/v2/execution/artifacts" },
+  { operation: "execution.archive", method: "PUT", pattern: /^\/v2\/execution\/artifacts\/(art_[0-9A-HJKMNP-TV-Z]{26})$/, path: "/v2/execution/artifacts/<artifact>" },
   { operation: "assistant.read", method: "GET", pattern: /^\/v2\/assistant\/conversations$/, path: "/v2/assistant/conversations" },
   { operation: "assistant.read", method: "GET", pattern: /^\/v2\/assistant\/conversations\/(conv_[0-9A-HJKMNP-TV-Z]{26})$/, path: "/v2/assistant/conversations/<id>" },
   { operation: "assistant.chat", method: "POST", pattern: /^\/v2\/assistant\/chat$/, path: "/v2/assistant/chat" },
@@ -29,12 +35,14 @@ export function moduleError(cause: unknown): HubError | undefined {
 }
 export async function handleV2(request: Request, route: V2Route, identity: Identity, store: HubStore,
   modules: BusinessModules, decide: typeof authorize): Promise<Response> {
-  const decision = decide(identity.actor, { operation: route.operation });
+  const decision = decide(identity.actor, { operation: route.operation,
+    includePrivate: route.operation === "execution.read" && new URL(request.url).searchParams.get("include_private") === "true" });
   let execution = "applied";
   let audited = false;
   try {
     if (decision.result !== "allow") throw new HubError("FORBIDDEN", "请求未获授权", { reason: decision.result === "deny" ? decision.reason : "需要批准" });
     const url = new URL(request.url), id = route.pattern.exec(url.pathname)?.[1];
+    if (url.pathname.includes("/artifacts")) return await handleArtifacts(request, identity, store, modules);
     if (route.operation === "work.command" || route.operation === "execution.command") {
       const body = await json(request);
       const result = store.db.transaction(() => {

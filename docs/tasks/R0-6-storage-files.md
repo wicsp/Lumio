@@ -26,3 +26,13 @@ JSONL 每个 run 单写入者、顺序连续、分段封存。活跃尾部未写
 2026-11-01，Bun 1.3.13，完整 `LUMIO_LIVE=0 bun run check` 通过：763 pass、3 skip、0 fail
 （766 tests / 85 files）。新增 5 项测试覆盖上述日志/文件/备份失败路径及业务写入租约。
 Storage 基础已完成，Hub/Runtime 与客户端接入继续下一切片；没有改契约或引入依赖。
+
+## 接入切片
+
+必要调用方：Hub 组装与归档 API、授权、管理命令；Runtime 的 JSONL 输出与独立 archive_outbox；API Client 与 CLI 的产物查看和校验下载。
+使用既有 StoredArtifact/RunLogEvent/BackupManifest，没有增加 schema 字段或改变 Job 协议。Runtime 新增对仓库内 Storage/Foundation 的显式依赖，无新第三方库。
+新增执行器上传权限只允许已接手的本人 Job；不授予助手或 agent 文件读取/写入权限，私密读取沿用显式请求。
+端到端已覆盖上传失败时 Job 先完成、执行器重启后独立归档一次、配套备份恢复，以及 CLI 下载不覆盖已有目标。
+
+2026-11-01 接入验证：Bun 1.3.13，完整 `LUMIO_LIVE=0 bun run check` 通过，768 pass、3 skip、0 fail
+（771 tests / 85 files）。本机 Claude 的只读交叉 review 已启动，最终结论另行记录；未将整个 R0 标为完成。

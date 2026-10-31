@@ -51,8 +51,10 @@
       "version": "0.0.0",
       "dependencies": {
         "@lumio/execution": "workspace:*",
+        "@lumio/foundation": "workspace:*",
         "@lumio/platform": "workspace:*",
         "@lumio/schema": "workspace:*",
+        "@lumio/storage": "workspace:*",
       },
     },
     "packages/api-client": {

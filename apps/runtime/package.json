@@ -7,6 +7,8 @@
     "build": "bun build --compile src/main.ts --outfile dist/lumio-runtime"
   },
   "dependencies": {
+    "@lumio/foundation": "workspace:*",
+    "@lumio/storage": "workspace:*",
     "@lumio/schema": "workspace:*",
     "@lumio/execution": "workspace:*",
     "@lumio/platform": "workspace:*"

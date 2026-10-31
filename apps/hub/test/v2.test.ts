@@ -2,7 +2,8 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ApiError, WorkCommandResult, WorkTaskDetail, AssistantChatResult, AssistantEvent, Job, ExecutionRoutine, ExecutionRoutineInfo, RuntimeSync, type RuntimeRegistration } from "@lumio/schema";
+import { ApiError, WorkCommandResult, WorkTaskDetail, AssistantChatResult, AssistantEvent, Job, ExecutionRoutine, ExecutionRoutineInfo, RuntimeSync, StoredArtifact, type RuntimeRegistration } from "@lumio/schema";
+import { createHash } from "node:crypto";
 import { routineJobId } from "@lumio/execution";
 import { startHub } from "../src/server.ts";
 import { readConfig } from "../src/config.ts";
@@ -27,6 +28,12 @@ function request(path: string, body?: unknown, token = human) {
   return fetch(`http://127.0.0.1:${hub.server.port}${path}`, { method: body === undefined ? "GET" : "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 }
+test("a second Hub cannot own the same business directory; stopping releases the OS lease", async () => {
+  await expect(startHub({ ...readConfig({ LUMIO_STATE_DIR: temp }), port: 0 }, { log() {} })).rejects.toMatchObject({ code: "CONFLICT" });
+  expect((await request("/v2/work/tasks")).status).toBe(200);
+  await hub.stop(); hub = await startHub({ ...readConfig({ LUMIO_STATE_DIR: temp }), port: 0 }, { log() {} });
+  expect((await request("/v2/work/tasks")).status).toBe(200);
+});
 let sequence = 0;
 async function command(op: string, args: Record<string, unknown>, requestId = `synthetic-command-${++sequence}`) {
   const response = await request("/v2/work/commands", { request_id: requestId, operation: { op, args } });
@@ -79,8 +86,8 @@ test("v2 retains shared authorization, request validation, revision conflicts an
 test("all v2 routes obey the shared deny policy before reading bodies or exposing objects", async () => {
   await hub.stop(); hub = await startHub({ ...readConfig({ LUMIO_STATE_DIR: temp }), port: 0 }, { log() {}, authorize: () => ({ result: "deny", reason: "synthetic denial" }) });
   for (const route of V2_ROUTES) {
-    const path = route.path.replace("<id>", route.path.includes("conversations") ? "conv_00000000000000000000000001" : route.path.includes("projects") ? "prj_00000000000000000000000001" : route.path.includes("routines") ? "rtn_00000000000000000000000001" : "task_00000000000000000000000001");
-    const response = await request(path, route.method === "POST" ? {} : undefined);
+    const path = route.path.replace("<job>", "job_00000000000000000000000001").replace("<artifact>", "art_00000000000000000000000001").replace("<id>", route.path.includes("conversations") ? "conv_00000000000000000000000001" : route.path.includes("projects") ? "prj_00000000000000000000000001" : route.path.includes("routines") ? "rtn_00000000000000000000000001" : "task_00000000000000000000000001");
+    const response = await fetch(`http://127.0.0.1:${hub.server.port}${path}`, { method: route.method, headers: { Authorization: `Bearer ${human}` } });
     expect(response.status).toBe(403); expect(ApiError.parse(await response.json()).error.reason).toBe("synthetic denial");
   }
 });
@@ -121,6 +128,38 @@ test("a failed dispatch audit rolls back Job, Work execution, status and request
   expect(hub.modules.work.task(created.task.id).status).toBe("todo");
   expect((await request("/v2/work/commands", body)).status).toBe(200);
   expect(hub.store.db.query("SELECT * FROM jobs").all()).toHaveLength(1);
+});
+
+test("file routes enforce runtime ownership, explicit private reads and staged content verification", async () => {
+  const created = await command("work.task.create", { title: "文件边界", assignee: "pi@server" }); if (created.kind !== "task") throw new Error("task expected");
+  const dispatched = await command("work.task.dispatch", { task: created.task.id }); if (dispatched.kind !== "job") throw new Error("job expected");
+  await request("/v1/runtime/ack", { accepted: [dispatched.job.spec.id] }, runtime);
+  const bytes = Buffer.from("合成私密文件"), id = "art_00000000000000000000000001";
+  const metadata = StoredArtifact.parse({ id, owner: { module: "execution", id: dispatched.job.spec.id }, key: `${id}.bin`, size: bytes.length,
+    sha256: createHash("sha256").update(bytes).digest("hex"), media_type: "text/plain", status: "staged", private: true, created: new Date().toISOString() });
+  expect((await request("/v2/execution/artifacts", metadata)).status).toBe(403);
+  hub.store.createActor("other-runtime", "runtime"); const other = hub.store.createToken("other-runtime", "other-runtime");
+  expect((await request("/v2/execution/artifacts", metadata, other)).status).toBe(403);
+  expect((await request("/v2/execution/artifacts", metadata, runtime)).status).toBe(200);
+  const upload = (data: Uint8Array) => fetch(`http://127.0.0.1:${hub.server.port}/v2/execution/artifacts/${id}`, { method: "PUT", headers: { Authorization: `Bearer ${runtime}` }, body: data });
+  expect((await upload(Buffer.from("wrong"))).status).toBe(400); expect(hub.modules.artifacts.get(id).status).toBe("staged");
+  expect((await upload(bytes)).status).toBe(200); expect((await upload(bytes)).status).toBe(200);
+  expect(await (await request(`/v2/execution/jobs/${dispatched.job.spec.id}/artifacts`)).json()).toEqual([]);
+  expect((await request(`/v2/execution/artifacts/${id}/content`)).status).toBe(404);
+  expect((await request(`/v2/execution/artifacts/${id}/content?include_private=true`, undefined, agent)).status).toBe(403);
+  expect(await (await request(`/v2/execution/artifacts/${id}/content?include_private=true`)).text()).toBe("合成私密文件");
+  async function cli(args: string[]) {
+    const child = Bun.spawn([process.execPath, new URL("../../cli/src/main.ts", import.meta.url).pathname, ...args], {
+      env: { HOME: temp, PATH: temp, LUMIO_HUB_URL: `http://127.0.0.1:${hub.server.port}`, LUMIO_TOKEN: human }, stdout: "pipe", stderr: "pipe",
+    });
+    const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]); return { code, stdout, stderr };
+  }
+  const listed = await cli(["job", "artifacts", dispatched.job.spec.id, "--include-private", "--json"]);
+  expect(listed.code).toBe(0); expect(StoredArtifact.array().parse(JSON.parse(listed.stdout))).toHaveLength(1);
+  const target = join(temp, "download.bin"), downloaded = await cli(["job", "download", id, "--output", target, "--include-private", "--json"]);
+  expect(downloaded.code).toBe(0); expect(StoredArtifact.parse(JSON.parse(downloaded.stdout)).status).toBe("ready"); expect(await readFile(target)).toEqual(bytes);
+  expect((await cli(["job", "download", id, "--output", target, "--include-private", "--json"])).code).toBe(1);
+  expect(await readFile(target)).toEqual(bytes);
 });
 
 test("CLI uses database tasks and projects, preserves conflicting edit files, and exposes assistant JSON and streams", async () => {

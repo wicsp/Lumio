@@ -156,9 +156,23 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 ### 4.2 存放
 - Hub 的运行数据放在 `~/.local/share/lumio/`（可配置），**不在 vault、不在同步目录里**：
   `index.sqlite`（派生索引，可重建）、`hub.sqlite`（身份、令牌、提议、审计、Job、数据库 Work 和 Assistant，需要备份）。
-  现有 `lumio-hub backup <目标文件>` 可在 Hub 运行中备份数据库；包含托管文件的完整业务备份随 R0 后续切片加入，完成前不切换真实数据（ADR 0014、0016、0025）。
-- Storage 已提供分段 JSONL、staged/ready 托管文件与配套快照备份/校验/新目录恢复；Hub/Runtime 与管理命令接入仍在实施中。
-  恢复拒绝缺失或被篡改的文件、重复清单与符号链接，不覆盖已有状态目录（ADR 0025）。
+  `lumio-hub backup <目标文件>` 仍提供旧数据库单文件备份；完整业务备份用 `lumio-hub backup business <新目录>`，
+  以数据库一致性快照确定 ready 托管文件，复制文件并生成校验清单（ADR 0014、0016、0025）。
+- `lumio-hub backup verify <目录>` 校验清单、数据库和引用文件；`lumio-hub restore business <备份目录> <新状态目录>` 只恢复到新目录。
+  拒绝缺失或被篡改的文件、重复清单与符号链接，不覆盖已有状态。知识目录与安装配置单独备份，索引可重建（ADR 0025）。
+- Hub 与离线迁移通过同一业务目录的 SQLite OS 租约互斥；进程崩溃自动释放锁，不删除锁文件或凭 PID 猜测锁失效。
+
+### 4.2.1 日志与托管文件（ADR 0025）
+
+- Runtime 保留原始输出，同时写分段 JSONL（RunLogEvent v1）；每次运行独占日志目录，事件顺序从 1 连续递增。
+  原始 stdout/stderr 的 JSONL output 负载用 base64 表达，避免二进制和 UTF-8 分块造成内容损坏。
+- 活跃日志末行不完整可报告；封存日志截断、行损坏、事件重复或缺失必须失败。恢复中断运行只封存完整前缀并记 recovery，Job 仍由数据库标为 unknown，不从日志重新执行。
+- 自有日志归档 MIME 为 `application/vnd.lumio.runlog+jsonl`，按完整运行流再次校验；原始输出以 text/plain 独立归档。
+- Runtime 为文件保留独立交付记录；Hub 校验大小与 SHA-256，先发布字节再登记 ready。登记冲突保留文件待核查，重复交付不重复登记。
+  Job 结果确认与文件确认互不替代，上传失败不阻塞结果交回；确认后原始文件仍留在 Runtime。
+- 文件接口在 `/v2/execution/` 下；runtime 只能上传自己已接手的 Job 的文件。读取只授予 human，私密产物需显式 include_private。
+  `lumio job artifacts <Job ID>` 查看 staged/ready；`lumio job download <文件 ID> --output <新文件>` 流式校验后保存，不覆盖目标。
+- Job 协议仍为 2；旧 Runtime 不归档文件，新 Runtime 遇到旧 Hub 时保留待交付文件并重试，不影响旧结果协议。
 
 ### 4.3 自动提交（ADR 0014）
 - vault 安静 5 分钟（可配置）后自动提交一次；没有 git 仓库时跳过。任何非隐藏文件的变化都会重新计时（报告、附件也会被提交），补全只处理笔记。

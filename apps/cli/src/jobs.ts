@@ -2,6 +2,9 @@ import { hubCredentials } from "./config.ts";
 import { parseArgs } from "node:util";
 import { createClient } from "@lumio/api-client";
 import { AgentRun, JobStatus, type Job } from "@lumio/schema";
+import { createHash } from "node:crypto";
+import { link, mkdtemp, open, rm } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 
 const usage = "用法：lumio job submit --runtime <名称> [--workdir 路径] [--timeout 30m] [--gpus 0,1] -- <程序> [参数…]；" +
   "lumio job submit --runtime <名称> --agent codex|claude-code|pi [--model 模型] [--session ID [--resume]] [--workdir 路径] [--timeout 2h] [--gpus 0,1] \"<要求>\"；lumio job list [--status 状态] [--json]；lumio job show <job> [--json]；lumio job cancel <job>";
@@ -10,10 +13,37 @@ export async function runJobs(args: string[], log: (line: string) => void) {
   const { values, positionals } = parseArgs({ args: split < 0 ? args : args.slice(0, split), allowPositionals: true, strict: true, options: {
     runtime: { type: "string" }, workdir: { type: "string" }, timeout: { type: "string" }, gpus: { type: "string" }, status: { type: "string" }, json: { type: "boolean" },
     agent: { type: "string" }, model: { type: "string" }, session: { type: "string" }, resume: { type: "boolean" },
+    output: { type: "string" }, "include-private": { type: "boolean" },
   } });
   const [action, id] = positionals;
   const keys = Object.keys(values);
   const agentKeys = ["agent", "model", "session", "resume"];
+  if (action === "artifacts" || action === "download") {
+    if (positionals.length !== 2 || split >= 0 || (action === "download" && !values.output)
+      || keys.some((key) => !["json", "include-private", ...(action === "download" ? ["output"] : [])].includes(key))) throw new Error("用法：lumio job artifacts <Job ID> [--json]；lumio job download <文件 ID> --output <目标文件> [--include-private]");
+    const client = createClient(hubCredentials()), query = { includePrivate: values["include-private"] };
+    if (action === "artifacts") {
+      const files = await client.jobArtifacts(id!, query);
+      if (values.json) log(JSON.stringify(files));
+      else { if (!files.length) log("尚未登记日志或产物"); for (const file of files) log(`${file.id}  ${file.status === "ready" ? "归档完成" : "等待文件上传"}  ${file.media_type}  ${file.size} 字节`); }
+      return 0;
+    }
+    const metadata = await client.artifact(id!, query), response = await client.artifactContent(id!, query);
+    const target = resolve(values.output!), directory = await mkdtemp(join(dirname(target), ".lumio-download-")), temporary = join(directory, "content");
+    try {
+      const handle = await open(temporary, "wx", 0o600), hash = createHash("sha256"); let size = 0;
+      try {
+        if (!response.body) throw new Error("文件响应缺少内容");
+        const reader = response.body.getReader();
+        try { while (true) { const chunk = await reader.read(); if (chunk.done) break; size += chunk.value.length; if (size > metadata.size) throw new Error("文件大小与登记不符"); hash.update(chunk.value); await handle.writeFile(chunk.value); } }
+        finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+        if (size !== metadata.size || hash.digest("hex") !== metadata.sha256) throw new Error("文件校验失败，未保存");
+        await handle.sync();
+      } finally { await handle.close(); }
+      await link(temporary, target);
+      log(values.json ? JSON.stringify(metadata) : `已校验并保存：${target}`); return 0;
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  }
   if (action === "submit" && values.agent !== undefined) {
     // agent 类型：要求是唯一的位置参数，不用 --。
     if (positionals.length !== 2 || split >= 0 || !positionals[1] || !values.runtime || (values.resume && !values.session)

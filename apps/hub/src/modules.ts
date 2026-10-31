@@ -1,9 +1,10 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { join } from "node:path";
 import { CoreError, newId } from "@lumio/foundation";
 import { parseAssignee, type AgentRun, type WorkTask } from "@lumio/schema";
 import { WorkService } from "@lumio/work";
 import { AssistantService, type AssistantModel, type AssistantTool } from "@lumio/assistant";
-import { SqliteWorkStore, SqliteAssistantStore, SqliteRoutineStore } from "@lumio/storage";
+import { SqliteWorkStore, SqliteAssistantStore, SqliteRoutineStore, SqliteArtifacts } from "@lumio/storage";
 import { ExecutionRoutines } from "@lumio/execution";
 import type { HubConfig } from "./config.ts";
 import type { HubStore } from "./store.ts";
@@ -18,6 +19,7 @@ export class BusinessModules {
   readonly assistant: AssistantService;
   readonly routineStore: SqliteRoutineStore;
   readonly routines: ExecutionRoutines;
+  readonly artifacts: SqliteArtifacts;
   private readonly stopped = new AbortController();
   private readonly timer: ReturnType<typeof setInterval>;
   readonly signal = this.stopped.signal;
@@ -27,6 +29,7 @@ export class BusinessModules {
     const now = options.now ?? (() => new Date());
     const id = (prefix: Parameters<typeof newId>[0]) => newId(prefix, now(), randomBytes);
     const jobs = new Jobs(store);
+    this.artifacts = new SqliteArtifacts(store.db, join(config.stateDir, "files"));
     this.routineStore = new SqliteRoutineStore(store.db);
     this.routines = new ExecutionRoutines(this.routineStore, jobs, {
       now, id: () => id("rtn"), lease: () => randomBytes(32).toString("base64url"),

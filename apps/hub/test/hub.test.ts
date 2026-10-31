@@ -159,7 +159,7 @@ test("authorization table is exhaustively checked, including private=false", () 
     expect(decision).toEqual(rule.decision);
     const expected = (PAIRING_OPERATIONS as readonly string[]).includes(rule.operation)
       ? ((rule.operation.endsWith(".join") ? rule.role === null : rule.operation === "runtime.signing-key" ? rule.role === "runtime" : rule.role === "human") ? "allow" : "deny")
-      : (V2_OPERATIONS as readonly string[]).includes(rule.operation) ? (rule.role === "human" ? "allow" : "deny")
+      : (V2_OPERATIONS as readonly string[]).includes(rule.operation) ? ((rule.operation === "execution.archive" ? rule.role === "runtime" : rule.role === "human") ? "allow" : "deny")
       : rule.operation === "exec.privileged" && rule.role === "runtime" && !rule.includePrivate ? "needs_approval" : (RUNTIME_OPERATIONS as readonly string[]).includes(rule.operation)
       ? ((rule.operation === "runtimes" ? rule.role === "human" : rule.role === "runtime") ? "allow" : "deny")
       : (JOB_OPERATIONS as readonly string[]).includes(rule.operation) ? (rule.role === "human" ? "allow" : "deny")

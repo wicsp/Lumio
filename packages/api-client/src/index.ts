@@ -1,6 +1,6 @@
 import { ClientInvite, ClientInviteRequest, ClientJoin, ClientJoinRequest, RuntimeInvite, RuntimeInviteRequest } from "@lumio/schema";
 import { WorkCommandRequest, WorkCommandResult, WorkTask, WorkTaskDetail, WorkProject, ExecutionRoutine, ExecutionRoutineCommandRequest, ExecutionRoutineInfo,
-  AssistantChatRequest, AssistantChatResult, AssistantConversation, AssistantConversationDetail, AssistantEvent, idOf } from "@lumio/schema";
+  AssistantChatRequest, AssistantChatResult, AssistantConversation, AssistantConversationDetail, AssistantEvent, StoredArtifact, idOf } from "@lumio/schema";
 import { JobRun, Job, JobSpec, JobStatus, RoutineInfo, RuntimeName, RuntimeInfo, Actor, OperationRequest, OperationResult, Proposal, ProposalStatus, ApiError, CheckResult, LinksResult, NoteDetail, SearchResult, type ApiErrorCode, type NoteRef } from "@lumio/schema";
 
 export class ApiClientError extends Error {
@@ -69,6 +69,21 @@ export function createClient(options: { url: string; token?: string; fetch?: typ
     executionCommand(input: ExecutionRoutineCommandRequest) { return request("/v2/execution/commands", {}, ExecutionRoutine, validate(ExecutionRoutineCommandRequest, input)); },
     executionRoutines() { return request("/v2/execution/routines", {}, ExecutionRoutineInfo.array()); },
     executionRoutine(id: string) { return request(`/v2/execution/routines/${validate(idOf("rtn"), id)}`, {}, ExecutionRoutine); },
+    jobArtifacts(id: string, query: QueryOptions = {}) { return request(`/v2/execution/jobs/${validate(idOf("job"), id)}/artifacts`, queryParams(query), StoredArtifact.array()); },
+    artifact(id: string, query: QueryOptions = {}) { return request(`/v2/execution/artifacts/${validate(idOf("art"), id)}`, queryParams(query), StoredArtifact); },
+    async artifactContent(id: string, query: QueryOptions = {}): Promise<Response> {
+      const path = `/v2/execution/artifacts/${validate(idOf("art"), id)}/content`; let status: number | undefined;
+      try {
+        const url = new URL(`${base}${path}`); for (const [key, value] of Object.entries(queryParams(query))) url.searchParams.set(key, value);
+        const response = await fetcher(url, { headers: options.token ? { Authorization: `Bearer ${options.token}` } : {}, redirect: "error" });
+        status = response.status;
+        if (!response.ok) throw new ApiClientError(ApiError.parse(await response.json()).error, status);
+        return response;
+      } catch (cause) {
+        if (cause instanceof ApiClientError) throw cause;
+        throw new ApiClientError({ code: "INTERNAL", message: "无法读取 Hub 归档文件" }, status);
+      }
+    },
     assistantChat(input: AssistantChatRequest) { return request("/v2/assistant/chat", {}, AssistantChatResult, validate(AssistantChatRequest, input)); },
     conversations() { return request("/v2/assistant/conversations", {}, AssistantConversation.array()); },
     conversation(id: string) { return request(`/v2/assistant/conversations/${validate(idOf("conv"), id)}`, {}, AssistantConversationDetail); },

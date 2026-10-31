@@ -31,7 +31,7 @@
 | Assistant | 自有对话和 Agent 循环、SQLite、工具记录/恢复、记忆过滤；Hub/CLI JSON 与 NDJSON | 生产模型/工具适配、记忆入口与完整运行验收 |
 | Knowledge | 解析/补全/引用/创建与查询用例提取；文件与索引在 Storage，应用已改用明确模块 | 最终独立性验收与兼容导出映射 |
 | Execution | Job 生命周期与存储分离；数据库 Routine、历史输入快照与 CLI/HTTP；无 Knowledge/Task 的真实 Runtime 离线验收；原协议保持 | 日志/产物归档、最终恢复验收 |
-| 公共与迁移 | 依赖检查新增领域隔离与禁止领域 I/O，应用不再依赖 Core 汇总包 | 日志归档、备份恢复、dry-run/apply/回退与安装维护共用代码 |
+| 公共与迁移 | 领域依赖隔离；分段 JSONL、独立文件归档与恢复；包含文件的快照备份/校验/恢复；Hub 独占租约 | dry-run/apply/回退与安装维护共用代码 |
 
 交叉 review 与处理记录：[2026-11-01](../reviews/2026-11-01-r0-foundations.md)。未把上述进度标为全部完成。
 
