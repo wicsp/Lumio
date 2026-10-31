@@ -1,7 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { newId } from "@lumio/foundation";
 import { ExecutionJobs, type RoutineHooks } from "@lumio/execution";
-import { SqliteExecutionStore } from "@lumio/storage";
 import { JobStatus } from "@lumio/schema";
 import type { HubStore, Identity } from "./store.ts";
 import type { authorize } from "./authorize.ts";
@@ -13,7 +12,7 @@ export type { RoutineHooks } from "@lumio/execution";
 /** Compatibility factory for Hub adapters; lifecycle rules live in the Execution module. */
 export class Jobs extends ExecutionJobs {
   constructor(store: HubStore, routines?: RoutineHooks) {
-    super(new SqliteExecutionStore(store.db, store), {
+    super(store.executionStore, {
       id: (now) => newId("job", now, randomBytes), lease: () => randomBytes(32).toString("base64url"), now: () => new Date(),
     }, routines);
   }

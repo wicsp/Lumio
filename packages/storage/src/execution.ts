@@ -27,6 +27,7 @@ export class SqliteExecutionStore implements ExecutionStore {
   record(input: Job): void { const job = Job.parse(input); this.db.query("INSERT OR IGNORE INTO jobs(id,record) VALUES(?,?)").run(job.spec.id, JSON.stringify(job)); }
   requestCancel(id: string): void { this.db.query("UPDATE jobs SET cancel=1 WHERE id=?").run(id); }
   cancellations(): string[] { return this.db.query<{ id: string }, []>("SELECT id FROM jobs WHERE cancel=1").all().map((row) => row.id); }
+  cancelRequested(id: string): boolean { return !!this.db.query<{ cancel: number }, [string]>("SELECT cancel FROM jobs WHERE id=?").get(id)?.cancel; }
   runtimes(now: Date): RuntimeInfo[] { return this.registry.runtimes(now); }
   syncRuntime(actor: string, now: Date): void { this.registry.syncRuntime(actor, now); }
 }

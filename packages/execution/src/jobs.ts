@@ -13,6 +13,7 @@ export interface ExecutionStore {
   record(job: Job): void;
   requestCancel(id: string): void;
   cancellations(): string[];
+  cancelRequested(id: string): boolean;
   runtimes(now: Date): RuntimeInfo[];
   syncRuntime(actor: string, now: Date): void;
   transaction<T>(action: () => T): T;
@@ -39,6 +40,11 @@ export class ExecutionJobs {
     this.store.save(job); return job;
   }
   record(job: Job): void { this.store.record(Job.parse(job)); }
+  /** A fact query for approval adapters; requesting cancellation already invalidates permission to start privileged work. */
+  live(actor: string, id: string): boolean {
+    const job = this.store.get(id);
+    return !!job && job.spec.runtime === actor && !!job.assigned && !job.result && active(job) && !this.store.cancelRequested(id);
+  }
   submit(body: unknown, now: Date): Job {
     const parsed = SubmitJob.safeParse(body);
     if (!parsed.success) throw new ExecutionError("INVALID", "Job 提交内容不合法");
