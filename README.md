@@ -50,7 +50,8 @@ curl -fsSL https://raw.githubusercontent.com/wicsp/Lumio/main/install.sh | sh -s
 
 设置监听地址与对外地址，HTTPS 交给反向代理，见 [Caddy 示例](infra/README.md#caddy-反向代理)。
 没有公网地址时，Tailscale 是一种办法；检测到已安装时 setup 可以帮助配置。
-加执行器使用 `lumio runtime add <名称>`（P2-8 提供）。安装到的版本须已包含相应命令。
+加执行器：在已配置的 CLI 上运行 `lumio runtime add <名称>`，到那台机器上运行它打印的一行命令。
+装好后用 `lumio doctor` 检查，用 `lumio selftest` 以真实 agent 验证；已有安装用 `lumio upgrade` 升级。
 
 只下载程序或指定版本：在安装脚本参数里使用 `--no-setup` 或 `--version vX.Y.Z`。
 后台服务、日志与手动安装见 [macOS](infra/launchd/README.md)、[Linux](infra/systemd/README.md)。
@@ -64,9 +65,15 @@ bun run check          # 类型检查 + 依赖边界检查 + 测试
 bun run schema:export  # 把契约导出为 JSON Schema（packages/schema/json/）
 ```
 
-## 当前阶段
+## 当前阶段（2026-10-31，v0.1.6）
 
-P0 已完成：`lumio new paper`、`lumio new idea`、`lumio sync`，以及新的 vault 目录结构（ADR 0012）。
-真实 vault 已迁移到新目录（P0-7）。P1 已完成：本地查询、Hub、文件监听与自动提交、操作与提议框架、按引用导出与断链检查、给 AI 用的 skill。P2（执行器与派活）已设计完，从 P2-1 开始实现。
+P0–P2 已完成，可以日常使用：
+
+- **笔记**：`lumio new paper|idea`、`lumio sync`（自动补全元数据）；`search`/`show`/`links`/`check`/`export bib`。
+- **Hub**：查询 API、监听文件并自动补全与提交、操作与提议、备份；给 AI 用的 skill（`skills/lumio`）。
+- **给 AI 派活**：每台设备一个执行器；任务笔记里 `assignee: pi@server` 这类负责人即交接开关；例行任务；高权限命令的审批门。
+- **安装**：一行安装、配对码加执行器、`doctor` / `selftest` / `upgrade`。
+
+接下来：自检覆盖不到的人工验收，之后规划 P3/P4，见 [`docs/tasks/README.md`](docs/tasks/README.md)。
 
 文档入口：[`docs/README.md`](docs/README.md)。
