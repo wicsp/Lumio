@@ -2,7 +2,7 @@
 
 个人研究工作台：论文笔记、想法、项目/任务、实验结果，以及在多台设备上给 AI 派活。
 
-- 数据（笔记/论文/任务…）**不在本仓库**，放在独立的 vault 仓库里（Markdown + YAML frontmatter）。
+- 数据**不在本仓库**：知识正文在独立 vault（Markdown + frontmatter）；项目/任务、执行与助手状态在 SQLite；过程记录与产物用 JSONL/文件。
 - 本仓库只放代码：TypeScript monorepo，运行在 [Bun](https://bun.com) 上。
 
 先读：[`docs/DESIGN.md`](docs/DESIGN.md)（现行设计）→ [`AGENTS.md`](AGENTS.md)（AI 的规则）；文档导航见 [`docs/README.md`](docs/README.md)
@@ -12,10 +12,16 @@
 | 路径 | 内容 |
 |---|---|
 | `packages/schema` | 契约：用 Zod 定义的实体与 job 协议，唯一事实来源 |
-| `packages/core` | vault 解析、链接、索引、BibTeX，纯本地逻辑 |
+| `packages/knowledge` | 知识文档、解析、补全、链接与引用用例 |
+| `packages/work` | Project、Task、讨论、关系与显式派活 |
+| `packages/execution` | Job、Routine、设备能力与执行规则 |
+| `packages/assistant` | 对话、记忆、模型端口与工具循环 |
+| `packages/storage` | 文件/索引/SQLite 适配、JSONL、产物、备份与显式迁移 |
+| `packages/foundation`、`packages/platform` | ID/错误，以及终端、诊断、安装维护 |
+| `packages/core` | 旧 API 兼容转发，应用已改用明确模块 |
 | `packages/api-client` | 调用 Hub 的 SDK，所有客户端共用 |
 | `apps/cli` | `lumio` 命令行 |
-| `apps/hub` | 服务器：HTTP API、job 队列、定时调度、提议队列 |
+| `apps/hub` | HTTP、鉴权/审计、模块组装与跨模块协调 |
 | `apps/runtime` | 每台设备上的 daemon，领取 job 并调用 agent |
 | `apps/feishu-bot` | 飞书入口与通知 |
 | `apps/web` `apps/chrome-ext` `apps/mobile` | 后期客户端 |
@@ -54,7 +60,9 @@ curl -fsSL https://raw.githubusercontent.com/wicsp/Lumio/main/install.sh | sh -s
 
 只下载程序或指定版本：在安装脚本参数里使用 `--no-setup` 或 `--version vX.Y.Z`。
 后台服务、日志与手动安装见 [macOS](infra/launchd/README.md)、[Linux](infra/systemd/README.md)。
-数据可用任意 Markdown 编辑器编辑，Lumio 不管理编辑器配置。
+知识正文可用任意 Markdown 编辑器编辑；Task/Project 描述通过带版本副本编辑，状态与负责人通过 Lumio 修改。
+已有任务笔记需按[迁移与回退说明](docs/migration-v2.md)显式切换；启动不自动迁移数据。
+内置助手的模型配置与记忆命令见[助手说明](docs/assistant.md)。
 
 ## 源码开发
 
@@ -66,7 +74,8 @@ bun run schema:export  # 把契约导出为 JSON Schema（packages/schema/json/�
 
 ## 当前阶段
 
-P0 已完成：`lumio new paper`、`lumio new idea`、`lumio sync`，以及新的 vault 目录结构（ADR 0012）。
-真实 vault 已迁移到新目录（P0-7）。P1 已完成：本地查询、Hub、文件监听与自动提交、操作与提议框架、按引用导出与断链检查、给 AI 用的 skill。P2（执行器与派活）已设计完，从 P2-1 开始实现。
+四模块重构已在本分支实现：Knowledge、Work、Execution、Assistant 独立用例与存储端口，Hub 负责组合。
+保留现有可靠派活、离线交付和审批路径，增加数据库业务对象、JSONL/文件归档与可验证备份。
+实现和验收证据见 [R0-0](docs/tasks/R0-0-four-module-refactor.md)。真实数据切换、安装升级和发布不在自动测试中执行。
 
 文档入口：[`docs/README.md`](docs/README.md)。

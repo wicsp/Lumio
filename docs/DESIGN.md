@@ -5,7 +5,7 @@
 > 修改规则：改了 ADR 就要在同一个 PR 里同步改本文件（ADR 0015）。本文件与 ADR 不一致时，说明有一方没同步，告诉人类。
 
 > **已批准、实施中的重构**：[ADR 0025](adr/0025-four-module-architecture.md)（Accepted，2026-10-31 人类批准）规定知识、工作、执行、助手四模块与混合存储；
-> [实施说明 R0-0](tasks/R0-0-four-module-refactor.md)。以下规则描述现有路径，按切片落地后同步替换；必要契约由 Claude 起草，不迁移真实数据。
+> [实施说明 R0-0](tasks/R0-0-four-module-refactor.md)。本分支已实现四模块边界、业务存储、日志备份与显式迁移；验收证据见 R0-0。必要契约由 Claude 起草，不迁移真实数据；ADR 的合并状态在 PR 合并时更新。
 
 ## 0. 目标与非目标
 
@@ -17,22 +17,31 @@
 
 ## 1. 总体结构
 
+```mermaid
+flowchart TD
+  Clients[CLI / 后续 GUI 与 Bot] -->|HTTP + 身份| Hub[Hub：授权、审计、模块组装与跨模块协调]
+  Hub --> K[Knowledge：知识文档与链接]
+  Hub --> W[Work：Project / Task / 讨论 / 显式派活]
+  Hub --> E[Execution：Job / Routine / 设备能力]
+  Hub --> A[Assistant：对话 / 记忆 / 工具循环]
+  K -->|知识端口| S[Storage：文件、索引、SQLite、日志与产物适配]
+  W -->|工作端口| S
+  E -->|执行端口| S
+  A -->|助手端口| S
+  S --> MD[Markdown：知识正文]
+  S --> DB[SQLite：各模块拥有的结构化表]
+  S --> Files[JSONL / 原始日志 / 文件产物]
+  Hub <-->|HTTP + Job 协议 2| Runtime[Runtime：本地队列、引擎、可靠交付]
+  Editors[外部编辑器] --> MD
 ```
- 任意编辑器 / 以后的官方 GUI ── 直接编辑文件 ──┐
-                                                ▼
-┌──── 程序入口（可替换）────┐      ┌───────────────────────────────┐
-│ CLI │ 飞书 Bot │ Web/插件  │─API─▶│ Hub（程序写入的唯一裁判）       │
-└──────────────────────────┘令牌  │  校验 → 执行 AI 边界 → 写文件   │
-                                    │  监听文件变化 → 补全与索引      │
-                                    │  任务与轮次 · 例行任务 · 搜索   │
-                                    └───────▲───────────┬───────────┘
-      执行器主动连接、轮询               │           │ 自动提交
-                   ┌────────────────────────┘           ▼
-            ┌──────┴────────┐                vault 的 git（只做历史与备份，
-            │ 执行器@每台设备 │ 本地队列、定时、  .git 在同步目录之外）
-            │ 调用 agent CLI │ 待交回的结果
-            └───────────────┘
-```
+
+四个业务模块互不导入实现。每个模块内部由业务用例组织规则，通过注入的存储/模型/工具端口使用外部能力；
+Storage 实现持久化，Hub 完成组装和跨模块协调。共用一个 SQLite 文件是为本地事务服务，不表示各模块可以互读内部表。
+跨模块通过稳定 ID、ResourceRef 与公开接口协作，Work 与 Execution 的关联由 Hub 在同一事务内协调。
+
+Foundation 提供 ID 和错误；Platform 提供终端、诊断、下载与升级。Schema 是唯一格式来源，API Client 只负责 HTTP。
+网络和进程能力留在应用/适配器中，领域包不做 I/O。Runtime 是独立应用，不能 import Hub，也不要求有 Task 或知识目录。
+
 
 - **vault 是知识的唯一事实来源**：一个装 Markdown + YAML frontmatter 的普通文件夹，任何编辑器都能改；Lumio 不依赖、不读写任何编辑器的配置。
   用外部编辑器改文件是一直支持但最不正式的用法，正式的编辑方式以后由官方 GUI 提供（ADR 0001、0007、0022）。默认位置 `~/.config/lumio/vault`，安装时可改。
@@ -70,6 +79,20 @@
 依赖方向由 `bun run lint:deps` 强制：`packages` 不依赖 `apps`，`apps` 之间不互相依赖；四个业务包不导入其他业务包实现或具体适配器，禁止文件/网络/SQLite/进程 I/O；应用不依赖 Core 兼容汇总入口（ADR 0025）。
 
 ## 3. 数据
+
+### 3.0 存储权威与备份
+
+| 数据 | 权威来源 | 其他格式的作用 |
+|---|---|---|
+| 知识正文、知识元数据、人的链接 | vault 中 Markdown + frontmatter | index.sqlite / refs.bib 可重建 |
+| Project / Task / 描述 / 讨论 / 依赖 / 派活关联 | hub.sqlite 中 Work 表 | 描述采用 Markdown 语法；外部编辑的是带版本副本，状态和负责人经 Lumio 修改 |
+| Job / Routine / 输入计划 / 设备能力 | hub.sqlite 中 Execution 表 | Runtime 本地 SQLite 保存队列、结果与归档待交付记录 |
+| 助手对话 / 轮次 / 工具状态 / 显式记忆 | hub.sqlite 中 Assistant 表 | 模型供应商的会话不是本地权威 |
+| 执行过程、原始输出、附件 | 有格式版本的 JSONL / 原始日志 / 文件 | SQLite 保存归属、摘要、大小和 staged/ready 状态；日志不决定任务当前状态 |
+
+正文用 Markdown 语法，不意味着每个业务对象必须对应一份知识文件。JSON 用于配置、快照和接口，JSONL 用于逐行过程记录与分段交付；
+二者都不作为反向修改 Task 状态的控制入口。知识目录单独备份；业务库必须连同其引用文件做一致性快照并验证清单，不能删除重建。
+旧 Task/Project/Routine Markdown 只在迁移前走兼容路径，切换后是保留原文和链接的历史来源；不与数据库双向同步。
 
 ### 3.1 vault 目录（ADR 0012）
 
@@ -240,7 +263,7 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
   不经过 shell；command 类型只执行登记过的程序；密钥在执行节点上才解析。
 - **不做**：跨设备调用工具、每一轮单独的权限、上下文管理、模型路由；留给以后自研的 agent（作为执行器里的一种引擎接入）。
 
-### 4.7 数据库 Work 与内置 Assistant（ADR 0025，分支内逐步实现）
+### 4.7 数据库 Work 与内置 Assistant（ADR 0025，分支内实现）
 
 - `/v2/work/commands` 使用 `WorkCommandRequest` 与 `WorkCommandResult`；Task/Project 查询返回严格业务对象，不含路径。
 - Task/Project 描述在数据库中；状态、负责人、依赖、讨论、执行关联各有明确归属。修改负责人或保存描述不隐式派活。
@@ -261,7 +284,8 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
 - Runtime 与离线准备也持有独占状态租约。`prepare-migration --state-dir <目录>` 只在执行器停止且无待执行/交付数据时清空派生计划缓存。
   迁移仅导入已处理历史关联与已经暂停的 Routine，不生成 Job 或重放工具/审批；下一轮取历史最高轮次加一。
 - `/v2/assistant/chat` 支持 JSON 与 NDJSON；对话、轮次、工具调用和记忆归 Assistant。CLI 用 `chat`、`chat list/show`。
-  模型和工具通过注入接口提供；当前基础接入不选择默认模型供应商，模型/工具生产适配随 R0 后续切片完成。
+  模型和工具通过注入接口提供。Hub 的兼容 Chat Completions 适配器须配置 LUMIO_ASSISTANT_BASE_URL 与 LUMIO_ASSISTANT_MODEL，凭据仅运行时环境注入；无默认供应商或模型。支持 SSE 与 JSON 响应，限制响应字节/时限，工具仅在完整响应校验后交付，不自动重试。
+  模型设置和显式记忆见 [助手使用说明](assistant.md)；默认不启用生产业务工具或新增委托权限。
 - `chat memory list/remember/forget` 经严格 v2 记忆命令显式管理偏好；仅 human 可操作自己拥有的记忆，行、幂等回执和成功审计同事务提交。遗忘会清除活动记忆和回执中的内容，重放旧请求返回 tombstone；既有对话和历史备份独立保留。
 - 工具执行使用持久的独立 agent 身份，human 仅作为对话所有者；默认没有生产工具或来源读取适配器。带来源记忆在保存、重放与使用时以 agent 权限重查，无法访问或私密内容不交付模型。
 - 助手持久化工具调用状态；中断或写操作结果不明标为 unknown，不自动重放。最终空回复明确失败，工具调用中间消息可无文本。

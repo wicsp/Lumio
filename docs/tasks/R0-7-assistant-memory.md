@@ -99,7 +99,7 @@ export type AssistantMemoryCommandResult = z.infer<typeof AssistantMemoryCommand
 ## 验收
 
 - 主 agent 运行 `bun test packages/schema/test/v2-contracts.test.ts` 中 "Assistant memory commands" describe block 全部通过。
-- `bun run schema:export` 生成 `assistant-memory-command-request.schema.json` 和 `assistant-memory-command-result.schema.json`，无手动编辑。
+- `bun run schema:export` 生成 `assistant-memory-command-request.json` 和 `assistant-memory-command-result.json`，无手动编辑。
 - 依赖检查（`bun run lint:deps`）通过：`packages/schema` 仍只依赖 zod。
 - 应用实现与权限验证为独立后续切片。
 

@@ -4,6 +4,7 @@ import { readFile, mkdir, writeFile, rename, rm } from "node:fs/promises";
 import { RuntimeName } from "@lumio/schema";
 import { homedir, hostname } from "node:os";
 import { join, resolve } from "node:path";
+import { modelConfiguration } from "./assistant-model.ts";
 import { HubError } from "./errors.ts";
 
 export function stateDirectory(env: NodeJS.ProcessEnv = process.env): string {
@@ -29,6 +30,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env) {
     } catch { throw new HubError("INVALID", "LUMIO_PUBLIC_URL 必须是无凭据、查询或片段的 HTTP(S) 地址"); }
   }
   return {
+    assistantModel: modelConfiguration(env),
     localRuntime: undefined as string | undefined,
     publicUrl,
     autosaveIdle,

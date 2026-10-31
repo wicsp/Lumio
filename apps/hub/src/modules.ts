@@ -10,6 +10,7 @@ import type { HubConfig } from "./config.ts";
 import type { HubStore } from "./store.ts";
 import { Jobs } from "./jobs.ts";
 import { HubError } from "./errors.ts";
+import { configuredModel } from "./assistant-model.ts";
 import { workdirInVault } from "./execution-policy.ts";
 
 /** Composition only: domain rules belong to their modules; adapters share one transaction-capable database. */
@@ -47,9 +48,7 @@ export class BusinessModules {
       dispatch: (task, input, round, to) => this.dispatch(task, input, round, to, now()),
       cancel: (task) => { const job = jobs.activeForTask(task); if (job) jobs.cancel(job.spec.id); },
     });
-    this.assistant = new AssistantService(new SqliteAssistantStore(store.db), options.assistantModel ?? {
-      async complete() { throw new Error("Assistant model not configured"); },
-    }, options.assistantTools ?? [], { now, id, ...(options.assistantTools?.length ? { toolActor: store.assistantActor() } : {}) });
+    this.assistant = new AssistantService(new SqliteAssistantStore(store.db), options.assistantModel ?? configuredModel(config.assistantModel), options.assistantTools ?? [], { now, id, ...(options.assistantTools?.length ? { toolActor: store.assistantActor() } : {}) });
     this.assistant.recover();
     this.reconcile();
     this.timer = setInterval(() => { try { this.reconcile(); } catch { /* Persisted pending results remain for the next pass. */ } }, 1000);
