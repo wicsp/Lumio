@@ -2,7 +2,7 @@
 
 - 依据：ADR 0025 第 1、3、4、5、8 节，已批准的 R0-1 ExecutionRoutine 契约。
 - 范围：Execution 用例及其必要 Storage、Hub、API Client、CLI 调用方；不修改 schema 或 Runtime 协议。
-- 状态：分支内完成，等待最终交叉 review 与合并。
+- 状态：分支内完成，交叉 review 已完成，待 PR 合并。
 
 ## 交付
 

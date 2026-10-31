@@ -1,7 +1,11 @@
+import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { backupBusiness, restoreBusiness } from "../src/backup.ts";
 import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
 import { AssistantService, type AssistantModel, type AssistantTool } from "@lumio/assistant";
-import { AssistantChatResult, AssistantConversation, AssistantTurn, AssistantToolCall, type AssistantEvent } from "@lumio/schema";
+import { AssistantModelRequest, AssistantChatResult, AssistantConversation, AssistantTurn, AssistantToolCall, type AssistantEvent } from "@lumio/schema";
 import { SqliteAssistantStore } from "../src/assistant.ts";
 
 const owner = "act_00000000000000000000000001", other = "act_00000000000000000000000002";
@@ -149,5 +153,85 @@ test("memory mutation, receipt and audit commit together, and explicit tool auth
     expect(await f.service.memories(owner)).toHaveLength(1); expect(models).toBe(0);
     expect(() => new AssistantService(f.store, model, [tool], { ...f.context, toolActor: undefined })).toThrow("agent 身份");
     expect(() => new AssistantService(f.store, model, [tool], { ...f.context, toolActor: { ...toolActor, role: "human" } })).toThrow("不能继承人类权限");
+  } finally { db.close(); }
+});
+
+
+test("each model request has an immutable context and revocations apply again between tool steps", async () => {
+  const db = new Database(":memory:"); let visible = true, models = 0;
+  const model: AssistantModel = { async complete(input) {
+    models++;
+    const row = db.query<{ request: string; tool_actor: string }, [number]>("SELECT request,tool_actor FROM assistant_contexts WHERE step=?").get(models - 1)!;
+    expect(AssistantModelRequest.parse(JSON.parse(row.request))).toEqual(input); expect(row.tool_actor).toBe(toolActor.id);
+    if (models === 1) { expect(input.messages[0]!.content).toContain("需撤回的合成记忆"); visible = false; return { content: "", tool_calls: [{ id: "fixture-call", name: "fixture_read", args: {} }] }; }
+    expect(input.messages[0]!.content).not.toContain("需撤回的合成记忆"); return { content: "完成", tool_calls: [] };
+  } };
+  const tool: AssistantTool = { spec: { name: "fixture_read", description: "synthetic", input_schema: {} }, effect: "read", async execute() { return {}; } };
+  try {
+    const f = fixture(db, model, [tool]); const service = new AssistantService(f.store, model, [tool], { ...f.context, canRead: async () => visible });
+    await service.remember(owner, "需撤回的合成记忆", [{ module: "knowledge", id: "pap_00000000000000000000000001" }]);
+    const request = { request_id: "synthetic-context-loop", message: "合成问题" }; const result = await service.chat(request, owner); expect(result.turn.status).toBe("done");
+    const rows = db.query<{ request: string }, []>("SELECT request FROM assistant_contexts ORDER BY step").all(); expect(rows).toHaveLength(2);
+    expect(AssistantModelRequest.parse(JSON.parse(rows[0]!.request)).messages).toHaveLength(2);
+    expect(AssistantModelRequest.parse(JSON.parse(rows[1]!.request)).messages).toHaveLength(4);
+    expect(() => f.store.putContext(result.turn.id, 0, inputForSnapshot(), time, toolActor.id)).toThrow();
+    const restarted = new AssistantService(f.store, model, [tool], f.context); restarted.recover();
+    expect(await restarted.chat(request, owner)).toEqual(result); expect(models).toBe(2);
+  } finally { db.close(); }
+});
+function inputForSnapshot(): AssistantModelRequest { return { messages: [{ role: "user", content: "合成" }], tools: [] }; }
+
+test("a context persistence failure prevents the network/model invocation", async () => {
+  const db = new Database(":memory:"); let models = 0;
+  try {
+    const f = fixture(db, { async complete() { models++; return { content: "不应发生", tool_calls: [] }; } });
+    db.exec("CREATE TRIGGER fail_context BEFORE INSERT ON assistant_contexts BEGIN SELECT RAISE(FAIL,'synthetic context failure'); END");
+    const result = await f.service.chat({ request_id: "synthetic-context-fail", message: "合成" }, owner);
+    expect(result.turn.status).toBe("failed"); expect(models).toBe(0); expect(db.query("SELECT * FROM assistant_contexts").all()).toEqual([]);
+  } finally { db.close(); }
+});
+
+test("business snapshot and restore retain typed assistant contexts with their conversations", async () => {
+  const root = await mkdtemp(join(tmpdir(), "lumio-context-backup-")), state = join(root, "state"); await mkdir(state);
+  const db = new Database(join(state, "hub.sqlite"));
+  try {
+    const f = fixture(db, { async complete() { return { content: "合成回答", tool_calls: [] }; } });
+    const result = await f.service.chat({ request_id: "synthetic-context-backup", message: "合成备份" }, owner); expect(result.turn.status).toBe("done");
+    await backupBusiness(state, join(root, "backup")); await restoreBusiness(join(root, "backup"), join(root, "restore"));
+    const restored = new Database(join(root, "restore", "hub.sqlite"), { readonly: true });
+    try {
+      const context = restored.query<{ request: string }, [string]>("SELECT request FROM assistant_contexts WHERE turn=?").get(result.turn.id)!;
+      expect(AssistantModelRequest.parse(JSON.parse(context.request)).messages.at(-1)?.content).toBe("合成备份");
+      expect(restored.query("SELECT owner FROM assistant_conversations WHERE id=?").get(result.conversation.id)).toEqual({ owner });
+    } finally { restored.close(); }
+  } finally { db.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+
+test("cancelling between tools settles unstarted calls and keeps the same receipt after recovery", async () => {
+  const db = new Database(":memory:"), controller = new AbortController(); let invoked = 0, models = 0;
+  const model: AssistantModel = { async complete() { models++; return { content: "", tool_calls: [{ id: "first", name: "fixture", args: {} }, { id: "second", name: "fixture", args: {} }] }; } };
+  const tool: AssistantTool = { spec: { name: "fixture", description: "synthetic", input_schema: {} }, effect: "read", async execute() { invoked++; controller.abort(); return {}; } };
+  try {
+    const f = fixture(db, model, [tool]), request = { request_id: "synthetic-between-tools", message: "合成取消" };
+    const result = await f.service.chat(request, owner, { signal: controller.signal }); expect(result.turn.status).toBe("cancelled"); expect(invoked).toBe(1);
+    expect(f.store.calls(result.turn.id).map(call => call.status)).toEqual(["succeeded", "failed"]);
+    expect(f.store.calls(result.turn.id)[1]!.error).toContain("未执行");
+    const restarted = new AssistantService(f.store, model, [tool], f.context); restarted.recover();
+    expect(await restarted.chat(request, owner)).toEqual(result); expect(models).toBe(1); expect(invoked).toBe(1);
+    // Repair older settled records that still contain a never-started prepared row without changing the turn.
+    const second = f.store.calls(result.turn.id)[1]!; f.store.putCall({ ...second, status: "prepared", finished: undefined, error: undefined }); restarted.recover();
+    expect(await restarted.chat(request, owner)).toEqual(result); expect(f.store.calls(result.turn.id)[1]!.status).toBe("failed");
+  } finally { db.close(); }
+});
+
+test("an uncertain write settles later prepared calls without invoking or replaying them", async () => {
+  const db = new Database(":memory:"); let invoked = 0;
+  const model: AssistantModel = { async complete() { return { content: "", tool_calls: [{ id: "first", name: "fixture", args: {} }, { id: "second", name: "fixture", args: {} }] }; } };
+  const tool: AssistantTool = { spec: { name: "fixture", description: "synthetic", input_schema: {} }, effect: "write", async execute() { invoked++; throw new Error("synthetic interrupted effect"); } };
+  try {
+    const f = fixture(db, model, [tool]), request = { request_id: "synthetic-unknown-pair", message: "合成写入" }; const result = await f.service.chat(request, owner);
+    expect(result.turn.status).toBe("unknown"); expect(f.store.calls(result.turn.id).map(call => call.status)).toEqual(["unknown", "failed"]);
+    const restarted = new AssistantService(f.store, model, [tool], f.context); restarted.recover(); expect(await restarted.chat(request, owner)).toEqual(result); expect(invoked).toBe(1);
   } finally { db.close(); }
 });

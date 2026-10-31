@@ -1,6 +1,6 @@
 # R0-0 四模块重构：审批、切片与迁移验收
 
-- 状态：实施中；2026-10-31 人类批准 ADR 0025，并授权范围内必要契约细化与代码重构直至完成。
+- 状态：分支内实现、合成验收与交叉 review 完成，待 PR 合并；2026-10-31 人类批准 ADR 0025，并授权范围内必要契约细化与代码重构直至完成。
 - 负责：后端重构 Codex；schema 由 Claude 起草、人类批准；客户端由对应负责人修改；交叉 review 按 AGENTS.md。
 - 相关 ADR：[0025](../adr/0025-four-module-architecture.md)（Accepted，全节）。
 - 当前规则：[`DESIGN.md`](../DESIGN.md)。按切片落地同步规则，不自动迁移真实数据。
@@ -11,7 +11,7 @@
 知识文档保留 Markdown，Task/Project 等结构化状态由数据库负责，详细过程使用 JSONL/文件。
 四个业务模块共用 Hub，Runtime 保持独立。保留可靠执行、权限与隐私边界。
 
-## 本次审批前交付
+## 审批与契约记录
 
 - [x] Proposed ADR 0025：模块所有权、依赖、存储、编辑、事务、日志、权限、契约与迁移要求。
 - [x] DESIGN 标明存在未生效提案，不用目标架构覆盖现行规则。
@@ -24,16 +24,21 @@
 
 ## 实施进度（2026-11-01，分支内）
 
-| 能力 | 当前证据 | 尚待完成 |
+| 能力 | 实现与验收证据 | 明确边界 |
 |---|---|---|
-| 契约 | R0-1；四领域和文件格式严格契约、旧格式兼容测试与导出 | 后续发现的问题继续按批准范围修正 |
-| Work | 独立规则、SQLite 表、幂等/版本/关系约束；Hub 与 CLI 实际接入，无知识目录可派活与收结果 | 旧数据迁移、备份、与独立 Routine 的协调 |
-| Assistant | 自有对话和 Agent 循环、SQLite、工具记录/恢复、记忆过滤；Hub/CLI JSON 与 NDJSON | 生产模型/工具适配、记忆入口与完整运行验收 |
-| Knowledge | 解析/补全/引用/创建与查询用例提取；文件与索引在 Storage，应用已改用明确模块 | 最终独立性验收与兼容导出映射 |
-| Execution | Job 生命周期与存储分离；数据库 Routine、历史输入快照与 CLI/HTTP；无 Knowledge/Task 的真实 Runtime 离线验收；原协议保持 | 日志/产物归档、最终恢复验收 |
-| 公共与迁移 | 领域隔离；JSONL/文件归档与恢复；配套快照备份；Hub/Runtime 租约；dry-run/apply/来源归档/全局退出旧控制与回退说明 | 安装维护共用代码、最终组合验收 |
+| 契约 | R0-1 与 R0-7 Claude 起草；四领域、文件、备份/迁移和显式记忆严格契约；生成物由 schema:export 导出 | 旧 v1 形状与 Job 协议 2 保持；数据库对象不伪装成笔记 |
+| Work | 独立规则、SQLite 表、幂等/版本/关系约束；Hub/CLI 实际接入；无知识目录创建、派活、收结果与重启通过 | 状态/负责人和执行分离；结果只追加一次进展，不自动完成任务 |
+| Assistant | 对话/循环、SQLite、工具记录与恢复、显式记忆、不可变模型请求快照；HTTP/CLI JSON 与 NDJSON；兼容模型适配器及本地假服务验收 | 不预设供应商或模型；默认不启用生产业务工具、来源适配器、新委托或私密访问；工具注入使用 agent 身份 |
+| Knowledge | 解析/补全/引用/创建与查询用例在独立模块，文件与索引适配在 Storage；知识测试与 CLI/Hub 兼容通过 | Markdown 权威与外部编辑保留，不因数据库业务改变人的链接 |
+| Execution | Job、设备登记与 Routine 规则；历史输入计划与 lease；独立真实 Runtime + 假引擎的离线交付、取消/超时/失联/unknown 验收 | 不要求 Task、Knowledge；状态不明不自动重跑 |
+| 公共与迁移 | Foundation/Platform 提取；依赖隔离；分段 JSONL、文件归档、完整业务快照/恢复；租约；dry-run/apply/来源原字节归档与退出旧控制 | 只用合成数据；真实切换、升级安装和发布单独安排 |
 
-交叉 review 与处理记录：[2026-11-01](../reviews/2026-11-01-r0-foundations.md)。未把上述进度标为全部完成。
+切片说明：[公共维护](R0-3-platform-maintenance.md)、[Routine](R0-5-execution-routines.md)、[设备登记](R0-5-runtime-registry.md)、
+[文件与备份](R0-6-storage-files.md)、[显式记忆](R0-7-assistant-memory.md)、[模型适配](R0-7-model-adapter.md)、
+[上下文记录](R0-7-assistant-context.md)、[迁移](R0-8-legacy-import.md)。
+
+交叉 review：[基础用例](../reviews/2026-11-01-r0-foundations.md)、[执行与归档](../reviews/2026-11-01-r0-execution-storage.md)。
+最新交叉审查与修正见 [最终 review](../reviews/2026-11-01-r0-final.md)。最终组合检查与构建证据见下方验收记录。ADR 状态在 PR 合并时更新。
 
 ## 后续切片
 
@@ -130,4 +135,21 @@
 
 ## 本次不做
 
-审批前不动 schema、运行实现或生成物，不迁移真实数据，不升级已安装服务，不引入依赖，不把目标方案标为已实现。
+不迁移真实数据、不升级已安装服务、不发布或合并、不新增第三方依赖，不自动开放助手工具/委托/私密权限。
+本分支完成实现与合成验收，真实环境切换按迁移说明单独执行。
+
+
+## 最终验收记录（2026-11-01）
+
+- Bun 1.3.13；最终 `LUMIO_LIVE=0 bun run check`：**809 pass、3 skip、0 fail**，812 tests / 94 files，包含类型与依赖检查。
+  跳过项为 opt-in 的真实论文服务、两个需要真实终端的交互测试；未把跳过当作已验证。
+- Work 无知识目录、Execution 无 Task 的 Hub/Runtime 真实进程与假引擎测试通过；Knowledge、Assistant 独立测试与全部旧路径回归通过。
+- 日志损坏/截断、独立归档 outbox、完整业务备份/恢复、迁移事务/重复导入/源变化/旧控制退出与回退均用合成数据通过。
+- Assistant 定向 13 pass，包括逐次模型上下文/来源撤回、快照写入失败、备份恢复、工具间取消与 unknown 不重放；模型适配定向 7 pass。
+- `schema:export` 从 Zod 生成，无手改生成物；`git diff --check` 与本次 17 份文档的本地链接核对通过。
+- CLI、Hub、Runtime 三个原生程序编译到临时目录；按现有 macOS 测试流程为 Nix Bun 产物作 ad-hoc 签名后，三者 `--version` 均成功（0.0.0-dev）。
+  未安装或替换用户程序，未启动实际服务。
+- 交叉 review 与一项已复现并修正的恢复缺陷见 [最终报告](../reviews/2026-11-01-r0-final.md)。review 的未覆盖范围如实保留，不宣称穷尽审计。
+- 变更涉及 knowledge/work/execution/assistant、storage/foundation/platform/core、schema/api-client，以及 cli/hub/runtime；
+  新外部依赖为零，已有解析依赖随实现搬迁；新增内部 workspace 依赖用于明确模块所有权，替代应用依赖 Core 汇总入口。
+- 不读取或迁移真实 vault、不调用真实模型/agent、不升级已安装服务。PR 不自动合并或发布；真实切换按 migration-v2.md 单独安排。

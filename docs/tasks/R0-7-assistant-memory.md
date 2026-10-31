@@ -4,7 +4,7 @@
 
 **契约连带范围：** schema 与生成物、Assistant 端口/用例、Storage、Hub 路由/身份/审计、API Client、CLI；仅为显式记忆命令和身份隔离所需调用方。
 
-**目标：** 为 Assistant 模块添加最小化严格 v2 记忆命令契约，只接受人类显式偏好/事实；不做应用实现或授权细节。
+**目标：** 为 Assistant 模块添加最小化严格 v2 记忆命令契约，只接受人类显式偏好/事实；必要调用方已按现有 human-only 规则接入，不新增委托权限。
 
 ## 背景（ADR 0025 第 7 节）
 
@@ -93,7 +93,7 @@ export type AssistantMemoryCommandResult = z.infer<typeof AssistantMemoryCommand
 ## 非目标与约束
 
 - **只接受人类显式记忆**：不提供从对话自动提取、agent 调用权限、私密检索或模型选择。
-- **不实现应用逻辑**：Hub 路由、数据库持久化、权限校验（仅 human）、sources 默认值注入、owner/private/revision 生成留给后续应用切片。
+- **契约起草时不写应用代码**；连带实现已接入 Hub 路由、数据库持久化、human-only 校验与服务器字段生成，见本文件末尾验证记录。
 - **不修改已有 v1 契约、Job 协议 2、其他模块的形状或现有 ID 前缀**。
 
 ## 验收

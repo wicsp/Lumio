@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import type { Database } from "bun:sqlite";
-import { AssistantConversation, AssistantMessage, AssistantTurn, AssistantToolCall, AssistantMemory, AssistantMemoryCommandResult } from "@lumio/schema";
+import { AssistantConversation, AssistantMessage, AssistantTurn, AssistantToolCall, AssistantMemory, AssistantMemoryCommandResult, AssistantModelRequest, Timestamp, idOf } from "@lumio/schema";
 import type { AssistantStore } from "@lumio/assistant";
+import { StorageError } from "./errors.ts";
 
 /** Typed Assistant persistence; indexed ownership and lifecycle fields are committed with validated records. */
 export class SqliteAssistantStore implements AssistantStore {
@@ -23,6 +24,9 @@ export class SqliteAssistantStore implements AssistantStore {
         turn TEXT NOT NULL REFERENCES assistant_turns(id),PRIMARY KEY(owner,request));
       CREATE TABLE IF NOT EXISTS assistant_memories(id TEXT PRIMARY KEY,owner TEXT NOT NULL,record TEXT NOT NULL CHECK(json_valid(record)));
       CREATE INDEX IF NOT EXISTS assistant_memories_owner ON assistant_memories(owner);
+      CREATE TABLE IF NOT EXISTS assistant_contexts(turn TEXT NOT NULL REFERENCES assistant_turns(id),step INTEGER NOT NULL CHECK(step>=0),
+        request TEXT NOT NULL CHECK(json_valid(request)),created TEXT NOT NULL,tool_actor TEXT,PRIMARY KEY(turn,step));
+      INSERT OR IGNORE INTO platform_migrations(name,applied) VALUES('assistant-3',strftime('%Y-%m-%dT%H:%M:%fZ','now'));
       CREATE TABLE IF NOT EXISTS assistant_memory_requests(owner TEXT NOT NULL,request TEXT NOT NULL,operation_hash TEXT NOT NULL,
         result TEXT NOT NULL CHECK(json_valid(result)),PRIMARY KEY(owner,request));
       INSERT OR IGNORE INTO platform_migrations(name,applied) VALUES('assistant-2',strftime('%Y-%m-%dT%H:%M:%fZ','now'));
@@ -72,6 +76,11 @@ export class SqliteAssistantStore implements AssistantStore {
   }
   putReceipt(owner: string, request: string, input: string, turn: string): void {
     this.db.query("INSERT INTO assistant_requests(owner,request,input,turn) VALUES(?,?,?,?)").run(owner, request, input, turn);
+  }
+  putContext(turn: string, step: number, input: AssistantModelRequest, created: string, toolActor?: string): void {
+    if (!Number.isSafeInteger(step) || step < 0) throw new StorageError("INVALID", "模型请求序号不合法");
+    this.db.query("INSERT INTO assistant_contexts(turn,step,request,created,tool_actor) VALUES(?,?,?,?,?)")
+      .run(idOf("turn").parse(turn), step, JSON.stringify(AssistantModelRequest.parse(input)), Timestamp.parse(created), toolActor === undefined ? null : idOf("act").parse(toolActor));
   }
   memories(owner: string): AssistantMemory[] {
     return this.db.query<{ record: string }, [string]>("SELECT record FROM assistant_memories WHERE owner=? ORDER BY rowid").all(owner).map((row) => AssistantMemory.parse(JSON.parse(row.record)));

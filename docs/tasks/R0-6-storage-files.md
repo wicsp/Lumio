@@ -2,7 +2,7 @@
 
 - 依据：ADR 0025 第 3、5、6、8 节；已批准的 RunLogEvent、StoredArtifact、BackupManifest。
 - 范围：先在 Storage 完成日志/文件/备份，再接入 Hub、Runtime、客户端必要调用方；无新协议版本。
-- 状态：实施中。不读取真实数据，不触碰已安装服务。
+- 状态：分支内实现并验证。不读取真实数据，不触碰已安装服务。
 
 ## 要求
 

@@ -73,7 +73,7 @@ Foundation 提供 ID 和错误；Platform 提供终端、诊断、下载与升�
 | `packages/api-client` | 调用 Hub 的 SDK | schema |
 | `apps/cli` | `lumio` 命令行；联网获取论文元数据、本地知识模式、Hub 客户端 | api-client, knowledge, storage, foundation, platform, schema |
 | `apps/hub` | API、模块组装、跨模块协调、身份与旧路径兼容 | 业务包、storage、foundation、platform、schema |
-| `apps/runtime` | 设备 daemon，与 Hub 只走 HTTP | execution 的纯计划能力、platform、schema |
+| `apps/runtime` | 设备 daemon，与 Hub 只走 HTTP | execution 的纯计划能力、storage 的日志适配、foundation、platform、schema |
 | `apps/feishu-bot`、`apps/web` 等 | 各个客户端 | api-client |
 
 依赖方向由 `bun run lint:deps` 强制：`packages` 不依赖 `apps`，`apps` 之间不互相依赖；四个业务包不导入其他业务包实现或具体适配器，禁止文件/网络/SQLite/进程 I/O；应用不依赖 Core 兼容汇总入口（ADR 0025）。
@@ -286,8 +286,9 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
 - `/v2/assistant/chat` 支持 JSON 与 NDJSON；对话、轮次、工具调用和记忆归 Assistant。CLI 用 `chat`、`chat list/show`。
   模型和工具通过注入接口提供。Hub 的兼容 Chat Completions 适配器须配置 LUMIO_ASSISTANT_BASE_URL 与 LUMIO_ASSISTANT_MODEL，凭据仅运行时环境注入；无默认供应商或模型。支持 SSE 与 JSON 响应，限制响应字节/时限，工具仅在完整响应校验后交付，不自动重试。
   模型设置和显式记忆见 [助手使用说明](assistant.md)；默认不启用生产业务工具或新增委托权限。
-- `chat memory list/remember/forget` 经严格 v2 记忆命令显式管理偏好；仅 human 可操作自己拥有的记忆，行、幂等回执和成功审计同事务提交。遗忘会清除活动记忆和回执中的内容，重放旧请求返回 tombstone；既有对话和历史备份独立保留。
+- `chat memory list/remember/forget` 经严格 v2 记忆命令显式管理偏好；仅 human 可操作自己拥有的记忆，行、幂等回执和成功审计同事务提交。遗忘会清除活动记忆和回执中的内容，重放旧请求返回 tombstone；既有对话、模型请求快照和历史备份独立保留。
 - 工具执行使用持久的独立 agent 身份，human 仅作为对话所有者；默认没有生产工具或来源读取适配器。带来源记忆在保存、重放与使用时以 agent 权限重查，无法访问或私密内容不交付模型。
+- 每次模型调用前以既有 AssistantModelRequest 保存不可变请求快照、序号、时间与工具 agent；写入失败不调用模型。快照是准备调用的记录，不代表远端已收到，不用于自动重放，也不提供绕过来源权限的读取接口。每次模型请求前重新筛选记忆。
 - 助手持久化工具调用状态；中断或写操作结果不明标为 unknown，不自动重放。最终空回复明确失败，工具调用中间消息可无文本。
 - 新 v2 工作与助手入口目前仅 human 可访问，不自动放宽 agent/runtime 权限；搜索来源与私密规则继续适用。
 
