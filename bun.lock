@@ -57,6 +57,14 @@
         "@lumio/storage": "workspace:*",
       },
     },
+    "apps/web": {
+      "name": "@lumio/web",
+      "version": "0.0.0",
+      "dependencies": {
+        "@lumio/api-client": "workspace:*",
+        "@lumio/schema": "workspace:*",
+      },
+    },
     "packages/api-client": {
       "name": "@lumio/api-client",
       "version": "0.0.0",
@@ -171,6 +179,8 @@
     "@lumio/schema": ["@lumio/schema@workspace:packages/schema"],
 
     "@lumio/storage": ["@lumio/storage@workspace:packages/storage"],
+
+    "@lumio/web": ["@lumio/web@workspace:apps/web"],
 
     "@lumio/work": ["@lumio/work@workspace:packages/work"],
 

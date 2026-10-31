@@ -19,7 +19,7 @@
 
 ```mermaid
 flowchart TD
-  Clients[CLI / 后续 GUI 与 Bot] -->|HTTP + 身份| Hub[Hub：授权、审计、模块组装与跨模块协调]
+  Clients[CLI / Web GUI / 后续 Bot] -->|HTTP + 身份| Hub[Hub：授权、审计、模块组装与跨模块协调]
   Hub --> K[Knowledge：知识文档与链接]
   Hub --> W[Work：Project / Task / 讨论 / 显式派活]
   Hub --> E[Execution：Job / Routine / 设备能力]
@@ -74,7 +74,8 @@ Foundation 提供 ID 和错误；Platform 提供终端、诊断、下载与升�
 | `apps/cli` | `lumio` 命令行；联网获取论文元数据、本地知识模式、Hub 客户端 | api-client, knowledge, storage, foundation, platform, schema |
 | `apps/hub` | API、模块组装、跨模块协调、身份与旧路径兼容 | 业务包、storage、foundation、platform、schema |
 | `apps/runtime` | 设备 daemon，与 Hub 只走 HTTP | execution 的纯计划能力、storage 的日志适配、foundation、platform、schema |
-| `apps/feishu-bot`、`apps/web` 等 | 各个客户端 | api-client |
+| `apps/web` | 中文 GUI、静态资源构建、同源固定 Hub 代理 | api-client, schema |
+| `apps/feishu-bot` 等 | 后续客户端 | api-client |
 
 依赖方向由 `bun run lint:deps` 强制：`packages` 不依赖 `apps`，`apps` 之间不互相依赖；四个业务包不导入其他业务包实现或具体适配器，禁止文件/网络/SQLite/进程 I/O；应用不依赖 Core 兼容汇总入口（ADR 0025）。
 
@@ -292,6 +293,32 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
 - 助手持久化工具调用状态；中断或写操作结果不明标为 unknown，不自动重放。最终空回复明确失败，工具调用中间消息可无文本。
 - 新 v2 工作与助手入口目前仅 human 可访问，不自动放宽 agent/runtime 权限；搜索来源与私密规则继续适用。
 
+### 4.8 Web 工作台（ADR 0026）
+
+本地 GUI，决定见 ADR 0026。
+
+- **技术栈**：原生 TypeScript、DOM 与 CSS，用 Bun 1.3.x 构建和提供服务。只依赖 `@lumio/api-client` 与 `@lumio/schema`。
+- **类型隔离**：浏览器端与服务端是两个独立的 TypeScript 程序，根 typecheck 同时检查两者。
+- **访问路径**：浏览器只请求同源 `/hub`，Web 服务转发到 `LUMIO_WEB_HUB_URL`（默认 `http://127.0.0.1:7420`），默认监听 `127.0.0.1:4317`。
+- **代理规则**：
+  - 用户路由按 GET/POST 白名单放行；runtime 注册、归档上传与邀请接口不可达。
+  - 只转发 `Authorization`、`Content-Type`、`Accept`。
+  - 校验 Host 与 Origin；经反向代理访问时，需配置 `LUMIO_WEB_ORIGINS`。
+  - 限制请求大小，拒绝跟随重定向，NDJSON 按流转发。
+  - 响应带 `no-store` 与限制性 CSP。
+- **会话**：先用 `lumio login-code --name web` 配对。凭据只在内存中，刷新后重新连接。收到 401 或登出时，中止所有请求并清空模块数据。不使用浏览器数据库，不直接访问 vault。
+- **模块**：
+  - 概览。
+  - Knowledge：只读，支持搜索、类型与链接视图，私有内容需显式开启。
+  - Project/Task：创建与更新表单；描述带 revision，用 textarea 加预览；评论与派发是独立的显式操作。
+  - Jobs：结果与待回答问题、取消；文件下载校验大小与 SHA。
+  - Routine：创建、编辑、暂停与恢复；设备列表。
+  - Assistant：流式会话与停止；可查看已保存状态，不重放；记忆显式管理。
+  - 审批：展示完整 argv、job、runtime 与理由，由用户显式接受或拒绝。
+- **渲染**：只支持安全的 Markdown 子集。转义原始 HTML，过滤不安全协议，不加载外部图片。沿用 source/private 过滤，并丢弃过期请求的结果。
+- **边界**：Web 不自行运行 agent，通过 Hub 显式派活。实施与验收不访问真实数据、不升级现有服务、不发布。
+
+
 ## 5. AI 协作与权限（ADR 0014、0016、0018）
 
 - **AI 只推荐，不写链接**（ADR 0018）：AI 可以查询、新建想法和论文笔记、重写 AI 区块；它检索已有笔记，在对话里告诉人
@@ -350,4 +377,4 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
 | P1 | 本地查询与 `export bib`；Hub（身份与令牌、查询 API、监听、自动提交、操作与提议框架）；按引用导出与断链检查；skill | ✅（pi 验收待补） |
 | P2 | 执行器与派活（P2-1 ✅、P2-2 ✅、P2-3 ✅、P2-4 ✅、P2-5 ✅、P2-6 ✅）：执行器登记、可靠的派活核心、三种 agent 适配器、任务笔记里的一问一答、例行任务、`lumio-runtime sudo` 审批的门；安装、配对与自检（P2-7 至 P2-9，ADR 0021、0022）；识别 Markdown 链接（P2-10） | 功能 ✅，安装与自检进行中 |
 | P3 | 飞书 Bot（派活、批准、通知）、审批模型、资产到期提醒、多维表格镜像；Chrome 插件入库论文 | |
-| P4 | 官方 GUI（Web：浏览、编辑笔记与任务、批准提议）、Docker / Nix 安装、对外 SDK、手机端 | |
+| P4 | Web GUI 提前按用户要求实现（知识只读、项目任务、执行、助手、审批）；知识写入、Docker / Nix、SDK 与原生手机端后续规划 | GUI 分支内实现与验收中 |

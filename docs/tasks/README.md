@@ -44,6 +44,8 @@
 
 P1 的设计决定见 ADR 0014、0016、0017、0018；P2 见 ADR 0019、0020、0021、0022 与修订后的 ADR 0005；契约见 `packages/schema/src/` 中的 `query.ts`、`actor.ts`、`operation.ts`、`proposal.ts`、`api.ts`。
 
+新增 GUI 切片：[P4-1 Web 工作台](P4-1-web-workbench.md)，连接现有四模块 Hub；验收仅使用合成数据。
+
 ## 等人类回来处理
 
 P2-9 用自检覆盖执行、会话续接、提问、取消和任务笔记写回。真实安装按下面的顺序验收：

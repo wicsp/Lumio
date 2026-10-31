@@ -24,7 +24,8 @@
 | `apps/hub` | HTTP、鉴权/审计、模块组装与跨模块协调 |
 | `apps/runtime` | 每台设备上的 daemon，领取 job 并调用 agent |
 | `apps/feishu-bot` | 飞书入口与通知 |
-| `apps/web` `apps/chrome-ext` `apps/mobile` | 后期客户端 |
+| `apps/web` | 中文 Web 工作台，连接 Hub，见[使用说明](apps/web/README.md) |
+| `apps/chrome-ext` `apps/mobile` | 后期客户端 |
 | `sdk/python` | 实验侧的薄客户端（后期），类型从导出的 JSON Schema 生成 |
 | `infra/` | Docker / Nix（后期） |
 
@@ -71,6 +72,8 @@ bun install
 bun run check          # 类型检查 + 依赖边界检查 + 测试
 bun run schema:export  # 把契约导出为 JSON Schema（packages/schema/json/）
 ```
+
+Web GUI 从源码启动：`cd apps/web` 后执行 `bun start`，打开 `http://127.0.0.1:4317`，使用 `lumio login-code --name web` 配对。配置见 [Web 使用说明](apps/web/README.md)。
 
 ## 当前阶段
 
