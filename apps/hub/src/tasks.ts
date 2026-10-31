@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join, relative, resolve } from "node:path";
+import { join } from "node:path";
+import { workdirInVault } from "./execution-policy.ts";
+export { workdirInVault } from "./execution-policy.ts";
 import { CoreError } from "@lumio/foundation";
 import { entityDirectory, humanPart, parseFrontmatter, setFields, upsertBlock } from "@lumio/knowledge";
 import { scanVault, showNote, type GitTrailers } from "@lumio/storage";
@@ -66,13 +67,6 @@ export function lineDiff(before: string, after: string): { added: string[]; remo
   return { added: added.filter((l) => l.trim()), removed: removed.filter((l) => l.trim()) };
 }
 
-
-/** workdir（可以 ~ 开头）是否落在笔记库里（ADR 0019：不允许）。 */
-export function workdirInVault(vault: string, workdir: string): boolean {
-  const expanded = workdir === "~" ? homedir() : workdir.startsWith("~/") ? join(homedir(), workdir.slice(2)) : workdir;
-  const inside = relative(resolve(vault), resolve(expanded));
-  return !inside || (!inside.startsWith("..") && !inside.startsWith("/"));
-}
 
 /** 未指定 device 时只使用 Hub 配置里的本机执行器。 */
 export function pickRuntime(store: HubStore, now: Date, engine: AgentRun["engine"], device: string | undefined, localRuntime?: string): RuntimeInfo {

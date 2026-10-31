@@ -1,5 +1,5 @@
 import { ClientInvite, ClientInviteRequest, ClientJoin, ClientJoinRequest, RuntimeInvite, RuntimeInviteRequest } from "@lumio/schema";
-import { WorkCommandRequest, WorkCommandResult, WorkTask, WorkTaskDetail, WorkProject,
+import { WorkCommandRequest, WorkCommandResult, WorkTask, WorkTaskDetail, WorkProject, ExecutionRoutine, ExecutionRoutineCommandRequest, ExecutionRoutineInfo,
   AssistantChatRequest, AssistantChatResult, AssistantConversation, AssistantConversationDetail, AssistantEvent, idOf } from "@lumio/schema";
 import { JobRun, Job, JobSpec, JobStatus, RoutineInfo, RuntimeName, RuntimeInfo, Actor, OperationRequest, OperationResult, Proposal, ProposalStatus, ApiError, CheckResult, LinksResult, NoteDetail, SearchResult, type ApiErrorCode, type NoteRef } from "@lumio/schema";
 
@@ -66,6 +66,9 @@ export function createClient(options: { url: string; token?: string; fetch?: typ
     workTask(id: string) { return request(`/v2/work/tasks/${validate(idOf("task"), id)}`, {}, WorkTaskDetail); },
     workProjects() { return request("/v2/work/projects", {}, WorkProject.array()); },
     workProject(id: string) { return request(`/v2/work/projects/${validate(idOf("prj"), id)}`, {}, WorkProject); },
+    executionCommand(input: ExecutionRoutineCommandRequest) { return request("/v2/execution/commands", {}, ExecutionRoutine, validate(ExecutionRoutineCommandRequest, input)); },
+    executionRoutines() { return request("/v2/execution/routines", {}, ExecutionRoutineInfo.array()); },
+    executionRoutine(id: string) { return request(`/v2/execution/routines/${validate(idOf("rtn"), id)}`, {}, ExecutionRoutine); },
     assistantChat(input: AssistantChatRequest) { return request("/v2/assistant/chat", {}, AssistantChatResult, validate(AssistantChatRequest, input)); },
     conversations() { return request("/v2/assistant/conversations", {}, AssistantConversation.array()); },
     conversation(id: string) { return request(`/v2/assistant/conversations/${validate(idOf("conv"), id)}`, {}, AssistantConversationDetail); },

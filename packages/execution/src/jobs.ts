@@ -17,7 +17,7 @@ export interface ExecutionStore {
   syncRuntime(actor: string, now: Date): void;
   transaction<T>(action: () => T): T;
 }
-export interface RoutineHooks { plans(actor: string): RoutineSpec[]; adopt(actor: string, id: string, now: Date): Job | undefined }
+export interface RoutineHooks { plans(actor: string): RoutineSpec[]; adopt(actor: string, id: string, now: Date, lease?: string): Job | undefined }
 export interface ExecutionContext { id(now: Date): string; lease(): string; now(): Date }
 export const SubmitJob = JobSpec.omit({ protocol_version: true, id: true, source: true, lease: true, created: true }).extend({
   runtime: RuntimeName, run: JobRun, workdir: JobSpec.shape.workdir.default("~"), timeout_seconds: JobSpec.shape.timeout_seconds.default(7200),
@@ -56,9 +56,9 @@ export class ExecutionJobs {
       return this.get(id);
     });
   }
-  private owned(actor: string, id: string, now = this.context.now()): Job {
+  private owned(actor: string, id: string, now = this.context.now(), lease?: string): Job {
     let job = this.store.get(id);
-    if (!job) job = this.routines?.adopt(actor, id, now);
+    if (!job) job = this.routines?.adopt(actor, id, now, lease);
     if (!job || job.spec.runtime !== actor) throw new ExecutionError("CONFLICT", "Job 与执行器不匹配");
     return Job.parse(job);
   }
@@ -71,7 +71,7 @@ export class ExecutionJobs {
   result(actor: string, input: JobResult): void {
     const result = JobResult.parse(input);
     this.store.transaction(() => {
-      const job = this.owned(actor, result.job);
+      const job = this.owned(actor, result.job, this.context.now(), result.lease);
       if (job.spec.lease !== result.lease || !job.assigned || (job.status === "cancelled" && result.status !== "cancelled")) throw new ExecutionError("CONFLICT", "Job lease 或指派状态不匹配");
       if (job.result) {
         if (JSON.stringify(job.result) !== JSON.stringify(result)) throw new ExecutionError("CONFLICT", "Job 已有不同的结果");

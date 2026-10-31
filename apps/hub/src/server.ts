@@ -85,7 +85,10 @@ export async function startHub(config: HubConfig, options: {
   let tasks: TaskRounds | undefined;
   let routines: Routines | undefined;
   let modules: BusinessModules | undefined;
-  const hooks: RoutineHooks = { plans: (actor) => routines?.plans(actor) ?? [], adopt: (actor, id, now) => routines?.adopt(actor, id, now) };
+  const hooks: RoutineHooks = {
+    plans: (actor) => [...(routines?.plans(actor) ?? []).filter((plan) => !modules?.routineStore.get(plan.routine)), ...(modules?.routines.plans(actor) ?? [])],
+    adopt: (actor, id, now, lease) => modules?.routines.adopt(actor, id, now, lease) ?? routines?.adopt(actor, id, now),
+  };
   try {
     const writes = new WriteCoordinator();
     vaultWatch = config.vault ? await startVaultWatch(config, { ...options.watch, log,
@@ -175,7 +178,8 @@ export async function startHub(config: HubConfig, options: {
             const response = await vaultWatch!.exclusive(() => handleOperation(request,
               route.operation,
               route.pattern.exec(url.pathname)?.[1], identity!, store, config, decide, { ...options.operations, tasks, routines, privileged,
-                isManagedTask: (id) => modules!.workStore.task(id) !== undefined }));
+                isManagedTask: (id) => modules!.workStore.task(id) !== undefined,
+                isManagedRoutine: (id) => modules!.routineStore.get(id) !== undefined }));
             status = response.status;
             return response;
           }

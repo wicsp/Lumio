@@ -1,20 +1,23 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { CoreError, newId } from "@lumio/foundation";
 import { parseAssignee, type AgentRun, type WorkTask } from "@lumio/schema";
 import { WorkService } from "@lumio/work";
 import { AssistantService, type AssistantModel, type AssistantTool } from "@lumio/assistant";
-import { SqliteWorkStore, SqliteAssistantStore } from "@lumio/storage";
+import { SqliteWorkStore, SqliteAssistantStore, SqliteRoutineStore } from "@lumio/storage";
+import { ExecutionRoutines } from "@lumio/execution";
 import type { HubConfig } from "./config.ts";
 import type { HubStore } from "./store.ts";
 import { Jobs } from "./jobs.ts";
 import { HubError } from "./errors.ts";
-import { workdirInVault } from "./tasks.ts";
+import { workdirInVault } from "./execution-policy.ts";
 
 /** Composition only: domain rules belong to their modules; adapters share one transaction-capable database. */
 export class BusinessModules {
   readonly workStore: SqliteWorkStore;
   readonly work: WorkService;
   readonly assistant: AssistantService;
+  readonly routineStore: SqliteRoutineStore;
+  readonly routines: ExecutionRoutines;
   private readonly stopped = new AbortController();
   private readonly timer: ReturnType<typeof setInterval>;
   readonly signal = this.stopped.signal;
@@ -24,6 +27,18 @@ export class BusinessModules {
     const now = options.now ?? (() => new Date());
     const id = (prefix: Parameters<typeof newId>[0]) => newId(prefix, now(), randomBytes);
     const jobs = new Jobs(store);
+    this.routineStore = new SqliteRoutineStore(store.db);
+    this.routines = new ExecutionRoutines(this.routineStore, jobs, {
+      now, id: () => id("rtn"), lease: () => randomBytes(32).toString("base64url"),
+      fingerprint: (value) => createHash("sha256").update(value).digest("hex"),
+      runtimes: (time) => store.runtimes(time), localRuntime: config.localRuntime,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      validateWorkdir: (runtime, workdir) => {
+        if (config.vault && runtime.registration.name === config.localRuntime && workdirInVault(config.vault, workdir)) {
+          throw new HubError("INVALID", "工作目录不能在知识库中");
+        }
+      },
+    });
     this.workStore = new SqliteWorkStore(store.db);
     this.work = new WorkService(this.workStore, { now, id,
       dispatch: (task, input, round, to) => this.dispatch(task, input, round, to, now()),

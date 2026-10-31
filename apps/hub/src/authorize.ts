@@ -8,7 +8,7 @@ export type QueryOperation = (typeof QUERY_OPERATIONS)[number];
 export const EXISTING_OPERATIONS = [...QUERY_OPERATIONS, "health", "operations", "actors", "proposals", "proposal.accept", "proposal.reject", "task.dispatch", "routine.followup", "routines", "exec.privileged"] as const;
 export const RUNTIME_OPERATIONS = ["runtime.register", "runtime.sync", "runtime.ack", "runtime.results", "runtimes", "runtime.privileged.status", "runtime.privileged.report"] as const;
 export const JOB_OPERATIONS = ["job.submit", "jobs", "job.show", "job.cancel"] as const;
-export const V2_OPERATIONS = ["work.read", "work.command", "assistant.read", "assistant.chat"] as const;
+export const V2_OPERATIONS = ["work.read", "work.command", "execution.read", "execution.command", "assistant.read", "assistant.chat"] as const;
 export interface AuthorizationRequest { operation: (typeof EXISTING_OPERATIONS)[number] | (typeof RUNTIME_OPERATIONS)[number] | (typeof JOB_OPERATIONS)[number] | (typeof V2_OPERATIONS)[number] | PairingOperation; includePrivate?: boolean }
 export type Decision = { result: "allow" } | { result: "deny"; reason: string } | { result: "needs_approval" };
 

@@ -2,7 +2,8 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ApiError, WorkCommandResult, WorkTaskDetail, AssistantChatResult, AssistantEvent, Job, type RuntimeRegistration } from "@lumio/schema";
+import { ApiError, WorkCommandResult, WorkTaskDetail, AssistantChatResult, AssistantEvent, Job, ExecutionRoutine, ExecutionRoutineInfo, RuntimeSync, type RuntimeRegistration } from "@lumio/schema";
+import { routineJobId } from "@lumio/execution";
 import { startHub } from "../src/server.ts";
 import { readConfig } from "../src/config.ts";
 import { HubStore } from "../src/store.ts";
@@ -78,10 +79,48 @@ test("v2 retains shared authorization, request validation, revision conflicts an
 test("all v2 routes obey the shared deny policy before reading bodies or exposing objects", async () => {
   await hub.stop(); hub = await startHub({ ...readConfig({ LUMIO_STATE_DIR: temp }), port: 0 }, { log() {}, authorize: () => ({ result: "deny", reason: "synthetic denial" }) });
   for (const route of V2_ROUTES) {
-    const path = route.path.replace("<id>", route.path.includes("conversations") ? "conv_00000000000000000000000001" : route.path.includes("projects") ? "prj_00000000000000000000000001" : "task_00000000000000000000000001");
+    const path = route.path.replace("<id>", route.path.includes("conversations") ? "conv_00000000000000000000000001" : route.path.includes("projects") ? "prj_00000000000000000000000001" : route.path.includes("routines") ? "rtn_00000000000000000000000001" : "task_00000000000000000000000001");
     const response = await request(path, route.method === "POST" ? {} : undefined);
     expect(response.status).toBe(403); expect(ApiError.parse(await response.json()).error.reason).toBe("synthetic denial");
   }
+});
+
+test("v2 Routine plans and historical results work without Knowledge or Task, preserve protocol 2 and refuse agent writes", async () => {
+  const body = { request_id: "synthetic-routine-0001", operation: { op: "execution.routine.create", args: { title: "合成例行工作", description: "第一版", schedule: "* * * * *", timezone: "UTC", assignee: "pi@server" } } };
+  expect((await request("/v2/execution/commands", body, agent)).status).toBe(403);
+  const created = ExecutionRoutine.parse(await (await request("/v2/execution/commands", body)).json());
+  expect(ExecutionRoutine.parse(await (await request("/v2/execution/commands", body)).json())).toEqual(created);
+  const first = RuntimeSync.parse(await (await request("/v1/runtime/sync", { running: [], queued: [], outbox: 0 }, runtime)).json());
+  expect(first.jobs).toEqual([]); expect(first.routines).toHaveLength(1);
+  const old = first.routines[0]!;
+  const changed = { request_id: "synthetic-routine-0002", operation: { op: "execution.routine.update", args: { routine: created.id, expected_revision: 1, patch: { description: "第二版" } } } };
+  expect((await request("/v2/execution/commands", changed)).status).toBe(200);
+  const sync = RuntimeSync.parse(await (await request("/v1/runtime/sync", { running: [], queued: [], outbox: 0 }, runtime)).json());
+  expect(sync.routines[0]!.lease).not.toBe(old.lease);
+  const fired = new Date(Math.floor(Date.now() / 60_000) * 60_000), id = routineJobId(created.id, fired);
+  const result = { job: id, lease: old.lease, status: "done", finished: new Date().toISOString(), report: "离线结果" };
+  expect((await request("/v1/runtime/results", result, runtime)).status).toBe(200);
+  expect((await request("/v1/runtime/results", result, runtime)).status).toBe(200);
+  expect(Job.parse(await (await request(`/v1/jobs/${id}`)).json()).spec.run).toEqual(old.template.run);
+  const list = ExecutionRoutineInfo.array().parse(await (await request("/v2/execution/routines")).json());
+  expect(list[0]!.last?.job).toBe(id); expect(hub.modules.work.tasks()).toEqual([]);
+  expect((await request("/v1/operations", { operation: { op: "routine.followup", args: { routine: created.id, job: id } } })).status).toBe(409);
+  await hub.stop(); hub = await startHub({ ...readConfig({ LUMIO_STATE_DIR: temp }), localRuntime: "server", port: 0 }, { log() {} });
+  expect(hub.modules.routines.get(created.id).description).toBe("第二版");
+});
+
+test("a failed dispatch audit rolls back Job, Work execution, status and request receipt together", async () => {
+  const created = await command("work.task.create", { title: "事务验证", assignee: "pi@server" });
+  if (created.kind !== "task") throw new Error("task expected");
+  const audit = hub.store.audit.bind(hub.store); let fail = true;
+  hub.store.audit = (...args) => { if (fail && args[1] === "work.command") { fail = false; throw new Error("synthetic audit failure"); } return audit(...args); };
+  const body = { request_id: "synthetic-transaction-0001", operation: { op: "work.task.dispatch", args: { task: created.task.id } } };
+  expect((await request("/v2/work/commands", body)).status).toBe(500);
+  expect(hub.store.db.query("SELECT * FROM jobs").all()).toEqual([]);
+  expect(hub.modules.work.detail(created.task.id).executions).toEqual([]);
+  expect(hub.modules.work.task(created.task.id).status).toBe("todo");
+  expect((await request("/v2/work/commands", body)).status).toBe(200);
+  expect(hub.store.db.query("SELECT * FROM jobs").all()).toHaveLength(1);
 });
 
 test("CLI uses database tasks and projects, preserves conflicting edit files, and exposes assistant JSON and streams", async () => {
@@ -114,4 +153,21 @@ test("CLI uses database tasks and projects, preserves conflicting edit files, an
   expect(streamed.code).toBe(0);
   const events = streamed.stdout.trim().split("\n").map((line) => AssistantEvent.parse(JSON.parse(line)));
   expect(events.some((value) => value.type === "token")).toBe(true); expect(events.at(-1)?.type).toBe("result");
+  const routineOutput = await cli(["routine", "new", "合成定时工作", "--schedule", "* * * * *", "--to", "pi@server", "--timezone", "UTC", "--file", path, "--json"]);
+  expect(routineOutput.code).toBe(0);
+  const routine = ExecutionRoutine.parse(JSON.parse(routineOutput.stdout));
+  expect(ExecutionRoutineInfo.array().parse(JSON.parse((await cli(["routine", "list", "--json"])).stdout))).toHaveLength(1);
+  expect((await cli(["routine", "status", routine.id, "paused", "--json"])).code).toBe(0);
+  const routineConflict = await cli(["routine", "edit", routine.id, "--file", path, "--revision", "1", "--json"]);
+  expect(routineConflict.code).toBe(1); expect(ApiError.parse(JSON.parse(routineConflict.stdout)).error.code).toBe("CONFLICT");
+  expect(await readFile(path, "utf8")).toBe("第二版正文");
+  expect((await cli(["routine", "status", routine.id, "active", "--json"])).code).toBe(0);
+  const plan = hub.modules.routines.plans(runtimeActor)[0]!;
+  const fired = new Date(Math.floor(Date.now() / 60_000) * 60_000), job = routineJobId(routine.id, fired);
+  expect((await request("/v1/runtime/results", { job, lease: plan.lease, status: "done", finished: new Date().toISOString(), report: "追问来源" }, runtime)).status).toBe(200);
+  const followup = await cli(["routine", "followup", routine.id, job, "--json"]); expect(followup.code).toBe(0);
+  const followupTask = WorkCommandResult.parse(JSON.parse(followup.stdout));
+  if (followupTask.kind !== "task") throw new Error("task expected");
+  expect(followupTask.task.assignee).toBe("human"); expect(followupTask.task.description).toContain("追问来源");
+  expect(followupTask.task.references).toEqual([{ module: "execution", id: routine.id }, { module: "execution", id: job }]);
 });

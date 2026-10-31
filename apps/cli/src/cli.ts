@@ -15,6 +15,7 @@ import { runTasks } from "./tasks.ts";
 import { runWork } from "./work.ts";
 import { runAssistant } from "./assistant.ts";
 import { runRoutines } from "./routines.ts";
+import { runExecutionRoutines } from "./execution-routines.ts";
 import { runOperations } from "./operations.ts";
 import { version } from "./version.ts";
 import { readCliConfig, hubCredentials, localVault } from "./config.ts";
@@ -55,7 +56,7 @@ async function executeCli(args: string[], options: CliOptions): Promise<number> 
   if (args[0] === "task") return (await runWork("task", args.slice(1), log)) ?? runTasks(args.slice(1).filter((arg) => arg !== "--legacy"), log);
   if (args[0] === "project") return (await runWork("project", args.slice(1), log))!;
   if (args[0] === "chat") return runAssistant(args.slice(1), log);
-  if (args[0] === "routine") return runRoutines(args.slice(1), log);
+  if (args[0] === "routine") return (await runExecutionRoutines(args.slice(1), log)) ?? runRoutines(args.slice(1).filter((arg) => arg !== "--legacy"), log);
   const { values, positionals } = parseArgs({
     args, allowPositionals: true, strict: true,
     options: {

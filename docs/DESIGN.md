@@ -55,7 +55,7 @@
 | `packages/schema` | 契约 | 仅 zod |
 | `packages/knowledge` | 知识规则、解析/补全/链接、论文创建与查询用例；不做 I/O | schema, foundation，已有 YAML/XML 解析依赖 |
 | `packages/work` | 数据库项目/任务、依赖、讨论、输入快照、显式派活用例；不做 I/O | schema |
-| `packages/execution` | Job 生命周期、确认/回报/取消、cron 与例行触发 ID；不做 I/O | schema, foundation |
+| `packages/execution` | Job 生命周期、确认/回报/取消、数据库 Routine 计划与历史输入、cron；不做 I/O | schema, foundation |
 | `packages/assistant` | 对话、上下文、Agent 循环、工具记录与恢复；通过接口调用模型 | schema |
 | `packages/storage` | 各领域的 SQLite、知识文件与索引适配器 | schema 与业务包公开接口 |
 | `packages/foundation` | 稳定 ID 与带 code 的基础错误 | schema |
@@ -225,8 +225,13 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
 - Task/Project 描述在数据库中；状态、负责人、依赖、讨论、执行关联各有明确归属。修改负责人或保存描述不隐式派活。
 - 更新带 `expected_revision`；请求用 `request_id` 去重。派活在同一事务内保存 Job、Work 关联和请求回执；同一任务默认只有一轮待完成。
 - 运行结果作为 Work 进展追加一次，不自动把 Task 标成 done，不强制改变负责人。旧 v1 派活接口拒绝操作数据库任务。
+- 数据库 Routine 使用 `/v2/execution/routines` 与 `/v2/execution/commands`；计划在 Execution，独立于 Task 与知识目录。
+  Runtime 继续使用 Job 协议 2，本地触发与 outbox 不变。已交付计划保留历史快照，旧结果按原 lease 匹配输入；心跳无 lease 时不猜测多份历史计划。
+- Work 派活与 Routine 修改的业务数据、请求回执和成功审计参加同一数据库事务；审计失败不交付半个派活。
 - CLI：`project new/list/show/update/edit/status`，`task new/list/show/update/edit/status/assign/comment/continue`；`--legacy` 明确使用旧任务笔记。
   `edit` 打开带版本的外部编辑副本；用 `--file` 提交已有正文时必须带 `--revision`，冲突保留内容。
+- `routine new/list/show/update/edit/status/followup` 使用数据库路径；`--legacy` 选择旧笔记。
+  新版追问从指定执行创建人工 Work 任务并保留执行来源；旧 v1 followup 拒绝数据库 Routine。
 - `/v2/assistant/chat` 支持 JSON 与 NDJSON；对话、轮次、工具调用和记忆归 Assistant。CLI 用 `chat`、`chat list/show`。
   模型和工具通过注入接口提供；当前基础接入不选择默认模型供应商，模型/工具生产适配随 R0 后续切片完成。
 - 助手持久化工具调用状态；中断或写操作结果不明标为 unknown，不自动重放。最终空回复明确失败，工具调用中间消息可无文本。
