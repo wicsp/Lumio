@@ -47,7 +47,7 @@ test("selftest uses real Hub and runtime with fake codex, claude and pi; notes a
     for (const r of results) { expect(r.elapsed_ms).toBeGreaterThanOrEqual(0); expect(Job.safeParse(await client.job(r.job!)).success).toBe(true); }
     const noteNames = (await readdir(join(vault, "plan/tasks"))).filter((n) => n.startsWith("Lumio 自检")); expect(noteNames).toHaveLength(1);
     const note = parseFrontmatter(await readFile(join(vault, "plan/tasks", noteNames[0]!)));
-    expect(Task.parse(note.data)).toMatchObject({ status: "done", turn: "human", assignee: { agent: "codex", device: "server" } });
+    expect(Task.parse(note.data)).toMatchObject({ status: "done", assignee: "human" });
     expect(note.body.toString()).toContain("### 第 1 轮"); expect(note.body.toString()).toContain("name=round-1");
     for (const [failure, label] of [["forget", "接着会话"], ["no-question", "提问"], ["no-cancel", "取消"]]) {
       await writeFile(mode, failure!);
@@ -118,6 +118,6 @@ test("notes timeout retains a completed note and clears its pending agent turn",
     expect(results.at(-1)).toMatchObject({ name: "笔记派活与写回", ok: false });
     const names = await readdir(join(home, "plan/tasks")); expect(names).toHaveLength(1);
     const text = await readFile(join(home, "plan/tasks", names[0]!));
-    expect(Task.parse(parseFrontmatter(text).data)).toMatchObject({ status: "done", turn: "human" });
+    expect(Task.parse(parseFrontmatter(text).data)).toMatchObject({ status: "done", assignee: "human" });
   } finally { await rm(home, { recursive: true, force: true }); }
 });

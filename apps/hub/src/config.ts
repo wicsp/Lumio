@@ -1,5 +1,8 @@
 import { isIP } from "node:net";
-import { homedir } from "node:os";
+import { randomUUID } from "node:crypto";
+import { readFile, mkdir, writeFile, rename, rm } from "node:fs/promises";
+import { RuntimeName } from "@lumio/schema";
+import { homedir, hostname } from "node:os";
 import { join, resolve } from "node:path";
 import { HubError } from "./errors.ts";
 
@@ -27,6 +30,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env) {
     } catch { throw new HubError("INVALID", "LUMIO_PUBLIC_URL 必须是无凭据、查询或片段的 HTTP(S) 地址"); }
   }
   return {
+    localRuntime: undefined as string | undefined,
     publicUrl,
     autosaveIdle,
     vault: resolve(env.LUMIO_VAULT), stateDir: stateDirectory(env),
@@ -44,4 +48,26 @@ export function networkWarning(config: Pick<HubConfig, "hostname" | "publicUrl">
   if (!isLoopback(config.hostname) && (!config.publicUrl || config.publicUrl.startsWith("http://"))) {
     return "警告：Hub 正在非本机地址监听，且未配置 HTTPS 对外地址；令牌可能以明文传输。请配置反向代理与 LUMIO_PUBLIC_URL。";
   }
+}
+
+/** 与 setup 共用名称规则；升级时把推导值保存进 Hub 配置。 */
+export function runtimeName(host: string): string {
+  return RuntimeName.parse(host.toLowerCase().replace(/[^a-z0-9._-]/g, "-").replace(/^[^a-z0-9]+/, "").slice(0, 32) || "local");
+}
+export async function rememberLocalRuntime(stateDir: string, name?: string): Promise<string> {
+  const path = join(stateDir, "config.json");
+  let config: Record<string, unknown> = {};
+  try { config = JSON.parse(await readFile(path, "utf8")); }
+  catch (cause) { if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw new HubError("INVALID", "Hub 配置无法读取"); }
+  if (!config || Array.isArray(config) || typeof config !== "object") throw new HubError("INVALID", "Hub 配置必须是对象");
+  const localRuntime = RuntimeName.parse(name ?? config.localRuntime ?? runtimeName(hostname()));
+  if (config.localRuntime !== localRuntime) {
+    await mkdir(stateDir, { recursive: true });
+    const temporary = `${path}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(temporary, JSON.stringify({ ...config, localRuntime }, null, 2) + "\n", { mode: 0o600, flag: "wx" });
+      await rename(temporary, path);
+    } finally { await rm(temporary, { force: true }); }
+  }
+  return localRuntime;
 }

@@ -103,7 +103,7 @@ test("private notes are hidden from agents, and only explicit human requests rev
 });
 
 test("all invalid inputs return ApiError and ambiguous references are INVALID with candidates", async () => {
-  for (const path of ["/v1/search", "/v1/search?q=%20", "/v1/search?q=x&type=bad", "/v1/search?q=x&limit=0",
+  for (const path of ["/v1/search?q=%20", "/v1/search?q=x&type=bad", "/v1/search?q=x&limit=0",
     "/v1/search?q=x&limit=1.5", "/v1/search?q=x&limit=9007199254740992", "/v1/notes/%ZZ", "/v1/notes/Main?include_private=yes"]) {
     await error(path, human, 400, "INVALID");
   }
@@ -323,4 +323,10 @@ test("live Hub backup preserves all tables and WAL data, uses 0600, refuses exis
   const hashes = hub!.store.db.query<{ hash: string }, []>("SELECT hash FROM tokens").all();
   for (const secret of [human, human2, agent, revoked, ...hashes.map((r) => r.hash)]) expect(output).not.toContain(secret);
   expect((await request("/v1/check", human)).status).toBe(200);
+});
+
+
+test("empty Hub search lists tasks through the existing SearchResult contract", async () => {
+  const result = SearchResult.parse(await (await request("/v1/search?q=&type=task", human)).json());
+  expect(result.total).toBe(1); expect(result.hits[0]!.note.type).toBe("task");
 });

@@ -100,8 +100,8 @@ export async function selftest(options: SelftestOptions): Promise<SelftestResult
       if (!options.vault) throw new SelftestError("--notes 需要本机 vault 配置，请在 Hub 所在机器运行");
       const date = new Date(), title = `Lumio 自检 ${date.toISOString().replaceAll(":", "-")}`;
       const task = newId("task", date, randomBytes), engine = engines[0]!;
-      const data = Task.parse({ id: task, type: "task", title, created: date.toISOString(), updated: date.toISOString(), status: "todo", turn: "agent",
-        assignee: { agent: engine, device: runtime.registration.name }, workdir: "~" });
+      const data = Task.parse({ id: task, type: "task", title, created: date.toISOString(), updated: date.toISOString(), status: "todo",
+        assignee: `${engine}@${runtime.registration.name}` });
       const dir = VAULT_LAYOUT.find((d) => d.type === "task")!.dir;
       const relative = join(dir, `${title}-${task}.md`);
       const path = join(options.vault, relative);
@@ -114,7 +114,7 @@ export async function selftest(options: SelftestOptions): Promise<SelftestResult
         const jobs = await client.jobs(undefined, task);
         const first = jobs[0]; id = first?.spec.id;
         const text = await readFile(path, "utf8"), note = parseFrontmatter(text);
-        if (note.data.turn === "human" && text.includes("<!-- lumio:ai start name=round-1") && text.includes("### 第 1 轮")) {
+        if (note.data.assignee === "human" && text.includes("<!-- lumio:ai start name=round-1") && text.includes("### 第 1 轮")) {
           if (first?.status !== "done" || !first.result?.report?.trim()) throw new SelftestError("笔记第 1 轮没有成功汇报");
           content = text; break;
         }
@@ -138,9 +138,9 @@ export async function selftest(options: SelftestOptions): Promise<SelftestResult
           if (!file) throw new Error();
           const bytes = await readFile(file.path);
           if (parseFrontmatter(bytes).data.id !== noteTask) throw new Error();
-          await writeFileAtomic(file.path, setFields(bytes, { status: "done", turn: "human" }), { expectedContent: bytes });
+          await writeFileAtomic(file.path, setFields(bytes, { status: "done", assignee: "human" }), { expectedContent: bytes });
         } catch {
-          record({ name: "自检笔记清理", ok: false, elapsed_ms: now() - begin, problem: "无法标记自检笔记完成", fix: "检查自检笔记后手动设 status: done、turn: human" });
+          record({ name: "自检笔记清理", ok: false, elapsed_ms: now() - begin, problem: "无法标记自检笔记完成", fix: "检查自检笔记后手动设 status: done、assignee: human" });
         }
       }
     }

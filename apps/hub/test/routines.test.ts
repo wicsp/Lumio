@@ -148,7 +148,7 @@ test("routine.followup opens a task from one run with the routine's assignee and
   expect(applied.note).toMatchObject({ type: "task", title: "日报 · 2026-10-26 10:10 追问", path: "plan/tasks/日报 · 2026-10-26 10-10 追问.md" });
   const bytes = await readFile(join(vault, applied.note.path));
   const task = Task.parse(parseFrontmatter(bytes).data);
-  expect(task).toMatchObject({ id: applied.note.id, status: "todo", turn: "human", assignee: { agent: "pi", device: "server" }, workdir,
+  expect(task).toMatchObject({ id: applied.note.id, status: "todo", assignee: "human", workdir,
     model: "pi-large", timeout_minutes: 30, routine: R });
   expect(bytes.toString()).toContain("[[日报]]");
   expect(bytes.toString()).toContain(`<!-- lumio:ai start name=routine-run job=${id} -->`);
@@ -160,3 +160,38 @@ test("routine.followup opens a task from one run with the routine's assignee and
   const bad = await request("/v1/operations", human, { operation: { op: "routine.followup", args: { routine: "rtn_01M5AAAAAAAAAAAAAAAAAAAAR9", job: id } } });
   expect(bad.status).toBe(400);
 }, 30_000);
+
+
+test("string routine assignee without workdir creates a home-directory plan and run", async () => {
+  await writeRoutine({ assignee: "pi@server" });
+  await writeFile(file(), (await note()).replace(/^workdir:.*\n/m, "")); notify(path);
+  await eventually(async () => (await sync()).routines[0]?.template.workdir === "~");
+  const plan = (await sync()).routines[0]!;
+  const id = routineJobId(R, fire("10:10"));
+  await sync({ running: [id], queued: [], outbox: 0 });
+  expect(Job.parse(await (await request(`/v1/jobs/${id}`, human)).json()).spec.workdir).toBe("~");
+  expect((await request("/v1/runtime/results", runtime, result(id, plan.lease))).status).toBe(200);
+  await eventually(async () => (await note()).includes("### 2026-10-26 10:10 的结果"));
+});
+
+
+test.each([
+  ["codex", "codex"],
+  ["claude-code@mac", "claude-code@mac"],
+  ["{agent: codex, device: laptop}", "codex@laptop"],
+])("routine.followup describes the routine's own assignee %s", async (assignee, expected) => {
+  await writeRoutine();
+  await eventually(async () => (await sync()).routines.length === 1);
+  const plan = (await sync()).routines[0]!;
+  const id = routineJobId(R, fire("10:10"));
+  expect((await request("/v1/runtime/results", runtime, result(id, plan.lease))).status).toBe(200);
+  await writeRoutine({ assignee, status: "paused" });
+  const response = await request("/v1/operations", human, { operation: { op: "routine.followup", args: { routine: R, job: id } } });
+  expect(response.status).toBe(200);
+  const applied = OperationResult.parse(await response.json());
+  if (applied.status !== "applied" || !applied.note) throw new Error("expected a note");
+  const bytes = await readFile(join(vault, applied.note.path));
+  expect(Task.parse(parseFrontmatter(bytes).data).assignee).toBe("human");
+  expect(bytes.toString()).toContain(`把 \`assignee\` 改成 \`${expected}\``);
+  expect(bytes.toString()).not.toContain("改成 `pi@server`");
+});

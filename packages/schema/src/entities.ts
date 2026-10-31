@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AGENTS, Assignee, Base, Id, Timestamp, idOf, optional, withDefault } from "./common.ts";
+import { AgentAssignee, Assignee, Base, Id, Timestamp, idOf, optional, withDefault } from "./common.ts";
 import { containsCardNumber } from "./secrets.ts";
 
 /**
@@ -47,7 +47,7 @@ export const Project = Base.extend({
  * 每一轮实际用了什么记在 Hub 的 Job 记录里，不写回笔记。
  */
 const RunConfig = {
-  workdir: optional(z.string().min(1)).describe("执行器上的工作目录（绝对路径或以 ~/ 开头）；不能在笔记库里"),
+  workdir: optional(z.string().min(1)).describe("执行器上的工作目录（缺省 ~；绝对路径或以 ~/ 开头）；不能在笔记库里"),
   model: optional(z.string().min(1)).describe("可选：指定模型，原样交给 agent"),
   gpus: optional(z.array(z.number().int().nonnegative())).describe("可选：只把这些 GPU 暴露给这一轮"),
   timeout_minutes: optional(z.number().int().positive()).describe("可选：每一轮最长运行时间，缺省时用执行器的默认值"),
@@ -58,14 +58,10 @@ const RunConfig = {
  * 例外：Hub 第一次派出时把 todo 改为 active。
  */
 export const TASK_STATUSES = ["todo", "active", "waiting", "paused", "done", "cancelled"] as const;
-/** 现在轮到谁动手。只有负责人是 agent 的任务才有：人只能改成 agent，Hub 只能改成 human。 */
-export const TASK_TURNS = ["human", "agent"] as const;
-
 export const Task = Base.extend({
   type: z.literal("task"),
   id: idOf("task"),
   status: withDefault(z.enum(TASK_STATUSES), "todo"),
-  turn: optional(z.enum(TASK_TURNS)).describe("agent：请 AI 开始或继续；human：轮到你。由 Hub 维护，见 ADR 0019"),
   project: optional(idOf("prj")),
   assignee: withDefault(Assignee, "human"),
   due: optional(Timestamp),
@@ -86,10 +82,7 @@ export const Routine = Base.extend({
   schedule: z.string().regex(CRON_PATTERN, "schedule 必须是 5 段 cron 表达式，例如 0 9 * * 1"),
   timezone: optional(z.string().min(1)).describe("IANA 时区，如 Asia/Singapore；缺省时用 Hub 所在机器的时区"),
   status: withDefault(z.enum(["active", "paused"]), "active"),
-  assignee: z.strictObject({
-    agent: z.enum(AGENTS),
-    device: z.string().optional().describe("指定设备；省略则由调度决定"),
-  }),
+  assignee: AgentAssignee,
   context: withDefault(z.enum(["none", "previous"]), "none").describe("previous：带上上一次结果的摘要"),
   project: optional(idOf("prj")),
   ...RunConfig,

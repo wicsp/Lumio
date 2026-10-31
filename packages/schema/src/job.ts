@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AGENTS, Timestamp, idOf } from "./common.ts";
+import { AGENTS, Timestamp, RuntimeName, idOf } from "./common.ts";
 import { NoteRef } from "./query.ts";
 
 /**
@@ -12,8 +12,7 @@ import { NoteRef } from "./query.ts";
  */
 export const JOB_PROTOCOL_VERSION = 2;
 
-/** 执行器名称（设备名），如 `server`、`mac`。 */
-export const RuntimeName = z.string().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/, "执行器名称只能用小写字母、数字和 . _ -");
+export { RuntimeName } from "./common.ts";
 
 /**
  * agent 的隔离级别，由适配器如实声明（ADR 0019 第 7 节）。

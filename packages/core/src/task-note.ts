@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
-import { Document, isScalar, parseDocument } from "yaml";
+import { Document, isMap, isScalar, parseDocument } from "yaml";
 import { CoreError } from "./errors.ts";
 import { parseFrontmatter } from "./frontmatter.ts";
 
@@ -9,8 +9,8 @@ import { parseFrontmatter } from "./frontmatter.ts";
  */
 
 /**
- * 设置 frontmatter 中的字符串字段：已有的标量值就地替换，缺失的追加。
- * 与补全器的 render 不同，这里允许覆盖已有值，只给 Hub 维护的程序字段（turn、status）使用。
+ * 设置 frontmatter 中的字符串字段：已有的值就地替换，缺失的追加。
+ * 与补全器的 render 不同，这里允许覆盖已有值，只给 Hub 维护的程序字段（assignee、status）使用。
  */
 export function setFields(source: Uint8Array, patch: Record<string, string>): Buffer {
   const bytes = Buffer.from(source);
@@ -28,9 +28,11 @@ export function setFields(source: Uint8Array, patch: Record<string, string>): Bu
     for (const [key, value] of Object.entries(patch)) {
       const node = Object.hasOwn(parsed.data, key) ? doc.get(key, true) : undefined;
       if (node === undefined) { missing[key] = value; continue; }
-      if (!isScalar(node) || !node.range) throw new CoreError("UNSAFE_FRONTMATTER_EDIT", `无法定位字段 ${key}`);
-      const text = new Document(value).toString().trimEnd();
+      if ((!isScalar(node) && !(key === "assignee" && isMap(node))) || !node.range) throw new CoreError("UNSAFE_FRONTMATTER_EDIT", `无法定位字段 ${key}`);
+      let text = new Document(value).toString().trimEnd();
       const [from, to] = node.range;
+      // 块式旧负责人映射的范围包含末尾换行；替换后仍须分隔下一个字段。
+      if (header.slice(from, to).endsWith("\n")) text += header.slice(from, to).endsWith("\r\n") ? "\r\n" : "\n";
       replacements.push({ start: from, end: to, text: from === to ? ` ${text}` : text });
     }
     for (const r of replacements.sort((a, b) => b.start - a.start)) header = header.slice(0, r.start) + r.text + header.slice(r.end);

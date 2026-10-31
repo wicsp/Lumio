@@ -39,8 +39,9 @@ description: 查用户（Wenbin）的研究笔记库：论文笔记、想法、�
 
 ## 任务笔记（`plan/tasks/`）
 - 用户可以把任务交给服务器上的 agent 一轮一轮地做。笔记里 `<!-- lumio:ai start name=round-N … -->` 区块是各轮 agent 的汇报，
-  区块以外是用户写的要求和意见。frontmatter 的 `turn` 表示现在轮到谁（`agent` / `human`）。
-- 你只能读：**不能派任务**（`lumio task continue` 对 agent 令牌会被拒绝），也不要改 `turn`、`status`。
+  区块以外是用户写的要求和意见。frontmatter 的 `assignee` 表示现在轮到谁（`human`、`pi` 或 `pi@server`）；`workdir` 可以不写，默认执行器上的 `~`。
+- 你只能读：**不能派任务**（`lumio task continue` 对 agent 令牌会被拒绝），也不要改 `assignee`、`status`。
+- 旧笔记如果还有 `turn`，仍按旧开关运行；不要改旧 `turn` 或自行迁移笔记。`done` / `cancelled` / `paused` 的任务须由人先恢复状态才可派出。
 - 用 `lumio show <任务>` 读笔记；问到某一轮的细节时，告诉用户用 `lumio job show <job>` 查看完整汇报。
 
 ## 例行任务（`plan/routines/`）
