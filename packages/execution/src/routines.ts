@@ -31,6 +31,19 @@ export class ExecutionRoutines {
     if (!routine) throw new ExecutionError("NOT_FOUND", "找不到例行任务");
     return ExecutionRoutine.parse(routine);
   }
+  /** An offline import never sends a plan; schedules must have been explicitly paused before migration. */
+  importPaused(input: ExecutionRoutine[]): void {
+    const parsed = ExecutionRoutine.array().safeParse(input);
+    if (!parsed.success) throw new ExecutionError("INVALID", "历史例行任务格式不合法");
+    this.store.transaction(() => {
+      const seen = new Set<string>();
+      for (const routine of parsed.data) {
+        if (routine.status !== "paused") throw new ExecutionError("CONFLICT", "导入前必须先暂停旧例行任务");
+        if (seen.has(routine.id) || this.store.get(routine.id)) throw new ExecutionError("CONFLICT", "例行任务 ID 已存在或重复");
+        seen.add(routine.id); this.validate(routine); this.store.save(routine); this.store.setCurrent(routine.id);
+      }
+    });
+  }
   private validate(routine: ExecutionRoutine): void {
     try { if (!validTimeZone(routine.timezone) || !nextFire(parseCron(routine.schedule), routine.timezone, this.context.now())) throw new Error(); }
     catch { throw new ExecutionError("INVALID", "例行任务的 cron 或时区不合法"); }

@@ -23,7 +23,7 @@ import { V2_ROUTES, handleV2 } from "./v2.ts";
 import { WriteCoordinator } from "./coordinator.ts";
 import type { AssistantModel, AssistantTool } from "@lumio/assistant";
 import { KnowledgeService } from "@lumio/knowledge";
-import { FileKnowledgeRepository, acquireStateLease } from "@lumio/storage";
+import { FileKnowledgeRepository, acquireStateLease, isMigratedSource, legacyControlDisabled } from "@lumio/storage";
 
 // Routes share authentication, authorization and logging before dispatch.
 export const ROUTES = [
@@ -86,10 +86,12 @@ async function startHubInstance(config: HubConfig, options: {
   let routines: Routines | undefined;
   let modules: BusinessModules | undefined;
   const hooks: RoutineHooks = {
-    plans: (actor) => [...(routines?.plans(actor) ?? []).filter((plan) => !modules?.routineStore.get(plan.routine)), ...(modules?.routines.plans(actor) ?? [])],
-    adopt: (actor, id, now, lease) => modules?.routines.adopt(actor, id, now, lease) ?? routines?.adopt(actor, id, now),
+    plans: (actor) => [...(legacyControlDisabled(store.db) ? [] : routines?.plans(actor) ?? []).filter((plan) => !modules?.routineStore.get(plan.routine)), ...(modules?.routines.plans(actor) ?? [])],
+    adopt: (actor, id, now, lease) => modules?.routines.adopt(actor, id, now, lease) ?? (legacyControlDisabled(store.db) ? undefined : routines?.adopt(actor, id, now)),
   };
   try {
+    modules = new BusinessModules(config, store, options);
+    await modules.artifacts.recover();
     const writes = new WriteCoordinator();
     vaultWatch = config.vault ? await startVaultWatch(config, { ...options.watch, log,
       onNote: async (path) => { await options.watch?.onNote?.(path); await tasks?.noteChanged(path); await routines?.noteChanged(path); } }) : {
@@ -98,14 +100,14 @@ async function startHubInstance(config: HubConfig, options: {
         status: async () => ({ watching: false, last_full_sync: null, pending_files: 0, issues: [] }), stop: () => writes.drain(),
       };
     const watch = vaultWatch;
-    tasks = new TaskRounds(config, store, new Jobs(store, hooks), (action) => watch.exclusive(action), (path, line) => watch.issue(path, line), options.tasks);
-    routines = new Routines(config, store, new Jobs(store, hooks), (action) => watch.exclusive(action), (path, line) => watch.issue(path, line), options.routines);
+    tasks = new TaskRounds(config, store, new Jobs(store, hooks), (action) => watch.exclusive(action), (path, line) => watch.issue(path, line), { ...options.tasks,
+      isManaged: (path, id) => legacyControlDisabled(store.db) || isMigratedSource(store.db, path) || !!(id && modules!.workStore.task(id)) || !!options.tasks?.isManaged?.(path, id) });
+    routines = new Routines(config, store, new Jobs(store, hooks), (action) => watch.exclusive(action), (path, line) => watch.issue(path, line), { ...options.routines,
+      isManaged: (path, id) => legacyControlDisabled(store.db) || isMigratedSource(store.db, path) || !!(id && modules!.routineStore.get(id)) || !!options.routines?.isManaged?.(path, id) });
     if (config.vault) {
       await watch.exclusive(() => tasks!.start());
       await watch.exclusive(() => routines!.start());
     }
-    modules = new BusinessModules(config, store, options);
-    await modules.artifacts.recover();
     server = Bun.serve({
       hostname: config.hostname, port: config.port,
       async fetch(request, server) {
@@ -179,8 +181,8 @@ async function startHubInstance(config: HubConfig, options: {
             const response = await vaultWatch!.exclusive(() => handleOperation(request,
               route.operation,
               route.pattern.exec(url.pathname)?.[1], identity!, store, config, decide, { ...options.operations, tasks, routines, privileged,
-                isManagedTask: (id) => modules!.workStore.task(id) !== undefined,
-                isManagedRoutine: (id) => modules!.routineStore.get(id) !== undefined }));
+                isManagedTask: (id) => legacyControlDisabled(store.db) || modules!.workStore.task(id) !== undefined,
+                isManagedRoutine: (id) => legacyControlDisabled(store.db) || modules!.routineStore.get(id) !== undefined }));
             status = response.status;
             return response;
           }

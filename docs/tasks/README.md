@@ -8,7 +8,8 @@
 具体契约由 Claude 起草，按切片实现并同步 DESIGN，不读取真实 vault。
 
 已落地的分支切片：[R0-1 契约](R0-1-contracts.md)、[R0-5 数据库 Routine](R0-5-execution-routines.md)、
-[R0-6 日志、文件与业务备份](R0-6-storage-files.md)。剩余工作与最终验收以 R0-0 为准。
+[R0-6 日志、文件与业务备份](R0-6-storage-files.md)、[R0-8 显式迁移](R0-8-legacy-import.md)。剩余工作与最终验收以 R0-0 为准。
+真实切换另见[迁移与回退说明](../migration-v2.md)，不会在重构测试中执行。
 
 | 编号 | 内容 | 负责 | 依赖 |
 |---|---|---|---|

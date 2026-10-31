@@ -9,6 +9,8 @@ import { Queue } from "./queue.ts";
 import { Executor } from "./executor.ts";
 import { RoutinePlans } from "./routines.ts";
 import { RuntimeArchives } from "./archive.ts";
+import { acquireStateLease } from "@lumio/storage";
+import type { ArchiveDelivery } from "./archive.ts";
 
 class Wake {
   private listeners = new Set<() => void>();
@@ -24,7 +26,7 @@ class Wake {
     });
   }
 }
-export async function runRuntime(config: RuntimeConfig, options: {
+async function runRuntimeInstance(config: RuntimeConfig, options: {
   signal: AbortSignal;
   log?: (line: string) => void;
   env?: NodeJS.ProcessEnv;
@@ -32,6 +34,7 @@ export async function runRuntime(config: RuntimeConfig, options: {
   sleep?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
   /** 例行任务用的时钟（测试注入）。 */
   now?: () => Date;
+  archive?: ArchiveDelivery;
 }): Promise<void> {
   const shutdown = new AbortController();
   const signal = AbortSignal.any([options.signal, shutdown.signal]);
@@ -43,7 +46,7 @@ export async function runRuntime(config: RuntimeConfig, options: {
   const registration = RuntimeRegistration.parse({ ...config.registration, engines: await detectEngines(options.env) });
   const queue = new Queue(config.stateDir);
   const plans = new RoutinePlans(queue);
-  const archives = new RuntimeArchives(config, queue, fetcher, log);
+  const archives = options.archive ?? new RuntimeArchives(config, queue, fetcher, log);
   const now = options.now ?? (() => new Date());
   let actor: string | undefined;
   const sudo = new SudoGate(config, queue, () => actor, fetcher, signal, log);
@@ -93,8 +96,14 @@ export async function runRuntime(config: RuntimeConfig, options: {
     await sudo.start();
     await executor.recover();
     delivering = deliver().catch((cause) => { deliveryFailure = cause; shutdown.abort(); });
-    archiving = (async () => { while (!signal.aborted) { const next = await archives.flush(signal); await archiveWake.wait(Math.max(1, next), signal); } })()
-      .catch(() => { if (!signal.aborted) log("文件归档暂时中断，原始日志与待交付记录已保留"); });
+    archiving = (async () => {
+      while (!signal.aborted) {
+        let next = Math.min(config.pollSeconds, 60) * 1000;
+        try { next = await archives.flush(signal); }
+        catch { if (!signal.aborted) log("文件归档暂时中断，原始日志与待交付记录已保留，稍后重试"); }
+        await archiveWake.wait(Math.max(1, next), signal);
+      }
+    })();
     while (!signal.aborted) {
       let delay = config.pollSeconds;
       let justAcked = false;
@@ -140,4 +149,9 @@ export async function runRuntime(config: RuntimeConfig, options: {
     queue.close();
   }
   if (deliveryFailure) throw deliveryFailure;
+}
+
+export async function runRuntime(config: RuntimeConfig, options: Parameters<typeof runRuntimeInstance>[1]): Promise<void> {
+  const lease = await acquireStateLease(config.stateDir);
+  try { await runRuntimeInstance(config, options); } finally { lease.close(); }
 }

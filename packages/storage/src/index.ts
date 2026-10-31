@@ -8,3 +8,4 @@ export * from "./logs.ts";
 export * from "./artifacts.ts";
 export * from "./backup.ts";
 export * from "./lease.ts";
+export * from "./migration.ts";

@@ -76,6 +76,24 @@ export class WorkService {
     return WorkTaskDetail.parse({ task: this.task(id), comments: this.store.comments(id), executions: this.store.executions(id) });
   }
 
+  /** Import historical facts without transitions, generated IDs or execution side effects. The caller archives provenance. */
+  importSettled(input: { projects: WorkProject[]; tasks: WorkTask[]; executions?: WorkExecution[] }): void {
+    const projects = WorkProject.array().safeParse(input.projects), tasks = WorkTask.array().safeParse(input.tasks), executions = WorkExecution.array().safeParse(input.executions ?? []);
+    if (!projects.success || !tasks.success || !executions.success) throw new WorkError("INVALID", "历史工作对象格式不合法");
+    this.store.transaction(() => {
+      const ids = [...projects.data.map((value) => value.id), ...tasks.data.map((value) => value.id)];
+      if (new Set(ids).size !== ids.length || projects.data.some((value) => this.store.project(value.id)) || tasks.data.some((value) => this.store.task(value.id))) throw new WorkError("CONFLICT", "历史对象 ID 已存在或重复");
+      const taskIds = new Set(tasks.data.map((value) => value.id)), oldJobs = new Set(this.store.executions().map((value) => value.job));
+      if (executions.data.some((value) => !value.applied || !taskIds.has(value.task) || oldJobs.has(value.job))) throw new WorkError("CONFLICT", "只允许导入已处理且属于本批任务的历史执行");
+      for (const value of projects.data) this.store.putProject(value);
+      // Reserve all task IDs first so parent/dependency ordering cannot create a partial import.
+      for (const value of tasks.data) this.store.putTask(WorkTask.parse({ ...value, parent: undefined, dependencies: [] }));
+      for (const value of tasks.data) this.store.putTask(value);
+      for (const value of tasks.data) this.checkTask(value);
+      for (const value of executions.data) this.store.putExecution(value);
+    });
+  }
+
   private checkTask(task: WorkTask): void {
     if (task.project) this.project(task.project);
     if (task.parent) {
@@ -159,7 +177,7 @@ export class WorkService {
           if (!this.context.dispatch) throw new WorkError("INTERNAL", "执行能力尚未配置");
           const comments = this.store.comments(task.id);
           const snapshot = [`# ${task.title}`, "", task.description, ...comments.flatMap((comment) => ["", `## 讨论 ${comment.author} ${comment.created}`, comment.body])].join("\n");
-          const round = executions.length + 1;
+          const round = executions.reduce((maximum, value) => Math.max(maximum, value.round), 0) + 1;
           const job = this.context.dispatch(task, snapshot, round, operation.args.to);
           this.store.putExecution(WorkExecution.parse({ task: task.id, job: job.spec.id, round, input_revision: task.revision,
             input_snapshot: snapshot, created: time, applied: false }));

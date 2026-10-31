@@ -7,8 +7,10 @@ import { stateDirectory } from "./config.ts";
 import { HubError } from "./errors.ts";
 import { HubStore } from "./store.ts";
 import { backupBusiness, restoreBusiness, verifyBusinessBackup, StorageError } from "@lumio/storage";
+import { runMigration } from "./migrate.ts";
 
 export async function runManagement(args: string[], log: (line: string) => void = console.log): Promise<void> {
+  if (args[0] === "migrate") return runMigration(args.slice(1), log);
   const { positionals, values } = parseArgs({ args, allowPositionals: true, options: { role: { type: "string" }, actor: { type: "string" } } });
   const [kind, action, name] = positionals;
   if ((kind === "backup" && ["business", "verify"].includes(action ?? "")) || kind === "restore") {

@@ -84,12 +84,14 @@ life/      assets/ → asset（私密）
 files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是实体，不扫描
 ```
 
-- **类型由所在的类型目录决定**；映射表 `VAULT_LAYOUT`（`packages/core`）是唯一来源，其他代码不得写死路径。
+- **类型由所在的类型目录决定**；映射表 `VAULT_LAYOUT`（`packages/knowledge`）是唯一来源，其他代码不得写死路径。
 - 类型目录下可以自由建子文件夹，只用于浏览，不影响类型。每个实体只对应一个 `.md` 文件。
 - 扫描时跳过隐藏文件、`*.excalidraw.md` 和 frontmatter 含 `excalidraw-plugin` 的文件。
 - 大文件（视频原片等）不进 vault，用 `media://<相对路径>` 引用，由各设备配置媒体根目录。
 
 ### 3.2 实体类型
+
+本表描述知识目录中的文件格式；Project/Task/Routine 保留旧格式兼容，新业务对象与数据库规则见第 4.7 节。
 
 所有实体共有：`id`（`<前缀>_<ULID>`）、`type`、`title`、`created`、`updated`（ISO 8601 带时区）、`tags`。（`related` 已删除，旧笔记里的值原样保留但不计入链接图，ADR 0018。）
 
@@ -202,7 +204,10 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 - 只信任配置过的反向代理传来的客户端信息。
 - 飞书 Bot 用官方 SDK 的长连接，不需要公网回调地址。
 
-### 4.6 给 AI 派活（P2，ADR 0005、0019）
+### 4.6 Runtime 与旧任务笔记兼容（P2，ADR 0005、0019）
+
+本节的文件开关和写回语义仅适用于尚未执行 v2 apply 的旧模式；Job 的可靠执行协议继续共用。
+数据库 Work 的负责人、显式派活与结果规则见第 4.7 节。
 
 本节关于修改笔记负责人触发、元数据交接和 AI 区块写回的条款适用于旧笔记路径；新版数据库 Work 使用第 4.7 节。
 Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用（ADR 0025）。
@@ -248,6 +253,11 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
   `edit` 打开带版本的外部编辑副本；用 `--file` 提交已有正文时必须带 `--revision`，冲突保留内容。
 - `routine new/list/show/update/edit/status/followup` 使用数据库路径；`--legacy` 选择旧笔记。
   新版追问从指定执行创建人工 Work 任务并保留执行来源；旧 v1 followup 拒绝数据库 Routine。
+- `lumio-hub migrate plan/apply/sources/source` 提供显式迁移，完整步骤见 [切换与回退](migration-v2.md)。
+  apply 要求匹配的完整备份、源摘要和设备准备确认，并与 Hub 独占同一状态目录；原始字节和未知字段进入来源档案。
+  第一次成功 apply 后关闭整个工作区的旧 Task/Routine 文件控制与旧派活/追问；知识文件继续可编辑，不再由旧字段覆盖数据库。
+- Runtime 与离线准备也持有独占状态租约。`prepare-migration --state-dir <目录>` 只在执行器停止且无待执行/交付数据时清空派生计划缓存。
+  迁移仅导入已处理历史关联与已经暂停的 Routine，不生成 Job 或重放工具/审批；下一轮取历史最高轮次加一。
 - `/v2/assistant/chat` 支持 JSON 与 NDJSON；对话、轮次、工具调用和记忆归 Assistant。CLI 用 `chat`、`chat list/show`。
   模型和工具通过注入接口提供；当前基础接入不选择默认模型供应商，模型/工具生产适配随 R0 后续切片完成。
 - 助手持久化工具调用状态；中断或写操作结果不明标为 unknown，不自动重放。最终空回复明确失败，工具调用中间消息可无文本。
@@ -271,7 +281,8 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
 - **审计**：每次授权与执行都记入 `hub.sqlite`；Hub 执行的操作立即单独提交，提交信息带 `Lumio-Actor`，
   经提议执行的还带 `Lumio-Proposal`、`Lumio-Approved-By`；派出一轮、写回一轮结果的提交带 `Lumio-Job`。自动保存的提交不带身份。
 - **执行器**（ADR 0019）：身份角色 `runtime`，只能领取派给自己的活、回报结果、登记能力；看不到笔记库，只看到 Job 里带的内容。
-- **AI 的汇报只是资料**：不能改 `assignee`、不能派新活、不能改状态；`assignee` 只能由人改成 agent、由 Hub 在一轮结束时改回 `human`（ADR 0024）。
+- **AI 的汇报只是资料**：不能自行派新活或决定 Task 完成。旧笔记模式在一轮结束时把交接开关改回 human（ADR 0024）；
+  数据库 Work 不强制改变负责人，修改负责人和派活分开（ADR 0025）。
 - **私密实体**（`life/` 下）：默认不出现在任何查询结果中；`agent` 令牌在任何情况下都拿不到；
   `human` 令牌须显式加 `--include-private`。`refs.bib`、报告等不得引用私密实体（ADR 0012、0014）。
 - **局限**：不经过 Hub、直接读文件的 AI 拦不住，需要在 agent 的沙箱配置里排除 `life/`。
