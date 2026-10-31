@@ -1,6 +1,6 @@
 import { ClientInvite, ClientInviteRequest, ClientJoin, ClientJoinRequest, RuntimeInvite, RuntimeInviteRequest } from "@lumio/schema";
 import { WorkCommandRequest, WorkCommandResult, WorkTask, WorkTaskDetail, WorkProject, ExecutionRoutine, ExecutionRoutineCommandRequest, ExecutionRoutineInfo,
-  AssistantChatRequest, AssistantChatResult, AssistantConversation, AssistantConversationDetail, AssistantEvent, StoredArtifact, idOf } from "@lumio/schema";
+  AssistantMemory, AssistantMemoryCommandRequest, AssistantMemoryCommandResult, AssistantChatRequest, AssistantChatResult, AssistantConversation, AssistantConversationDetail, AssistantEvent, StoredArtifact, idOf } from "@lumio/schema";
 import { JobRun, Job, JobSpec, JobStatus, RoutineInfo, RuntimeName, RuntimeInfo, Actor, OperationRequest, OperationResult, Proposal, ProposalStatus, ApiError, CheckResult, LinksResult, NoteDetail, SearchResult, type ApiErrorCode, type NoteRef } from "@lumio/schema";
 
 export class ApiClientError extends Error {
@@ -84,6 +84,8 @@ export function createClient(options: { url: string; token?: string; fetch?: typ
         throw new ApiClientError({ code: "INTERNAL", message: "无法读取 Hub 归档文件" }, status);
       }
     },
+    memories() { return request("/v2/assistant/memories", {}, AssistantMemory.array()); },
+    memoryCommand(input: AssistantMemoryCommandRequest) { return request("/v2/assistant/memory-commands", {}, AssistantMemoryCommandResult, validate(AssistantMemoryCommandRequest, input)); },
     assistantChat(input: AssistantChatRequest) { return request("/v2/assistant/chat", {}, AssistantChatResult, validate(AssistantChatRequest, input)); },
     conversations() { return request("/v2/assistant/conversations", {}, AssistantConversation.array()); },
     conversation(id: string) { return request(`/v2/assistant/conversations/${validate(idOf("conv"), id)}`, {}, AssistantConversationDetail); },

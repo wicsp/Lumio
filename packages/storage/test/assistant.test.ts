@@ -6,10 +6,11 @@ import { SqliteAssistantStore } from "../src/assistant.ts";
 
 const owner = "act_00000000000000000000000001", other = "act_00000000000000000000000002";
 const time = "2026-10-31T00:00:00Z";
+const toolActor = { id: "act_00000000000000000000000003", name: "assistant", role: "agent" as const, created: time };
 function fixture(db: Database, model: AssistantModel, tools: AssistantTool[] = []) {
   let n = 0;
   const store = new SqliteAssistantStore(db);
-  const context = { now: () => new Date(time), id: (prefix: string) => `${prefix}_${String(++n).padStart(26, "0")}` };
+  const context = { toolActor, now: () => new Date(time), id: (prefix: string) => `${prefix}_${String(++n).padStart(26, "0")}` };
   return { store, context, service: new AssistantService(store, model, tools, context) };
 }
 
@@ -24,7 +25,7 @@ test("assistant persists its own dialogue and tool loop, streams events and repl
     options.token("整理结果"); return { content: "整理结果", tool_calls: [] };
   } };
   const tools: AssistantTool[] = [{ spec: { name: "read_fixture", description: "读取合成资料", input_schema: { type: "object" } }, effect: "read",
-    async execute(args, context) { reads++; expect(args).toEqual({ query: "合成" }); expect(context.actor).toBe(owner); return { text: "合成资料" }; } }];
+    async execute(args, context) { reads++; expect(args).toEqual({ query: "合成" }); expect(context.actor).toBe(toolActor.id); expect(context.owner).toBe(owner); return { text: "合成资料" }; } }];
   try {
     const f = fixture(db, model, tools), request = { request_id: "synthetic-chat-001", message: "查阅并整理" };
     const result = AssistantChatResult.parse(await f.service.chat(request, owner, { event: (event) => events.push(event) }));
@@ -98,5 +99,55 @@ test("empty final replies fail clearly while a disconnected event listener canno
     const service = new AssistantService(f.store, { async complete() { return { content: "已完成", tool_calls: [] }; } }, [], f.context);
     const completed = await service.chat({ request_id: "synthetic-display-001", message: "另一个问题" }, owner, { event() { throw new Error("display closed"); } });
     expect(completed.turn.status).toBe("done");
+  } finally { db.close(); }
+});
+
+test("memory commands are actor-scoped and idempotent, forget tombstones prevent replay and remove active context", async () => {
+  const db = new Database(":memory:"), systems: string[] = [];
+  const model: AssistantModel = { async complete(input) { systems.push(input.messages[0]!.content); return { content: "完成", tool_calls: [] }; } };
+  try {
+    const f = fixture(db, model), request = { request_id: "synthetic-memory-remember-001", operation: { op: "assistant.memory.remember", args: { content: "第一位用户偏好中文" } } };
+    const result = await f.service.memoryCommand(request, owner); if (result.kind !== "memory") throw new Error("memory expected");
+    expect(await f.service.memoryCommand(request, owner)).toEqual(result); expect(await f.service.memories(owner)).toHaveLength(1);
+    await expect(f.service.memoryCommand({ ...request, operation: { ...request.operation, args: { content: "不同输入" } } }, owner)).rejects.toThrow("不同的记忆操作");
+    await f.service.memoryCommand({ ...request, operation: { ...request.operation, args: { content: "第二位用户偏好简短" } } }, other);
+    await f.service.memoryCommand({ request_id: "synthetic-other-forget-001", operation: { op: "assistant.memory.forget", args: { memory: result.memory.id } } }, other);
+    expect(await f.service.memories(owner)).toHaveLength(1); expect(await f.service.memories(other)).toHaveLength(1);
+    await f.service.chat({ request_id: "synthetic-memory-chat-001", message: "你好" }, owner); expect(systems.at(-1)).toContain("第一位用户偏好中文");
+    const forgotten = await f.service.memoryCommand({ request_id: "synthetic-memory-forget-001", operation: { op: "assistant.memory.forget", args: { memory: result.memory.id } } }, owner);
+    expect(forgotten).toEqual({ kind: "forgotten", memory: result.memory.id }); expect(await f.service.memoryCommand(request, owner)).toEqual(forgotten);
+    expect(await f.service.memories(owner)).toEqual([]);
+    await f.service.chat({ request_id: "synthetic-memory-chat-002", message: "新问题" }, owner); expect(systems.at(-1)).not.toContain("第一位用户偏好中文");
+    const receipt = db.query<{ operation_hash: string; result: string }, [string, string]>("SELECT operation_hash,result FROM assistant_memory_requests WHERE owner=? AND request=?").get(owner, request.request_id)!;
+    expect(receipt.operation_hash).toMatch(/^[0-9a-f]{64}$/); expect(receipt.result).not.toContain("第一位用户偏好中文");
+  } finally { db.close(); }
+});
+
+test("source permission is checked as the tool agent, including receipt replay; forgetting revoked content stays possible", async () => {
+  const db = new Database(":memory:"); let visible = true;
+  const model: AssistantModel = { async complete() { return { content: "完成", tool_calls: [] }; } };
+  try {
+    const f = fixture(db, model), service = new AssistantService(f.store, model, [], { ...f.context, canRead: async (_source, actor) => { expect(actor).toBe(toolActor.id); return visible; } });
+    const request = { request_id: "synthetic-source-memory-001", operation: { op: "assistant.memory.remember", args: { content: "有来源的事实", sources: [{ module: "knowledge", id: "pap_00000000000000000000000001" }] } } };
+    const created = await service.memoryCommand(request, owner); if (created.kind !== "memory") throw new Error("memory expected");
+    visible = false; expect(await service.memories(owner)).toEqual([]); await expect(service.memoryCommand(request, owner)).rejects.toThrow("不可访问");
+    await service.memoryCommand({ request_id: "synthetic-source-forget-001", operation: { op: "assistant.memory.forget", args: { memory: created.memory.id } } }, owner);
+    expect(await service.memoryCommand(request, owner)).toEqual({ kind: "forgotten", memory: created.memory.id });
+  } finally { db.close(); }
+});
+
+test("memory mutation, receipt and audit commit together, and explicit tool authority never defaults to a human", async () => {
+  const db = new Database(":memory:"); let models = 0;
+  const model: AssistantModel = { async complete() { models++; return { content: "完成", tool_calls: [] }; } };
+  const tool: AssistantTool = { spec: { name: "fixture", description: "synthetic", input_schema: {} }, effect: "read", async execute() { return {}; } };
+  try {
+    const f = fixture(db, model); db.exec("CREATE TABLE synthetic_audit(result TEXT)");
+    const request = { request_id: "synthetic-memory-audit-001", operation: { op: "assistant.memory.remember", args: { content: "应随审计回滚" } } };
+    await expect(f.service.memoryCommand(request, owner, () => { db.exec("INSERT INTO synthetic_audit VALUES('attempt')"); throw new Error("injected audit failure"); })).rejects.toThrow("injected audit failure");
+    expect(await f.service.memories(owner)).toEqual([]); expect(db.query("SELECT * FROM assistant_memory_requests").all()).toEqual([]); expect(db.query("SELECT * FROM synthetic_audit").all()).toEqual([]);
+    await f.service.memoryCommand(request, owner, () => { db.exec("INSERT INTO synthetic_audit VALUES('applied')"); });
+    expect(await f.service.memories(owner)).toHaveLength(1); expect(models).toBe(0);
+    expect(() => new AssistantService(f.store, model, [tool], { ...f.context, toolActor: undefined })).toThrow("agent 身份");
+    expect(() => new AssistantService(f.store, model, [tool], { ...f.context, toolActor: { ...toolActor, role: "human" } })).toThrow("不能继承人类权限");
   } finally { db.close(); }
 });

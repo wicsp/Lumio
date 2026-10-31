@@ -23,6 +23,7 @@ export * from "./storage.ts";
 import { Actor } from "./actor.ts";
 import {
   AssistantChatRequest, AssistantChatResult, AssistantConversation, AssistantConversationDetail, AssistantEvent,
+  AssistantMemoryCommandRequest, AssistantMemoryCommandResult,
   AssistantMemory, AssistantMessage, AssistantModelRequest, AssistantModelResponse, AssistantToolCall, AssistantTurn,
 } from "./assistant.ts";
 import { ExecutionRoutine, ExecutionRoutineCommandRequest, ExecutionRoutineInfo } from "./execution.ts";
@@ -105,6 +106,8 @@ export const CONTRACTS = {
   "assistant-model-request": AssistantModelRequest,
   "assistant-model-response": AssistantModelResponse,
   "assistant-event": AssistantEvent,
+  "assistant-memory-command-request": AssistantMemoryCommandRequest,
+  "assistant-memory-command-result": AssistantMemoryCommandResult,
   "run-log-event": RunLogEvent,
   "stored-artifact": StoredArtifact,
   "backup-manifest": BackupManifest,

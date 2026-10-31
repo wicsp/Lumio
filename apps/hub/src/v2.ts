@@ -8,6 +8,8 @@ import type { authorize } from "./authorize.ts";
 import { handleArtifacts } from "./artifacts.ts";
 
 export const V2_ROUTES = [
+  { operation: "assistant.memory.read", method: "GET", pattern: /^\/v2\/assistant\/memories$/, path: "/v2/assistant/memories" },
+  { operation: "assistant.memory.command", method: "POST", pattern: /^\/v2\/assistant\/memory-commands$/, path: "/v2/assistant/memory-commands" },
   { operation: "work.read", method: "GET", pattern: /^\/v2\/work\/tasks$/, path: "/v2/work/tasks" },
   { operation: "work.read", method: "GET", pattern: /^\/v2\/work\/tasks\/(task_[0-9A-HJKMNP-TV-Z]{26})$/, path: "/v2/work/tasks/<id>" },
   { operation: "work.read", method: "GET", pattern: /^\/v2\/work\/projects$/, path: "/v2/work/projects" },
@@ -61,6 +63,13 @@ export async function handleV2(request: Request, route: V2Route, identity: Ident
       if (project !== null && !idOf("prj").safeParse(project).success) throw new HubError("INVALID", "项目 ID 不合法");
       return Response.json(WorkTask.array().parse(modules.work.tasks({ status: status ?? undefined, project: project ?? undefined, query: query ?? undefined })));
     }
+    if (route.operation === "assistant.memory.read") return Response.json(await modules.assistant.memories(identity.actor.id));
+    if (route.operation === "assistant.memory.command") {
+      const result = await modules.assistant.memoryCommand(await json(request), identity.actor.id, () => {
+        store.audit(identity, route.operation, decision.result, undefined, "applied");
+      });
+      audited = true; return Response.json(result);
+    }
     if (route.operation === "assistant.read") return Response.json(id ? modules.assistant.detail(id, identity.actor.id) : modules.assistant.conversations(identity.actor.id));
     const parsed = AssistantChatRequest.safeParse(await json(request));
     if (!parsed.success) throw new HubError("INVALID", "助手请求参数不合法");
@@ -89,7 +98,7 @@ export async function handleV2(request: Request, route: V2Route, identity: Ident
     execution = error?.code ?? (cause instanceof HubError ? cause.code : "INTERNAL");
     throw error ?? cause;
   } finally {
-    if (!audited && (!["work.read", "execution.read", "assistant.read"].includes(route.operation) || execution !== "applied" || decision.result !== "allow")) {
+    if (!audited && (!["work.read", "execution.read", "assistant.read", "assistant.memory.read"].includes(route.operation) || execution !== "applied" || decision.result !== "allow")) {
       store.audit(identity, route.operation, decision.result, undefined, execution);
     }
   }

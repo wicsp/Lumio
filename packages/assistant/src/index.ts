@@ -1,7 +1,8 @@
 import {
   AssistantChatRequest, AssistantChatResult, AssistantConversation, AssistantConversationDetail,
   AssistantMessage, AssistantTurn, AssistantToolCall, AssistantMemory,
-  AssistantModelRequest, AssistantModelResponse, AssistantEvent,
+  AssistantModelRequest, AssistantModelResponse, AssistantEvent, Actor,
+  AssistantMemoryCommandRequest, AssistantMemoryCommandResult,
   type AssistantModelMessage, type AssistantToolSpec, type ID_PREFIXES, type ResourceRef,
 } from "@lumio/schema";
 
@@ -25,6 +26,9 @@ export interface AssistantStore {
   putReceipt(owner: string, request: string, input: string, turn: string): void;
   memories(owner: string): AssistantMemory[];
   putMemory(value: AssistantMemory): void;
+  removeMemory(owner: string, id: string): void;
+  memoryReceipt(owner: string, request: string, operation: string): { matches: boolean; result: AssistantMemoryCommandResult } | undefined;
+  putMemoryReceipt(owner: string, request: string, operation: string, result: AssistantMemoryCommandResult): void;
 }
 export interface AssistantModel {
   complete(input: AssistantModelRequest, options: { signal?: AbortSignal; token(text: string): void }): Promise<AssistantModelResponse>;
@@ -32,11 +36,13 @@ export interface AssistantModel {
 export interface AssistantTool {
   spec: AssistantToolSpec;
   effect: "read" | "write";
-  execute(args: Record<string, unknown>, context: { actor: string; request: string; signal?: AbortSignal }): Promise<unknown>;
+  execute(args: Record<string, unknown>, context: { actor: string; owner: string; request: string; signal?: AbortSignal }): Promise<unknown>;
 }
 export interface AssistantContext {
   now(): Date;
   id(prefix: (typeof ID_PREFIXES)[keyof typeof ID_PREFIXES]): string;
+  /** Tool authority is an explicit agent identity; the human owner is only conversation scope. */
+  toolActor?: Actor;
   canRead?(reference: ResourceRef, actor: string): Promise<boolean>;
   maxSteps?: number;
 }
@@ -44,8 +50,13 @@ export interface AssistantContext {
 /** Assistant owns its conversations and loop, and knows other modules only as injected tools. */
 export class AssistantService {
   private readonly pending = new Map<string, Promise<AssistantChatResult>>();
+  private readonly toolActor?: Actor;
   constructor(private readonly store: AssistantStore, private readonly model: AssistantModel,
-    private readonly tools: readonly AssistantTool[], private readonly context: AssistantContext) {}
+    private readonly tools: readonly AssistantTool[], private readonly context: AssistantContext) {
+    const actor = context.toolActor === undefined ? undefined : Actor.safeParse(context.toolActor);
+    if ((actor && (!actor.success || actor.data.role !== "agent")) || (tools.length && !actor)) throw new AssistantError("INVALID", "助手工具必须配置明确的 agent 身份，不能继承人类权限");
+    this.toolActor = actor?.success ? actor.data : undefined;
+  }
 
   conversations(owner: string): AssistantConversation[] { return AssistantConversation.array().parse(this.store.conversations(owner)); }
   detail(id: string, owner: string): AssistantConversationDetail {
@@ -78,16 +89,52 @@ export class AssistantService {
     for (const memory of AssistantMemory.array().parse(this.store.memories(owner))) {
       if (memory.private) continue;
       let allowed = true;
-      for (const source of memory.sources) if (!this.context.canRead || !(await this.context.canRead(source, owner))) { allowed = false; break; }
+      for (const source of memory.sources) if (!(await this.sourceVisible(source))) { allowed = false; break; }
       if (allowed) visible.push(memory);
     }
     return visible;
   }
-  async remember(owner: string, content: string, sources: ResourceRef[] = []): Promise<AssistantMemory> {
-    for (const source of sources) if (!this.context.canRead || !(await this.context.canRead(source, owner))) throw new AssistantError("NOT_FOUND", "记忆来源不存在或不可访问");
+  private async sourceVisible(source: ResourceRef): Promise<boolean> {
+    try { return !!this.toolActor && !!this.context.canRead && await this.context.canRead(source, this.toolActor.id); }
+    catch { return false; }
+  }
+  private async checkSources(sources: ResourceRef[]): Promise<void> {
+    for (const source of sources) if (!await this.sourceVisible(source)) throw new AssistantError("NOT_FOUND", "记忆来源不存在或不可访问");
+  }
+  private makeMemory(owner: string, content: string, sources: ResourceRef[]): AssistantMemory {
+    if (!content.trim()) throw new AssistantError("INVALID", "记忆内容不能为空白");
     const time = this.time();
-    const memory = AssistantMemory.parse({ id: this.context.id("mem"), owner, content, sources, private: false, revision: 1, created: time, updated: time });
-    this.store.putMemory(memory); return memory;
+    return AssistantMemory.parse({ id: this.context.id("mem"), owner, content, sources, private: false, revision: 1, created: time, updated: time });
+  }
+  async remember(owner: string, content: string, sources: ResourceRef[] = []): Promise<AssistantMemory> {
+    await this.checkSources(sources);
+    const memory = this.makeMemory(owner, content, sources); this.store.putMemory(memory); return memory;
+  }
+  async memoryCommand(input: unknown, owner: string, onCommit?: (result: AssistantMemoryCommandResult) => void): Promise<AssistantMemoryCommandResult> {
+    const parsed = AssistantMemoryCommandRequest.safeParse(input);
+    if (!parsed.success) throw new AssistantError("INVALID", "记忆命令不合法");
+    const request = parsed.data, operation = JSON.stringify(request.operation);
+    const prior = this.store.memoryReceipt(owner, request.request_id, operation);
+    if (prior && !prior.matches) throw new AssistantError("CONFLICT", "请求编号已用于不同的记忆操作");
+    if (prior?.result.kind === "memory") await this.checkSources(prior.result.memory.sources);
+    else if (!prior && request.operation.op === "assistant.memory.remember") await this.checkSources(request.operation.args.sources ?? []);
+    return this.store.transaction(() => {
+      const receipt = this.store.memoryReceipt(owner, request.request_id, operation);
+      if (receipt) {
+        if (!receipt.matches) throw new AssistantError("CONFLICT", "请求编号已用于不同的记忆操作");
+        const result = AssistantMemoryCommandResult.parse(receipt.result); onCommit?.(result); return result;
+      }
+      let result: AssistantMemoryCommandResult;
+      if (request.operation.op === "assistant.memory.remember") {
+        const memory = this.makeMemory(owner, request.operation.args.content, request.operation.args.sources ?? []);
+        this.store.putMemory(memory); result = { kind: "memory", memory };
+      } else {
+        this.store.removeMemory(owner, request.operation.args.memory);
+        result = { kind: "forgotten", memory: request.operation.args.memory };
+      }
+      result = AssistantMemoryCommandResult.parse(result);
+      this.store.putMemoryReceipt(owner, request.request_id, operation, result); onCommit?.(result); return result;
+    });
   }
 
   async chat(input: unknown, owner: string, options: { signal?: AbortSignal; event?: (event: AssistantEvent) => void } = {}): Promise<AssistantChatResult> {
@@ -185,11 +232,13 @@ export class AssistantService {
           let result: unknown;
           try {
             if (!tool) throw new AssistantError("INVALID", "未提供这个工具");
-            result = await tool.execute(call.args, { actor: owner, request: call.id, signal: options.signal });
+            if (!this.toolActor) throw new AssistantError("INVALID", "助手工具尚未配置身份");
+            result = await tool.execute(call.args, { actor: this.toolActor.id, owner, request: call.id, signal: options.signal });
             result = JSON.parse(JSON.stringify(result ?? null));
             call = { ...call, status: "succeeded", result, finished: this.time() };
-          } catch {
-            if (tool?.effect === "write") {
+          } catch (cause) {
+            const denied = cause instanceof Error && "code" in cause && cause.code === "FORBIDDEN";
+            if (tool?.effect === "write" && !denied) {
               call = { ...call, status: "unknown", error: "操作结果不明，请先核查，未自动重试", finished: this.time() };
               this.store.putCall(call); state = { ...state, status: "unknown", error: call.error, finished: this.time() };
               this.store.putTurn(state); emit({ type: "tool", turn: state.id, tool: call }); return this.result(state, owner);

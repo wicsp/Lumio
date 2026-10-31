@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import type { Database } from "bun:sqlite";
-import { AssistantConversation, AssistantMessage, AssistantTurn, AssistantToolCall, AssistantMemory } from "@lumio/schema";
+import { AssistantConversation, AssistantMessage, AssistantTurn, AssistantToolCall, AssistantMemory, AssistantMemoryCommandResult } from "@lumio/schema";
 import type { AssistantStore } from "@lumio/assistant";
 
 /** Typed Assistant persistence; indexed ownership and lifecycle fields are committed with validated records. */
@@ -22,6 +23,9 @@ export class SqliteAssistantStore implements AssistantStore {
         turn TEXT NOT NULL REFERENCES assistant_turns(id),PRIMARY KEY(owner,request));
       CREATE TABLE IF NOT EXISTS assistant_memories(id TEXT PRIMARY KEY,owner TEXT NOT NULL,record TEXT NOT NULL CHECK(json_valid(record)));
       CREATE INDEX IF NOT EXISTS assistant_memories_owner ON assistant_memories(owner);
+      CREATE TABLE IF NOT EXISTS assistant_memory_requests(owner TEXT NOT NULL,request TEXT NOT NULL,operation_hash TEXT NOT NULL,
+        result TEXT NOT NULL CHECK(json_valid(result)),PRIMARY KEY(owner,request));
+      INSERT OR IGNORE INTO platform_migrations(name,applied) VALUES('assistant-2',strftime('%Y-%m-%dT%H:%M:%fZ','now'));
       INSERT OR IGNORE INTO platform_migrations(name,applied) VALUES('assistant-1',strftime('%Y-%m-%dT%H:%M:%fZ','now'));
     `))();
   }
@@ -77,4 +81,21 @@ export class SqliteAssistantStore implements AssistantStore {
     this.db.query("INSERT INTO assistant_memories(id,owner,record) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET record=excluded.record")
       .run(value.id, value.owner, JSON.stringify(value));
   }
+  memoryReceipt(owner: string, request: string, operation: string): { matches: boolean; result: AssistantMemoryCommandResult } | undefined {
+    const row = this.db.query<{ operation_hash: string; result: string }, [string, string]>("SELECT operation_hash,result FROM assistant_memory_requests WHERE owner=? AND request=?").get(owner, request);
+    return row ? { matches: row.operation_hash === createHash("sha256").update(operation).digest("hex"), result: AssistantMemoryCommandResult.parse(JSON.parse(row.result)) } : undefined;
+  }
+  putMemoryReceipt(owner: string, request: string, operation: string, result: AssistantMemoryCommandResult): void {
+    this.db.query("INSERT INTO assistant_memory_requests(owner,request,operation_hash,result) VALUES(?,?,?,?)")
+      .run(owner, request, createHash("sha256").update(operation).digest("hex"), JSON.stringify(AssistantMemoryCommandResult.parse(result)));
+  }
+  removeMemory(owner: string, id: string): void {
+    this.db.transaction(() => {
+      this.db.query("DELETE FROM assistant_memories WHERE owner=? AND id=?").run(owner, id);
+      const result = AssistantMemoryCommandResult.parse({ kind: "forgotten", memory: id });
+      this.db.query("UPDATE assistant_memory_requests SET result=? WHERE owner=? AND json_extract(result,'$.kind')='memory' AND json_extract(result,'$.memory.id')=?")
+        .run(JSON.stringify(result), owner, id);
+    })();
+  }
+
 }

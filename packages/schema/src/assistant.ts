@@ -83,6 +83,85 @@ export const AssistantMemory = z.strictObject({
   updated: Timestamp,
 });
 
+// ───────────────────────── 记忆命令（R0-7）─────────────────────────
+
+/**
+ * 记忆命令：保存用户显式偏好/事实或删除已有记忆（ADR 0025 第 7 节，R0-7）。
+ *
+ * 语义：
+ * - assistant.memory.remember：保存新记忆。owner 为调用者（必须为 human），由应用注入。
+ *   sources 缺省为空数组（应用供给）；不可访问的引用在保存时拒绝，不接受后填充 private。
+ *   revision 起始值为 1；id/created/updated 由应用生成。
+ *   **本切片只接受人类显式记忆，不提供从对话自动提取或 agent 调用权限。**
+ * - assistant.memory.forget：删除记忆（按调用者作用域幂等：不存在或已删除均返回成功）。
+ *   已忘记的记忆 ID 重放旧 remember 请求可能返回 forgotten 结果，不恢复内容。
+ *
+ * content 必须非空且非纯空白（包括空格、制表符、换行符）。
+ */
+
+const nonBlank = (s: string) => s.trim().length > 0;
+
+const AssistantMemoryRemember = z.strictObject({
+  op: z.literal("assistant.memory.remember"),
+  args: z.strictObject({
+    content: z
+      .string()
+      .min(1)
+      .refine(nonBlank, { message: "content 不能为空或纯空白" })
+      .describe("记忆内容，不能为空或纯空白"),
+    sources: z
+      .array(ResourceRef)
+      .optional()
+      .describe("来源引用；缺省为空数组（应用供给）；不可访问的引用在保存时拒绝"),
+  }),
+});
+
+const AssistantMemoryForget = z.strictObject({
+  op: z.literal("assistant.memory.forget"),
+  args: z.strictObject({
+    memory: idOf("mem").describe("要删除的记忆 ID；按调用者作用域幂等（不存在或已删除不报错）"),
+  }),
+});
+
+/**
+ * 记忆命令的 discriminated union。
+ */
+export const AssistantMemoryCommand = z.discriminatedUnion("op", [
+  AssistantMemoryRemember,
+  AssistantMemoryForget,
+]);
+
+export const ASSISTANT_MEMORY_COMMAND_NAMES = AssistantMemoryCommand.options.map(
+  (o) => o.shape.op.value,
+);
+
+/**
+ * 记忆命令请求：带 request_id 去重。
+ */
+export const AssistantMemoryCommandRequest = z.strictObject({
+  request_id: RequestId,
+  operation: AssistantMemoryCommand,
+});
+
+/**
+ * 记忆命令结果（严格 discriminated union）：
+ * - remember → {kind:'memory', memory: AssistantMemory}
+ * - forget → {kind:'forgotten', memory: <mem_ID>}（幂等；已删除或不存在也返回此结果）
+ *
+ * 已忘记的 ID 重放 remember 请求可能返回 forgotten 变体，不恢复内容。
+ */
+export const AssistantMemoryCommandResult = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("memory"),
+    memory: AssistantMemory.describe("新建的记忆；owner/private/revision/id/timestamps 由应用生成"),
+  }),
+  z.strictObject({
+    kind: z.literal("forgotten"),
+    memory: idOf("mem").describe("已删除的记忆 ID（幂等；不存在或已删除也成功）"),
+  }),
+]);
+
+
 // ───────────────────────── 命令与查询 ─────────────────────────
 
 /** 发起一轮对话（可以是新对话或继续已有对话）。 */
@@ -157,6 +236,12 @@ export const AssistantEvent = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("result"), turn: idOf("turn"), messages: z.array(AssistantMessage) }),
   z.strictObject({ type: z.literal("error"), turn: idOf("turn"), error: z.string() }),
 ]);
+
+export type AssistantMemoryCommand = z.infer<typeof AssistantMemoryCommand>;
+export type AssistantMemoryCommandName = AssistantMemoryCommand["op"];
+export type AssistantMemoryCommandRequest = z.infer<typeof AssistantMemoryCommandRequest>;
+export type AssistantMemoryCommandResult = z.infer<typeof AssistantMemoryCommandResult>;
+
 
 export type MessageRole = z.infer<typeof MessageRole>;
 export type ModelMessageRole = z.infer<typeof ModelMessageRole>;

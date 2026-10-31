@@ -49,7 +49,7 @@ export class BusinessModules {
     });
     this.assistant = new AssistantService(new SqliteAssistantStore(store.db), options.assistantModel ?? {
       async complete() { throw new Error("Assistant model not configured"); },
-    }, options.assistantTools ?? [], { now, id });
+    }, options.assistantTools ?? [], { now, id, ...(options.assistantTools?.length ? { toolActor: store.assistantActor() } : {}) });
     this.assistant.recover();
     this.reconcile();
     this.timer = setInterval(() => { try { this.reconcile(); } catch { /* Persisted pending results remain for the next pass. */ } }, 1000);

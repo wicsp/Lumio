@@ -38,6 +38,21 @@ export class HubStore {
     } catch (cause) { db.close(); throw cause; }
   }
 
+  /** A stable internal agent identity is separate from the conversation owner; it receives no token or human delegation. */
+  assistantActor(): Actor {
+    return this.db.transaction(() => {
+      this.db.exec("CREATE TABLE IF NOT EXISTS internal_actors(purpose TEXT PRIMARY KEY,actor TEXT NOT NULL REFERENCES actors(id))");
+      const binding = this.db.query<{ actor: string }, []>("SELECT actor FROM internal_actors WHERE purpose='assistant-tools'").get();
+      if (binding) {
+        const actor = this.actors().find((value) => value.id === binding.actor);
+        if (!actor || actor.role !== "agent") throw new HubError("INVALID", "助手工具身份配置无效");
+        return actor;
+      }
+      const actor = this.createActor(`assistant-${randomBytes(6).toString("hex")}`, "agent");
+      this.db.query("INSERT INTO internal_actors(purpose,actor) VALUES('assistant-tools',?)").run(actor.id); return actor;
+    })();
+  }
+
   createActor(name: string, role: ActorRole): Actor {
     const now = new Date();
     const parsed = Actor.safeParse({ id: newId("act", now, randomBytes), name, role, created: now.toISOString() });

@@ -1,13 +1,26 @@
 import { randomUUID } from "node:crypto";
 import { parseArgs } from "node:util";
 import { createClient } from "@lumio/api-client";
+import { AssistantMemoryCommandRequest } from "@lumio/schema";
 import { hubCredentials } from "./config.ts";
 
 export async function runAssistant(args: string[], log: (line: string) => void): Promise<number> {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, strict: true, options: {
-    json: { type: "boolean" }, stream: { type: "boolean" }, conversation: { type: "string" }, model: { type: "string" }, "request-id": { type: "string" },
+    sources: { type: "string" }, json: { type: "boolean" }, stream: { type: "boolean" }, conversation: { type: "string" }, model: { type: "string" }, "request-id": { type: "string" },
   } });
   const client = createClient(hubCredentials());
+  if (positionals[0] === "memory") {
+    const [, action, ...text] = positionals;
+    const emit = (value: unknown) => log(values.json ? JSON.stringify(value) : JSON.stringify(value, null, 2));
+    if (action === "list" && !text.length) { emit(await client.memories()); return 0; }
+    if ((action === "remember" && text.length) || (action === "forget" && text.length === 1)) {
+      const input = AssistantMemoryCommandRequest.parse({ request_id: values["request-id"] ?? randomUUID(), operation: {
+        op: `assistant.memory.${action}`, args: action === "remember" ? { content: text.join(" "), ...(values.sources ? { sources: JSON.parse(values.sources) } : {}) } : { memory: text[0] },
+      } });
+      emit(await client.memoryCommand(input)); return 0;
+    }
+    throw new Error("用法：lumio chat memory list|remember <内容>|forget <记忆ID> [--json] [--request-id ID]；remember 可指定 --sources JSON");
+  }
   if (positionals[0] === "list" && positionals.length === 1) {
     const conversations = await client.conversations();
     if (values.json) log(JSON.stringify(conversations)); else for (const conversation of conversations) log(`${conversation.id}  ${conversation.title}`);

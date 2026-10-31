@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ApiError, WorkCommandResult, WorkTaskDetail, AssistantChatResult, AssistantEvent, Job, ExecutionRoutine, ExecutionRoutineInfo, RuntimeSync, StoredArtifact, type RuntimeRegistration } from "@lumio/schema";
+import { AssistantMemory, AssistantMemoryCommandResult, ApiError, WorkCommandResult, WorkTaskDetail, AssistantChatResult, AssistantEvent, Job, ExecutionRoutine, ExecutionRoutineInfo, RuntimeSync, StoredArtifact, type RuntimeRegistration } from "@lumio/schema";
 import { createHash } from "node:crypto";
 import { routineJobId } from "@lumio/execution";
 import { startHub } from "../src/server.ts";
@@ -186,6 +186,11 @@ test("CLI uses database tasks and projects, preserves conflicting edit files, an
   expect((await cli(["task", "edit", task.task.id, "--file", path, "--revision", "2", "--json"])).code).toBe(0);
   const shown = await cli(["task", "show", task.task.id, "--json"]);
   expect(WorkTaskDetail.parse(JSON.parse(shown.stdout)).task.description).toBe("第二版正文");
+  const memory = AssistantMemoryCommandResult.parse(JSON.parse((await cli(["chat", "memory", "remember", "合成CLI偏好", "--json", "--request-id", "synthetic-cli-memory"])).stdout));
+  if (memory.kind !== "memory") throw new Error("memory expected");
+  expect(AssistantMemory.array().parse(JSON.parse((await cli(["chat", "memory", "list", "--json"])).stdout))).toHaveLength(1);
+  expect((await cli(["chat", "memory", "forget", memory.memory.id, "--json"])).code).toBe(0);
+  expect(JSON.parse((await cli(["chat", "memory", "remember", "合成CLI偏好", "--json", "--request-id", "synthetic-cli-memory"])).stdout).kind).toBe("forgotten");
   const chat = await cli(["chat", "你好", "--json"]); expect(chat.code).toBe(0);
   const dialogue = AssistantChatResult.parse(JSON.parse(chat.stdout)); expect(dialogue.turn.status).toBe("done");
   const streamed = await cli(["chat", "继续", "--conversation", dialogue.conversation.id, "--stream"]);
@@ -209,4 +214,45 @@ test("CLI uses database tasks and projects, preserves conflicting edit files, an
   if (followupTask.kind !== "task") throw new Error("task expected");
   expect(followupTask.task.assignee).toBe("human"); expect(followupTask.task.description).toContain("追问来源");
   expect(followupTask.task.references).toEqual([{ module: "execution", id: routine.id }, { module: "execution", id: job }]);
+});
+
+
+test("explicit memory API is human-only, owner-scoped, audited and cannot resurrect forgotten content", async () => {
+  const path = "/v2/assistant/memory-commands";
+  const payload = { request_id: "synthetic-memory-api-001", operation: { op: "assistant.memory.remember", args: { content: "合成偏好" } } };
+  expect((await request(path, payload, agent)).status).toBe(403);
+  expect((await request(path, { ...payload, owner: "injected" })).status).toBe(400);
+  const first = AssistantMemoryCommandResult.parse(await (await request(path, payload)).json());
+  if (first.kind !== "memory") throw new Error("memory expected");
+  expect(await (await request(path, payload)).json()).toEqual(first);
+  expect(AssistantMemory.array().parse(await (await request("/v2/assistant/memories")).json())).toHaveLength(1);
+  const stranger = hub.store.createActor("memory-stranger", "human"), token = hub.store.createToken("memory-stranger", stranger.name);
+  expect(await (await request("/v2/assistant/memories", undefined, token)).json()).toEqual([]);
+  const forget = { request_id: "synthetic-memory-forget", operation: { op: "assistant.memory.forget", args: { memory: first.memory.id } } };
+  expect((await request(path, forget, token)).status).toBe(200);
+  expect(await hub.modules.assistant.memories(first.memory.owner)).toHaveLength(1);
+  expect((await request(path, forget)).status).toBe(200);
+  expect(await (await request(path, payload)).json()).toEqual({ kind: "forgotten", memory: first.memory.id });
+  expect(await (await request("/v2/assistant/memories")).json()).toEqual([]);
+  const source = { ...payload, request_id: "synthetic-memory-source", operation: { op: "assistant.memory.remember", args: { content: "不可访问", sources: [{ module: "knowledge", id: "pap_00000000000000000000000001" }] } } };
+  expect((await request(path, source)).status).toBe(404);
+  hub.store.db.exec("CREATE TRIGGER fail_memory_audit BEFORE INSERT ON audit WHEN NEW.operation='assistant.memory.command' AND NEW.execution_result='applied' BEGIN SELECT RAISE(FAIL,'synthetic audit'); END");
+  expect((await request(path, { ...payload, request_id: "synthetic-memory-rollback" })).status).toBe(500);
+  expect(await (await request("/v2/assistant/memories")).json()).toEqual([]);
+  expect(hub.store.db.query("SELECT * FROM assistant_memory_requests WHERE request='synthetic-memory-rollback'").all()).toEqual([]);
+});
+
+test("injected assistant tools use a persistent agent identity without a credential or owner authority", async () => {
+  await hub.stop(); let calls = 0, toolActor = "";
+  hub = await startHub({ ...readConfig({ LUMIO_STATE_DIR: temp }), port: 0 }, { log() {},
+    assistantModel: { async complete() { return ++calls === 1 ? { content: "", tool_calls: [{ id: "provider-id", name: "fixture_read", args: {} }] } : { content: "完成", tool_calls: [] }; } },
+    assistantTools: [{ spec: { name: "fixture_read", description: "fixture", input_schema: { type: "object" } }, effect: "read", async execute(_args, context) {
+      toolActor = context.actor; expect(context.owner).not.toBe(context.actor); expect(hub.store.actors().find(a => a.id === context.actor)?.role).toBe("agent"); return { text: "合成" };
+    } }],
+  });
+  expect(AssistantChatResult.parse(await (await request("/v2/assistant/chat", { request_id: "synthetic-agent-chat", message: "资料" })).json()).turn.status).toBe("done");
+  expect(hub.store.assistantActor().id).toBe(toolActor);
+  expect(hub.store.db.query("SELECT * FROM tokens WHERE actor_id=?").all(toolActor)).toEqual([]);
+  await hub.stop(); hub = await startHub({ ...readConfig({ LUMIO_STATE_DIR: temp }), port: 0 }, { log() {} });
+  expect(hub.store.assistantActor().id).toBe(toolActor);
 });
