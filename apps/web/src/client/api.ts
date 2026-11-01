@@ -1,5 +1,5 @@
 /**
- * 浏览器会话（ADR 0026）：令牌只在内存里；登出或 401 时中止所有未完成请求。
+ * 浏览器会话（ADR 0026）：请求会话持有令牌；保存与恢复由 App 负责。登出或 401 时中止所有未完成请求。
  */
 import { ApiClientError, createClient } from "@lumio/api-client";
 
@@ -20,7 +20,10 @@ export function createSession(token: string | undefined, onUnauthorized: () => v
   const fetcher = (async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const signal = init.signal ? AbortSignal.any([init.signal, controller.signal]) : controller.signal;
     const target = typeof input === "string" && input.startsWith("/") ? new URL(input, window.location.origin) : input;
-    const response = await window.fetch(target, { ...init, signal, credentials: "omit", cache: "no-store" });
+    const headers = new Headers(init.headers);
+    const hub = typeof document === "undefined" ? undefined : document.querySelector<HTMLMetaElement>('meta[name="lumio-hub"]')?.content;
+    if (hub) headers.set("X-Lumio-Hub", hub);
+    const response = await window.fetch(target, { ...init, headers, signal, credentials: "omit", cache: "no-store" });
     if (response.status === 401 && token&&!closed) queueMicrotask(()=>{if(!closed)onUnauthorized();});
     return response;
   }) as typeof fetch;
@@ -48,3 +51,8 @@ export function errorText(error: unknown): string {
 
 export const isConflict = (error: unknown) => error instanceof ApiClientError && error.code === "CONFLICT";
 export const isAborted = (error: unknown) => error instanceof DOMException && error.name === "AbortError";
+
+/** A failed verification may be retried in memory, never persisted before success. */
+export class LoginError extends Error {
+  constructor(message: string, readonly retryable: boolean) { super(message); }
+}

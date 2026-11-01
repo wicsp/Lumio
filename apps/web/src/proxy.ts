@@ -112,6 +112,8 @@ export function createHubProxy(options:ProxyOptions):(request:Request)=>Promise<
     if(!isAllowedRoute(method,path))return proxyError(404,"NOT_FOUND","工作台没有开放这个接口");
     if(url.search.length>MAX_QUERY_LENGTH)return proxyError(400,"INVALID","查询条件太长");
     const rejected=checkRequestSource(request,options.allowedOrigins);if(rejected)return rejected;
+    const expectedHub=request.headers.get("x-lumio-hub");
+    if(expectedHub!==null&&expectedHub!==options.hubUrl)return proxyError(409,"FORBIDDEN","Hub 连接配置已变更，请刷新页面后重新连接");
     if(method==="POST"&&!/^application\/json(\s*;|$)/i.test(request.headers.get("content-type")??""))return proxyError(415,"INVALID","请求内容必须是 JSON");
     const controller=new AbortController(),sources=[request.signal,...(options.signal?[options.signal]:[])];
     const onAbort=()=>controller.abort();for(const source of sources){source.addEventListener("abort",onAbort,{once:true});if(source.aborted)controller.abort();}

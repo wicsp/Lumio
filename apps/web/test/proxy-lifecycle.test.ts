@@ -43,3 +43,10 @@ test("unexpected network errors are redacted and not retried",async()=>{
   let calls=0;const response=await proxy(fake(()=>{calls++;throw new Error("Bearer synthetic-secret-value");}))(request());
   const body=ApiError.parse(await response.json());expect(response.status).toBe(502);expect(body.error.message).not.toContain("synthetic-secret");expect(calls).toBe(1);
 });
+
+test("a page bound to a different Hub cannot forward its credential after reconfiguration",async()=>{
+ let calls=0;const handler=proxy(fake(()=>{calls++;return Response.json([]);}));
+ const rejected=await handler(request("/hub/v1/actors",{headers:{authorization:"Bearer synthetic-token","x-lumio-hub":"https://previous-hub.example"}}));
+ expect(rejected.status).toBe(409);expect(ApiError.parse(await rejected.json()).error.message).toContain("配置已变更");expect(calls).toBe(0);
+ const accepted=await handler(request("/hub/v1/actors",{headers:{"x-lumio-hub":"http://127.0.0.1:7420"}}));expect(accepted.status).toBe(200);expect(calls).toBe(1);await accepted.body?.cancel();
+});

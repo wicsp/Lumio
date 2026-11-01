@@ -84,3 +84,5 @@ input[type=checkbox] {width:15px;height:15px;accent-color:var(--accent);padding:
 .title-form>input {font-size:19px;font-weight:600;line-height:1.5}
 .title-message {margin:0;color:var(--danger);font-size:12px}
 @media(max-width:680px) {.properties .field-row {grid-template-columns:1fr}.title-form>input {font-size:19px}}
+
+.remember-choice {display:grid;gap:7px}.remember-choice>.field-hint {margin:0;line-height:1.8}

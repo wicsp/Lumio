@@ -90,6 +90,8 @@ describe("proxy", () => {
   test("serves page with CSP and rejects foreign Host", async () => {
     const page = await fetch(`${base()}/`);
     expect(page.headers.get("content-security-policy")).toContain("script-src 'self'");
-    expect(await page.text()).toContain("/assets/app.js");
+    const html=await page.text();
+    expect(html).toContain("/assets/app.js");
+    expect(html).toContain(`name="lumio-hub" content="http://127.0.0.1:${hub.port}"`);
   });
 });
