@@ -4,13 +4,14 @@ import { commentCommand, dispatchCommand, engineTargets, formatTime, newRequestI
 import { clear, empty, failure, field, h, openDialog, select } from "../dom.ts";
 import { JOB_LABELS, PROJECT_LABELS, TASK_LABELS } from "../labels.ts";
 import { renderMarkdown } from "../utils/markdown.ts";
+import { InlineTitle } from "../inline-title.ts";
 export type EditableWork=WorkTask|WorkProject;
 
 export class WorkEditor {
   private record:EditableWork;
   private baseDescription:string;
   private description=h("textarea",{name:"edit-description",rows:"10",placeholder:"写下背景、方法或完成标准，支持 Markdown"});
-  private title=h("input",{name:"edit-title",required:true});
+  private title:InlineTitle;
   private status:HTMLSelectElement;
   private assignee=h("input",{name:"assignee",placeholder:"human 或 pi@设备名"});
   private project:HTMLSelectElement;
@@ -18,7 +19,6 @@ export class WorkEditor {
   private model=h("input",{name:"task-model",placeholder:"使用执行引擎的默认模型"});
   private timeout=h("input",{name:"timeout",type:"number",min:"1",step:"1",placeholder:"120"});
   private goal=h("input",{name:"project-goal"});
-  private heading=h("h2");
   private note=h("div",{class:"form-message",role:"alert"});
   private busy=false;
   private commentDraft?:HTMLTextAreaElement;
@@ -30,20 +30,19 @@ export class WorkEditor {
     const isTask=this.record.type==="task",labels=isTask?TASK_LABELS:PROJECT_LABELS;
     this.status=select("edit-status",(isTask?TASK_STATUSES:PROJECT_STATUSES).map(s=>[s,labels[s]!] as [string,string]),this.record.status);
     this.project=select("edit-project",[["","不关联项目"],...projects.map(p=>[p.id,p.title] as [string,string])],this.record.type==="task"?this.record.project:undefined);
-    this.title.value=this.record.title;this.heading.textContent=this.record.title;
+    this.title=new InlineTitle(this.record.title,title=>this.saveTitle(title));
     if(this.record.type==="task"){this.assignee.value=this.record.assignee;this.workdir.value=this.record.workdir??"";this.model.value=this.record.model??"";this.timeout.value=this.record.timeout_minutes?.toString()??"";}
     else this.goal.value=this.record.goal??"";
     const saveFields=this.button("保存属性",()=>{});saveFields.type="submit";
-    const form=h("form",{class:"form-stack properties"},h("div",{class:"field-row"},field(isTask?"任务标题":"项目名称",this.title),field("状态",this.status)),
-      ...(isTask?[h("div",{class:"field-row"},field("负责人",this.assignee,"修改负责人不会自动派活"),field("所属项目",this.project)),
-        h("details",{class:"advanced"},h("summary",{},"执行设置"),h("div",{class:"form-stack"},field("工作目录",this.workdir),h("div",{class:"field-row"},field("模型",this.model),field("最长运行时间（分钟）",this.timeout))))]:[field("项目目标",this.goal)]),saveFields);
+    const form=h("form",{class:"form-stack properties"},...(isTask?[h("div",{class:"field-row"},field("状态",this.status),field("负责人",this.assignee,"修改负责人不会自动派活")),field("所属项目",this.project),
+        h("details",{class:"advanced"},h("summary",{},"执行设置"),h("div",{class:"form-stack"},field("工作目录",this.workdir),h("div",{class:"field-row"},field("模型",this.model),field("最长运行时间（分钟）",this.timeout))))]:[h("div",{class:"field-row"},field("状态",this.status),field("项目目标",this.goal))]),saveFields);
     form.addEventListener("submit",e=>{e.preventDefault();void this.saveFields();});
     const saveBody=this.button("保存正文",()=>{});saveBody.type="submit";
     const bodyForm=h("form",{class:"form-stack body-editor"},h("h3",{},"正文"),field("说明（Markdown）",this.description),saveBody);
     bodyForm.addEventListener("submit",e=>{e.preventDefault();void this.saveDescription();});
     const preview=h("div",{class:"markdown description-preview"});preview.innerHTML=renderMarkdown(this.baseDescription||"尚未填写说明。");
     const previewBox=h("details",{},h("summary",{},"阅读已保存的正文"),preview);
-    root.append(h("div",{class:"detail-heading"},h("p",{class:"eyebrow"},isTask?"TASK":"PROJECT"),this.heading,h("p",{class:"muted"},`更新于 ${formatTime(this.record.updated)}`)),this.note,form,bodyForm,previewBox);
+    root.append(h("div",{class:"detail-heading"},h("p",{class:"eyebrow"},isTask?"TASK":"PROJECT"),this.title.element,h("p",{class:"muted"},`更新于 ${formatTime(this.record.updated)}`)),this.note,form,bodyForm,previewBox);
     this.structuralBase=this.fieldsKey();
     if("task" in input){
       const dispatch=this.button("派出 / 继续",()=>this.dispatch());dispatch.classList.add("btn-primary");root.append(h("section",{class:"detail-section"},h("h3",{},"执行与进展"),h("p",{class:"muted"},"保存修改后，再明确选择执行器派出这一轮。运行成功不会自动完成任务。"),dispatch,
@@ -54,37 +53,47 @@ export class WorkEditor {
     }
   }
   dispose():void{this.active=false;}
-  private fieldsKey():string{return JSON.stringify([this.title.value,this.status.value,this.assignee.value,this.project.value,this.workdir.value,this.model.value,this.timeout.value,this.goal.value]);}
-  get dirty():boolean{return this.description.value!==this.baseDescription||this.fieldsKey()!==this.structuralBase||!!this.commentDraft?.value.trim();}
+  private fieldsKey():string{return JSON.stringify([this.status.value,this.assignee.value,this.project.value,this.workdir.value,this.model.value,this.timeout.value,this.goal.value]);}
+  get dirty():boolean{return this.title.dirty||this.description.value!==this.baseDescription||this.fieldsKey()!==this.structuralBase||!!this.commentDraft?.value.trim();}
   canLeave():boolean {if(this.busy)return false;return !this.dirty||confirm("有尚未保存的修改，离开会丢弃这些修改。确定离开吗？");}
   private button(text:string,action:()=>void|Promise<void>):HTMLButtonElement{
     const button=h("button",{type:"button",class:"btn",onclick:()=>void action()},text);this.buttons.push(button);return button;
   }
-  private setBusy(value:boolean):void{this.busy=value;for(const button of this.buttons)button.disabled=value;}
+  private setBusy(value:boolean):void{this.busy=value;this.title.setBusy(value);for(const button of this.buttons)button.disabled=value;}
   private showFailure(cause:unknown):void{
     const text=isConflict(cause)?"内容已有新版本。你的修改仍保留在输入框中，请先保留草稿，再决定是否载入新版本。":`${errorText(cause)}。修改仍保留；连接中断时请先核对是否保存成功。`;
-    clear(this.note,failure(text),h("div",{class:"button-row"},h("button",{type:"button",class:"btn btn-small",onclick:()=>this.exportDraft()},"下载草稿"),h("button",{type:"button",class:"btn btn-small",onclick:()=>{if(confirm("载入最新内容会放弃当前未保存修改，确定继续吗？")){this.structuralBase=this.fieldsKey();this.baseDescription=this.description.value;if(this.commentDraft)this.commentDraft.value="";this.reload();}}},"载入最新内容")));
+    clear(this.note,failure(text),h("div",{class:"button-row"},h("button",{type:"button",class:"btn btn-small",onclick:()=>this.exportDraft()},"下载草稿"),h("button",{type:"button",class:"btn btn-small",onclick:()=>{if(confirm("载入最新内容会放弃当前未保存修改，确定继续吗？")){this.structuralBase=this.fieldsKey();this.baseDescription=this.description.value;if(this.commentDraft)this.commentDraft.value="";this.title.discard();this.reload();}}},"载入最新内容")));
   }
   private exportDraft():void{
     const blob=new Blob([`# ${this.title.value}\n\n${this.description.value}\n\n---\n状态：${this.status.value}\n负责人：${this.assignee.value}\n项目：${this.project.value}\n项目目标：${this.goal.value}\n工作目录：${this.workdir.value}\n模型：${this.model.value}\n最长时间：${this.timeout.value}\n\n未提交讨论：\n${this.commentDraft?.value??""}`],{type:"text/markdown;charset=utf-8"});
     const url=URL.createObjectURL(blob),anchor=h("a",{href:url,download:`lumio-draft-${this.record.id}.md`});anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
   }
+  private async saveTitle(title:string):Promise<string>{
+    this.setBusy(true);clear(this.note);
+    try{
+      const request={request_id:newRequestId(),operation:{op:this.record.type==="task"?"work.task.update":"work.project.update",args:{[this.record.type]:this.record.id,expected_revision:this.record.revision,patch:{title}}}} as WorkCommandRequest;
+      const result=await this.client.workCommand(request);
+      if(result.kind!=="task"&&result.kind!=="project")throw new Error();
+      this.record=result.kind==="task"?result.task:result.project;
+      clear(this.note,h("p",{class:"success",role:"status"},"标题已保存"));this.changed();return this.record.title;
+    }catch(cause){this.showFailure(cause);throw cause;}finally{this.setBusy(false);}
+  }
   private async saveFields():Promise<void>{
     if(this.busy)return;let request:WorkCommandRequest|undefined;
     if(this.record.type==="task"){
-      request=taskFieldsCommand(this.record,{title:this.title.value,status:this.status.value as WorkTask["status"],assignee:this.assignee.value.trim(),project:this.project.value});
+      request=taskFieldsCommand(this.record,{title:this.record.title,status:this.status.value as WorkTask["status"],assignee:this.assignee.value.trim(),project:this.project.value});
       const patch:Record<string,unknown>=request?.operation.op==="work.task.update"?{...request.operation.args.patch}:{};
       for(const [key,value,old] of [["workdir",this.workdir.value.trim()||null,this.record.workdir??null],["model",this.model.value.trim()||null,this.record.model??null],["timeout_minutes",this.timeout.value?Number(this.timeout.value):null,this.record.timeout_minutes??null]] as const)if(value!==old)patch[key]=value;
       if(Object.keys(patch).length)request={request_id:request?.request_id??newRequestId(),operation:{op:"work.task.update",args:{task:this.record.id,expected_revision:this.record.revision,patch}}} as WorkCommandRequest;
     }else{
-      request=projectFieldsCommand(this.record,{title:this.title.value,status:this.status.value as WorkProject["status"]});
+      request=projectFieldsCommand(this.record,{title:this.record.title,status:this.status.value as WorkProject["status"]});
       const patch:Record<string,unknown>=request?.operation.op==="work.project.update"?{...request.operation.args.patch}:{};
       if((this.goal.value.trim()||null)!==(this.record.goal??null))patch.goal=this.goal.value.trim()||null;
       if(Object.keys(patch).length)request={request_id:request?.request_id??newRequestId(),operation:{op:"work.project.update",args:{project:this.record.id,expected_revision:this.record.revision,patch}}} as WorkCommandRequest;
     }
     if(!request)return;const savedFields=this.fieldsKey();this.setBusy(true);clear(this.note);
     try{const result=await this.client.workCommand(request);if(result.kind!=="task"&&result.kind!=="project")throw new Error();
-      this.record=result.kind==="task"?result.task:result.project;this.heading.textContent=this.record.title;this.structuralBase=savedFields;clear(this.note,h("p",{class:"success",role:"status"},"属性已保存"));this.changed();
+      this.record=result.kind==="task"?result.task:result.project;this.structuralBase=savedFields;clear(this.note,h("p",{class:"success",role:"status"},"属性已保存"));this.changed();
     }catch(error){this.showFailure(error);}finally{this.setBusy(false);}
   }
   private async saveDescription():Promise<void>{
