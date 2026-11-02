@@ -74,6 +74,7 @@
 
 ## 界面重构（2026-11-02，Claude）
 
+- 试用：在仓库根目录运行 `bun run demo:web`（scripts/web-demo.ts），启动临时 Hub（7499）与 Web（4399），使用合成数据和假模型，不影响已安装的 Hub；Ctrl+C 退出并删除临时数据。
 - 范围：只改 `apps/web/src/client` 的视图层与样式，新增 `format.ts`、`list-keys.ts`、`views/palette.ts` 和纯函数 `workPatchCommand`（含测试）。不改 schema、Hub、代理、登录存储，无新依赖。
 - 外壳：全高三栏（侧栏 / 列表 / 详情），各栏独立滚动；侧栏显示进行中任务、运行中执行、待审批的数量；⌘K 命令面板；toast 确认；明暗主题；860px 以下为底部导航，列表与详情分屏显示。
 - 交互：列表按状态分组、边输入边搜索、菜单式筛选、J/K 导航；属性改为点选后立即保存（每次只发一个字段并带 revision）；说明默认显示渲染结果，点击编辑；讨论用 composer；审批从弹窗改为列表 + 详情。
