@@ -1,3 +1,4 @@
+import { browserAllowed, browserDenied, webResponse, type HubWeb } from "./web.ts";
 import { Pairing, handlePairing } from "./pairing.ts";
 import { Privileged, handlePrivileged } from "./privileged.ts";
 import { stat } from "node:fs/promises";
@@ -60,6 +61,7 @@ export const ROUTES = [
 const STATUS: Record<ApiErrorCode, number> = { INVALID: 400, UNAUTHENTICATED: 401, FORBIDDEN: 403, NOT_FOUND: 404, CONFLICT: 409, INTERNAL: 500 };
 
 async function startHubInstance(config: HubConfig, options: {
+  web?: HubWeb;
   log?: (line: string) => void;
   now?: () => Date;
   authorize?: typeof authorize;
@@ -108,9 +110,7 @@ async function startHubInstance(config: HubConfig, options: {
       await watch.exclusive(() => tasks!.start());
       await watch.exclusive(() => routines!.start());
     }
-    server = Bun.serve({
-      hostname: config.hostname, port: config.port,
-      async fetch(request, server) {
+    const handle = async (request: Request, server: Bun.Server<undefined>): Promise<Response> => {
         const start = performance.now();
         const time = new Date().toISOString();
         const url = new URL(request.url);
@@ -129,6 +129,13 @@ async function startHubInstance(config: HubConfig, options: {
           if (forwarded && isIP(forwarded)) clientIp = forwarded;
         }
         try {
+          if (!browserAllowed(request, config, server.port!)) { status = 403; return browserDenied(); }
+          const file = options.web?.files.get(url.pathname);
+          if (file && ["GET", "HEAD"].includes(request.method)) {
+            status = 200;
+            return new Response(request.method === "HEAD" ? null : typeof file.body === "string" ? file.body : Buffer.from(file.body), { headers: { "Content-Type": file.type } });
+          }
+          if (url.pathname === "/" && !options.web) { status = 404; return Response.json(ApiError.parse({ error: { code: "NOT_FOUND", message: "找不到端点" } }), { status }); }
           if (route?.operation === "health") identity = store.authenticate(request.headers.get("authorization"));
           if (route?.operation !== "health" && route?.operation !== "runtime.join" && route?.operation !== "client.join") {
             identity = store.authenticate(request.headers.get("authorization"));
@@ -233,7 +240,9 @@ async function startHubInstance(config: HubConfig, options: {
           log(JSON.stringify({ time, actor_id: identity?.actor.id ?? null, token_label: identity?.label ?? null,
             method: request.method, path, status, duration_ms: performance.now() - start, client_ip: clientIp }));
         }
-      },
+    };
+    server = Bun.serve({ hostname: config.hostname, port: config.port,
+      async fetch(request, server) { return webResponse(await handle(request, server), options.web?.csp); },
     });
   } catch (cause) { modules?.stop(); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); throw cause; }
   return { server, store, tasks: tasks!, routines: routines!, modules: modules!, async stop() { modules?.stop(); await server.stop(true); await modules?.artifacts.drain(); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); } };

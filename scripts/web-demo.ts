@@ -5,7 +5,7 @@
  *   bun run demo:web
  *
  * - vault 复制自 fixtures/query-vault，状态放在系统临时目录，退出（Ctrl+C）时删除。
- * - Hub 监听 127.0.0.1:7499，Web 监听 127.0.0.1:4399，不占用正式 Hub 的 7420。
+ * - Hub 与网页共用 127.0.0.1:7499，不占用正式 Hub 的 7420。
  * - 助手用本地假模型（只回放固定文字），不调用任何真实模型或 agent。
  * - 合成执行器「demo」上报了完成、失败、等待回答、运行中与排队的几轮，用来看执行页面。
  */
@@ -16,10 +16,9 @@ import { createClient } from "../packages/api-client/src/index.ts";
 import { HubStore } from "../apps/hub/src/store.ts";
 import { readConfig } from "../apps/hub/src/config.ts";
 import { startHub } from "../apps/hub/src/server.ts";
-import { parseWebConfig } from "../apps/web/src/config.ts";
-import { startWeb } from "../apps/web/src/server.ts";
+import { buildWebAssets, webFiles, WEB_CSP } from "../apps/web/src/entry.ts";
 
-const HUB = "127.0.0.1:7499", WEB = "127.0.0.1:4399";
+const HUB = "127.0.0.1:7499";
 const root = await mkdtemp(join(tmpdir(), "lumio-web-demo-"));
 const vault = join(root, "vault"), state = join(root, "state");
 await cp(new URL("../fixtures/query-vault", import.meta.url).pathname, vault, { recursive: true });
@@ -40,10 +39,9 @@ const fakeModel = {
   },
 };
 
-const hub = await startHub(readConfig({ LUMIO_VAULT: vault, LUMIO_STATE_DIR: state, LUMIO_HUB_LISTEN: HUB }), { assistantModel: fakeModel, log: () => {} });
-const web = await startWeb(parseWebConfig({ LUMIO_WEB_LISTEN: WEB, LUMIO_WEB_HUB_URL: `http://${HUB}` }));
+const hub = await startHub(readConfig({ LUMIO_VAULT: vault, LUMIO_STATE_DIR: state, LUMIO_HUB_LISTEN: HUB }), { web: { files: webFiles(await buildWebAssets(), { apiBase: "" }), csp: WEB_CSP }, assistantModel: fakeModel, log: () => {} });
 
-const stop = async () => { await web.stop().catch(() => {}); await hub.stop().catch(() => {}); await rm(root, { recursive: true, force: true }); process.exit(0); };
+const stop = async () => { await hub.stop().catch(() => {}); await rm(root, { recursive: true, force: true }); process.exit(0); };
 process.once("SIGINT", () => void stop());
 process.once("SIGTERM", () => void stop());
 
@@ -100,7 +98,7 @@ await dispatch("补充三个模型族的实验", "codex@demo"); // 第 2 轮，�
 console.log(`
 Lumio Web 试用已启动（临时数据，不影响已安装的 Hub）
 
-  打开：      http://${WEB}
+  打开：      http://${HUB}
   访问令牌：  ${token}
 
 在连接页点「使用已有的访问令牌」，粘贴上面的令牌。按 Ctrl+C 结束并删除临时数据。

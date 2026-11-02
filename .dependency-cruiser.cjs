@@ -28,8 +28,14 @@ module.exports = {
     {
       name: "apps-not-depend-on-each-other",
       severity: "error",
-      from: { path: "^apps/([^/]+)/" },
+      from: { path: "^apps/([^/]+)/", pathNot: "^apps/cli/src/" },
       to: { path: "^apps/", pathNot: "^apps/$1/" },
+    },
+    {
+      name: "cli-only-app-entries",
+      severity: "error",
+      from: { path: "^apps/cli/src/" },
+      to: { path: "^apps/", pathNot: ["^apps/cli/", "^apps/(hub|runtime|web)/src/entry\\.ts$"] },
     },
     {
       name: "schema-is-leaf",

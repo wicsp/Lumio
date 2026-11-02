@@ -64,21 +64,27 @@ fi
 actual=${actual%% *}
 [ "$actual" = "$expected" ] || fail 'SHA256 校验失败，未安装任何程序'
 tar -tzf "$tmp/$archive" > "$tmp/contents" || fail '读取压缩包'
-[ "$(wc -l < "$tmp/contents" | tr -d ' ')" = 3 ] || fail '压缩包内容不合法'
-for binary in lumio lumio-hub lumio-runtime; do
+[ "$(wc -l < "$tmp/contents" | tr -d ' ')" = 1 ] || fail '压缩包内容不合法'
+for binary in lumio; do
   [ "$(awk -v file="$binary" '$0 == file { n++ } END { print n+0 }' "$tmp/contents")" = 1 ] || fail '压缩包缺少程序或含非预期路径'
 done
+tar -tvzf "$tmp/$archive" > "$tmp/types" || fail '读取压缩包类型'
+[ "$(cut -c1 "$tmp/types")" = - ] || fail '压缩包含非普通程序文件'
 mkdir "$tmp/extracted"
 tar -xzf "$tmp/$archive" -C "$tmp/extracted" || fail '解压程序'
-for binary in lumio lumio-hub lumio-runtime; do
+for binary in lumio; do
   if [ ! -f "$tmp/extracted/$binary" ] || [ -L "$tmp/extracted/$binary" ]; then fail '压缩包含非普通程序文件'; fi
 done
 bin=$HOME/.local/bin
 mkdir -p "$bin" || fail '创建 ~/.local/bin'
-for binary in lumio lumio-hub lumio-runtime; do
+for binary in lumio; do
   cp "$tmp/extracted/$binary" "$bin/.$binary.new.$$" || fail '复制程序'
   chmod 755 "$bin/.$binary.new.$$" || fail '设置程序权限'
   mv -f "$bin/.$binary.new.$$" "$bin/$binary" || fail '替换程序'
+done
+for alias in lumio-hub lumio-runtime; do
+  ln -s lumio "$bin/.$alias.new.$$" || fail '创建兼容链接'
+  mv -f "$bin/.$alias.new.$$" "$bin/$alias" || fail '替换兼容链接'
 done
 printf '已安装到 %s\n' "$bin"
 case ":${PATH-}:" in
@@ -89,9 +95,9 @@ case ":${PATH-}:" in
 esac
 [ "$setup" = yes ] || exit 0
 if [ "$mode" = runtime ]; then
-  "$bin/lumio-runtime" join --hub "$hub" --code "$code" || fail 'lumio-runtime join'
+  "$bin/lumio" runtime join --hub "$hub" --code "$code" || fail 'lumio-runtime join'
 else
-  set -- "$bin/lumio-hub" setup
+  set -- "$bin/lumio" hub setup
   if [ "$server" = yes ]; then set -- "$@" --server; fi
   if [ -n "$vault" ]; then set -- "$@" --vault "$vault"; fi
   if [ -n "$public_url" ]; then set -- "$@" --public-url "$public_url"; fi

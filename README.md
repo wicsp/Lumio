@@ -38,7 +38,7 @@ curl -fsSL https://raw.githubusercontent.com/wicsp/Lumio/main/install.sh | sh
 ```
 
 程序装到 `~/.local/bin`；按终端提示把它加入 PATH。默认单机模式会配置 Hub、本机执行器和 CLI，
-vault 默认在 `~/.config/lumio/vault`，可用 `lumio-hub setup --vault /已有的笔记目录` 指定。
+vault 默认在 `~/.config/lumio/vault`，可用 `lumio hub setup --vault /已有的笔记目录` 指定。
 安装可重复运行，CLI 配置文件会自动更新，令牌不显示在终端。
 指定已有 vault 也可以只运行一行：
 
@@ -74,7 +74,7 @@ bun run check          # 类型检查 + 依赖边界检查 + 测试
 bun run schema:export  # 把契约导出为 JSON Schema（packages/schema/json/）
 ```
 
-Web 工作台从源码启动：`cd apps/web` 后执行 `bun start`，打开 `http://127.0.0.1:4317`，使用 `lumio login-code --name web` 配对。只想先看看界面，可以在仓库根目录运行 `bun run demo:web`（临时 Hub 与合成数据）。配置见 [Web 使用说明](apps/web/README.md)。
+Web 工作台随 Hub 提供：安装后打开 `http://127.0.0.1:7420`（或 Hub 对外地址）；源码启动用 `bun apps/cli/src/main.ts hub serve`，使用 `lumio login-code --name web` 配对。只想先看看界面，可以在仓库根目录运行 `bun run demo:web`（临时 Hub 与合成数据）。配置见 [Web 使用说明](apps/web/README.md)。
 
 ## 当前阶段（2026-11-02）
 

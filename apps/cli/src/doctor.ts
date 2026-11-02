@@ -1,3 +1,4 @@
+import { realpath } from "node:fs/promises";
 import { extraServices, healthVersion, publicHubChecks } from "./hub-checks.ts";
 import { join } from "node:path";
 import { createClient } from "@lumio/api-client";
@@ -17,7 +18,8 @@ export function supported(engine: keyof typeof verifiedVersions, value: string):
   };
   return compare(verifiedVersions[engine][0]) >= 0 && compare(verifiedVersions[engine][1]) < 0;
 }
-export async function doctor(options: DiagnosticOptions = {}): Promise<Check[]> {
+export interface DoctorOptions extends DiagnosticOptions { realpath?: (path: string) => Promise<string> }
+export async function doctor(options: DoctorOptions = {}): Promise<Check[]> {
   const io = diagnosticIO(options), checks: Check[] = [];
   const check = async (name: string, fix: string, action: () => Promise<void>) => {
     try { await action(); checks.push({ name, ok: true }); }
@@ -48,6 +50,25 @@ export async function doctor(options: DiagnosticOptions = {}): Promise<Check[]> 
     hubVersion = healthVersion(body);
     checks.push({ name: `Hub 版本 ${hubVersion} / CLI ${version}`, ok: hubVersion === version,
       ...(hubVersion !== version ? { problem: localAddress(new URL(base)) ? "端口上是另一个 Hub，版本不一致" : "版本不一致", fix: "运行 lumio upgrade" } : {}) });
+  });
+  await check("Hub 网页", "运行 lumio upgrade 更新 Hub 与内嵌网页", async () => {
+    if (!base) throw new Error();
+    const response = await io.fetch(`${base}/`);
+    if (!response.ok || !response.headers.get("content-type")?.includes("text/html") || !(await response.text()).includes("/assets/app.js")) throw new Error();
+  });
+  await check("Hub 网页资源", "运行 lumio upgrade 修复网页资源", async () => {
+    if (!base) throw new Error();
+    const response = await io.fetch(`${base}/assets/app.js`);
+    if (!response.ok || !response.headers.get("content-type")?.includes("javascript") || !(await response.text()).trim()) throw new Error();
+  });
+  await check("本机程序与兼容链接", "运行 install.sh 或 lumio upgrade 修复兼容链接与版本", async () => {
+    const bin = join(io.home, ".local/bin"), resolve = options.realpath ?? realpath;
+    const program = await resolve(join(bin, "lumio"));
+    for (const name of ["lumio", "lumio-hub", "lumio-runtime"]) {
+      if (await resolve(join(bin, name)) !== program) throw new Error();
+      const result = await io.run([join(bin, name), "--version"]);
+      if (result.code || result.stdout.trim().replace(/^v/, "") !== version) throw new Error();
+    }
   });
   await check("Hub 令牌", "运行 lumio login 重新登录或 lumio-hub setup", async () => { if (!base) throw new Error(); await client.actors(); });
   await check("vault 状态", "检查 Hub 对 vault 的读写权限并查看 Hub 日志", async () => {

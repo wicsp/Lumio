@@ -49,7 +49,7 @@ export function hubPlist(binary: string, env: Record<string, string>, state: str
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Label</key><string>io.lumio.hub</string>
-<key>ProgramArguments</key><array><string>${xml(binary)}</string></array>
+<key>ProgramArguments</key><array><string>${xml(binary)}</string><string>hub</string><string>serve</string></array>
 <key>EnvironmentVariables</key><dict>${Object.entries(env).map(([key, value]) => `<key>${xml(key)}</key><string>${xml(value)}</string>`).join("")}</dict>
 <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
 <key>StandardOutPath</key><string>${xml(join(state, "hub.log"))}</string>
@@ -57,7 +57,7 @@ export function hubPlist(binary: string, env: Record<string, string>, state: str
 </dict></plist>\n`;
 }
 export function hubUnit(binary: string, envFile: string): string {
-  return `[Unit]\nDescription=Lumio Hub\nAfter=network.target\n\n[Service]\nExecStart=${unitString(binary)}\nEnvironmentFile=${unitPath(envFile)}\nRestart=always\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n`;
+  return `[Unit]\nDescription=Lumio Hub\nAfter=network.target\n\n[Service]\nExecStart=${unitString(binary)} hub serve\nEnvironmentFile=${unitPath(envFile)}\nRestart=always\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n`;
 }
 export { runtimeName } from "./config.ts";
 export interface SetupOptions {
@@ -82,7 +82,7 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
   const fs = options.files ?? files, env = options.env ?? process.env;
   const home = resolve(options.home ?? env.HOME ?? homedir());
   const host = options.host ?? hostname(), platform = options.platform ?? process.platform;
-  const binary = options.binary ?? process.execPath, runtimeBinary = options.runtimeBinary ?? join(dirname(binary), "lumio-runtime");
+  const binary = options.binary ?? process.execPath, runtimeBinary = options.runtimeBinary ?? binary;
   if (binary === process.execPath && !Bun.main.startsWith("/$bunfs/")) throw new HubError("INVALID", "请用 install.sh 安装的程序运行 setup；从源码运行不会安装后台服务");
   if (!["darwin", "linux"].includes(platform)) throw new HubError("INVALID", "只支持 macOS 与 Linux");
   if (![binary, runtimeBinary].every((path) => isAbsolute(path) && !/[\r\n]/.test(path))) throw new HubError("INVALID", "程序路径必须是绝对路径");
@@ -195,7 +195,7 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
       let linger = "";
       try { linger = (await run(["loginctl", "show-user", env.USER ?? "", "-p", "Linger"])).stdout; } catch { /* hint below */ }
       if (!linger.includes("Linger=yes")) log(`退出登录后 Hub 会停止；请管理员运行 loginctl enable-linger ${env.USER ?? "<用户名>"}`);
-    } else log(`没有 systemd 用户服务。手动运行：set -a; . '${envFile.replaceAll("'", "'\\''")}'; set +a; nohup '${binary.replaceAll("'", "'\\''")}' > '${state.replaceAll("'", "'\\''")}/hub.log' 2>&1 &（也可放入 crontab @reboot）。`);
+    } else log(`没有 systemd 用户服务。手动运行：set -a; . '${envFile.replaceAll("'", "'\\''")}'; set +a; nohup '${binary.replaceAll("'", "'\\''")}' hub serve > '${state.replaceAll("'", "'\\''")}/hub.log' 2>&1 &（也可放入 crontab @reboot）。`);
   }
   if (managed) {
     const now = options.now ?? Date.now, sleep = options.sleep ?? Bun.sleep, until = now() + 20_000;
@@ -228,10 +228,10 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
   const runtimeEnv = { ...parseEnvironment(await optional(runtimeEnvFile, fs) ?? ""), LUMIO_HUB_URL: url, LUMIO_TOKEN: runtimeToken,
     LUMIO_RUNTIME_NAME: name, LUMIO_RUNTIME_STATE_DIR: join(home, ".local/share/lumio-runtime"), PATH: env.PATH ?? "/usr/bin:/bin" };
   await privateFile(runtimeEnvFile, environmentText(runtimeEnv));
-  const installed = await run([runtimeBinary, "install-service"]);
+  const installed = await run([runtimeBinary, "runtime", "install-service"]);
   if (installed.code) throw new HubError("INVALID", `本机执行器安装或登记失败；请运行 lumio-runtime install-service。日志：${runtimeEnv.LUMIO_RUNTIME_STATE_DIR}/runtime.err.log（Linux：journalctl --user -u lumio-runtime -n 30）`);
   // The installer only prints service status; keep credentials out even on child failure.
   for (const line of installed.stdout.split("\n").filter(Boolean)) if (!line.includes(token) && !line.includes(runtimeToken)) log(line);
   if (options.server) log("Caddy 示例（按实际域名与监听地址修改）：\nlumio.example.org {\n  reverse_proxy 127.0.0.1:" + config.port + "\n}");
-  log(`vault：${vault}\nHub：${url}${config.publicUrl ? `\n对外地址：${config.publicUrl}` : ""}\n日志：${platform === "linux" ? "journalctl --user -u lumio-hub -u lumio-runtime" : state}\n本机执行器：${name}\n加一台执行器：lumio runtime add <名称>`);
+  log(`vault：${vault}\n网页 / Hub：${url}${config.publicUrl ? `\n对外地址：${config.publicUrl}` : ""}\n日志：${platform === "linux" ? "journalctl --user -u lumio-hub -u lumio-runtime" : state}\n本机执行器：${name}\n加一台执行器：lumio runtime add <名称>\n运行 lumio login-code --name web 获取配对码`);
 }

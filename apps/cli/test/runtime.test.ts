@@ -38,6 +38,6 @@ test("runtime list requires Hub credentials and rejects unrelated arguments/opti
   ] as const) {
     const result = Bun.spawnSync([process.execPath, main, ...args], { env: { ...process.env, HOME: cliHome, ...env }, stdout: "pipe", stderr: "pipe" });
     expect(result.exitCode).toBe(1); expect(result.stdout.toString()).toBe("");
-    expect(result.stderr.toString()).toContain(args.length === 2 && args[1] === "list" ? "lumio-hub setup" : "runtime list");
+    expect(result.stderr.toString()).toContain(args[1] === "unknown" ? "未知执行器命令" : args.length === 2 && args[1] === "list" ? "lumio-hub setup" : "runtime list");
   }
 });
