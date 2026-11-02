@@ -2,7 +2,8 @@
  * Lumio Web 工作台服务（ADR 0026）：提供页面与同源 /hub 代理。服务本身不持有任何人的凭据。
  */
 import { buildAssets, type WebAssets } from "./build.ts";
-import { WebConfigError, listenOrigins, parseWebConfig, type WebConfig } from "./config.ts";
+import { listenOrigins, type WebConfig } from "./config.ts";
+import { version } from "./version.ts";
 import { PROXY_PREFIX, SECURITY_HEADERS, checkRequestSource, createHubProxy, proxyError } from "./proxy.ts";
 
 export interface StartWebOptions {
@@ -11,6 +12,30 @@ export interface StartWebOptions {
   fetch?: typeof globalThis.fetch;
   maxBodyBytes?: number;
   upstreamTimeoutMs?: number;
+}
+
+/** 品牌标记：石墨圆点里一盏灯。 */
+const FAVICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="15" fill="#1c2220"/><circle cx="16" cy="16" r="7" fill="#f2b705"/></svg>';
+
+/**
+ * 给 doctor 用的健康检查（ADR 0027）：Web 自己的版本，以及从服务端探测到的 Hub 状态。
+ * 不经过 /hub 代理（代理只放行浏览器用户接口），也不转发任何凭据。
+ */
+async function health(hubUrl: string, fetcher: typeof fetch): Promise<Response> {
+  let hub: { url: string; ok: boolean; version?: string; error?: string } = { url: hubUrl, ok: false };
+  try {
+    const response = await fetcher(`${hubUrl}/health`, { redirect: "error", signal: AbortSignal.timeout(3000) });
+    const body = await response.json().catch(() => undefined) as { ok?: unknown; version?: unknown } | undefined;
+    hub = response.ok && body?.ok === true
+      ? { url: hubUrl, ok: true, ...(typeof body.version === "string" ? { version: body.version } : {}) }
+      : { url: hubUrl, ok: false, error: `Hub 返回 HTTP ${response.status}` };
+  } catch (cause) {
+    hub = { url: hubUrl, ok: false, error: cause instanceof DOMException && cause.name === "TimeoutError" ? "连接 Hub 超时" : "连接不上 Hub" };
+  }
+  return new Response(JSON.stringify({ ok: hub.ok, version, hub }), {
+    status: hub.ok ? 200 : 503,
+    headers: { ...SECURITY_HEADERS, "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
+  });
 }
 
 export interface WebServer { url: string; port: number; stop(): Promise<void> }
@@ -49,7 +74,8 @@ export async function startWeb(config: WebConfig, options: StartWebOptions = {})
       if (request.method !== "GET" && request.method !== "HEAD") return proxyError(405, "INVALID", "不支持这种请求方式");
       const rejected = checkRequestSource(request, origins);
       if (rejected) return rejected;
-      if(url.pathname==="/favicon.svg")return asset('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="9" fill="#7b6bdd"/><path d="M16 5v5m0 12v5M5 16h5m12 0h5M8 8l4 4m8 8 4 4M8 24l4-4m8-8 4-4M16 11l5 5-5 5-5-5z" stroke="white" stroke-width="1.7" fill="none"/></svg>',"image/svg+xml");
+      if (url.pathname === "/favicon.svg") return asset(FAVICON, "image/svg+xml");
+      if (url.pathname === "/health") return health(config.hubUrl, options.fetch ?? fetch);
       if (url.pathname === "/") return asset(PAGE.replace("__LUMIO_HUB_ORIGIN__", config.hubUrl.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")), "text/html; charset=utf-8");
       if (url.pathname === "/assets/app.js") return asset(assets.js, "text/javascript; charset=utf-8");
       if (url.pathname === "/assets/app.css") return asset(assets.css, "text/css; charset=utf-8");
@@ -61,16 +87,4 @@ export async function startWeb(config: WebConfig, options: StartWebOptions = {})
   proxy = createHubProxy({ hubUrl: config.hubUrl, allowedOrigins: origins, fetch: options.fetch,
     maxBodyBytes: options.maxBodyBytes, timeoutMs: options.upstreamTimeoutMs, signal:stopped.signal });
   return { url: origins[0]!, port, async stop() { stopped.abort();await server.stop(true); } };
-}
-
-if (import.meta.main) {
-  try {
-    const config = parseWebConfig(process.env);
-    const web = await startWeb(config);
-    console.log(`Lumio 工作台：${web.url}`);
-    console.log(`Hub：${config.hubUrl}`);
-  } catch (cause) {
-    console.error(cause instanceof WebConfigError ? cause.message : cause instanceof Error ? cause.message : "工作台启动失败");
-    process.exitCode = 1;
-  }
 }

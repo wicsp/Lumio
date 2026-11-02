@@ -4,9 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "bun run src/server.ts",
-    "dev": "bun --watch run src/server.ts",
+    "start": "bun run src/main.ts",
+    "dev": "bun --watch run src/main.ts",
     "build": "bun run src/build.ts",
+    "build:binary": "bun run src/build-binary.ts",
     "test": "bun test test",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.client.json"
   },

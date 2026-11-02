@@ -30,6 +30,10 @@ bun start
 
 快捷键：⌘K / Ctrl+K 命令面板（跳转、新建、搜索任务/项目/笔记）；1–6 切换模块；C 新建任务；/ 聚焦搜索；J / K 或 ↑ / ↓ 在列表中移动；⌘↵ 提交表单或说明。界面随系统切换明暗主题，窄屏时侧栏变为底部导航，列表与详情分屏显示。
 
+## 健康检查
+
+`GET /health` 返回 Web 版本和从服务端探测到的 Hub 状态（`{ ok, version, hub: { url, ok, version } }`），Hub 不可达时为 503。它不经过 `/hub` 代理，也不带任何凭据，供 `lumio doctor` 使用。
+
 ## 配置
 
 | 环境变量 | 默认值 | 用途 |
@@ -56,6 +60,7 @@ bun start
 # 在 apps/web 下
 bun dev                 # 文件变化后重新启动
 bun run build           # 输出浏览器 JS/CSS 到 dist
+bun run build:binary -- --outfile dist/lumio-web [--target bun-darwin-arm64] [--version X.Y.Z]   # 单个程序，资源已嵌入（ADR 0027）
 bun run typecheck       # 服务端与浏览器类型检查
 bun test test           # Web 测试
 
