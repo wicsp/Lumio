@@ -88,3 +88,12 @@ test("doctor diagnoses another Hub, extra services, public health mismatch and T
   expect(f.commands.some((argv) => argv.includes("bootout") || argv.includes("--bg"))).toBe(false);
   expect(JSON.stringify(checks)).not.toContain(token);
 });
+
+test("doctor treats a missing assistant model as a reminder and never prints the private key", async () => {
+  const f = fixture();
+  expect((await doctor(f.options)).find(c => c.name === "助手模型")).toMatchObject({ ok: true, problem: "未配置" });
+  f.files["/synthetic/.config/lumio/hub.env"] += '\nLUMIO_ASSISTANT_BASE_URL="http://127.0.0.1:8080/v1"\nLUMIO_ASSISTANT_MODEL="synthetic"\nLUMIO_ASSISTANT_API_KEY="synthetic-private-key"';
+  const checks = await doctor(f.options);
+  expect(checks.find(c => c.name === "助手模型")).toMatchObject({ ok: true, problem: "已配置" });
+  expect(JSON.stringify(checks)).not.toContain("synthetic-private-key");
+});

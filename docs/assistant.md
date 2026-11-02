@@ -6,7 +6,22 @@
 ## 配置模型
 
 Hub 支持兼容 Chat Completions 的 HTTP 服务；不预设供应商、服务地址或模型。
-在 **Hub 服务的运行环境**中配置，例如本机模型服务：
+推荐用命令配置（R1-2 合并前使用 `lumio-hub assistant …`）：
+
+```sh
+lumio hub assistant setup
+lumio hub assistant status
+lumio hub assistant clear
+# 非交互模式：密钥只经标准输入，不能放在参数里
+凭据管理器输出命令 | lumio hub assistant setup --base-url http://127.0.0.1:8080/v1 --model 你的模型名 --api-key-stdin
+```
+
+交互式密钥输入不回显。setup 先用一次最小请求验证，失败不写配置；`--skip-check` 可跳过验证。
+配置写入 Hub 服务的私有环境文件 `~/.config/lumio/hub.env`（权限 600），保留原有项目并重启托管服务；
+非托管环境需要手动加载环境文件并重启。status 只显示地址、模型和密钥是否设置；clear 删除这三项并重启。
+`lumio doctor` 显示本机助手是否配置；未配置仅提醒。
+
+高级用法：也可在 **Hub 服务的运行环境**中配置，例如本机模型服务：
 
 ```sh
 export LUMIO_ASSISTANT_BASE_URL='http://127.0.0.1:8080/v1'
@@ -15,7 +30,7 @@ export LUMIO_ASSISTANT_MODEL='你的模型名'
 ```
 
 地址填 API 基础路径，程序追加 `/chat/completions`。不接受地址内的用户名、密码、查询参数或片段。
-密钥不写入仓库或 Lumio 配置文件；更换服务环境后重启 Hub。交互终端里的环境变量不会自动传给已经启动的后台服务。
+密钥不写入仓库或 `config.json`；更换服务环境后重启 Hub。交互终端里的环境变量不会自动传给已经启动的后台服务。
 不配置模型仍可使用 Work、Execution 和 Knowledge；聊天会明确提示尚未配置。
 
 ```sh

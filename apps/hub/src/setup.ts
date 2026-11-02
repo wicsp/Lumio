@@ -11,7 +11,7 @@ import { HubStore } from "./store.ts";
 
 interface CommandResult { code: number; stdout: string; stderr: string }
 type Run = (argv: string[]) => Promise<CommandResult>;
-async function runCommand(argv: string[]): Promise<CommandResult> {
+export async function runCommand(argv: string[]): Promise<CommandResult> {
   const child = Bun.spawn(argv, { stdin: "ignore", stdout: "pipe", stderr: "pipe", timeout: 40_000 });
   const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
   return { code, stdout, stderr };
@@ -67,6 +67,17 @@ export interface SetupOptions {
   now?: () => number; sleep?: (ms: number) => Promise<void>; log?: (line: string) => void;
   ask?: (question: string, fallback: string) => Promise<string>;
 }
+export async function optional(path: string, fs = files) {
+  try { return await fs.readFile(path, "utf8"); } catch (cause) { if ((cause as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw cause; }
+}
+export async function atomicFile(path: string, content: string, mode: number, privateDirectory = false, fs = files) {
+  await fs.mkdir(dirname(path), { recursive: true, mode: privateDirectory ? 0o700 : 0o755 });
+  if (privateDirectory) await fs.chmod(dirname(path), 0o700);
+  const temp = `${path}.${crypto.randomUUID()}.tmp`;
+  try { await fs.writeFile(temp, content, { flag: "wx", mode }); await fs.chmod(temp, mode); await fs.rename(temp, path); }
+  finally { await fs.rm(temp, { force: true }); }
+}
+
 export async function setup(options: SetupOptions = {}): Promise<void> {
   const fs = options.files ?? files, env = options.env ?? process.env;
   const home = resolve(options.home ?? env.HOME ?? homedir());
@@ -85,19 +96,9 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
     if (options.ask) return (await options.ask(question, fallback)).trim() || fallback;
     return terminal ? (askTerminal(terminal, `${question} [${fallback}]：`) ?? "").trim() || fallback : fallback;
   };
-  async function optional(path: string) {
-    try { return await fs.readFile(path, "utf8"); } catch (cause) { if ((cause as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw cause; }
-  }
-  async function atomicFile(path: string, content: string, mode: number, privateDirectory = false) {
-    await fs.mkdir(dirname(path), { recursive: true, mode: privateDirectory ? 0o700 : 0o755 });
-    if (privateDirectory) await fs.chmod(dirname(path), 0o700);
-    const temp = `${path}.${crypto.randomUUID()}.tmp`;
-    try { await fs.writeFile(temp, content, { flag: "wx", mode }); await fs.chmod(temp, mode); await fs.rename(temp, path); }
-    finally { await fs.rm(temp, { force: true }); }
-  }
-  const privateFile = (path: string, content: string) => atomicFile(path, content, 0o600, true);
+  const privateFile = (path: string, content: string) => atomicFile(path, content, 0o600, true, fs);
   const configPath = join(home, ".config/lumio/config.json");
-  const old = await optional(configPath);
+  const old = await optional(configPath, fs);
   let previous: CliConfig | undefined;
   if (old) {
     try { previous = CliConfig.parse(JSON.parse(old)); }
@@ -116,7 +117,7 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
   const state = resolve(env.LUMIO_STATE_DIR ?? join(home, ".local/share/lumio"));
   await fs.mkdir(state, { recursive: true, mode: 0o700 }); await fs.chmod(state, 0o700);
   const envFile = join(home, ".config/lumio/hub.env");
-  const previousEnv = parseEnvironment(await optional(envFile) ?? "");
+  const previousEnv = parseEnvironment(await optional(envFile, fs) ?? "");
   let listen = env.LUMIO_HUB_LISTEN ?? previousEnv.LUMIO_HUB_LISTEN ?? "127.0.0.1:7420";
   let publicUrl = options.publicUrl ?? env.LUMIO_PUBLIC_URL ?? previousEnv.LUMIO_PUBLIC_URL ?? "";
   if (options.server) {
@@ -177,14 +178,14 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
   let managed = true;
   if (platform === "darwin") {
     const path = join(home, "Library/LaunchAgents/io.lumio.hub.plist");
-    await atomicFile(path, hubPlist(binary, serviceEnv, state), 0o600);
+    await atomicFile(path, hubPlist(binary, serviceEnv, state), 0o600, false, fs);
     if ((await run(["plutil", "-lint", path])).code) throw new HubError("INVALID", "Hub 服务配置校验失败");
     const domain = `gui/${options.uid ?? process.getuid!()}`;
     await run(["launchctl", "bootout", domain, path]);
     if ((await run(["launchctl", "bootstrap", domain, path])).code) throw new HubError("INVALID", `Hub 服务无法启动，请查看 ${state}/hub.err.log`);
   } else {
     const path = join(home, ".config/systemd/user/lumio-hub.service");
-    await atomicFile(path, hubUnit(binary, envFile), 0o644);
+    await atomicFile(path, hubUnit(binary, envFile), 0o644, false, fs);
     try { managed = (await run(["systemctl", "--user", "show-environment"])).code === 0; } catch { managed = false; }
     if (managed) {
       const active = (await run(["systemctl", "--user", "is-active", "--quiet", "lumio-hub.service"])).code === 0;
@@ -215,7 +216,7 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
     if (otherHub) throw new HubError("INVALID", `端口 ${config.port} 上是另一个 Hub：Hub 是 ${otherHub}，本程序是 ${version}；请检查并停用旧服务后重试`);
     if (!ready) {
       const logPath = join(state, "hub.err.log");
-      let errors = (await optional(logPath) ?? "").slice(-8192);
+      let errors = (await optional(logPath, fs) ?? "").slice(-8192);
       if (platform === "linux") { try { errors += (await run(["journalctl", "--user", "-u", "lumio-hub", "-n", "30", "--no-pager"])).stdout; } catch { /* use log path */ } }
       if (/EPERM|EACCES|Operation not permitted/i.test(errors)) throw new HubError("INVALID", platform === "darwin" ? `系统设置 → 隐私与安全性 → 完全磁盘访问权限，加入 ${binary}，然后重新运行 lumio-hub setup` : `Hub 无法读取 vault；请检查目录权限。日志：${logPath}`);
       if (/EADDRINUSE|address already in use/i.test(errors)) throw new HubError("INVALID", `端口 ${config.port} 被占用；请停止占用程序或修改 LUMIO_HUB_LISTEN 后重新运行 setup`);
@@ -224,7 +225,7 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
   }
   if (config.publicUrl) report(await publicHubChecks(diagnostics, config.publicUrl, version, config.port));
   const runtimeEnvFile = join(home, ".config/lumio-runtime/runtime.env");
-  const runtimeEnv = { ...parseEnvironment(await optional(runtimeEnvFile) ?? ""), LUMIO_HUB_URL: url, LUMIO_TOKEN: runtimeToken,
+  const runtimeEnv = { ...parseEnvironment(await optional(runtimeEnvFile, fs) ?? ""), LUMIO_HUB_URL: url, LUMIO_TOKEN: runtimeToken,
     LUMIO_RUNTIME_NAME: name, LUMIO_RUNTIME_STATE_DIR: join(home, ".local/share/lumio-runtime"), PATH: env.PATH ?? "/usr/bin:/bin" };
   await privateFile(runtimeEnvFile, environmentText(runtimeEnv));
   const installed = await run([runtimeBinary, "install-service"]);

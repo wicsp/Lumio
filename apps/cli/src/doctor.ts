@@ -58,6 +58,10 @@ export async function doctor(options: DiagnosticOptions = {}): Promise<Check[]> 
     for (const issue of status.issues as string[]) checks.push({ name: "Hub 问题", ok: false, problem: issue, fix: "按提示修复笔记或 vault 权限，查看 Hub 日志" });
   });
   if (base && localAddress(new URL(base))) {
+    let assistant: Record<string, string> = {};
+    try { assistant = environment(await io.read(join(io.home, ".config/lumio/hub.env"))); } catch { /* unmanaged Hub */ }
+    const configured = Boolean(assistant.LUMIO_ASSISTANT_BASE_URL && assistant.LUMIO_ASSISTANT_MODEL);
+    checks.push({ name: "助手模型", ok: true, problem: configured ? "已配置" : "未配置", ...(!configured ? { fix: "运行 lumio hub assistant setup" } : {}) });
     checks.push(...await extraServices(io));
     for (const service of ["hub", "runtime"] as const) await check(`本机 ${service} 后台服务`, `运行 lumio-hub setup（${service} 服务未启动）`, async () => {
       if ((await io.run(serviceCommand(io.platform, io.uid, service, "status"))).code !== 0) throw new Error();

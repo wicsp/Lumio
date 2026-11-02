@@ -1,3 +1,4 @@
+import { assistantConfiguration } from "./assistant-setup.ts";
 import { signingKey } from "./pairing.ts";
 import { Privileged } from "./privileged.ts";
 import { parseArgs } from "node:util";
@@ -10,6 +11,7 @@ import { backupBusiness, restoreBusiness, verifyBusinessBackup, StorageError } f
 import { runMigration } from "./migrate.ts";
 
 export async function runManagement(args: string[], log: (line: string) => void = console.log): Promise<void> {
+  if (args[0] === "assistant") return assistantConfiguration(args.slice(1), { log });
   if (args[0] === "migrate") return runMigration(args.slice(1), log);
   const { positionals, values } = parseArgs({ args, allowPositionals: true, options: { role: { type: "string" }, actor: { type: "string" } } });
   const [kind, action, name] = positionals;
