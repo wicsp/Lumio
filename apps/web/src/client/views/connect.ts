@@ -1,6 +1,6 @@
 /** Pairing is single-use; keep an unverified candidate only in this view's memory. */
 import { createSession, errorText, LoginError } from "../api.ts";
-import { field, h, icon } from "../dom.ts";
+import { h } from "../dom.ts";
 
 export class ConnectView {
   constructor(root: HTMLElement, onToken: (token: string, remember: boolean) => Promise<void>, notice?: string, retry?: () => void) {
@@ -27,9 +27,10 @@ export class ConnectView {
       }
     };
     const start = () => { candidate = undefined; retryVerification.hidden = true; message.hidden = true; busy(true); };
-    const code = h("input", { name: "code", autocomplete: "one-time-code", required: true, spellcheck: "false" });
-    const codeForm = h("form", { class: "connect-form" }, field("配对码", code, "在 Hub 所在机器运行 lumio login-code --name web 获取，10 分钟内有效，只能用一次"),
-      h("button", { type: "submit", class: "btn btn-primary" }, "用配对码连接"));
+    const code = h("input", { name: "code", class: "code-input", autocomplete: "one-time-code", required: true, spellcheck: "false", placeholder: "配对码", "aria-label": "配对码" });
+    const codeForm = h("form", { class: "connect-form" }, code,
+      h("p", { class: "field-hint" }, "在 Hub 所在的机器上运行 lumio login-code --name web 获取。10 分钟内有效，只能用一次。"),
+      h("button", { type: "submit", class: "btn btn-primary" }, "连接"));
     codeForm.addEventListener("submit", async event => {
       event.preventDefault(); if (pending) return; start();
       const session = createSession(undefined, () => {});
@@ -37,19 +38,25 @@ export class ConnectView {
       catch (error) { show(error instanceof Error && !("code" in error) ? error.message : errorText(error)); }
       finally { session.close(); busy(false); }
     });
-    const token = h("input", { name: "token", type: "password", autocomplete: "off", required: true, spellcheck: "false" });
-    const tokenForm = h("form", { class: "connect-form" }, field("访问令牌", token, "已有的人类访问令牌"),
-      h("button", { type: "submit", class: "btn" }, "用令牌连接"));
+    const token = h("input", { name: "token", type: "password", autocomplete: "off", required: true, spellcheck: "false", placeholder: "粘贴人类访问令牌", "aria-label": "访问令牌" });
+    const tokenForm = h("form", { class: "connect-form" }, token, h("button", { type: "submit", class: "btn" }, "用令牌连接"));
     tokenForm.addEventListener("submit", async event => {
       event.preventDefault(); if (pending) return; start();
       try { const value = token.value.trim(); token.value = ""; await verify(value); } finally { busy(false); }
     });
-    root.append(h("main", { class: "connect" }, h("section", { class: "connect-card", "aria-labelledby": "connect-title" },
-      h("div", { class: "brand" }, h("span", { class: "brand-mark" }, icon("brand")), h("span", {}, "lumio", h("span", { class: "brand-dot" }, "."))),
-      h("h1", { id: "connect-title" }, "连接你的研究工作台"), h("p", { class: "muted" }, "让知识有所积累，让每一步有所推进。"),
-      message, retrySaved, retryVerification,
-      h("div", { class: "remember-choice" }, h("label", { class: "check" }, remember, "记住这台设备"), h("p", { class: "field-hint" }, "勾选后，在这个浏览器中关闭再打开也能保持登录。仅在自己的设备上使用；未勾选时，关闭标签页后需重新配对。")),
-      codeForm, h("div", { class: "divider" }, "或"), tokenForm)));
+    root.append(h("main", { class: "connect" },
+      h("aside", { class: "connect-art", "aria-hidden": "true" },
+        h("h2", {}, "知识、任务与 agent，放在同一张桌面上。"),
+        h("p", {}, "Lumio 连接你自己的 Hub。数据留在你的机器上，浏览器只是一扇窗。")),
+      h("section", { class: "connect-panel" }, h("div", { class: "connect-card", "aria-labelledby": "connect-title" },
+        h("div", { class: "brand" }, h("span", { class: "brand-mark", "aria-hidden": "true" }), h("span", {}, "Lumio")),
+        h("h1", { id: "connect-title" }, "连接到你的 Hub"),
+        message, retrySaved, retryVerification,
+        codeForm,
+        h("label", { class: "check" }, remember, "在这台设备上保持登录"),
+        h("p", { class: "field-hint" }, "勾选后关闭浏览器再打开也不用重新配对。只在自己的设备上勾选。"),
+        h("div", { class: "or" }, "或"),
+        h("details", {}, h("summary", {}, "使用已有的访问令牌"), tokenForm)))));
     code.focus();
   }
 }
