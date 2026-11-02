@@ -93,3 +93,20 @@ test("upgrade rejects unsupported platforms and options, and detects a Hub that 
     })).rejects.toThrow("Hub 未在 30 秒");
   } finally { await f.server.stop(true); }
 });
+
+test("upgrade hint offers retire or import only for a local v2 Hub still using legacy mode", async () => {
+  const { Database } = await import("bun:sqlite"), { legacyUpgradeHint } = await import("../src/upgrade.ts");
+  const f = await fixture();
+  try {
+    const state = join(f.home, "synthetic-state"); await mkdir(state);
+    const db = new Database(join(state, "hub.sqlite"));
+    try {
+      db.exec("CREATE TABLE work_tasks(id TEXT)");
+      await legacyUpgradeHint({ ...f.options, env: { LUMIO_STATE_DIR: state } });
+      expect(f.logs.at(-1)).toContain("lumio hub switch --retire-legacy"); expect(f.logs.at(-1)).toContain("plan / apply");
+      const length = f.logs.length;
+      db.exec("CREATE TABLE migration_receipts(id TEXT,kind TEXT,applied TEXT,backup TEXT); INSERT INTO migration_receipts VALUES('synthetic','retire','2026-11-02T00:00:00Z','synthetic-backup')");
+      await legacyUpgradeHint({ ...f.options, env: { LUMIO_STATE_DIR: state } }); expect(f.logs).toHaveLength(length);
+    } finally { db.close(); }
+  } finally { await f.server.stop(true); }
+});
