@@ -2,7 +2,7 @@
 import { ApiClientError } from "@lumio/api-client";
 import { createSession, errorText, LoginError, type Session } from "./api.ts";
 import { browserLoginStorage, type LoginStorage, type SavedLogin } from "./credentials.ts";
-import { h, loading } from "./dom.ts";
+import { h, loading, toast } from "./dom.ts";
 import { ConnectView } from "./views/connect.ts";
 import { WorkbenchView } from "./views/workbench.ts";
 
@@ -36,7 +36,7 @@ export class App {
   }
   private logout(): void { this.storage.clear(); this.showConnect(); }
   private restore(saved: SavedLogin): void {
-    this.reset(); this.root.append(loading("正在恢复登录…"), h("button", { type: "button", class: "btn", onclick: () => this.logout() }, "重新配对"));
+    this.reset(); this.root.append(h("div", { class: "placeholder" }, loading("正在恢复登录…"), h("button", { type: "button", class: "btn btn-quiet btn-small", onclick: () => this.logout() }, "改用新的配对码")));
     void this.enter(saved.token, saved.remember, true);
   }
   /** actors is human-only. Never persist an unverified agent/runtime/invalid token. */
@@ -60,8 +60,8 @@ export class App {
       }
       this.pending = undefined; this.session = session; this.login = { token, remember: actualRemember };
       this.root.replaceChildren();
-      if (warning) this.root.append(h("p", { class: "state state-error", role: "alert" }, warning));
       this.view = new WorkbenchView(this.root, session, actors.filter(actor => actor.role === "human").map(actor => actor.name), () => this.logout());
+      if (warning) toast(warning, "error");
     } catch (error) {
       session.close(); if (generation !== this.generation) return;
       this.pending = undefined;

@@ -42,6 +42,22 @@ export function projectDescriptionCommand(project: WorkProject, description: str
   return { request_id: requestId, operation: { op: "work.project.update", args: { project: project.id, expected_revision: project.revision, patch: { description } } } };
 }
 
+/**
+ * 属性面板的即时保存：只发送这一处修改，带看到的 revision。
+ * 值与当前相同（null 与缺省视为相同）时返回 undefined，不发请求。
+ */
+export function workPatchCommand(record: WorkTask | WorkProject, patch: Record<string, unknown>, requestId = newRequestId()): WorkCommandRequest | undefined {
+  const changed: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(patch)) {
+    const current = (record as Record<string, unknown>)[key] ?? null;
+    if (JSON.stringify(current) !== JSON.stringify(value ?? null)) changed[key] = value;
+  }
+  if (!Object.keys(changed).length) return undefined;
+  return record.type === "task"
+    ? { request_id: requestId, operation: { op: "work.task.update", args: { task: record.id, expected_revision: record.revision, patch: changed } } } as WorkCommandRequest
+    : { request_id: requestId, operation: { op: "work.project.update", args: { project: record.id, expected_revision: record.revision, patch: changed } } } as WorkCommandRequest;
+}
+
 export function taskCreateCommand(input: { title: string; description?: string; project?: string }, requestId = newRequestId()): WorkCommandRequest {
   return { request_id: requestId, operation: { op: "work.task.create", args: {
     title: input.title.trim(), ...(input.description ? { description: input.description } : {}), ...(input.project ? { project: input.project } : {}) } } };

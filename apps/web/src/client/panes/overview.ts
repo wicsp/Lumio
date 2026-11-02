@@ -1,60 +1,138 @@
-import type { Job, SearchResult, WorkProject, WorkTask } from "@lumio/schema";
+/** 今日：一句话说清现状，左侧是要推进的任务，右侧是需要你处理的事和运行动态。各区块独立失败。 */
+import type { Job, Proposal, WorkProject, WorkTask } from "@lumio/schema";
 import { errorText, type Client } from "../api.ts";
 import { formatTime } from "../commands.ts";
-import { clear, empty, failure, h, icon, loading } from "../dom.ts";
-import { JOB_LABELS, TASK_LABELS } from "../labels.ts";
-export type Destination="work"|"knowledge"|"execution"|"assistant"|"approvals";
+import { clear, failure, h, icon, loading, statusIcon } from "../dom.ts";
+import { ago, dueLabel, jobTitle } from "../format.ts";
+import { JOB_LABELS } from "../labels.ts";
+import type { Navigate } from "../navigation.ts";
+
+const LIVE = ["queued", "assigned", "running"];
+const ATTENTION = ["waiting_for_human", "failed", "unknown"];
 
 export class OverviewPane {
-  private root=h("div",{class:"dashboard"});
-  private generation=0;
-  private active=true;
-  constructor(owner:HTMLElement,private client:Client,private navigate:(section:Destination,id?:string)=>void=()=>{}){
-    const date=new Intl.DateTimeFormat("zh-CN",{month:"long",day:"numeric",weekday:"long"}).format(new Date());
-    owner.append(h("header",{class:"pane-head dashboard-heading"},h("div",{class:"heading-group"},h("p",{class:"eyebrow"},date),h("h1",{},"我的工作台"),h("p",{class:"page-subtitle"},"连接知识，推进重要的事。")),
-      h("button",{type:"button",class:"btn btn-ghost","aria-label":"刷新总览",onclick:()=>this.load()},icon("refresh"))),this.root);void this.load();
+  private body = h("div", { class: "today-inner" });
+  private generation = 0;
+  private active = true;
+
+  constructor(owner: HTMLElement, private client: Client, private navigate: Navigate) {
+    owner.append(h("div", { class: "today" }, this.body));
+    clear(this.body, loading("正在整理今天的工作…"));
+    void this.load();
   }
-  dispose():void{this.active=false;this.generation++;}
-  private stat(title:string,value:number|undefined,detail:string,section:Destination,iconName:string):HTMLElement{
-    return h("button",{type:"button",class:"metric",onclick:()=>this.navigate(section)},h("div",{class:"metric-top"},h("span",{},title),icon(iconName)),h("strong",{class:"metric-value"},value===undefined?"—":value),h("span",{class:"metric-detail"},detail));
+  dispose(): void { this.active = false; this.generation++; }
+
+  private async load(): Promise<void> {
+    const generation = ++this.generation;
+    const [tasks, projects, jobs, approvals] = await Promise.allSettled([this.client.workTasks(), this.client.workProjects(), this.client.jobs(), this.client.proposals("pending")]);
+    if (!this.active || generation !== this.generation) return;
+    const taskData = tasks.status === "fulfilled" ? tasks.value : undefined;
+    const projectData = projects.status === "fulfilled" ? projects.value : [];
+    const jobData = jobs.status === "fulfilled" ? jobs.value : undefined;
+    const approvalData = approvals.status === "fulfilled" ? approvals.value : undefined;
+
+    const active = taskData?.filter(t => t.status === "active") ?? [];
+    const todo = (taskData?.filter(t => t.status === "todo") ?? []).sort(byDue);
+    const waiting = taskData?.filter(t => t.status === "waiting") ?? [];
+    const running = jobData?.filter(j => LIVE.includes(j.status)) ?? [];
+    const attentionJobs = jobData?.filter(j => ATTENTION.includes(j.status)) ?? [];
+
+    const date = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "long" }).format(new Date());
+    const num = (n: number) => h("span", { class: `num${n ? "" : " zero"}` }, n);
+    const decide = (approvalData?.length ?? 0) + attentionJobs.length;
+    const headline = h("h1", { class: "today-headline" });
+    if (taskData) {
+      headline.append("推进中 ", num(active.length), " 项，待办 ", num(todo.length), " 项。");
+      if (running.length) headline.append("agent 正在跑 ", num(running.length), " 轮，");
+      if (decide) headline.append("有 ", num(decide), " 件事等你决定。");
+      else headline.append(running.length ? "没有等你决定的事。" : "暂时没有等你决定的事。");
+    } else headline.append("今天");
+
+    clear(this.body,
+      h("p", { class: "today-date" }, date),
+      headline,
+      h("div", { class: "today-grid" },
+        h("div", { class: "today-col" },
+          this.block("推进中", active.length, "work", tasks.status === "rejected" ? failure(errorText(tasks.reason)) : this.taskList(active, projectData, "没有进行中的任务。从待办里挑一项开始吧。")),
+          this.block("待办", todo.length, "work", tasks.status === "rejected" ? null : this.taskList(todo.slice(0, 8), projectData, "待办清空了。")),
+          waiting.length ? this.block("等待中", waiting.length, "work", this.taskList(waiting, projectData, "")) : null),
+        h("div", { class: "today-col" },
+          this.attention(approvalData, attentionJobs, approvals.status === "rejected" ? approvals.reason : undefined, taskData ?? []),
+          this.block("运行动态", running.length, "execution", jobs.status === "rejected" ? failure(errorText(jobs.reason)) : this.runs(jobData ?? [], taskData ?? [])),
+          this.block("项目", projectData.filter(p => p.status !== "done").length, "work", projects.status === "rejected" ? failure(errorText(projects.reason)) : this.projects(projectData, taskData ?? [])),
+          this.ask())));
   }
-  private panel(title:string,section:Destination,body:HTMLElement,label="查看全部"):HTMLElement{
-    return h("section",{class:"dashboard-panel"},h("header",{},h("h2",{},title),h("button",{type:"button",class:"text-button",onclick:()=>this.navigate(section)},label," →")),body);
+
+  private block(title: string, count: number, section: "work" | "execution" | "approvals", body: Node | null): HTMLElement {
+    return h("section", {},
+      h("header", { class: "block-head" }, h("h2", {}, title), h("span", { class: "count" }, count || ""),
+        h("button", { type: "button", class: "text-btn", onclick: () => this.navigate(section) }, "全部")),
+      body);
   }
-  private async load():Promise<void>{
-    const generation=++this.generation;clear(this.root,loading("正在整理你的工作台…"));
-    const [tasks,projects,jobs,approvals,notes]=await Promise.allSettled([this.client.workTasks(),this.client.workProjects(),this.client.jobs(),this.client.proposals("pending"),this.client.search("",{type:"paper",limit:4})]);
-    if(!this.active||generation!==this.generation)return;
-    const taskData=tasks.status==="fulfilled"?tasks.value:undefined,projectData=projects.status==="fulfilled"?projects.value:undefined,jobData=jobs.status==="fulfilled"?jobs.value:undefined;
-    const open=taskData?.filter(task=>!["done","cancelled"].includes(task.status));
-    const stats=h("div",{class:"metrics"},
-      this.stat("未完成任务",open?.length,taskData?`${taskData.filter(task=>task.status==="active").length} 项进行中 · ${taskData.filter(task=>task.status==="waiting").length} 项等待中`:"任务暂不可用","work","work"),
-      this.stat("进行中项目",projectData?.filter(project=>project.status==="active").length,projectData?`共 ${projectData.length} 个项目`:"项目暂不可用","work","knowledge"),
-      this.stat("正在执行",jobData?.filter(job=>["queued","assigned","running"].includes(job.status)).length,jobData?`${jobData.filter(job=>job.status==="failed").length} 次失败运行待核对`:"执行暂不可用","execution","execution"),
-      this.stat("等待你的决定",approvals.status==="fulfilled"?approvals.value.length:undefined,approvals.status==="fulfilled"?(approvals.value.length?"有申请等待你确认":"暂时没有待审批的申请"):"审批暂不可用","approvals","approvals"));
-    const tasksBody=h("div",{class:"dashboard-task-list"});
-    if(tasks.status==="rejected")tasksBody.append(failure(errorText(tasks.reason)));
-    else{
-      const rank:Record<string,number>={active:0,todo:1,waiting:2,paused:3};
-      const selected=open!.slice().sort((a,b)=>(rank[a.status]??4)-(rank[b.status]??4)).slice(0,5);
-      tasksBody.append(...selected.map(task=>h("button",{type:"button",class:"dashboard-task",onclick:()=>this.navigate("work",task.id)},h("span",{class:`status-mark status-${task.status}`,"aria-hidden":"true"}),
-        h("span",{class:"row-main"},h("strong",{},task.title),h("span",{class:"muted"},projectData?.find(project=>project.id===task.project)?.title??"独立任务")),h("span",{class:`badge status-${task.status}`},TASK_LABELS[task.status]))),...(!selected.length?[empty("把一件值得推进的事，放进任务里。")]:[]));
-    }
-    const projectsBody=h("div",{class:"dashboard-projects"});
-    if(projects.status==="rejected")projectsBody.append(failure(errorText(projects.reason)));
-    else projectsBody.append(...projects.value.filter(project=>project.status!=="done").slice(0,3).map(project=>{
-      const related=taskData?.filter(task=>task.project===project.id&&task.status!=="cancelled"),done=related?.filter(task=>task.status==="done").length;
-      return h("button",{type:"button",class:"project-summary",onclick:()=>this.navigate("work",project.id)},h("strong",{},project.title),h("p",{class:"muted"},project.goal??"明确目标，让每一步都有所指向。"),
-        related&&related.length>0?h("div",{class:"project-progress"},h("progress",{value:done??0,max:related.length,"aria-label":`${project.title}任务完成进度`}),h("span",{class:"muted"},`${done} / ${related.length} 项已完成`)):h("span",{class:"muted"},taskData?"尚未添加任务":"任务数据暂不可用"));
-    }),...(!projects.value.length?[empty("用项目承接一个长期目标。")]:[]));
-    const notesBody=h("div",{class:"dashboard-notes"});
-    if(notes.status==="rejected")notesBody.append(failure(`知识库暂不可用：${errorText(notes.reason)}`));
-    else notesBody.append(...notes.value.hits.map(hit=>h("button",{type:"button",class:"reading-item",onclick:()=>this.navigate("knowledge",hit.note.id??hit.note.path)},h("span",{class:"paper-symbol","aria-hidden":"true"},icon("knowledge")),h("span",{class:"row-main"},h("strong",{},hit.note.title),h("span",{class:"muted"},hit.snippet||hit.note.citekey||"打开笔记阅读")))));
-    const runs=h("div",{class:"dashboard-runs"});
-    if(jobs.status==="rejected")runs.append(failure(errorText(jobs.reason)));
-    else runs.append(...jobs.value.slice().reverse().slice(0,3).map(job=>h("button",{type:"button",class:"run-summary",onclick:()=>this.navigate("execution",job.spec.id)},h("span",{class:`status-mark status-${job.status}`,"aria-hidden":"true"}),
-      h("span",{class:"row-main"},h("strong",{},taskData?.find(task=>task.id===job.spec.source?.task)?.title??(job.spec.run.kind==="agent"?`${job.spec.run.engine} 运行`:"独立运行")),h("span",{class:"muted"},formatTime(job.spec.created))),h("span",{class:`badge status-${job.status}`},JOB_LABELS[job.status]))),...(!jobs.value.length?[empty("执行记录会在派出工作后显示。")]:[]));
-    const assistant=h("section",{class:"assistant-invitation"},h("span",{class:"assistant-symbol"},icon("assistant")),h("p",{class:"eyebrow"},"LUMIO ASSISTANT"),h("h2",{},"一起，把问题想清楚"),h("p",{},"梳理零散的线索，为下一步找到一个清晰的起点。"),h("button",{type:"button",class:"btn btn-primary",onclick:()=>this.navigate("assistant")},"打开助手",h("span",{"aria-hidden":"true"},"↗")));
-    clear(this.root,stats,h("div",{class:"dashboard-columns"},h("div",{class:"dashboard-main"},this.panel("接下来要做","work",tasksBody),this.panel("项目进展","work",projectsBody),this.panel("运行动态","execution",runs)),h("aside",{class:"dashboard-aside"},this.panel("知识书架","knowledge",notesBody,"打开知识库"),assistant)));
+
+  private taskList(tasks: WorkTask[], projects: WorkProject[], emptyText: string): HTMLElement {
+    if (!tasks.length) return h("p", { class: "muted state" }, emptyText);
+    return h("div", {}, ...tasks.map(task => {
+      const due = dueLabel(task.due);
+      const project = projects.find(p => p.id === task.project)?.title;
+      return h("button", { type: "button", class: "row", onclick: () => this.navigate("work", task.id) },
+        statusIcon(task.status),
+        h("span", { class: "row-main" }, h("span", { class: "row-title" }, task.title)),
+        h("span", { class: "row-meta" },
+          project && h("span", { class: "project-chip hide-narrow" }, project),
+          task.assignee !== "human" && h("span", { class: "who-chip" }, icon("bot"), task.assignee),
+          due && h("span", { class: `due${due.overdue ? " overdue" : due.soon ? " soon" : ""}` }, due.text)));
+    }));
   }
+
+  private attention(approvals: Proposal[] | undefined, jobs: Job[], error: unknown, tasks: WorkTask[]): HTMLElement | null {
+    if (error) return this.block("等你决定", 0, "approvals", failure(errorText(error)));
+    const items = [
+      ...(approvals ?? []).map(p => h("button", { type: "button", class: "row", onclick: () => this.navigate("approvals") },
+        icon("approvals"), h("span", { class: "row-main" }, h("span", { class: "row-title" }, p.operation.op === "exec.privileged" ? p.operation.args.argv.join(" ") : p.operation.op),
+          h("span", { class: "row-sub" }, p.reason)), h("span", { class: "pill pill-ochre" }, "待审批"))),
+      ...jobs.map(j => h("button", { type: "button", class: "row", onclick: () => this.navigate("execution", j.spec.id) },
+        statusIcon(j.status), h("span", { class: "row-main" }, h("span", { class: "row-title" }, jobTitle(j, tasks)), h("span", { class: "row-sub" }, j.result?.question ?? j.result?.error ?? "")),
+        h("span", { class: `pill ${j.status === "waiting_for_human" ? "pill-ochre" : "pill-red"}` }, JOB_LABELS[j.status]))),
+    ];
+    if (!items.length) return null;
+    return h("section", {}, h("header", { class: "block-head" }, h("h2", {}, "等你决定"), h("span", { class: "count" }, items.length)), ...items);
+  }
+
+  private runs(jobs: Job[], tasks: WorkTask[]): HTMLElement {
+    const recent = jobs.slice().sort((a, b) => b.spec.created.localeCompare(a.spec.created)).slice(0, 5);
+    if (!recent.length) return h("p", { class: "muted state" }, "还没有运行记录。在任务里点「派出」，agent 的每一轮都会出现在这里。");
+    return h("div", {}, ...recent.map(job => h("button", { type: "button", class: "row", onclick: () => this.navigate("execution", job.spec.id) },
+      statusIcon(job.status),
+      h("span", { class: "row-main" }, h("span", { class: "row-title" }, jobTitle(job, tasks))),
+      h("span", { class: "row-meta", title: formatTime(job.spec.created) }, ago(job.spec.created)))));
+  }
+
+  private projects(projects: WorkProject[], tasks: WorkTask[]): HTMLElement {
+    const open = projects.filter(p => p.status !== "done").slice(0, 5);
+    if (!open.length) return h("p", { class: "muted state" }, "还没有进行中的项目。");
+    return h("div", {}, ...open.map(project => {
+      const related = tasks.filter(t => t.project === project.id && t.status !== "cancelled");
+      const done = related.filter(t => t.status === "done").length;
+      const fill = h("span", { class: "progress-fill" });
+      fill.style.width = `${related.length ? Math.round((done / related.length) * 100) : 0}%`;
+      return h("button", { type: "button", class: "project-line", onclick: () => this.navigate("work", project.id) },
+        h("span", { class: "row-main" }, h("span", { class: "row-title" }, project.title), project.goal && h("span", { class: "row-sub" }, project.goal)),
+        h("span", { class: "progress" }, fill), h("span", { class: "ratio" }, related.length ? `${done}/${related.length}` : "—"));
+    }));
+  }
+
+  private ask(): HTMLElement {
+    const input = h("input", { type: "text", placeholder: "例如：帮我列出 rebuttal 还缺哪些实验", "aria-label": "向助手提问", autocomplete: "off" });
+    const form = h("form", {}, input, h("button", { type: "submit", class: "btn" }, "提问"));
+    form.addEventListener("submit", event => { event.preventDefault(); const text = input.value.trim(); if (text) this.navigate("assistant", undefined, `ask:${text}`); });
+    return h("section", { class: "ask-card" }, h("h2", {}, "问问助手"), h("p", {}, "助手只使用 Hub 配置的模型；不会因为聊天而获得任务或私密笔记的访问权限。"), form);
+  }
+}
+
+function byDue(a: WorkTask, b: WorkTask): number {
+  if (a.due && b.due) return a.due.localeCompare(b.due);
+  if (a.due) return -1;
+  if (b.due) return 1;
+  return b.updated.localeCompare(a.updated);
 }

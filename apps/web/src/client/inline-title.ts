@@ -8,9 +8,9 @@ export class InlineTitle {
   private state: TitleEditState;
   private input = h("input", { name: "edit-title", required: true, "aria-label": "标题", autocomplete: "off" });
   private label = h("button", { type: "button", class: "title-label", title: "双击修改标题，也可按 Enter 或 F2" });
-  private edit = h("button", { type: "button", class: "btn btn-ghost btn-small", "aria-label": "编辑标题", onclick: () => this.begin() }, "编辑");
+  private edit = h("button", { type: "button", class: "btn btn-quiet btn-small", "aria-label": "编辑标题", onclick: () => this.begin() }, "编辑");
   private heading = h("div", { class: "title-display" }, h("h2", {}, this.label), this.edit);
-  private save = h("button", { type: "submit", class: "btn btn-small btn-primary" }, "保存标题");
+  private save = h("button", { type: "submit", class: "btn btn-small btn-primary" }, "保存");
   private cancel = h("button", { type: "button", class: "btn btn-small", onclick: () => this.discard() }, "取消");
   private message = h("p", { class: "title-message", role: "alert", hidden: true });
   private form = h("form", { class: "title-form", hidden: true }, this.input,
