@@ -4,8 +4,8 @@
 > 想知道"为什么"时再去查；平时不需要读 ADR。
 > 修改规则：改了 ADR 就要在同一个 PR 里同步改本文件（ADR 0015）。本文件与 ADR 不一致时，说明有一方没同步，告诉人类。
 
-> **已批准、实施中的重构**：[ADR 0025](adr/0025-four-module-architecture.md)（Accepted，2026-10-31 人类批准）规定知识、工作、执行、助手四模块与混合存储；
-> [实施说明 R0-0](tasks/R0-0-four-module-refactor.md)。本分支已实现四模块边界、业务存储、日志备份与显式迁移；验收证据见 R0-0。必要契约由 Claude 起草，不迁移真实数据；ADR 的合并状态在 PR 合并时更新。
+> **四模块重构**：[ADR 0025](adr/0025-four-module-architecture.md)（Accepted，2026-10-31 人类批准）规定知识、工作、执行、助手四模块与混合存储，
+> 已于 2026-11-02 合并（#62）：四模块边界、业务存储、日志备份与显式迁移已实现，验收证据见 [R0-0](tasks/R0-0-four-module-refactor.md)。Project/Task 的 Markdown 展示与导出派生物尚未实现。真实数据迁移需按 [migration-v2](migration-v2.md) 单独执行。
 
 ## 0. 目标与非目标
 
@@ -19,7 +19,7 @@
 
 ```mermaid
 flowchart TD
-  Clients[CLI / 后续 GUI 与 Bot] -->|HTTP + 身份| Hub[Hub：授权、审计、模块组装与跨模块协调]
+  Clients[CLI / Web GUI / 后续 Bot] -->|HTTP + 身份| Hub[Hub：授权、审计、模块组装与跨模块协调]
   Hub --> K[Knowledge：知识文档与链接]
   Hub --> W[Work：Project / Task / 讨论 / 显式派活]
   Hub --> E[Execution：Job / Routine / 设备能力]
@@ -74,7 +74,8 @@ Foundation 提供 ID 和错误；Platform 提供终端、诊断、下载与升�
 | `apps/cli` | `lumio` 命令行；联网获取论文元数据、本地知识模式、Hub 客户端 | api-client, knowledge, storage, foundation, platform, schema |
 | `apps/hub` | API、模块组装、跨模块协调、身份与旧路径兼容 | 业务包、storage、foundation、platform、schema |
 | `apps/runtime` | 设备 daemon，与 Hub 只走 HTTP | execution 的纯计划能力、storage 的日志适配、foundation、platform、schema |
-| `apps/feishu-bot`、`apps/web` 等 | 各个客户端 | api-client |
+| `apps/web` | 中文 GUI、静态资源构建、同源固定 Hub 代理 | api-client, schema |
+| `apps/feishu-bot` 等 | 后续客户端 | api-client |
 
 依赖方向由 `bun run lint:deps` 强制：`packages` 不依赖 `apps`，`apps` 之间不互相依赖；四个业务包不导入其他业务包实现或具体适配器，禁止文件/网络/SQLite/进程 I/O；应用不依赖 Core 兼容汇总入口（ADR 0025）。
 
@@ -263,7 +264,7 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
   不经过 shell；command 类型只执行登记过的程序；密钥在执行节点上才解析。
 - **不做**：跨设备调用工具、每一轮单独的权限、上下文管理、模型路由；留给以后自研的 agent（作为执行器里的一种引擎接入）。
 
-### 4.7 数据库 Work 与内置 Assistant（ADR 0025，分支内实现）
+### 4.7 数据库 Work 与内置 Assistant（ADR 0025）
 
 - `/v2/work/commands` 使用 `WorkCommandRequest` 与 `WorkCommandResult`；Task/Project 查询返回严格业务对象，不含路径。
 - Task/Project 描述在数据库中；状态、负责人、依赖、讨论、执行关联各有明确归属。修改负责人或保存描述不隐式派活。
@@ -291,6 +292,32 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
 - 每次模型调用前以既有 AssistantModelRequest 保存不可变请求快照、序号、时间与工具 agent；写入失败不调用模型。快照是准备调用的记录，不代表远端已收到，不用于自动重放，也不提供绕过来源权限的读取接口。每次模型请求前重新筛选记忆。
 - 助手持久化工具调用状态；中断或写操作结果不明标为 unknown，不自动重放。最终空回复明确失败，工具调用中间消息可无文本。
 - 新 v2 工作与助手入口目前仅 human 可访问，不自动放宽 agent/runtime 权限；搜索来源与私密规则继续适用。
+
+### 4.8 Web 工作台（ADR 0026）
+
+本地 GUI，决定见 ADR 0026。
+
+- **技术栈**：原生 TypeScript、DOM 与 CSS，用 Bun 1.3.x 构建和提供服务。只依赖 `@lumio/api-client` 与 `@lumio/schema`。
+- **类型隔离**：浏览器端与服务端是两个独立的 TypeScript 程序，根 typecheck 同时检查两者。
+- **访问路径**：浏览器只请求同源 `/hub`，Web 服务转发到 `LUMIO_WEB_HUB_URL`（默认 `http://127.0.0.1:7420`），默认监听 `127.0.0.1:4317`。
+- **代理规则**：
+  - 用户路由按 GET/POST 白名单放行；runtime 注册、归档上传与邀请接口不可达。
+  - 只转发 `Authorization`、`Content-Type`、`Accept`。
+  - 校验 Host 与 Origin；经反向代理访问时，需配置 `LUMIO_WEB_ORIGINS`。
+  - 限制请求大小，拒绝跟随重定向，NDJSON 按流转发。
+  - 响应带 `no-store` 与限制性 CSP。
+- **会话**：先用 `lumio login-code --name web` 配对。身份验证后，默认以 sessionStorage 保留当前标签页登录，刷新自动恢复；勾选「记住这台设备」时使用 localStorage，关闭重开仍可恢复。仅保存凭据，按 Web 来源和固定 Hub 来源隔离；代理在转发前核对页面启动时的 Hub 来源，配置改变需刷新。恢复前验证 human 身份。同源脚本可读，受现有 CSP 与安全渲染保护；不等同 HttpOnly 或钥匙串隔离。验证遇到 401/403 或登出时清除对应凭据，任何 401 或登出中止请求、清空模块；临时断线保留凭据并允许重试。存储受限时降级并提示，不缓存业务数据或直接访问 vault。
+- **模块**：
+  - 概览。
+  - Knowledge：只读，支持搜索、类型与链接视图，私有内容需显式开启。
+  - Project/Task：创建与更新表单；描述带 revision，用 textarea 加预览；评论与派发是独立的显式操作。
+  - Jobs：结果与待回答问题、取消；文件下载校验大小与 SHA。
+  - Routine：创建、编辑、暂停与恢复；设备列表。
+  - Assistant：流式会话与停止；可查看已保存状态，不重放；记忆显式管理。
+  - 审批：展示完整 argv、job、runtime 与理由，由用户显式接受或拒绝。
+- **渲染**：只支持安全的 Markdown 子集。转义原始 HTML，过滤不安全协议，不加载外部图片。沿用 source/private 过滤，并丢弃过期请求的结果。
+- **边界**：Web 不自行运行 agent，通过 Hub 显式派活。实施与验收不访问真实数据、不升级现有服务、不发布。
+
 
 ## 5. AI 协作与权限（ADR 0014、0016、0018）
 
@@ -350,4 +377,4 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
 | P1 | 本地查询与 `export bib`；Hub（身份与令牌、查询 API、监听、自动提交、操作与提议框架）；按引用导出与断链检查；skill | ✅（pi 的 skill 验收待补） |
 | P2 | 执行器与派活：执行器登记、可靠的派活核心、三种 agent 适配器、任务笔记里的一问一答、例行任务、`lumio-runtime sudo` 审批的门（P2-1 至 P2-6）；安装、配对与自检（P2-7 至 P2-9、P2-11、P2-12，ADR 0021、0022、0023）；识别 Markdown 链接（P2-10）；负责人即交接开关（P2-13，ADR 0024） | ✅（v0.1.6；剩余人工验收见 `docs/tasks/README.md`） |
 | P3 | 飞书 Bot（派活、批准、通知）、审批模型、资产到期提醒、多维表格镜像；Chrome 插件入库论文 | |
-| P4 | 官方 GUI（Web：浏览、编辑笔记与任务、批准提议）、Docker / Nix 安装、对外 SDK、手机端 | |
+| P4 | Web GUI 提前按用户要求实现（知识只读、项目任务、执行、助手、审批）；知识写入、Docker / Nix、SDK 与原生手机端后续规划 | Web 工作台已合并（#63、#64），其余未排期 |

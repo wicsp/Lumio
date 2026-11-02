@@ -24,7 +24,8 @@
 | `apps/hub` | HTTP、鉴权/审计、模块组装与跨模块协调 |
 | `apps/runtime` | 每台设备上的 daemon，领取 job 并调用 agent |
 | `apps/feishu-bot` | 飞书入口与通知 |
-| `apps/web` `apps/chrome-ext` `apps/mobile` | 后期客户端 |
+| `apps/web` | 中文 Web 工作台，连接 Hub，见[使用说明](apps/web/README.md) |
+| `apps/chrome-ext` `apps/mobile` | 后期客户端 |
 | `sdk/python` | 实验侧的薄客户端（后期），类型从导出的 JSON Schema 生成 |
 | `infra/` | Docker / Nix（后期） |
 
@@ -73,6 +74,8 @@ bun run check          # 类型检查 + 依赖边界检查 + 测试
 bun run schema:export  # 把契约导出为 JSON Schema（packages/schema/json/）
 ```
 
+Web 工作台从源码启动：`cd apps/web` 后执行 `bun start`，打开 `http://127.0.0.1:4317`，使用 `lumio login-code --name web` 配对。只想先看看界面，可以在仓库根目录运行 `bun run demo:web`（临时 Hub 与合成数据）。配置见 [Web 使用说明](apps/web/README.md)。
+
 ## 当前阶段（2026-11-02）
 
 P0–P2 已完成（v0.1.6），并已合入四模块重构（ADR 0025）：
@@ -81,6 +84,7 @@ P0–P2 已完成（v0.1.6），并已合入四模块重构（ADR 0025）：
 - **工作（Work）**：Project/Task 存在 Hub 的数据库里，正文可用 Markdown；修改负责人不会派活，派出是单独的显式操作。旧的任务/例行笔记需按[切换与回退](docs/migration-v2.md)显式迁移，启动时不会自动迁移。
 - **执行（Execution）**：每台设备一个执行器；Job 协议 2、离线队列、例行任务、高权限命令的审批门。
 - **助手（Assistant）**：对话与显式记忆，模型由 Hub 配置，见[使用说明](docs/assistant.md)。
+- **Web 工作台**：今日总览、项目与任务、知识阅读、执行与例行任务、助手和审批，见 [apps/web](apps/web/README.md)。
 - **安装**：一行安装、配对码加执行器、`doctor` / `selftest` / `upgrade`。
 
 实现和验收证据见 [R0-0](docs/tasks/R0-0-four-module-refactor.md)；后续计划见 [`docs/tasks/README.md`](docs/tasks/README.md)。

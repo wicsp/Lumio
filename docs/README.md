@@ -6,6 +6,7 @@
 | AI 必须遵守什么 | [`../AGENTS.md`](../AGENTS.md) |
 | 接下来要做什么 | [`tasks/README.md`](tasks/README.md) |
 | 四模块重构的目标与实施顺序 | [ADR 0025](adr/0025-four-module-architecture.md)（Accepted，大部分已实现）、[R0-0](tasks/R0-0-four-module-refactor.md) |
+| Web GUI 启动、配置与功能 | [工作台说明](../apps/web/README.md)、[P4-1](tasks/P4-1-web-workbench.md) |
 | 助手模型配置、显式记忆与工具权限 | [助手使用](assistant.md) |
 | 旧任务笔记切换数据库、备份与回退 | [迁移与回退](migration-v2.md) |
 | 某条规则**为什么**这样定 | `adr/` 中对应的 ADR（DESIGN.md 里每条规则都标了编号） |
@@ -32,6 +33,11 @@ ADR 0025 的四模块重构已合入：业务库、显式派活、Routine、助�
 
 状态：**Implemented** = 已写进代码，定稿；**Accepted** = 已批准未实现，修改需批准并记修订记录；
 **部分实现** = 已实现的小节定稿，其余仍可改。一条 ADR 可能出现在多个领域下。
+
+**客户端**
+| 编号 | 一句话 | 状态 |
+|---|---|---|
+| [0026](adr/0026-web-workbench.md) | Web 工作台：同源代理、登录保持与四模块 GUI | Implemented |
 
 **工程基础**
 | 编号 | 一句话 | 状态 |

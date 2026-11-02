@@ -1,0 +1,17 @@
+{
+  "name": "@lumio/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/server.ts",
+    "dev": "bun --watch run src/server.ts",
+    "build": "bun run src/build.ts",
+    "test": "bun test test",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.client.json"
+  },
+  "dependencies": {
+    "@lumio/api-client": "workspace:*",
+    "@lumio/schema": "workspace:*"
+  }
+}
