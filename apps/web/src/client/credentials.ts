@@ -38,9 +38,9 @@ export class LoginStorage {
 }
 
 export function browserLoginStorage(): LoginStorage {
-  // The Web server supplies its fixed Hub origin. Origin-only browser storage also
-  // separates different Web hosts/ports; this key separates upstream Hub changes.
-  const hub = document.querySelector<HTMLMetaElement>('meta[name="lumio-hub"]')?.content;
-  if (!hub) throw new Error("缺少工作台连接配置，请重新载入页面");
+  // The old standalone Web server supplies its fixed upstream Hub origin; when the Hub serves
+  // the page itself (ADR 0027) the page origin is the Hub. Origin-scoped browser storage also
+  // separates different hosts/ports; this key separates upstream Hub changes.
+  const hub = document.querySelector<HTMLMetaElement>('meta[name="lumio-hub"]')?.content || window.location.origin;
   return new LoginStorage(hub, () => window.sessionStorage, () => window.localStorage);
 }

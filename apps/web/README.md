@@ -30,6 +30,12 @@ bun start
 
 快捷键：⌘K / Ctrl+K 命令面板（跳转、新建、搜索任务/项目/笔记）；1–6 切换模块；C 新建任务；/ 聚焦搜索；J / K 或 ↑ / ↓ 在列表中移动；⌘↵ 提交表单或说明。界面随系统切换明暗主题，窄屏时侧栏变为底部导航，列表与详情分屏显示。
 
+## 由 Hub 提供与 App（ADR 0027）
+
+`src/entry.ts` 是给 `apps/cli` 用的入口：`buildWebAssets()` 构建浏览器资源，`webFiles(assets, { apiBase: "" })` 返回页面、JS/CSS、PWA 清单与图标的文件表，`WEB_CSP` 是页面的 CSP。R1-2 起网页由 Hub 在自己的地址上提供，浏览器与 Hub 同源；下面的独立服务与 `/hub` 代理届时删除。
+
+页面带 Web App Manifest 与图标：Safari「文件 → 添加到程序坞」、Chrome「安装」、iPad/iPhone「添加到主屏幕」即可当 App 用。不注册 Service Worker，不缓存业务数据。
+
 ## 配置
 
 | 环境变量 | 默认值 | 用途 |
