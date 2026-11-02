@@ -4,6 +4,8 @@ const original=Object.getOwnPropertyDescriptor(globalThis,"window");
 const originalDocument=Object.getOwnPropertyDescriptor(globalThis,"document");
 afterEach(()=>{if(original)Object.defineProperty(globalThis,"window",original);else Reflect.deleteProperty(globalThis,"window");if(originalDocument)Object.defineProperty(globalThis,"document",originalDocument);else Reflect.deleteProperty(globalThis,"document");});
 function browser(fetcher:(input:RequestInfo|URL,init?:RequestInit)=>Promise<Response>){Object.defineProperty(globalThis,"window",{configurable:true,value:{location:{origin:"http://127.0.0.1:4317"},fetch:fetcher}});}
+/** 模拟页面里的 meta 标签：按 name 返回 content。 */
+function page(meta:Record<string,string>){Object.defineProperty(globalThis,"document",{configurable:true,value:{querySelector:(selector:string)=>{const name=/name="([^"]+)"/.exec(selector)?.[1];return name&&name in meta?{content:meta[name]}:null;}}});}
 const unauthorized=()=>Response.json({error:{code:"UNAUTHENTICATED",message:"synthetic unauthorized"}},{status:401});
 test("session requests are same-origin, omit ambient credentials and close their abort scope",async()=>{
   let captured:RequestInit|undefined,url="";
@@ -25,6 +27,13 @@ test("an active 401 notifies the application so it can clear all module state",a
 
 test("browser requests identify their boot-time Hub while keeping the bearer out of URLs",async()=>{
  let captured:RequestInit|undefined,url="";browser(async(input,init)=>{url=String(input);captured=init;return Response.json([]);});
- Object.defineProperty(globalThis,"document",{configurable:true,value:{querySelector:()=>({content:"https://expected-hub.example"})}});
+ page({"lumio-hub":"https://expected-hub.example","lumio-api-base":"/hub"});
  const session=createSession("synthetic-token",()=>{});await session.client.actors();expect(new Headers(captured?.headers).get("x-lumio-hub")).toBe("https://expected-hub.example");expect(url).not.toContain("synthetic-token");session.close();
+});
+
+test("a page served by the Hub calls the Hub's API at the same-origin root without the proxy header",async()=>{
+ let captured:RequestInit|undefined,url="";browser(async(input,init)=>{url=String(input);captured=init;return Response.json([]);});
+ page({"lumio-api-base":""});
+ const session=createSession("synthetic-token",()=>{});await session.client.actors();
+ expect(url).toBe("http://127.0.0.1:4317/v1/actors");expect(new Headers(captured?.headers).get("x-lumio-hub")).toBeNull();session.close();
 });

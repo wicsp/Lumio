@@ -3,7 +3,14 @@
  */
 import { ApiClientError, createClient } from "@lumio/api-client";
 
-export const HUB_BASE = "/hub";
+/**
+ * API 前缀由页面告诉浏览器（ADR 0027）：Hub 直接提供页面时为空（同源根路径），旧的独立 Web 服务为 "/hub"。
+ * 没有这个 meta 时按旧页面处理。
+ */
+export function apiBase(): string {
+  const value = typeof document === "undefined" ? undefined : document.querySelector<HTMLMetaElement>('meta[name="lumio-api-base"]')?.content;
+  return value === undefined ? "/hub" : value;
+}
 export type Client = ReturnType<typeof createClient>;
 
 export interface Session {
@@ -13,7 +20,7 @@ export interface Session {
   readonly signal: AbortSignal;
 }
 
-/** 返回绑定当前页面同源 /hub 的会话；任何 401 都调用 onUnauthorized。 */
+/** 返回绑定当前页面 API 地址（见 apiBase）的会话；任何 401 都调用 onUnauthorized。 */
 export function createSession(token: string | undefined, onUnauthorized: () => void): Session {
   const controller = new AbortController();
   let closed=false;
@@ -28,7 +35,7 @@ export function createSession(token: string | undefined, onUnauthorized: () => v
     return response;
   }) as typeof fetch;
   // api-client 用 new URL(base + path) 组装地址，需要绝对地址。
-  const client = createClient({ url: `${window.location.origin}${HUB_BASE}`, ...(token ? { token } : {}), fetch: fetcher });
+  const client = createClient({ url: `${window.location.origin}${apiBase()}`, ...(token ? { token } : {}), fetch: fetcher });
   return { client, signal: controller.signal, close: () => {closed=true;controller.abort();} };
 }
 
