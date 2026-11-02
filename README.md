@@ -56,7 +56,8 @@ curl -fsSL https://raw.githubusercontent.com/wicsp/Lumio/main/install.sh | sh -s
 
 设置监听地址与对外地址，HTTPS 交给反向代理，见 [Caddy 示例](infra/README.md#caddy-反向代理)。
 没有公网地址时，Tailscale 是一种办法；检测到已安装时 setup 可以帮助配置。
-加执行器使用 `lumio runtime add <名称>`（P2-8 提供）。安装到的版本须已包含相应命令。
+加执行器：在已配置的 CLI 上运行 `lumio runtime add <名称>`，到那台机器上运行它打印的一行命令。
+装好后用 `lumio doctor` 检查，用 `lumio selftest` 以真实 agent 验证；已有安装用 `lumio upgrade` 升级。
 
 只下载程序或指定版本：在安装脚本参数里使用 `--no-setup` 或 `--version vX.Y.Z`。
 后台服务、日志与手动安装见 [macOS](infra/launchd/README.md)、[Linux](infra/systemd/README.md)。
@@ -72,10 +73,16 @@ bun run check          # 类型检查 + 依赖边界检查 + 测试
 bun run schema:export  # 把契约导出为 JSON Schema（packages/schema/json/）
 ```
 
-## 当前阶段
+## 当前阶段（2026-11-02）
 
-四模块重构已在本分支实现：Knowledge、Work、Execution、Assistant 独立用例与存储端口，Hub 负责组合。
-保留现有可靠派活、离线交付和审批路径，增加数据库业务对象、JSONL/文件归档与可验证备份。
-实现和验收证据见 [R0-0](docs/tasks/R0-0-four-module-refactor.md)。真实数据切换、安装升级和发布不在自动测试中执行。
+P0–P2 已完成（v0.1.6），并已合入四模块重构（ADR 0025）：
+
+- **知识（Knowledge）**：笔记仍是外部可编辑的 Markdown。`lumio new paper|idea`、`lumio sync`（自动补全元数据）；`search`/`show`/`links`/`check`/`export bib`。
+- **工作（Work）**：Project/Task 存在 Hub 的数据库里，正文可用 Markdown；修改负责人不会派活，派出是单独的显式操作。旧的任务/例行笔记需按[切换与回退](docs/migration-v2.md)显式迁移，启动时不会自动迁移。
+- **执行（Execution）**：每台设备一个执行器；Job 协议 2、离线队列、例行任务、高权限命令的审批门。
+- **助手（Assistant）**：对话与显式记忆，模型由 Hub 配置，见[使用说明](docs/assistant.md)。
+- **安装**：一行安装、配对码加执行器、`doctor` / `selftest` / `upgrade`。
+
+实现和验收证据见 [R0-0](docs/tasks/R0-0-four-module-refactor.md)；后续计划见 [`docs/tasks/README.md`](docs/tasks/README.md)。
 
 文档入口：[`docs/README.md`](docs/README.md)。

@@ -13,6 +13,7 @@
   2. `lumio-hub setup --public-url https://<机器名>.<tailnet>.ts.net`（Hub 仍只听本机）；
   3. `lumio runtime add server`，把打印的命令粘到服务器上运行。
   学校服务器没有 root，不装提权助手。
+  已于 2026-10-29 接入（执行器名 `server`，只有 pi）。
 - **以后**：两台服务器都会装 Nix；私人服务器有 root，可以装提权助手。
 
 安装并指定已有 vault，可运行：

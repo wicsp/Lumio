@@ -5,17 +5,17 @@
 | Lumio 现在是怎么设计的、有哪些规则 | [`DESIGN.md`](DESIGN.md)（**唯一的现行设计说明**） |
 | AI 必须遵守什么 | [`../AGENTS.md`](../AGENTS.md) |
 | 接下来要做什么 | [`tasks/README.md`](tasks/README.md) |
-| 四模块重构的目标与实施顺序 | [ADR 0025](adr/0025-four-module-architecture.md)（Accepted，本分支实现待合并）、[R0-0](tasks/R0-0-four-module-refactor.md) |
+| 四模块重构的目标与实施顺序 | [ADR 0025](adr/0025-four-module-architecture.md)（Accepted，大部分已实现）、[R0-0](tasks/R0-0-four-module-refactor.md) |
 | 助手模型配置、显式记忆与工具权限 | [助手使用](assistant.md) |
 | 旧任务笔记切换数据库、备份与回退 | [迁移与回退](migration-v2.md) |
 | 某条规则**为什么**这样定 | `adr/` 中对应的 ADR（DESIGN.md 里每条规则都标了编号） |
 | 数据格式的精确定义 | `packages/schema` |
 
-## 现在在哪一步（2026-11-01）
+## 现在在哪一步（2026-11-02）
 
-P0/P1/P2 的既有知识、派活、配对与维护功能保留。ADR 0025 批准的四模块重构已在本分支实现，
-包括业务库、显式派活、Routine、助手对话与显式记忆、可配置模型适配、JSONL/产物和完整业务备份，以及可核查的旧数据迁移。
-实现证据与交叉 review 见 [R0-0](tasks/R0-0-four-module-refactor.md)。真实数据迁移和已安装服务升级单独安排。
+P0、P1、P2 全部完成（P2-1 至 P2-13，最新发布 v0.1.6），Mac 单机安装与实验室服务器执行器已人工验收。
+ADR 0025 的四模块重构已合入：业务库、显式派活、Routine、助手对话与显式记忆、可配置模型适配、JSONL/产物和完整业务备份，以及可核查的旧数据迁移。
+实现证据与交叉 review 见 [R0-0](tasks/R0-0-four-module-refactor.md)。真实数据迁移、已安装服务升级和发布单独安排；未排期的待办见 [`tasks/README.md`](tasks/README.md)，阶段表见 [`DESIGN.md`](DESIGN.md) 第 8 节。
 
 ## 文档各管什么
 
@@ -39,7 +39,7 @@ P0/P1/P2 的既有知识、派活、配对与维护功能保留。ADR 0025 批�
 | [0001](adr/0001-monorepo-and-separate-vault.md) | 代码放一个仓库；笔记放独立的 vault | Implemented |
 | [0002](adr/0002-typescript-on-bun.md) | 全部用 TypeScript + Bun（研究后放弃 Rust） | Implemented |
 | [0003](adr/0003-zod-as-contract.md) | 数据格式用 Zod 写，导出 JSON Schema 给其他语言 | Implemented |
-| [0025](adr/0025-four-module-architecture.md) | 知识、工作、执行、助手四模块；数据库、Markdown 与 JSONL 分工 | Accepted（实施中） |
+| [0025](adr/0025-four-module-architecture.md) | 知识、工作、执行、助手四模块；数据库、Markdown 与 JSONL 分工 | Accepted（部分实现） |
 
 **数据**
 | 编号 | 一句话 | 状态 |
@@ -54,35 +54,34 @@ P0/P1/P2 的既有知识、派活、配对与维护功能保留。ADR 0025 批�
 **Hub 与运行**
 | 编号 | 一句话 | 状态 |
 |---|---|---|
-| [0005](adr/0005-runtime-execution-semantics.md) | 给 AI 派活不怕中断：一轮只执行一次，状态不明就交给人 | Accepted（P2） |
-| [0019](adr/0019-hub-runtimes-tasks-rounds.md) | Hub 与执行器；任务生命周期（交接现见 0024）；一个任务很多轮；例行任务；派活的安全底线 | Accepted（P2） |
-| [0007](adr/0007-hub-as-single-writer.md) | Hub 是程序写入的唯一裁判；git 只做备份；只讲 HTTP | 部分实现 |
-| [0014](adr/0014-hub-and-ai-access.md) | Hub 的存放、链接、搜索、写入路径、自动提交 | 部分实现（第 4、5 节） |
+| [0005](adr/0005-runtime-execution-semantics.md) | 给 AI 派活不怕中断：一轮只执行一次，状态不明就交给人 | Implemented |
+| [0019](adr/0019-hub-runtimes-tasks-rounds.md) | Hub 与执行器；任务生命周期（交接现见 0024）；一个任务很多轮；例行任务；派活的安全底线 | Implemented |
+| [0007](adr/0007-hub-as-single-writer.md) | Hub 是程序写入的唯一裁判；git 只做备份；只讲 HTTP | Implemented |
+| [0014](adr/0014-hub-and-ai-access.md) | Hub 的存放、链接、搜索、写入路径、自动提交 | Implemented（链接部分由 0018 取代） |
 | [0016](adr/0016-operations-actors-authorization.md) | 每次修改都是一个操作，统一授权；审计与 git trailer | Implemented |
-| [0017](adr/0017-single-machine-deployment.md) | Hub 与 vault 同机、只有一个 Hub；单用户（远程访问与 vault 同步部分由 0022 取代） | Accepted（P1，部分被取代） |
+| [0017](adr/0017-single-machine-deployment.md) | Hub 与 vault 同机、只有一个 Hub；单用户（远程访问与 vault 同步部分由 0022 取代） | Implemented（部分被取代） |
 
 **AI 协作与权限**
 | 编号 | 一句话 | 状态 |
 |---|---|---|
 | [0012](adr/0012-vault-layout-sources-posts-assets.md) | AI 内容写在标记区块里；`life/` 私密 | 部分实现 |
-| [0014](adr/0014-hub-and-ai-access.md) | AI 只能提议；入口是 CLI + skill；两种令牌 | Accepted（P1） |
+| [0014](adr/0014-hub-and-ai-access.md) | AI 只能提议；入口是 CLI + skill；两种令牌 | Implemented（链接部分由 0018 取代） |
 | [0016](adr/0016-operations-actors-authorization.md) | 身份与令牌分开；允许 / 拒绝 / 需要批准；错误带决策信息 | Implemented |
 | [0018](adr/0018-links-in-body-ai-recommends.md) | 链接写在正文里；AI 只推荐不写链接；`related` 弃用 | Implemented |
-| [0019](adr/0019-hub-runtimes-tasks-rounds.md) | 执行器只能领活和回报；AI 的汇报不能派活；`lumio sudo` 需要批准 | Accepted（P2） |
+| [0019](adr/0019-hub-runtimes-tasks-rounds.md) | 执行器只能领活和回报；AI 的汇报不能派活；`lumio sudo` 需要批准 | Implemented |
 | [0020](adr/0020-privileged-exec-signed-approvals.md) | 高权限命令：Hub 签名的一次性批准凭据，root 助手程序自己验证 | Implemented |
-| [0021](adr/0021-install-pairing-selftest.md) | 安装、配对与自检：发布编译好的程序，装 Hub 一行、每台执行器一行，`doctor`/`selftest` 代替手动清单 | Accepted（P2-7 至 P2-9） |
-| [0022](adr/0022-editor-agnostic-deployment-modes.md) | 编辑器无关；单机 / 服务器两种部署模式；网络由部署者负责，Tailscale 只是补充 | Accepted |
+| [0021](adr/0021-install-pairing-selftest.md) | 安装、配对与自检：发布编译好的程序，装 Hub 一行、每台执行器一行，`doctor`/`selftest` 代替手动清单 | Implemented |
+| [0022](adr/0022-editor-agnostic-deployment-modes.md) | 编辑器无关；单机 / 服务器两种部署模式；网络由部署者负责，Tailscale 只是补充 | 部分实现（官方 GUI 与改名操作未做） |
 | [0023](adr/0023-write-switch-fields.md) | 补全时写出开关字段（任务交接现见 0024） | Implemented |
-
 | [0024](adr/0024-assignee-string-default-workdir.md) | `assignee: pi@server` 作为交接开关；`workdir` 缺省 `~` | Implemented（P2-13） |
 
 **安全**
 | 编号 | 一句话 | 状态 |
 |---|---|---|
-| [0007](adr/0007-hub-as-single-writer.md) | 所有请求都要令牌；HTTPS 交给反向代理 | 部分实现 |
+| [0007](adr/0007-hub-as-single-writer.md) | 所有请求都要令牌；HTTPS 交给反向代理 | Implemented |
 | [0012](adr/0012-vault-layout-sources-posts-assets.md) | 禁存卡号；卡号写法 + Luhn 校验 | 部分实现 |
-| [0014](adr/0014-hub-and-ai-access.md) | 含卡号的文件不提交、不索引；私密由令牌角色执行 | Accepted（P1） |
-| [0017](adr/0017-single-machine-deployment.md) | Hub 默认只监听本机（远程访问方式由 0022 取代：网络由部署者负责） | Accepted（P1，部分被取代） |
+| [0014](adr/0014-hub-and-ai-access.md) | 含卡号的文件不提交、不索引；私密由令牌角色执行 | Implemented |
+| [0017](adr/0017-single-machine-deployment.md) | Hub 默认只监听本机（远程访问方式由 0022 取代：网络由部署者负责） | Implemented（部分被取代） |
 | [0020](adr/0020-privileged-exec-signed-approvals.md) | root 只能凭 Hub 签名、一次性的批准凭据执行 | Implemented |
 
 **流程**
