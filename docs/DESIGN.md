@@ -4,8 +4,8 @@
 > 想知道"为什么"时再去查；平时不需要读 ADR。
 > 修改规则：改了 ADR 就要在同一个 PR 里同步改本文件（ADR 0015）。本文件与 ADR 不一致时，说明有一方没同步，告诉人类。
 
-> **已批准、实施中的重构**：[ADR 0025](adr/0025-four-module-architecture.md)（Accepted，2026-10-31 人类批准）规定知识、工作、执行、助手四模块与混合存储；
-> [实施说明 R0-0](tasks/R0-0-four-module-refactor.md)。本分支已实现四模块边界、业务存储、日志备份与显式迁移；验收证据见 R0-0。必要契约由 Claude 起草，不迁移真实数据；ADR 的合并状态在 PR 合并时更新。
+> **四模块重构**：[ADR 0025](adr/0025-four-module-architecture.md)（Accepted，2026-10-31 人类批准）规定知识、工作、执行、助手四模块与混合存储，
+> 已于 2026-11-02 合并（#62）：四模块边界、业务存储、日志备份与显式迁移已实现，验收证据见 [R0-0](tasks/R0-0-four-module-refactor.md)。Project/Task 的 Markdown 展示与导出派生物尚未实现。真实数据迁移需按 [migration-v2](migration-v2.md) 单独执行。
 
 ## 0. 目标与非目标
 
@@ -264,7 +264,7 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
   不经过 shell；command 类型只执行登记过的程序；密钥在执行节点上才解析。
 - **不做**：跨设备调用工具、每一轮单独的权限、上下文管理、模型路由；留给以后自研的 agent（作为执行器里的一种引擎接入）。
 
-### 4.7 数据库 Work 与内置 Assistant（ADR 0025，分支内实现）
+### 4.7 数据库 Work 与内置 Assistant（ADR 0025）
 
 - `/v2/work/commands` 使用 `WorkCommandRequest` 与 `WorkCommandResult`；Task/Project 查询返回严格业务对象，不含路径。
 - Task/Project 描述在数据库中；状态、负责人、依赖、讨论、执行关联各有明确归属。修改负责人或保存描述不隐式派活。
@@ -374,7 +374,7 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
 |---|---|---|
 | P0 | `lumio new paper`、`lumio new idea`、`lumio sync`；vault 目录结构；source / post / asset 契约 | ✅ |
 | P0-7 | 迁移真实 vault 到新目录 | ✅ |
-| P1 | 本地查询与 `export bib`；Hub（身份与令牌、查询 API、监听、自动提交、操作与提议框架）；按引用导出与断链检查；skill | ✅（pi 验收待补） |
-| P2 | 执行器与派活（P2-1 ✅、P2-2 ✅、P2-3 ✅、P2-4 ✅、P2-5 ✅、P2-6 ✅）：执行器登记、可靠的派活核心、三种 agent 适配器、任务笔记里的一问一答、例行任务、`lumio-runtime sudo` 审批的门；安装、配对与自检（P2-7 至 P2-9，ADR 0021、0022）；识别 Markdown 链接（P2-10） | 功能 ✅，安装与自检进行中 |
+| P1 | 本地查询与 `export bib`；Hub（身份与令牌、查询 API、监听、自动提交、操作与提议框架）；按引用导出与断链检查；skill | ✅（pi 的 skill 验收待补） |
+| P2 | 执行器与派活：执行器登记、可靠的派活核心、三种 agent 适配器、任务笔记里的一问一答、例行任务、`lumio-runtime sudo` 审批的门（P2-1 至 P2-6）；安装、配对与自检（P2-7 至 P2-9、P2-11、P2-12，ADR 0021、0022、0023）；识别 Markdown 链接（P2-10）；负责人即交接开关（P2-13，ADR 0024） | ✅（v0.1.6；剩余人工验收见 `docs/tasks/README.md`） |
 | P3 | 飞书 Bot（派活、批准、通知）、审批模型、资产到期提醒、多维表格镜像；Chrome 插件入库论文 | |
-| P4 | Web GUI 提前按用户要求实现（知识只读、项目任务、执行、助手、审批）；知识写入、Docker / Nix、SDK 与原生手机端后续规划 | GUI 分支内实现与验收中 |
+| P4 | Web GUI 提前按用户要求实现（知识只读、项目任务、执行、助手、审批）；知识写入、Docker / Nix、SDK 与原生手机端后续规划 | Web 工作台已合并（#63、#64），其余未排期 |

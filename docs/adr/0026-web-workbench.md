@@ -1,6 +1,6 @@
 # ADR 0026：Web 工作台（GUI）
 
-- 状态：Accepted（实现位于分支 `codex/web-workbench`，PR 合并时改为 Implemented）
+- 状态：Implemented（#63 与界面重构 #64，2026-11-02 合并）
 - 日期：2026-11-01
 
 ## 背景
