@@ -37,8 +37,8 @@ ADR 0025 的四模块重构已合入：业务库、显式派活、Routine、助�
 **客户端**
 | 编号 | 一句话 | 状态 |
 |---|---|---|
-| [0026](adr/0026-web-workbench.md) | Web 工作台：同源代理、登录保持与四模块 GUI | Implemented |
-| [0027](adr/0027-v0.2-rollout.md) | v0.2 上线：Web 随安装运行、助手模型配置、旧任务笔记直接退役 | Accepted |
+| [0026](adr/0026-web-workbench.md) | Web 工作台：同源代理、登录保持与四模块 GUI | Implemented（第 2 节由 0027 取代） |
+| [0027](adr/0027-v0.2-rollout.md) | v0.2 上线：一个程序、Hub 提供 Web 与 PWA、助手模型配置、旧任务笔记直接退役 | Accepted |
 
 **工程基础**
 | 编号 | 一句话 | 状态 |

@@ -41,10 +41,10 @@
 | [P2-11](P2-11-acceptance-fixes.md) ✅ | 第一次验收发现的问题：终端输入、Tailscale 询问、重新登录、写出开关字段（ADR 0023） | 后端（Codex） | P2-8 |
 | [P2-12](P2-12-install-feedback.md) ✅ | 安装与配对：下载进度、配对失败说出原因、发现另一个 Hub | 后端（Codex） | P2-9 |
 | [P2-13](P2-13-assignee-handoff.md) ✅ | 负责人写成 `pi@server` 并作为交接开关（删除 `turn`）、`workdir` 缺省为 `~`（ADR 0024） | 后端（Codex） | P2-12 |
-| [R1-1](R1-0-v0.2-release.md#r1-1-lumio-web-单程序claude) | `lumio-web` 单程序，前端资源构建时嵌入 | Claude | — |
-| [R1-2](R1-0-v0.2-release.md#r1-2-安装与升级管理-webcodex) | 发布、安装、升级、doctor 管理 Web 服务 | 后端（Codex） | R1-1 |
-| [R1-3](R1-0-v0.2-release.md#r1-3-助手模型配置codex) | `lumio-hub assistant setup / status / clear` | 后端（Codex） | — |
-| [R1-4](R1-0-v0.2-release.md#r1-4-退役旧笔记与一条命令切换codex) | `migrate retire`、`lumio-hub switch --retire-legacy`、selftest 改用数据库任务 | 后端（Codex） | — |
+| [R1-1](R1-0-v0.2-release.md) | Web 资源入口模块、同源 API、PWA 清单与图标 | Claude | — |
+| [R1-2](R1-0-v0.2-release.md) | 一个程序 `lumio`；Hub 提供 Web；安装、升级、doctor 跟进 | 后端（Codex） | R1-1 |
+| [R1-3](R1-0-v0.2-release.md) | `lumio hub assistant setup / status / clear` | 后端（Codex） | — |
+| [R1-4](R1-0-v0.2-release.md) | `migrate retire`、`switch --retire-legacy`、selftest 改用数据库任务 | 后端（Codex） | — |
 | R1-5 | 发布 v0.2.0，真实切换与人工验收（见下方清单） | 人类 + Claude | R1-1 至 R1-4 |
 
 P1 的设计决定见 ADR 0014、0016、0017、0018；P2 见 ADR 0019、0020、0021、0022 与修订后的 ADR 0005；契约见 `packages/schema/src/` 中的 `query.ts`、`actor.ts`、`operation.ts`、`proposal.ts`、`api.ts`。
@@ -57,10 +57,10 @@ v0.2 起任务、项目、例行任务在数据库里（ADR 0025），旧任务�
 
 **升级与切换**（R1-1 至 R1-4 合并并发布 v0.2.0 后）：
 
-1. Mac：`lumio upgrade`，再按提示运行 `lumio-hub switch --retire-legacy`。
-2. Mac：`lumio-hub assistant setup`，填 API 地址、模型名和密钥。
+1. Mac：`lumio upgrade`（把旧的三个程序换成一个 `lumio`），再按提示运行 `lumio hub switch --retire-legacy`。
+2. Mac：`lumio hub assistant setup`，填 API 地址、模型名和密钥。
 3. 实验室服务器：`lumio-runtime upgrade`。
-4. Mac：`lumio doctor` 全部通过（Hub、本机执行器、Web、助手、服务器执行器在线且版本一致）；`lumio-runtime doctor` 在服务器上通过。
+4. Mac：`lumio doctor` 全部通过（Hub 与网页、本机执行器、助手、服务器执行器在线且版本一致）；`lumio-runtime doctor` 在服务器上通过。
 5. Mac：`lumio selftest --runtime server --agents pi`，以及本机 `lumio selftest`。
 
 新安装：`curl -fsSL https://raw.githubusercontent.com/wicsp/Lumio/main/install.sh | sh`（服务器模式加 `-s -- --server`），之后同上第 2、4、5 步。
@@ -69,13 +69,14 @@ v0.2 起任务、项目、例行任务在数据库里（ADR 0025），旧任务�
 
 | 事项 | 来自 | 怎么做 |
 |---|---|---|
-| Web 可用 | R1-2 | 浏览器打开 `http://127.0.0.1:4317`，用 `lumio login-code --name web` 的配对码连接，勾选「在这台设备上保持登录」；关闭浏览器再打开仍是登录状态 |
+| Web 可用 | R1-2 | 浏览器打开 `http://127.0.0.1:7420`，用 `lumio login-code --name web` 的配对码连接，勾选「在这台设备上保持登录」；关闭浏览器再打开仍是登录状态 |
+| 当 App 用 | R1-1 | Safari 菜单「文件 → 添加到程序坞」，从程序坞打开是独立窗口和 Lumio 图标；iPad/iPhone 经 Tailscale 打开 Hub 地址，「添加到主屏幕」后同样可用 |
 | 在 Web 上派活到服务器 | ADR 0025、0026 | 新建任务「在服务器上运行 nvidia-smi 并汇报」，负责人选 `pi@server`，点「派出」；在「执行」里看到这一轮完成并有报告，任务讨论里出现结果，任务不会自动变成已完成 |
 | 等你回答 | ADR 0025 | 派一个需要确认的任务（例如「列出要删除的临时文件，先问我再删」），在「今日 / 等你决定」里看到问题，在任务讨论里回答后「继续下一轮」 |
 | 助手对话 | R1-3 | 在 Web 的「助手」里发一句话，看到流式回复；刷新后对话还在；保存一条记忆再遗忘 |
 | 旧笔记已退役 | R1-4 | 打开一条旧任务笔记，把负责人改成 `pi@server` 并保存，确认不会产生新的运行；知识库里仍能搜到它 |
 | 例行任务 | ADR 0025 | 在 Web「执行 → 例行任务」新建一个每 10 分钟、目标 `pi@server` 的例行任务并启用；合上 Mac 半小时后打开，确认这段时间的运行记录都在 |
-| 开机自启动 | P2-7、R1-2 | 重启 Mac 后不做任何事，`lumio doctor` 显示 Hub、本机执行器、Web 都正常 |
+| 开机自启动 | P2-7、R1-2 | 重启 Mac 后不做任何事，`lumio doctor` 显示 Hub（含网页）与本机执行器都正常 |
 | 提权助手真实安装与审批 | P2-6 / P2-8 | 在有 root 的私人服务器配对后运行 `sudo ~/.local/bin/lumio-runtime install-sudo-helper`，核对指纹；让 agent 申请安装软件包，在 Web「审批」里批准一次、拒绝一次 |
 
 ### v0.1.x 的验收记录
