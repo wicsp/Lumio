@@ -13,9 +13,17 @@ import { runSudoHelper } from "./sudo-helper.ts";
 import { readConfig, RuntimeError } from "./config.ts";
 import { runRuntime } from "./runtime.ts";
 import { runWorker } from "./worker.ts";
+import { prepareMigration } from "./prepare-migration.ts";
+import { StorageError } from "@lumio/storage";
 
 if (process.argv[2] === "--version") {
   console.log(version);
+} else if (process.argv[2] === "prepare-migration") {
+  try {
+    const { values, positionals } = parseArgs({ args: process.argv.slice(3), allowPositionals: true, options: { "state-dir": { type: "string" } } });
+    if (positionals.length || !values["state-dir"]) throw new RuntimeError("用法：lumio-runtime prepare-migration --state-dir <执行器状态目录>（请先停止执行器服务）");
+    await prepareMigration(values["state-dir"]); console.log("迁移准备完成：旧计划缓存已清理，历史和日志保留");
+  } catch (cause) { console.error(cause instanceof RuntimeError || cause instanceof StorageError ? cause.message : "执行器迁移准备失败"); process.exitCode = 1; }
 } else if (process.argv[2] === "doctor" || process.argv[2] === "upgrade") {
   try {
     if (process.argv[2] === "upgrade") process.exitCode = await runUpgrade(process.argv.slice(3), true);
@@ -58,7 +66,7 @@ if (process.argv[2] === "--version") {
   }
   catch (cause) {
     // Never print fetch exceptions, environment values or agent output.
-    console.error(cause instanceof RuntimeError ? cause.message : "执行器无法启动；请检查配置与状态目录权限");
+    console.error(cause instanceof RuntimeError || cause instanceof StorageError ? cause.message : "执行器无法启动；请检查配置与状态目录权限");
     process.exitCode = 1;
   } finally {
     process.removeListener("SIGTERM", shutdown);

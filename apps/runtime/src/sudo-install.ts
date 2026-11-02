@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { chmod, chown, copyFile, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, parse } from "node:path";
-import { askTerminal, openTerminal } from "@lumio/core";
+import { askTerminal, openTerminal } from "@lumio/platform";
 import { HubSigningKey, RuntimeInfo, signingKeyFingerprint } from "@lumio/schema";
 import { readConfig, RuntimeError } from "./config.ts";
 import { environmentText, optionalFile } from "./pairing.ts";

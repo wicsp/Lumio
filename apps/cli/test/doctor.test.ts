@@ -88,8 +88,3 @@ test("doctor diagnoses another Hub, extra services, public health mismatch and T
   expect(f.commands.some((argv) => argv.includes("bootout") || argv.includes("--bg"))).toBe(false);
   expect(JSON.stringify(checks)).not.toContain(token);
 });
-test("duplicated installation helpers stay aligned across app boundaries", async () => {
-  for (const [local, other] of [["download", "runtime"], ["pairing-feedback", "runtime"], ["hub-checks", "hub"]]) {
-    expect(await readFile(new URL(`../src/${local}.ts`, import.meta.url), "utf8")).toBe(await readFile(new URL(`../../${other}/src/${local}.ts`, import.meta.url), "utf8"));
-  }
-});

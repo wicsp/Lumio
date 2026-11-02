@@ -1,7 +1,10 @@
 import { readFile } from "node:fs/promises";
-import { vaultFileAt, parseFrontmatter, buildBib, checkLinks, collectCitations, excludedCardPaths, exportBib, noteLinks, searchNotes, showNote, type SearchOptions } from "@lumio/core";
+import { vaultFileAt, buildBib, checkLinks, collectCitations, excludedCardPaths, exportBib, noteLinks, searchNotes, showNote, type SearchOptions } from "@lumio/storage";
+import { parseFrontmatter } from "@lumio/knowledge";
 import { createClient } from "@lumio/api-client";
 import { NOTE_TYPES, parseAssignee, type NoteRef } from "@lumio/schema";
+import { KnowledgeService } from "@lumio/knowledge";
+import { FileKnowledgeRepository } from "@lumio/storage";
 
 export interface QueryCommand {
   command: "search" | "show" | "links" | "check" | "export";
@@ -15,6 +18,7 @@ export interface QueryCommand {
 }
 
 export async function runQuery(root: string | undefined, command: QueryCommand, log: (line: string) => void, warn: (line: string) => void, remote?: ReturnType<typeof createClient>): Promise<number> {
+  const local = root ? new KnowledgeService(new FileKnowledgeRepository(root)) : undefined;
   if (command.command === "export") {
     const citations = command.from === undefined ? undefined : await collectCitations(root!, command.from);
     for (const warning of citations?.warnings ?? []) warn(warning);
@@ -36,9 +40,9 @@ export async function runQuery(root: string | undefined, command: QueryCommand, 
     ...(command.limit !== undefined ? { limit: Number(command.limit) } : {}),
   };
   if (command.command === "check") {
-    const result = await (remote ? remote.check(options) : checkLinks(root!, options));
+    const result = await (remote ? remote.check(options) : local!.check(options));
     // 沿用警告通道，JSON 与 Hub 的 CheckResult 契约保持原样。
-    const list = (limit?: number) => remote ? remote.search("", { includePrivate: options.includePrivate, limit }) : searchNotes(root!, "", { ...options, limit });
+    const list = (limit?: number) => remote ? remote.search("", { includePrivate: options.includePrivate, limit }) : local!.search("", { ...options, limit });
     let notes = await list();
     if (notes.hits.length < notes.total) notes = await list(notes.total);
     for (const { note } of notes.hits) {
@@ -60,7 +64,7 @@ export async function runQuery(root: string | undefined, command: QueryCommand, 
       log(`共 ${result.total} 条悬空链接`);
     }
   } else if (command.command === "search") {
-    const result = await (remote ? remote.search(command.argument, options) : searchNotes(root!, command.argument, options));
+    const result = await (remote ? remote.search(command.argument, options) : local!.search(command.argument, options));
     if (command.json) log(JSON.stringify(result));
     else {
       log(`找到 ${result.total} 篇笔记`);
@@ -69,10 +73,10 @@ export async function runQuery(root: string | undefined, command: QueryCommand, 
       if (paths.length) log(`有 ${paths.length} 个文件因疑似含卡号未被索引\n${paths.join("\n")}`);
     }
   } else if (command.command === "show") {
-    const result = await (remote ? remote.show(command.argument, options) : showNote(root!, command.argument, options));
+    const result = await (remote ? remote.show(command.argument, options) : local!.show(command.argument, options));
     log(command.json ? JSON.stringify(result) : `${result.note.title}  ${result.note.path}\n${JSON.stringify(result.frontmatter, null, 2)}\n\n${result.body}`);
   } else {
-    const result = await (remote ? remote.links(command.argument, options) : noteLinks(root!, command.argument, options));
+    const result = await (remote ? remote.links(command.argument, options) : local!.links(command.argument, options));
     if (command.json) log(JSON.stringify(result));
     else {
       log(`${result.note.title}  ${result.note.path}\n出链：`);

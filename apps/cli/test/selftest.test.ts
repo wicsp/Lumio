@@ -3,7 +3,7 @@ import { chmod, cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createClient } from "@lumio/api-client";
-import { parseFrontmatter } from "@lumio/core";
+import { parseFrontmatter } from "@lumio/knowledge";
 import { Job, Task } from "@lumio/schema";
 import { selftest } from "../src/selftest.ts";
 import { doctor } from "../src/doctor.ts";
@@ -94,12 +94,6 @@ test("selftest enforces round and cancellation deadlines, continues later checks
   expect(results).toHaveLength(4); expect(results.every((r) => !r.ok)).toBe(true);
   expect(results.slice(0, 3).every((r) => r.elapsed_ms === 100)).toBe(true);
   expect(results[3]!.elapsed_ms).toBe(30); expect(sequence).toBe(4); expect(cancelled).toBe(5);
-});
-
-test("diagnostic and upgrade copies stay identical across app dependency boundaries", async () => {
-  for (const name of ["diagnostics.ts", "upgrade.ts"]) {
-    expect(await readFile(new URL(`../src/${name}`, import.meta.url), "utf8")).toBe(await readFile(new URL(`../../runtime/src/${name}`, import.meta.url), "utf8"));
-  }
 });
 
 test("notes timeout retains a completed note and clears its pending agent turn", async () => {

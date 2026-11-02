@@ -2,6 +2,24 @@
 module.exports = {
   forbidden: [
     {
+      name: "domains-are-independent",
+      severity: "error",
+      from: { path: "^packages/(knowledge|work|execution|assistant)/src/" },
+      to: { path: "^packages/(knowledge|work|execution|assistant|storage|api-client|platform|core)/", pathNot: "^packages/$1/" },
+    },
+    {
+      name: "domains-no-io",
+      severity: "error",
+      from: { path: "^packages/(knowledge|work|execution|assistant)/src/" },
+      to: { path: "^(node:)?(fs|fs/promises|http|https|http2|net|tls|dgram|child_process)$|^bun:sqlite$|node_modules/(undici|axios|node-fetch|ky|got)/" },
+    },
+    {
+      name: "apps-use-explicit-modules",
+      severity: "error",
+      from: { path: "^apps/" },
+      to: { path: "^packages/core/" },
+    },
+    {
       name: "packages-not-depend-on-apps",
       severity: "error",
       from: { path: "^packages/" },

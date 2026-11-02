@@ -4,6 +4,7 @@ import { readFile, mkdir, writeFile, rename, rm } from "node:fs/promises";
 import { RuntimeName } from "@lumio/schema";
 import { homedir, hostname } from "node:os";
 import { join, resolve } from "node:path";
+import { modelConfiguration } from "./assistant-model.ts";
 import { HubError } from "./errors.ts";
 
 export function stateDirectory(env: NodeJS.ProcessEnv = process.env): string {
@@ -11,7 +12,6 @@ export function stateDirectory(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 export function readConfig(env: NodeJS.ProcessEnv = process.env) {
-  if (!env.LUMIO_VAULT) throw new HubError("INVALID", "请设置 LUMIO_VAULT");
   const listen = env.LUMIO_HUB_LISTEN ?? "127.0.0.1:7420";
   const match = /^(\[[^\]]+\]|[^:/\s]+):(\d+)$/.exec(listen);
   if (!match || Number(match[2]) > 65535) throw new HubError("INVALID", "LUMIO_HUB_LISTEN 必须是 host:port");
@@ -30,10 +30,11 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env) {
     } catch { throw new HubError("INVALID", "LUMIO_PUBLIC_URL 必须是无凭据、查询或片段的 HTTP(S) 地址"); }
   }
   return {
+    assistantModel: modelConfiguration(env),
     localRuntime: undefined as string | undefined,
     publicUrl,
     autosaveIdle,
-    vault: resolve(env.LUMIO_VAULT), stateDir: stateDirectory(env),
+    vault: env.LUMIO_VAULT ? resolve(env.LUMIO_VAULT) : "", stateDir: stateDirectory(env),
     hostname: match[1]!.replace(/^\[|\]$/g, ""), port: Number(match[2]), trustedProxy,
   };
 }

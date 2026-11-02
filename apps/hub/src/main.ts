@@ -6,6 +6,7 @@ import { runManagement } from "./cli.ts";
 import { readConfig } from "./config.ts";
 import { HubError } from "./errors.ts";
 import { startHub } from "./server.ts";
+import { StorageError } from "@lumio/storage";
 
 try {
   const args = process.argv.slice(2);
@@ -26,6 +27,6 @@ try {
 } catch (cause) {
   // Never echo argv, headers or database exceptions, which may contain credentials.
   const code = (cause as NodeJS.ErrnoException).code;
-  console.error(cause instanceof HubError ? cause.message : ["EPERM", "EACCES", "EADDRINUSE"].includes(code ?? "") ? `Hub 启动失败：${code}` : "Hub 无法启动或执行命令；请检查命令参数、LUMIO_VAULT、LUMIO_STATE_DIR、LUMIO_HUB_LISTEN 和 LUMIO_TRUSTED_PROXY");
+  console.error(cause instanceof HubError || cause instanceof StorageError ? cause.message : ["EPERM", "EACCES", "EADDRINUSE"].includes(code ?? "") ? `Hub 启动失败：${code}` : "Hub 无法启动或执行命令；请检查命令参数、LUMIO_VAULT、LUMIO_STATE_DIR、LUMIO_HUB_LISTEN 和 LUMIO_TRUSTED_PROXY");
   process.exitCode = 1;
 }

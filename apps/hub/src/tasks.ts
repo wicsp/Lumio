@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join, relative, resolve } from "node:path";
-import {
-  CoreError, entityDirectory, humanPart, parseFrontmatter, scanVault, setFields, showNote, upsertBlock,
-  type GitTrailers,
-} from "@lumio/core";
+import { join } from "node:path";
+import { workdirInVault } from "./execution-policy.ts";
+export { workdirInVault } from "./execution-policy.ts";
+import { CoreError } from "@lumio/foundation";
+import { entityDirectory, humanPart, parseFrontmatter, setFields, upsertBlock } from "@lumio/knowledge";
+import { scanVault, showNote, type GitTrailers } from "@lumio/storage";
 import { parseAssignee, textContainsCardNumber, type AgentRun, type Job, type Operation, type RuntimeInfo } from "@lumio/schema";
 import type { HubConfig } from "./config.ts";
 import { HubError } from "./errors.ts";
@@ -25,7 +25,7 @@ import { editNote } from "./commit.ts";
  * 所有读写笔记的动作都在 Hub 的写入队列里执行（与补全、自动保存串行）。
  */
 
-export interface TaskOptions { clock?: WatchClock; quietMs?: number; tickMs?: number }
+export interface TaskOptions { clock?: WatchClock; quietMs?: number; tickMs?: number; isManaged?: (path: string, id?: string) => boolean }
 type TaskTrigger = Extract<Operation, { op: "task.dispatch" }>["args"]["trigger"];
 interface TaskState { task: string; path: string; last_turn: string | null; session: string | null; snapshot: string | null; rounds: number; pending_since: number | null }
 
@@ -68,13 +68,6 @@ export function lineDiff(before: string, after: string): { added: string[]; remo
 }
 
 
-/** workdir（可以 ~ 开头）是否落在笔记库里（ADR 0019：不允许）。 */
-export function workdirInVault(vault: string, workdir: string): boolean {
-  const expanded = workdir === "~" ? homedir() : workdir.startsWith("~/") ? join(homedir(), workdir.slice(2)) : workdir;
-  const inside = relative(resolve(vault), resolve(expanded));
-  return !inside || (!inside.startsWith("..") && !inside.startsWith("/"));
-}
-
 /** 未指定 device 时只使用 Hub 配置里的本机执行器。 */
 export function pickRuntime(store: HubStore, now: Date, engine: AgentRun["engine"], device: string | undefined, localRuntime?: string): RuntimeInfo {
   const runtime = store.runtimes(now).find((r) => r.registration.name === (device ?? localRuntime));
@@ -108,10 +101,12 @@ export class TaskRounds {
   private readonly clock: WatchClock;
   private readonly quietMs: number;
   private readonly tickMs: number;
+  private readonly isManaged: NonNullable<TaskOptions["isManaged"]>;
 
   constructor(private config: HubConfig, private store: HubStore, private jobs: Jobs,
     private run: <T>(action: () => Promise<T>) => Promise<T>, private issue: (path: string, line: string) => void,
     options: TaskOptions = {}) {
+    this.isManaged = options.isManaged ?? (() => false);
     this.clock = options.clock ?? { now: Date.now, set: (cb, ms) => setTimeout(cb, ms), clear: (t) => clearTimeout(t as ReturnType<typeof setTimeout>) };
     this.quietMs = options.quietMs ?? 30_000;
     this.tickMs = options.tickMs ?? 5_000;
@@ -149,10 +144,12 @@ export class TaskRounds {
   /** 文件监听处理完一篇笔记之后调用（已在写入队列里，不能再排队）。 */
   async noteChanged(path: string): Promise<void> {
     if (!path.startsWith(`${entityDirectory("task")}/`) || !path.endsWith(".md")) return;
+    if (this.isManaged(path)) return;
     let data: Record<string, unknown>;
     try { data = parseFrontmatter(await readFile(join(this.config.vault, path))).data; } catch { return; }
     const id = data.id;
     if (typeof id !== "string" || !TASK_ID.test(id)) return;
+    if (this.isManaged(path, id)) return;
     const now = this.clock.now();
     this.lastChange.set(path, now);
     const s = this.state(id) ?? { task: id, path, last_turn: null, session: null, snapshot: null, rounds: 0, pending_since: null };
@@ -220,6 +217,7 @@ export class TaskRounds {
       catch { throw new HubError("NOT_FOUND", "找不到这个任务"); }
       s = { task, path: note.note.path, last_turn: null, session: null, snapshot: null, rounds: 0, pending_since: null };
     }
+    if (this.isManaged(s.path, task)) throw new HubError("CONFLICT", "这个来源已由数据库管理，旧文件不能再派活");
     const bytes = await readFile(join(this.config.vault, s.path));
     const parsed = parseFrontmatter(bytes);
     const data = parsed.data;
@@ -306,6 +304,7 @@ export class TaskRounds {
   async writeResults(): Promise<void> {
     const rows = this.store.db.query<{ job: string; task: string; round: number }, []>("SELECT job, task, round FROM task_rounds WHERE written=0 ORDER BY rowid").all();
     for (const row of rows) {
+      if (this.isManaged(this.state(row.task)?.path ?? "", row.task)) continue;
       let job: Job;
       try { job = this.jobs.get(row.job); } catch { continue; }
       if (!job.result && job.status !== "cancelled") continue;

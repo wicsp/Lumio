@@ -5,7 +5,8 @@ import { cp, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
-import { parseFrontmatter, writeFileAtomic } from "@lumio/core";
+import { parseFrontmatter } from "@lumio/knowledge";
+import { writeFileAtomic } from "@lumio/storage";
 import { Idea, Timestamp } from "@lumio/schema";
 import { startVaultWatch, type WatchClock, type WatchOptions } from "../src/watch.ts";
 

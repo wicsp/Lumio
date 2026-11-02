@@ -3,6 +3,15 @@
 每份任务说明是一个**纵向切片**：做完后能直接使用，并且可以独立验证。
 按编号顺序实现，后一个切片可以依赖前一个切片的代码。
 
+**实施中的重构**：[R0-0 四模块重构](R0-0-four-module-refactor.md)列出后续切片、迁移与验收要求；
+依据 [ADR 0025](../adr/0025-four-module-architecture.md)（Accepted，2026-10-31 人类批准并授权持续实施）。
+具体契约由 Claude 起草，按切片实现并同步 DESIGN，不读取真实 vault。
+
+已落地的分支切片：[R0-3 公共维护](R0-3-platform-maintenance.md)、[R0-5 设备登记](R0-5-runtime-registry.md)、
+[R0-7 显式记忆](R0-7-assistant-memory.md)、[R0-7 模型适配](R0-7-model-adapter.md)、[R0-7 上下文记录](R0-7-assistant-context.md)、[R0-1 契约](R0-1-contracts.md)、[R0-5 数据库 Routine](R0-5-execution-routines.md)、
+[R0-6 日志、文件与业务备份](R0-6-storage-files.md)、[R0-8 显式迁移](R0-8-legacy-import.md)。剩余工作与最终验收以 R0-0 为准。
+真实切换另见[迁移与回退说明](../migration-v2.md)，不会在重构测试中执行。
+
 | 编号 | 内容 | 负责 | 依赖 |
 |---|---|---|---|
 | [P0-1](P0-1-sync.md) ✅ | 补全器 + `lumio sync` | 后端（Codex） | — |
@@ -77,7 +86,7 @@ pi 的 skill 验收说明：pi 的回答完全正确（推荐了 `[[渲染格式
 | 审批模型、飞书批准 | P3 | ADR 0019 第 7 节 |
 | 服务器模式下怎么编辑 vault | 上服务器时 | ADR 0022 已定为编辑器无关、Lumio 不做同步；剩下的是选哪种外部同步或改用官方 GUI |
 | 改名操作 `note.rename`：自己的客户端经 Hub 改名并同步更新所有引用 | 做自己的客户端时 | ADR 0018 第 4 节 |
-| 任务总览：Obsidian Bases 的表格与看板视图（放在 vault 里的 `.base` 文件） | 打磨期 | 人类要两种视图；与官方 GUI（P4）的先后待定 |
+| 任务总览视图 | 打磨期 | ADR 0025 后任务存于数据库，vault 里没有可供 Obsidian Bases 读取的任务笔记。Web 工作台已有按状态分组的列表；如仍要在 Obsidian 里看，需要先实现 ADR 0025 第 3 节的只读 Markdown 投影，由人类决定 |
 
 已完成（✅）的任务说明保留当时的原文，其中的 vault 路径（如 `papers/`）以 ADR 0012 的新目录为准。
 

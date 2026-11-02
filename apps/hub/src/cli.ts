@@ -6,10 +6,23 @@ import { backupHub } from "./backup.ts";
 import { stateDirectory } from "./config.ts";
 import { HubError } from "./errors.ts";
 import { HubStore } from "./store.ts";
+import { backupBusiness, restoreBusiness, verifyBusinessBackup, StorageError } from "@lumio/storage";
+import { runMigration } from "./migrate.ts";
 
 export async function runManagement(args: string[], log: (line: string) => void = console.log): Promise<void> {
+  if (args[0] === "migrate") return runMigration(args.slice(1), log);
   const { positionals, values } = parseArgs({ args, allowPositionals: true, options: { role: { type: "string" }, actor: { type: "string" } } });
   const [kind, action, name] = positionals;
+  if ((kind === "backup" && ["business", "verify"].includes(action ?? "")) || kind === "restore") {
+    if (Object.keys(values).length || !name || (kind === "backup" ? positionals.length !== 3 : action !== "business" || positionals.length !== 4)) throw new HubError("INVALID", "用法：backup business <新备份目录>；backup verify <备份目录>；restore business <备份目录> <新状态目录>");
+    try {
+      const manifest = kind === "restore" ? await restoreBusiness(name, positionals[3]!) : action === "verify" ? await verifyBusinessBackup(name) : await backupBusiness(stateDirectory(), name);
+      log(JSON.stringify(manifest)); return;
+    } catch (cause) {
+      if (cause instanceof StorageError) throw new HubError(cause.code === "CORRUPT" ? "INVALID" : cause.code, cause.message);
+      throw cause;
+    }
+  }
   if (kind === "backup") {
     if (positionals.length !== 2 || !action || Object.keys(values).length) throw new HubError("INVALID", "用法：backup <目标文件>");
     await backupHub(stateDirectory(), action);

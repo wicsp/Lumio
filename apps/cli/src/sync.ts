@@ -1,5 +1,5 @@
-import { syncVault as sync, type SyncOptions } from "@lumio/core";
-export type { SyncOptions } from "@lumio/core";
+import { syncVault as sync, type SyncOptions } from "@lumio/storage";
+export type { SyncOptions } from "@lumio/storage";
 
 export async function syncVault(root: string, options: SyncOptions = {}): Promise<number> {
   const result = await sync(root, { ...options, log: options.log ?? console.log });

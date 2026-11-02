@@ -5,13 +5,17 @@
 | Lumio 现在是怎么设计的、有哪些规则 | [`DESIGN.md`](DESIGN.md)（**唯一的现行设计说明**） |
 | AI 必须遵守什么 | [`../AGENTS.md`](../AGENTS.md) |
 | 接下来要做什么 | [`tasks/README.md`](tasks/README.md) |
+| 四模块重构的目标与实施顺序 | [ADR 0025](adr/0025-four-module-architecture.md)（Accepted，大部分已实现）、[R0-0](tasks/R0-0-four-module-refactor.md) |
+| 助手模型配置、显式记忆与工具权限 | [助手使用](assistant.md) |
+| 旧任务笔记切换数据库、备份与回退 | [迁移与回退](migration-v2.md) |
 | 某条规则**为什么**这样定 | `adr/` 中对应的 ADR（DESIGN.md 里每条规则都标了编号） |
 | 数据格式的精确定义 | `packages/schema` |
 
-## 现在在哪一步（2026-10-31）
+## 现在在哪一步（2026-11-02）
 
-P0、P1、P2 全部完成（P2-1 至 P2-13，最新发布 v0.1.6），Mac 单机安装与实验室服务器执行器已人工验收，进入"先用起来、打磨流程"阶段。
-自检覆盖不到的人工验收和未排期的待办见 [`tasks/README.md`](tasks/README.md)；下一阶段（P3/P4）尚未写任务说明。阶段表见 [`DESIGN.md`](DESIGN.md) 第 8 节。
+P0、P1、P2 全部完成（P2-1 至 P2-13，最新发布 v0.1.6），Mac 单机安装与实验室服务器执行器已人工验收。
+ADR 0025 的四模块重构已合入：业务库、显式派活、Routine、助手对话与显式记忆、可配置模型适配、JSONL/产物和完整业务备份，以及可核查的旧数据迁移。
+实现证据与交叉 review 见 [R0-0](tasks/R0-0-four-module-refactor.md)。真实数据迁移、已安装服务升级和发布单独安排；未排期的待办见 [`tasks/README.md`](tasks/README.md)，阶段表见 [`DESIGN.md`](DESIGN.md) 第 8 节。
 
 ## 文档各管什么
 
@@ -35,6 +39,7 @@ P0、P1、P2 全部完成（P2-1 至 P2-13，最新发布 v0.1.6），Mac 单机
 | [0001](adr/0001-monorepo-and-separate-vault.md) | 代码放一个仓库；笔记放独立的 vault | Implemented |
 | [0002](adr/0002-typescript-on-bun.md) | 全部用 TypeScript + Bun（研究后放弃 Rust） | Implemented |
 | [0003](adr/0003-zod-as-contract.md) | 数据格式用 Zod 写，导出 JSON Schema 给其他语言 | Implemented |
+| [0025](adr/0025-four-module-architecture.md) | 知识、工作、执行、助手四模块；数据库、Markdown 与 JSONL 分工 | Accepted（部分实现） |
 
 **数据**
 | 编号 | 一句话 | 状态 |

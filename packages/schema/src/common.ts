@@ -15,6 +15,16 @@ export const ID_PREFIXES = {
   proposal: "prop",
   actor: "act",
   routine: "rtn",
+  // ADR 0025（R0-1）：Work / Assistant / 存储新增的前缀
+  work_comment: "wmsg",
+  conversation: "conv",
+  assistant_message: "amsg",
+  assistant_turn: "turn",
+  tool_call: "tool",
+  memory: "mem",
+  log_event: "evt",
+  artifact: "art",
+  migration: "mig",
 } as const;
 
 const ULID = "[0-9A-HJKMNP-TV-Z]{26}";
@@ -71,6 +81,38 @@ export const AgentAssignee = z.union([
   z.strictObject({ agent: z.enum(AGENTS), device: RuntimeName.optional() }),
 ]);
 export const Assignee = z.union([z.literal("human"), AgentAssignee]);
+
+/**
+ * v2 业务对象使用的负责人写法（ADR 0025 第 8 节）：只接受字符串 `agent` 或 `agent@执行器`，
+ * 不接受旧的 `{agent, device}` 对象；对象写法只用于旧笔记解码。
+ */
+export const AgentTarget = z
+  .string()
+  .regex(new RegExp(`^(${AGENTS.join("|")})(@[a-z0-9][a-z0-9._-]{0,31})?$`), ASSIGNEE_MESSAGE);
+/** v2 任务负责人：`human` 或 AgentTarget。 */
+export const TaskAssignee = z.union([z.literal("human"), AgentTarget]);
+export type AgentTarget = z.infer<typeof AgentTarget>;
+export type TaskAssignee = z.infer<typeof TaskAssignee>;
+
+/** 正整数版本号：每次修改递增，用于 expected_revision 并发检查。 */
+export const Revision = z.number().int().positive();
+
+/** 请求去重标识：重放同一 request_id 不重复执行（ADR 0025 第 5 节）。 */
+export const RequestId = z.string().regex(/^[A-Za-z0-9._:-]{16,128}$/, "request_id 必须是 16–128 个字母、数字或 . _ : -");
+
+const URL_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/;
+
+/** 安全相对路径：非空，不以 `/` 开头，不含 `..`/`.`/空段、反斜杠、NUL 或 URL scheme。 */
+export function isSafeRelativePath(path: string): boolean {
+  if (!path || path.startsWith("/") || path.includes("\\") || path.includes("\0") || URL_SCHEME.test(path)) return false;
+  return path.split("/").every((segment) => segment !== ".." && segment !== "." && segment !== "");
+}
+export const SafeRelativePath = z
+  .string()
+  .refine(isSafeRelativePath, "必须是安全的相对路径：不能以 / 开头，不能含 .. 段、反斜杠或 URL");
+
+/** SHA-256 十六进制摘要（小写 64 位）。 */
+export const Sha256 = z.string().regex(/^[0-9a-f]{64}$/, "sha256 必须是 64 位小写十六进制");
 
 export class AssigneeError extends Error {
   readonly code = "INVALID_ASSIGNEE";

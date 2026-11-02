@@ -1,10 +1,8 @@
 import { watch, type FSWatcher } from "node:fs";
 import { lstat, readFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
-import {
-  entityTypeOfPath, isPrivateType, isVaultNotePath, openVaultGit, syncFile, syncVault, updateIndex, vaultFileAt,
-  VAULT_LAYOUT, type SyncFileResult, type SyncOptions, type VaultGit,
-} from "@lumio/core";
+import { entityTypeOfPath, isPrivateType, isVaultNotePath, VAULT_LAYOUT } from "@lumio/knowledge";
+import { openVaultGit, syncFile, syncVault, updateIndex, vaultFileAt, type SyncFileResult, type SyncOptions, type VaultGit } from "@lumio/storage";
 import { textContainsCardNumber } from "@lumio/schema";
 
 export interface HubStatus {

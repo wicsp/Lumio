@@ -19,10 +19,7 @@ export class Privileged {
   }
   publicKey(): string { return this.store.db.query<{ public_key: string }, []>("SELECT public_key FROM signing_key WHERE id=1").get()!.public_key; }
   private live(runtime: string, id: string): boolean {
-    const row = this.store.db.query<{ record: string; cancel: number }, [string]>("SELECT record,cancel FROM jobs WHERE id=?").get(id);
-    if (!row || row.cancel) return false;
-    const job = new Jobs(this.store).get(id);
-    return job.spec.runtime === runtime && !!job.assigned && !job.result && (job.status === "assigned" || job.status === "running");
+    return new Jobs(this.store).live(runtime, id);
   }
   validate(operation: Extract<Operation, { op: "exec.privileged" }>, actor: string) {
     if (operation.args.runtime !== actor) throw new HubError("INVALID", "执行器身份不匹配");

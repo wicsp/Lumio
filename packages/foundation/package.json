@@ -1,0 +1,12 @@
+{
+  "name": "@lumio/foundation",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@lumio/schema": "workspace:*"
+  }
+}

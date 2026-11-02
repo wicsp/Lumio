@@ -1,4 +1,4 @@
-import { dueFires, parseCron, routineJobId } from "@lumio/core";
+import { dueFires, parseCron, routineJobId } from "@lumio/execution";
 import { JOB_PROTOCOL_VERSION, JobSpec, RoutineSpec } from "@lumio/schema";
 import type { Queue } from "./queue.ts";
 

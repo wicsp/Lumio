@@ -3,6 +3,17 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "scripts": { "build": "bun build --compile src/main.ts --outfile dist/lumio-hub" },
-  "dependencies": { "@lumio/core": "workspace:*", "@lumio/schema": "workspace:*" }
+  "scripts": {
+    "build": "bun build --compile src/main.ts --outfile dist/lumio-hub"
+  },
+  "dependencies": {
+    "@lumio/schema": "workspace:*",
+    "@lumio/work": "workspace:*",
+    "@lumio/assistant": "workspace:*",
+    "@lumio/storage": "workspace:*",
+    "@lumio/execution": "workspace:*",
+    "@lumio/platform": "workspace:*",
+    "@lumio/knowledge": "workspace:*",
+    "@lumio/foundation": "workspace:*"
+  }
 }

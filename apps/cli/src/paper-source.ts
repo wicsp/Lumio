@@ -1,4 +1,4 @@
-import type { PaperInput } from "@lumio/core";
+import type { PaperInput } from "@lumio/knowledge";
 
 export type PaperFetcher = (url: string, init: RequestInit) => Promise<Response>;
 export interface SourceOptions {
