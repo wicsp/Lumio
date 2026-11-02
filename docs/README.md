@@ -4,7 +4,7 @@
 |---|---|
 | Lumio 现在是怎么设计的、有哪些规则 | [`DESIGN.md`](DESIGN.md)（**唯一的现行设计说明**） |
 | AI 必须遵守什么 | [`../AGENTS.md`](../AGENTS.md) |
-| 接下来要做什么 | [`tasks/README.md`](tasks/README.md) |
+| 接下来要做什么 | [`tasks/README.md`](tasks/README.md)；当前：[R1-0 v0.2 上线](tasks/R1-0-v0.2-release.md) |
 | 四模块重构的目标与实施顺序 | [ADR 0025](adr/0025-four-module-architecture.md)（Accepted，大部分已实现）、[R0-0](tasks/R0-0-four-module-refactor.md) |
 | Web GUI 启动、配置与功能 | [工作台说明](../apps/web/README.md)、[P4-1](tasks/P4-1-web-workbench.md) |
 | 助手模型配置、显式记忆与工具权限 | [助手使用](assistant.md) |
@@ -37,7 +37,8 @@ ADR 0025 的四模块重构已合入：业务库、显式派活、Routine、助�
 **客户端**
 | 编号 | 一句话 | 状态 |
 |---|---|---|
-| [0026](adr/0026-web-workbench.md) | Web 工作台：同源代理、登录保持与四模块 GUI | Implemented |
+| [0026](adr/0026-web-workbench.md) | Web 工作台：同源代理、登录保持与四模块 GUI | Implemented（第 2 节由 0027 取代） |
+| [0027](adr/0027-v0.2-rollout.md) | v0.2 上线：一个程序、Hub 提供 Web 与 PWA、助手模型配置、旧任务笔记直接退役 | Accepted |
 
 **工程基础**
 | 编号 | 一句话 | 状态 |

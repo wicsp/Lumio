@@ -55,7 +55,7 @@ Foundation 提供 ID 和错误；Platform 提供终端、诊断、下载与升�
 
 - **一个代码仓库**，数据（vault）不放在仓库里（ADR 0001）。
 - **全部 TypeScript，运行在 Bun 上**；Bun 固定为 1.3.x，与人类的 Nix 环境一致（ADR 0002，AGENTS.md）。
-- CLI、Hub、Runtime 用 `bun build --compile` 编译成单个二进制（ADR 0002）。
+- 全部角色用 `bun build --compile` 编译成**一个程序** `lumio`，以子命令区分 `lumio hub …`、`lumio runtime …`；`lumio-hub`、`lumio-runtime` 是指向它的兼容链接（ADR 0002、0027；R1-2 实施中）。
 - **契约**：`packages/schema` 中的 Zod 定义是数据格式的唯一事实来源；其他语言用 `bun run schema:export`
   导出的 JSON Schema（ADR 0003）。vault 实体用宽松对象（未知字段原样保留），协议用严格对象（未知字段拒绝）。
 
@@ -71,13 +71,13 @@ Foundation 提供 ID 和错误；Platform 提供终端、诊断、下载与升�
 | `packages/platform` | 终端、下载、升级回退、诊断与配对/Hub 检查；显示和版本由应用传入 | schema |
 | `packages/core` | 旧包兼容转发入口，已无上述具体实现；应用禁止再依赖 | 上述内部包 |
 | `packages/api-client` | 调用 Hub 的 SDK | schema |
-| `apps/cli` | `lumio` 命令行；联网获取论文元数据、本地知识模式、Hub 客户端 | api-client, knowledge, storage, foundation, platform, schema |
+| `apps/cli` | 唯一程序入口 `lumio`：命令行（联网获取论文元数据、本地知识模式、Hub 客户端），并分派 `hub`、`runtime` 子命令 | api-client, knowledge, storage, foundation, platform, schema；以及 `apps/(hub\|runtime\|web)/src/entry.ts`（ADR 0027） |
 | `apps/hub` | API、模块组装、跨模块协调、身份与旧路径兼容 | 业务包、storage、foundation、platform、schema |
 | `apps/runtime` | 设备 daemon，与 Hub 只走 HTTP | execution 的纯计划能力、storage 的日志适配、foundation、platform、schema |
-| `apps/web` | 中文 GUI、静态资源构建、同源固定 Hub 代理 | api-client, schema |
+| `apps/web` | 中文 GUI 与静态资源构建，入口 `src/entry.ts`；网页由 Hub 提供（ADR 0027；R1-2 前仍保留独立服务与代理） | api-client, schema |
 | `apps/feishu-bot` 等 | 后续客户端 | api-client |
 
-依赖方向由 `bun run lint:deps` 强制：`packages` 不依赖 `apps`，`apps` 之间不互相依赖；四个业务包不导入其他业务包实现或具体适配器，禁止文件/网络/SQLite/进程 I/O；应用不依赖 Core 兼容汇总入口（ADR 0025）。
+依赖方向由 `bun run lint:deps` 强制：`packages` 不依赖 `apps`，`apps` 之间不互相依赖——唯一例外是 `apps/cli` 可以引用其他 app 的入口模块 `src/entry.ts`，hub、runtime、web 之间仍不互相引用（ADR 0027）；四个业务包不导入其他业务包实现或具体适配器，禁止文件/网络/SQLite/进程 I/O；应用不依赖 Core 兼容汇总入口（ADR 0025）。
 
 ## 3. 数据
 
@@ -219,11 +219,12 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 - **网络由部署者负责**：Hub 只讲 HTTP；监听地址（`LUMIO_HUB_LISTEN`）与对外地址（`LUMIO_PUBLIC_URL`）由部署者设置，
   HTTPS 推荐放 Caddy 等反向代理（文档有示例）。非本机监听且对外地址是 `http://` 时只警告、不拒绝。
   Tailscale 等私有网络是补充：`setup` 检测到时可以帮忙填对外地址，核心代码不依赖它。
-- **安装**（ADR 0021）：打 `v*` 标签时 CI 编译 `lumio`、`lumio-hub`、`lumio-runtime` 发布到 GitHub Releases；`install.sh` 下载、校验、装到 `~/.local/bin`，
+- **安装**（ADR 0021、0027）：打 `v*` 标签时 CI 为每个平台编译一个 `lumio`（嵌入 Web 资源）发布到 GitHub Releases；`install.sh` 下载、校验、装到 `~/.local/bin` 并建立 `lumio-hub`、`lumio-runtime` 兼容链接，
   再运行 `lumio-hub setup`（可重复运行；`--server` 为服务器模式）：vault 路径、身份、CLI 配置文件 `~/.config/lumio/config.json`、
-  Hub 与本机执行器的后台服务（macOS：launchd；Linux：systemd 用户服务）。
+  Hub 与本机执行器的后台服务（macOS：launchd；Linux：systemd 用户服务；服务命令为 `lumio hub serve`、`lumio runtime serve`，进程仍分开）。Web 由 Hub 在自己的地址上提供，没有单独的 Web 服务（ADR 0027）。
   加执行器：`lumio runtime add <名称>` 生成一次性配对码（10 分钟、一次有效），那台机器上 `lumio-runtime join` 换取令牌并装好后台服务；
-  另一台机器上的 CLI 用 `lumio login`。`lumio doctor`、`lumio-runtime doctor` 检查安装；`lumio selftest` 用真实 agent 验证关键路径；`upgrade` 升级。
+  另一台机器上的 CLI 用 `lumio login`。`lumio doctor`、`lumio-runtime doctor` 检查安装（含 Web 服务与助手配置）；`lumio selftest` 用真实 agent 和数据库任务验证关键路径；`upgrade` 升级（从 v0.1.x 升级时替换为单个程序并改写本机服务文件）。
+  从旧笔记模式切到数据库任务：不需要保留旧任务时 `lumio hub switch --retire-legacy` 一条命令退役旧笔记（不导入、不改文件，ADR 0027）；需要导入时按 `docs/migration-v2.md`。
   Nix 以后作为另一种安装方式。作者自己的用法见 `docs/personal-setup.md`。
 - 只信任配置过的反向代理传来的客户端信息。
 - 飞书 Bot 用官方 SDK 的长连接，不需要公网回调地址。
@@ -285,7 +286,7 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
 - Runtime 与离线准备也持有独占状态租约。`prepare-migration --state-dir <目录>` 只在执行器停止且无待执行/交付数据时清空派生计划缓存。
   迁移仅导入已处理历史关联与已经暂停的 Routine，不生成 Job 或重放工具/审批；下一轮取历史最高轮次加一。
 - `/v2/assistant/chat` 支持 JSON 与 NDJSON；对话、轮次、工具调用和记忆归 Assistant。CLI 用 `chat`、`chat list/show`。
-  模型和工具通过注入接口提供。Hub 的兼容 Chat Completions 适配器须配置 LUMIO_ASSISTANT_BASE_URL 与 LUMIO_ASSISTANT_MODEL，凭据仅运行时环境注入；无默认供应商或模型。支持 SSE 与 JSON 响应，限制响应字节/时限，工具仅在完整响应校验后交付，不自动重试。
+  模型和工具通过注入接口提供。Hub 的兼容 Chat Completions 适配器须配置 LUMIO_ASSISTANT_BASE_URL 与 LUMIO_ASSISTANT_MODEL，凭据仅运行时环境注入；无默认供应商或模型。用 `lumio hub assistant setup` 配置：验证后写入 Hub 服务的私有环境文件（600，与 Hub 令牌同一文件）并重启，密钥只从隐藏输入或标准输入读取，不经命令行参数、不进日志（ADR 0027）。支持 SSE 与 JSON 响应，限制响应字节/时限，工具仅在完整响应校验后交付，不自动重试。
   模型设置和显式记忆见 [助手使用说明](assistant.md)；默认不启用生产业务工具或新增委托权限。
 - `chat memory list/remember/forget` 经严格 v2 记忆命令显式管理偏好；仅 human 可操作自己拥有的记忆，行、幂等回执和成功审计同事务提交。遗忘会清除活动记忆和回执中的内容，重放旧请求返回 tombstone；既有对话、模型请求快照和历史备份独立保留。
 - 工具执行使用持久的独立 agent 身份，human 仅作为对话所有者；默认没有生产工具或来源读取适配器。带来源记忆在保存、重放与使用时以 agent 权限重查，无法访问或私密内容不交付模型。
@@ -299,7 +300,9 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
 
 - **技术栈**：原生 TypeScript、DOM 与 CSS，用 Bun 1.3.x 构建和提供服务。只依赖 `@lumio/api-client` 与 `@lumio/schema`。
 - **类型隔离**：浏览器端与服务端是两个独立的 TypeScript 程序，根 typecheck 同时检查两者。
-- **访问路径**：浏览器只请求同源 `/hub`，Web 服务转发到 `LUMIO_WEB_HUB_URL`（默认 `http://127.0.0.1:7420`），默认监听 `127.0.0.1:4317`。
+- **访问路径**（ADR 0027，R1-2 实施中）：网页由 Hub 在自己的地址上提供（单机 `http://127.0.0.1:7420`；服务器模式为 Hub 的对外地址），浏览器与 Hub 同源，直接调用 `/v1`、`/v2`。
+  Hub 为页面与资源设置限制性 CSP；浏览器请求（带 `Origin` 或 `Sec-Fetch-Site`）的 Origin/Host 必须是本机监听地址、`LUMIO_PUBLIC_URL` 或 `LUMIO_WEB_ORIGINS` 列出的来源。
+  在 R1-2 完成前，旧的独立 Web 服务（`127.0.0.1:4317`，经同源 `/hub` 代理转发）仍可用，下面的「代理规则」只适用于它。
 - **代理规则**：
   - 用户路由按 GET/POST 白名单放行；runtime 注册、归档上传与邀请接口不可达。
   - 只转发 `Authorization`、`Content-Type`、`Accept`。
@@ -310,13 +313,16 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
 - **模块**：
   - 概览。
   - Knowledge：只读，支持搜索、类型与链接视图，私有内容需显式开启。
-  - Project/Task：创建与更新表单；描述带 revision，用 textarea 加预览；评论与派发是独立的显式操作。
+  - Project/Task：按状态分组的列表；属性点选后立即保存（每次一个字段，带 revision）；描述默认渲染、点击编辑，单独保存；评论与派发是独立的显式操作。
   - Jobs：结果与待回答问题、取消；文件下载校验大小与 SHA。
   - Routine：创建、编辑、暂停与恢复；设备列表。
   - Assistant：流式会话与停止；可查看已保存状态，不重放；记忆显式管理。
   - 审批：展示完整 argv、job、runtime 与理由，由用户显式接受或拒绝。
 - **渲染**：只支持安全的 Markdown 子集。转义原始 HTML，过滤不安全协议，不加载外部图片。沿用 source/private 过滤，并丢弃过期请求的结果。
-- **边界**：Web 不自行运行 agent，通过 Hub 显式派活。实施与验收不访问真实数据、不升级现有服务、不发布。
+- **交互**：⌘K 命令面板（跳转、新建、搜索）；数字键切换模块、C 新建任务、J/K 列表导航；明暗主题；860px 以下为底部导航并分屏显示列表与详情。
+- **部署**：前端资源构建时嵌入 `lumio` 程序，随 Hub 一起提供与升级（ADR 0027）。仓库内 `bun run demo:web` 用合成数据试用。
+- **App**：提供 Web App Manifest 与图标，可在 Safari「添加到程序坞」、Chrome「安装」、iPad/iPhone「添加到主屏幕」；不注册 Service Worker、不缓存业务数据。原生 Mac App 以后另定（ADR 0027）。
+- **边界**：Web 不自行运行 agent，通过 Hub 显式派活。
 
 
 ## 5. AI 协作与权限（ADR 0014、0016、0018）
@@ -377,4 +383,5 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
 | P1 | 本地查询与 `export bib`；Hub（身份与令牌、查询 API、监听、自动提交、操作与提议框架）；按引用导出与断链检查；skill | ✅（pi 的 skill 验收待补） |
 | P2 | 执行器与派活：执行器登记、可靠的派活核心、三种 agent 适配器、任务笔记里的一问一答、例行任务、`lumio-runtime sudo` 审批的门（P2-1 至 P2-6）；安装、配对与自检（P2-7 至 P2-9、P2-11、P2-12，ADR 0021、0022、0023）；识别 Markdown 链接（P2-10）；负责人即交接开关（P2-13，ADR 0024） | ✅（v0.1.6；剩余人工验收见 `docs/tasks/README.md`） |
 | P3 | 飞书 Bot（派活、批准、通知）、审批模型、资产到期提醒、多维表格镜像；Chrome 插件入库论文 | |
+| R1 | v0.2 上线：一个程序 `lumio`、Hub 提供 Web 与 PWA、`assistant setup`、旧笔记退役与一条命令切换（ADR 0027，[R1-0](tasks/R1-0-v0.2-release.md)） | 进行中 |
 | P4 | Web GUI 提前按用户要求实现（知识只读、项目任务、执行、助手、审批）；知识写入、Docker / Nix、SDK 与原生手机端后续规划 | Web 工作台已合并（#63、#64），其余未排期 |

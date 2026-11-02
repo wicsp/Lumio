@@ -41,29 +41,45 @@
 | [P2-11](P2-11-acceptance-fixes.md) ✅ | 第一次验收发现的问题：终端输入、Tailscale 询问、重新登录、写出开关字段（ADR 0023） | 后端（Codex） | P2-8 |
 | [P2-12](P2-12-install-feedback.md) ✅ | 安装与配对：下载进度、配对失败说出原因、发现另一个 Hub | 后端（Codex） | P2-9 |
 | [P2-13](P2-13-assignee-handoff.md) ✅ | 负责人写成 `pi@server` 并作为交接开关（删除 `turn`）、`workdir` 缺省为 `~`（ADR 0024） | 后端（Codex） | P2-12 |
+| [R1-1](R1-0-v0.2-release.md) | Web 资源入口模块、同源 API、PWA 清单与图标 | Claude | — |
+| [R1-2](R1-0-v0.2-release.md) | 一个程序 `lumio`；Hub 提供 Web；安装、升级、doctor 跟进 | 后端（Codex） | R1-1 |
+| [R1-3](R1-0-v0.2-release.md) | `lumio hub assistant setup / status / clear` | 后端（Codex） | — |
+| [R1-4](R1-0-v0.2-release.md) | `migrate retire`、`switch --retire-legacy`、selftest 改用数据库任务 | 后端（Codex） | — |
+| R1-5 | 发布 v0.2.0，真实切换与人工验收（见下方清单） | 人类 + Claude | R1-1 至 R1-4 |
 
 P1 的设计决定见 ADR 0014、0016、0017、0018；P2 见 ADR 0019、0020、0021、0022 与修订后的 ADR 0005；契约见 `packages/schema/src/` 中的 `query.ts`、`actor.ts`、`operation.ts`、`proposal.ts`、`api.ts`。
 
-新增 GUI 切片：[P4-1 Web 工作台](P4-1-web-workbench.md)，连接现有四模块 Hub；验收仅使用合成数据。
+新增 GUI 切片：[P4-1 Web 工作台](P4-1-web-workbench.md)（已合并）。当前进行：[R1-0 v0.2 上线](R1-0-v0.2-release.md)（ADR 0027）。
 
-## 等人类回来处理
+## 等人类回来处理：v0.2 验收（R1-5）
 
-P2-9 用自检覆盖执行、会话续接、提问、取消和任务笔记写回。真实安装按下面的顺序验收：
+v0.2 起任务、项目、例行任务在数据库里（ADR 0025），旧任务笔记直接退役（ADR 0027）。下面的清单替代 v0.1.x 基于任务笔记的验收。
 
-1. Hub 所在机器：`curl -fsSL https://raw.githubusercontent.com/wicsp/Lumio/main/install.sh | sh`；服务器模式加 `-s -- --server`。已有安装可运行 `lumio upgrade`。
-2. 每台额外执行器：在已配置的 CLI 上运行 `lumio runtime add <名称>`，在目标机器运行打印的一行安装命令。已有安装可运行 `lumio-runtime upgrade`。
-3. 运行 `lumio doctor`；有失败项时按提示修复。在执行器机器上用 `lumio-runtime doctor` 检查服务、PATH、权限与提权助手。
-4. 在 Hub 所在机器运行 `lumio selftest --runtime <名称> --notes`（只有一个执行器时可省略 `--runtime`）。默认验证该执行器检测到的全部 agent，可用 `--agents codex,claude-code,pi` 选择。每项显示耗时和 job 编号，失败时用 `lumio job show <job>` 查看；`--json` 可保存结构化结果。自检笔记保留并标为 `done`。
+**升级与切换**（R1-1 至 R1-4 合并并发布 v0.2.0 后）：
 
-已有安装升级到最新版（`lumio upgrade`、服务器上 `lumio-runtime upgrade`）后，重跑第 3、4 步。
+1. Mac：`lumio upgrade`（把旧的三个程序换成一个 `lumio`），再按提示运行 `lumio hub switch --retire-legacy`。
+2. Mac：`lumio hub assistant setup`，填 API 地址、模型名和密钥。
+3. 实验室服务器：`lumio-runtime upgrade`。
+4. Mac：`lumio doctor` 全部通过（Hub 与网页、本机执行器、助手、服务器执行器在线且版本一致）；`lumio-runtime doctor` 在服务器上通过。
+5. Mac：`lumio selftest --runtime server --agents pi`，以及本机 `lumio selftest`。
 
-自检覆盖不到的项目仍需人工验收：
+新安装：`curl -fsSL https://raw.githubusercontent.com/wicsp/Lumio/main/install.sh | sh`（服务器模式加 `-s -- --server`），之后同上第 2、4、5 步。
+
+**自检覆盖不到、需要人工确认的事项**：
 
 | 事项 | 来自 | 怎么做 |
 |---|---|---|
-| 开机自启动 | P2-7 | 重启 Mac 后不做任何事，`lumio doctor` 显示 Hub 与本机执行器正常 |
-| 合上 Mac 期间例行任务补写 | P2-5 | 建一个 `assignee: pi@server`、`schedule: */10 * * * *` 的例行任务，合上 Mac 半小时后打开，确认结果补写 |
-| 提权助手真实安装与审批 | P2-6 / P2-8 | 在有 root 的私人服务器配对后运行 `sudo ~/.local/bin/lumio-runtime install-sudo-helper`，核对指纹；让 agent 申请安装软件包，用 `lumio proposals` 批准，再拒绝一次确认不执行。升级后按提示更新助手程序 |
+| Web 可用 | R1-2 | 浏览器打开 `http://127.0.0.1:7420`，用 `lumio login-code --name web` 的配对码连接，勾选「在这台设备上保持登录」；关闭浏览器再打开仍是登录状态 |
+| 当 App 用 | R1-1 | Safari 菜单「文件 → 添加到程序坞」，从程序坞打开是独立窗口和 Lumio 图标；iPad/iPhone 经 Tailscale 打开 Hub 地址，「添加到主屏幕」后同样可用 |
+| 在 Web 上派活到服务器 | ADR 0025、0026 | 新建任务「在服务器上运行 nvidia-smi 并汇报」，负责人选 `pi@server`，点「派出」；在「执行」里看到这一轮完成并有报告，任务讨论里出现结果，任务不会自动变成已完成 |
+| 等你回答 | ADR 0025 | 派一个需要确认的任务（例如「列出要删除的临时文件，先问我再删」），在「今日 / 等你决定」里看到问题，在任务讨论里回答后「继续下一轮」 |
+| 助手对话 | R1-3 | 在 Web 的「助手」里发一句话，看到流式回复；刷新后对话还在；保存一条记忆再遗忘 |
+| 旧笔记已退役 | R1-4 | 打开一条旧任务笔记，把负责人改成 `pi@server` 并保存，确认不会产生新的运行；知识库里仍能搜到它 |
+| 例行任务 | ADR 0025 | 在 Web「执行 → 例行任务」新建一个每 10 分钟、目标 `pi@server` 的例行任务并启用；合上 Mac 半小时后打开，确认这段时间的运行记录都在 |
+| 开机自启动 | P2-7、R1-2 | 重启 Mac 后不做任何事，`lumio doctor` 显示 Hub（含网页）与本机执行器都正常 |
+| 提权助手真实安装与审批 | P2-6 / P2-8 | 在有 root 的私人服务器配对后运行 `sudo ~/.local/bin/lumio-runtime install-sudo-helper`，核对指纹；让 agent 申请安装软件包，在 Web「审批」里批准一次、拒绝一次 |
+
+### v0.1.x 的验收记录
 
 2026-10-28 第一次 Mac 单机安装已人工通过三个真实 agent、任务笔记的一问一答与例行任务；当时发现的问题已记录为 P2-11。2026-10-29 v0.1.4：Mac 重装、实验室服务器（`server`，只有 pi）经 Tailscale 配对接入，`lumio doctor` 与 `lumio selftest --runtime server --agents pi --notes` 已人工通过。过程中修复：systemd `EnvironmentFile` 引号（#52）、发布测试的时序（#47、#54）；改进见 P2-12。
 同日人工通过：服务器执行器跑普通命令（P2-2，`nvidia-smi`）、在 iPad 上查看任务笔记（P2-4），已从上表移除。
@@ -88,7 +104,8 @@ pi 的 skill 验收说明：pi 的回答完全正确（推荐了 `[[渲染格式
 | 审批模型、飞书批准 | P3 | ADR 0019 第 7 节 |
 | 服务器模式下怎么编辑 vault | 上服务器时 | ADR 0022 已定为编辑器无关、Lumio 不做同步；剩下的是选哪种外部同步或改用官方 GUI |
 | 改名操作 `note.rename`：自己的客户端经 Hub 改名并同步更新所有引用 | 做自己的客户端时 | ADR 0018 第 4 节 |
-| 任务总览视图 | 打磨期 | ADR 0025 后任务存于数据库，vault 里没有可供 Obsidian Bases 读取的任务笔记。Web 工作台已有按状态分组的列表；如仍要在 Obsidian 里看，需要先实现 ADR 0025 第 3 节的只读 Markdown 投影，由人类决定 |
+| 任务总览在 Obsidian 里也能看 | 用一阵 Web 之后 | ADR 0025 后任务存于数据库；Web 工作台已有按状态分组的列表。如仍要在 Obsidian 里看，需要先实现 ADR 0025 第 3 节的只读 Markdown 投影，由人类决定 |
+| 给助手开放业务工具（读写任务、查笔记） | v0.2 用起来之后 | 需要新 ADR，涉及权限（ADR 0025 第 7 节） |
 
 已完成（✅）的任务说明保留当时的原文，其中的 vault 路径（如 `papers/`）以 ADR 0012 的新目录为准。
 
