@@ -1,3 +1,4 @@
+import { t } from "./i18n.ts";
 /**
  * DOM 与界面基础件：动态文本一律走 textContent，不拼接 HTML。
  * 所有样式来自 styles.css（CSP 不允许内联 style 属性；需要的尺寸用 CSSOM 设置）。
@@ -33,7 +34,7 @@ export function clear(el: Element, ...children: Child[]): void {
 
 // ───────────── 状态占位 ─────────────
 
-export const loading = (text = "载入中…") =>
+export const loading = (text = t("Loading…")) =>
   h("div", { class: "state state-loading", role: "status" }, h("span", { class: "spinner", "aria-hidden": "true" }), h("span", {}, text));
 
 export const empty = (text: string, action?: { label: string; run: () => void }) =>
@@ -42,7 +43,7 @@ export const empty = (text: string, action?: { label: string; run: () => void })
 
 export const failure = (text: string, retry?: () => void) =>
   h("div", { class: "state state-error", role: "alert" }, icon("alert"), h("span", {}, text),
-    retry && h("button", { type: "button", class: "btn btn-small", onclick: retry }, "重试"));
+    retry && h("button", { type: "button", class: "btn btn-small", onclick: retry }, t("Retry")));
 
 /** 详情区的空白页：一个图标和一句引导。 */
 export const placeholder = (iconName: string, text: string) =>
@@ -86,6 +87,10 @@ const ICONS: Record<string, string> = {
   command: "M9 6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3z",
   file: "M6 3h8l4 4v14H6zM14 3v4h4",
   terminal: "M4 5h16v14H4zM8 10l2.5 2L8 14M13 14h3",
+  sun: "M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4",
+  moon: "M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z",
+  monitor: "M3 5h18v12H3zM8 21h8M12 17v4",
+  globe: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z",
 };
 
 export function icon(name: string, className = "icon"): SVGSVGElement {
@@ -135,13 +140,13 @@ export function statusIcon(status: string): SVGSVGElement {
 
 /** 原生 <dialog>，关闭后自动移除；有未保存输入时关闭前确认。 */
 export function openDialog(title: string, body: Node, actions: Node[], options: { wide?: boolean } = {}): HTMLDialogElement {
-  const confirmClose = () => dialog.dataset.dirty !== "true" || confirm("有尚未保存的修改，确定关闭吗？");
+  const confirmClose = () => dialog.dataset.dirty !== "true" || confirm(t("You have unsaved changes. Close anyway?"));
   const dialog = h("dialog", { class: `dialog${options.wide ? " dialog-wide" : ""}`, "aria-label": title },
     h("header", { class: "dialog-head" }, h("h2", {}, title),
-      h("button", { type: "button", class: "icon-btn", "aria-label": "关闭", onclick: () => { if (confirmClose()) dialog.close(); } }, icon("close"))),
+      h("button", { type: "button", class: "icon-btn", "aria-label": t("Close"), onclick: () => { if (confirmClose()) dialog.close(); } }, icon("close"))),
     h("div", { class: "dialog-body" }, body),
     h("footer", { class: "dialog-foot" },
-      h("button", { type: "button", class: "btn btn-quiet", onclick: () => { if (confirmClose()) dialog.close(); } }, "取消"), ...actions));
+      h("button", { type: "button", class: "btn btn-quiet", onclick: () => { if (confirmClose()) dialog.close(); } }, t("Cancel")), ...actions));
   dialog.addEventListener("input", () => { dialog.dataset.dirty = "true"; });
   dialog.addEventListener("cancel", event => { if (!confirmClose()) event.preventDefault(); });
   dialog.addEventListener("click", event => { if (event.target === dialog && confirmClose()) dialog.close(); });
@@ -190,7 +195,7 @@ export interface MenuItem { value: string; label: string; icon?: Node; hint?: st
 export function openMenu(anchor: HTMLElement, items: MenuItem[], onPick: (value: string) => void, options: { filter?: boolean; placeholder?: string } = {}): void {
   document.querySelector(".menu")?.remove();
   const list = h("div", { class: "menu-list", role: "listbox" });
-  const input = options.filter ? h("input", { class: "menu-filter", placeholder: options.placeholder ?? "筛选…", autocomplete: "off" }) : undefined;
+  const input = options.filter ? h("input", { class: "menu-filter", placeholder: options.placeholder ?? t("Filter…"), autocomplete: "off" }) : undefined;
   const menu = h("div", { class: "menu" }, input, list);
   let index = Math.max(0, items.findIndex(item => item.selected));
   let visible = items;
@@ -204,7 +209,7 @@ export function openMenu(anchor: HTMLElement, items: MenuItem[], onPick: (value:
       onmousemove: () => { if (index !== i) { index = i; render(); } }, onclick: () => pick(item) },
       item.icon ?? h("span", { class: "menu-gap" }), h("span", { class: "menu-label" }, item.label), item.hint && h("span", { class: "menu-hint" }, item.hint),
       item.selected && icon("check", "icon menu-check"))));
-    if (!visible.length) list.append(h("p", { class: "menu-empty" }, "没有匹配项"));
+    if (!visible.length) list.append(h("p", { class: "menu-empty" }, t("No matches")));
   };
   const outside = (event: MouseEvent) => { if (!menu.contains(event.target as Node) && event.target !== anchor) close(); };
   menu.addEventListener("keydown", event => {

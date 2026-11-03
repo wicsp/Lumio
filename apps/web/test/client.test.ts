@@ -94,7 +94,7 @@ test("browser bundle builds without server-only modules", async () => {
   expect(assets.js).not.toMatch(/from\s*["'](node:|bun:|fs["']|child_process)/);
   expect(assets.js).not.toContain("Bun.serve");
   expect(assets.css).toContain("--lumen");
-  expect(assets.css).toContain("prefers-color-scheme: dark");
+  expect(assets.css).toContain(':root[data-theme="dark"]');
 }, 30000);
 
 test("time labels include timezone without incompatible Intl style options",()=>{expect(formatTime("2026-11-01T00:00:00+08:00","Asia/Singapore")).toContain("2026");expect(formatTime(undefined)).toBe("—");});

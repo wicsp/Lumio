@@ -2,6 +2,7 @@
  * 浏览器会话（ADR 0026）：请求会话持有令牌；保存与恢复由 App 负责。登出或 401 时中止所有未完成请求。
  */
 import { ApiClientError, createClient } from "@lumio/api-client";
+import { acceptLanguage, t } from "./i18n.ts";
 
 /**
  * API 前缀由页面告诉浏览器（ADR 0027）：Hub 直接提供页面时为空（同源根路径），旧的独立 Web 服务为 "/hub"。
@@ -30,6 +31,7 @@ export function createSession(token: string | undefined, onUnauthorized: () => v
     const headers = new Headers(init.headers);
     const hub = typeof document === "undefined" ? undefined : document.querySelector<HTMLMetaElement>('meta[name="lumio-hub"]')?.content;
     if (hub) headers.set("X-Lumio-Hub", hub);
+    headers.set("Accept-Language", acceptLanguage());
     const response = await window.fetch(target, { ...init, headers, signal, credentials: "omit", cache: "no-store" });
     if (response.status === 401 && token&&!closed) queueMicrotask(()=>{if(!closed)onUnauthorized();});
     return response;
@@ -40,20 +42,20 @@ export function createSession(token: string | undefined, onUnauthorized: () => v
 }
 
 const CODE_TEXT: Record<string, string> = {
-  UNAUTHENTICATED: "登录已失效，请重新连接",
-  FORBIDDEN: "当前身份没有权限执行这个操作",
-  NOT_FOUND: "没有找到这个对象，可能已被删除",
-  CONFLICT: "内容已被其他地方修改",
+  UNAUTHENTICATED: t("Your session has expired. Connect again."),
+  FORBIDDEN: t("You don't have permission to do this."),
+  NOT_FOUND: t("This item wasn't found. It may have been deleted."),
+  CONFLICT: t("This was changed somewhere else."),
 };
 
 /** 给人看的错误说明；只用 Hub 返回的说明或通用提示，不显示内部异常。 */
 export function errorText(error: unknown): string {
   if (error instanceof ApiClientError) {
     if (error.code === "INTERNAL" || error.code === "INVALID") return error.message;
-    return error.message || CODE_TEXT[error.code] || "操作失败";
+    return error.message || CODE_TEXT[error.code] || t("Something went wrong.");
   }
-  if (error instanceof DOMException && error.name === "AbortError") return "请求已取消";
-  return "操作失败，请检查与 Hub 的连接";
+  if (error instanceof DOMException && error.name === "AbortError") return t("Request cancelled.");
+  return t("Couldn't complete this. Check the connection to the Hub.");
 }
 
 export const isConflict = (error: unknown) => error instanceof ApiClientError && error.code === "CONFLICT";

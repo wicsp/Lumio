@@ -5,6 +5,7 @@
  * 原文中的 HTML 一律转义；外部链接只允许 http(s)；图片不加载，只显示替代文字；
  * 相对 .md 链接与 wikilink 变成工作台内的跳转（data-note），不是浏览器导航。
  */
+import { t } from "../i18n.ts";
 
 export function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -43,7 +44,7 @@ export function renderInline(text: string): string {
     else if (m[2] !== undefined) {
       const { target, label } = parseWikilink(m[2]);
       out += target ? `<a href="#" class="note-link" data-note="${escapeHtml(target)}">${escapeHtml(label)}</a>` : escapeHtml(m[0]);
-    } else if (m[4] !== undefined) out += `<span class="img-placeholder">[图片：${escapeHtml(m[3] || "未命名")}]</span>`;
+    } else if (m[4] !== undefined) out += `<span class="img-placeholder">[${escapeHtml(t("Image: {0}", m[3] || t("Untitled")))}]</span>`;
     else if (m[6] !== undefined) {
       const external = safeExternalUrl(m[6]); const note = external ? undefined : noteLinkTarget(m[6]);
       if (external) out += `<a href="${escapeHtml(external)}" target="_blank" rel="noopener noreferrer nofollow">${escapeHtml(m[5]!)}</a>`;

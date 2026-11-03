@@ -5,6 +5,7 @@ import { browserLoginStorage, type LoginStorage, type SavedLogin } from "./crede
 import { h, loading, toast } from "./dom.ts";
 import { ConnectView } from "./views/connect.ts";
 import { WorkbenchView } from "./views/workbench.ts";
+import { onLang, t } from "./i18n.ts";
 
 export class App {
   private session?: Session;
@@ -12,14 +13,18 @@ export class App {
   private view?: WorkbenchView;
   private generation = 0;
   private login?: SavedLogin;
+  private humans: string[] = [];
+  private connectArgs?: [string | undefined, (() => void) | undefined];
+  private langPending = false;
   constructor(private root: HTMLElement, private storage: LoginStorage = browserLoginStorage()) {}
 
   mount(): void {
+    onLang(() => this.relabel());
     window.addEventListener("storage", event => {
       if (event.key !== null && event.key !== this.storage.key) return;
       if (!this.login?.remember) return;
       const saved = this.storage.load();
-      if (!saved || saved.token !== this.login.token) this.showConnect("登录已在另一个页面退出或更换，请重新连接");
+      if (!saved || saved.token !== this.login.token) this.showConnect(t("You signed out or switched accounts in another tab. Connect again."));
     });
     const saved = this.storage.load();
     if (saved) this.restore(saved); else this.showConnect();
@@ -30,13 +35,33 @@ export class App {
     document.querySelectorAll<HTMLDialogElement>("dialog").forEach(dialog => { dialog.close(); dialog.remove(); });
     this.root.replaceChildren();
   }
+  /** 语言切换（ADR 0028）：没有未保存内容时立即重建界面；有则提示，并在下一次切换模块前重建，不丢草稿。 */
+  private relabel(): void {
+    if (this.connectArgs && !this.session) { this.showConnect(...this.connectArgs); return; }
+    if (!this.view || !this.session) return;
+    if (this.view.dirty) { this.langPending = true; toast(t("The language will switch after you save or leave what you're editing.")); return; }
+    this.rebuildView();
+  }
+  private rebuildView(): void {
+    if (!this.session) return;
+    this.langPending = false;
+    this.view?.dispose();
+    this.root.replaceChildren();
+    this.view = new WorkbenchView(this.root, this.session, this.humans, () => this.logout(), () => this.takePending());
+  }
+  private takePending(): boolean {
+    if (!this.langPending) return false;
+    queueMicrotask(() => this.rebuildView());
+    return true;
+  }
   private showConnect(notice?: string, retry?: () => void): void {
     this.reset();
+    this.connectArgs = [notice, retry];
     new ConnectView(this.root, (token, remember) => this.enter(token, remember), notice, retry);
   }
   private logout(): void { this.storage.clear(); this.showConnect(); }
   private restore(saved: SavedLogin): void {
-    this.reset(); this.root.append(h("div", { class: "placeholder" }, loading("正在恢复登录…"), h("button", { type: "button", class: "btn btn-quiet btn-small", onclick: () => this.logout() }, "改用新的配对码")));
+    this.reset(); this.root.append(h("div", { class: "placeholder" }, loading(t("Restoring your session…")), h("button", { type: "button", class: "btn btn-quiet btn-small", onclick: () => this.logout() }, t("Use a new pairing code"))));
     void this.enter(saved.token, saved.remember, true);
   }
   /** actors is human-only. Never persist an unverified agent/runtime/invalid token. */
@@ -44,7 +69,7 @@ export class App {
     const generation = ++this.generation; this.pending?.close();
     const session = createSession(token, () => {
       if (generation !== this.generation) return;
-      this.storage.clear(token); this.showConnect("登录已失效，请重新配对");
+      this.storage.clear(token); this.showConnect(t("Your session has expired. Pair again."));
     });
     this.pending = session;
     this.login = restoring ? { token, remember } : undefined;
@@ -55,19 +80,20 @@ export class App {
       let actualRemember = remember;
       if (!restoring) {
         const scope = this.storage.save(token, remember); actualRemember = scope === "device";
-        if (scope === "memory") warning = "浏览器不允许保存登录。本次可以继续使用，刷新后需要重新配对。";
-        else if (remember && scope !== "device") warning = "浏览器不允许记住设备。当前标签页刷新仍可使用，关闭后需重新配对。";
+        if (scope === "memory") warning = t("This browser won't save your session. You can keep working, but you'll need to pair again after a refresh.");
+        else if (remember && scope !== "device") warning = t("This browser won't remember the device. Refreshing this tab works; after closing it you'll need to pair again.");
       }
       this.pending = undefined; this.session = session; this.login = { token, remember: actualRemember };
       this.root.replaceChildren();
-      this.view = new WorkbenchView(this.root, session, actors.filter(actor => actor.role === "human").map(actor => actor.name), () => this.logout());
+      this.humans = actors.filter(actor => actor.role === "human").map(actor => actor.name); this.connectArgs = undefined;
+      this.view = new WorkbenchView(this.root, session, this.humans, () => this.logout(), () => this.takePending());
       if (warning) toast(warning, "error");
     } catch (error) {
       session.close(); if (generation !== this.generation) return;
       this.pending = undefined;
       const invalid = error instanceof ApiClientError && (error.status === 401 || error.status === 403);
       if (invalid) this.storage.clear(token);
-      const message = error instanceof ApiClientError && error.status === 403 ? "这个令牌属于 AI 或执行器，工作台只接受人的访问令牌" : invalid ? "登录已失效，请重新配对" : errorText(error);
+      const message = error instanceof ApiClientError && error.status === 403 ? t("This token belongs to an agent or runtime. The workbench only accepts a human access token.") : invalid ? t("Your session has expired. Pair again.") : errorText(error);
       if (restoring) this.showConnect(message, invalid ? undefined : () => { const saved = this.storage.load(); if (saved) this.restore(saved); else this.showConnect(); });
       else throw new LoginError(message, !invalid);
     }

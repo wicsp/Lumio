@@ -1,7 +1,8 @@
+import { t } from "./i18n.ts";
 /** Title edits commit independently from the surrounding property/body drafts. */
 export class TitleValidationError extends Error {
   readonly code = "INVALID";
-  constructor() { super("标题不能为空"); }
+  constructor() { super(t("Title can't be empty")); }
 }
 
 export class TitleEditState {

@@ -13,10 +13,11 @@ import { listKeys, markSelected } from "../list-keys.ts";
 import { renderMarkdown } from "../utils/markdown.ts";
 import type { Navigate } from "../navigation.ts";
 import { editRoutine } from "./routine-editor.ts";
+import { t } from "../i18n.ts";
 
 type Mode = "jobs" | "routines" | "devices";
 const LIVE = ["queued", "assigned", "running"];
-const GROUPS: Array<[string, string[]]> = [["需要处理", ["waiting_for_human", "failed", "unknown"]], ["进行中", LIVE], ["已结束", ["done", "cancelled"]]];
+const GROUPS: Array<[string, string[]]> = [["Needs attention", ["waiting_for_human", "failed", "unknown"]], ["In progress", LIVE], ["Finished", ["done", "cancelled"]]];
 
 export class ExecutionPane {
   private mode: Mode = "jobs";
@@ -26,7 +27,7 @@ export class ExecutionPane {
   private detail = h("section", { class: "detail-pane", "aria-live": "polite" });
   private statusFilter = "";
   private statusButton = h("button", { type: "button", class: "filter-btn" });
-  private createButton = h("button", { type: "button", class: "btn btn-primary", hidden: true, onclick: () => this.newRoutine() }, icon("plus"), h("span", { class: "hide-narrow" }, "新建例行任务"));
+  private createButton = h("button", { type: "button", class: "btn btn-primary", hidden: true, onclick: () => this.newRoutine() }, icon("plus"), h("span", { class: "hide-narrow" }, t("New routine")));
   private segments = new Map<Mode, HTMLButtonElement>();
   private listGeneration = 0;
   private detailGeneration = 0;
@@ -42,16 +43,16 @@ export class ExecutionPane {
   private unbindKeys: () => void;
 
   constructor(private root: HTMLElement, private client: Client, initialJob: string | undefined, private navigate: Navigate) {
-    const seg = h("div", { class: "segmented", role: "group", "aria-label": "执行视图" });
-    for (const [mode, label] of [["jobs", "运行"], ["routines", "例行任务"], ["devices", "设备"]] as const) {
+    const seg = h("div", { class: "segmented", role: "group", "aria-label": t("Execution view") });
+    for (const [mode, label] of [["jobs", t("Runs")], ["routines", t("Routine")], ["devices", t("Devices")]] as const) {
       const button = h("button", { type: "button", "aria-pressed": String(mode === this.mode), onclick: () => this.switchMode(mode) }, label);
       this.segments.set(mode, button); seg.append(button);
     }
     this.statusButton.addEventListener("click", () => openMenu(this.statusButton,
-      [{ value: "", label: "全部状态", selected: !this.statusFilter }, ...JOB_STATUSES.map(s => ({ value: s, label: JOB_LABELS[s]!, icon: statusIcon(s), selected: this.statusFilter === s }))],
+      [{ value: "", label: t("All statuses"), selected: !this.statusFilter }, ...JOB_STATUSES.map(s => ({ value: s, label: JOB_LABELS[s]!, icon: statusIcon(s), selected: this.statusFilter === s }))],
       value => { this.statusFilter = value; this.renderFilter(); void this.load(); }));
-    root.append(h("header", { class: "bar" }, h("h1", { class: "bar-title" }, "执行"), seg, h("span", { class: "bar-spacer" }),
-      h("button", { type: "button", class: "icon-btn", title: "刷新", "aria-label": "刷新", onclick: () => this.refresh() }, icon("refresh")), this.createButton), this.body);
+    root.append(h("header", { class: "bar" }, h("h1", { class: "bar-title" }, t("Execution")), seg, h("span", { class: "bar-spacer" }),
+      h("button", { type: "button", class: "icon-btn", title: t("Refresh"), "aria-label": t("Refresh"), onclick: () => this.refresh() }, icon("refresh")), this.createButton), this.body);
     this.split.append(h("div", { class: "list-pane" }, h("div", { class: "list-tools" }, this.statusButton), this.list), this.detail);
     this.unbindKeys = listKeys(this.list, id => void (this.mode === "jobs" ? this.openJob(id) : this.openRoutine(id)));
     this.renderFilter();
@@ -69,7 +70,7 @@ export class ExecutionPane {
   intent(name: string): void { if (name === "new-routine") { this.switchMode("routines"); this.newRoutine(); } }
   open(id: string): void { if (this.mode !== "jobs") this.switchMode("jobs"); void this.openJob(id); }
 
-  private newRoutine(): void { void editRoutine(this.root, this.client, () => { toast("例行任务已保存"); void this.load(); }); }
+  private newRoutine(): void { void editRoutine(this.root, this.client, () => { toast(t("Routine saved")); void this.load(); }); }
 
   private switchMode(mode: Mode): void {
     if (mode === this.mode) return;
@@ -88,13 +89,13 @@ export class ExecutionPane {
   }
 
   private renderFilter(): void {
-    clear(this.statusButton, this.statusFilter ? statusIcon(this.statusFilter) : icon("down"), this.statusFilter ? JOB_LABELS[this.statusFilter]! : "全部状态");
+    clear(this.statusButton, this.statusFilter ? statusIcon(this.statusFilter) : icon("down"), this.statusFilter ? JOB_LABELS[this.statusFilter]! : t("All statuses"));
     this.statusButton.classList.toggle("is-set", !!this.statusFilter);
   }
 
   private showPlaceholder(): void {
     this.split.classList.remove("has-detail");
-    clear(this.detail, placeholder(this.mode === "jobs" ? "execution" : "repeat", this.mode === "jobs" ? "选择一次运行，查看报告、日志与产物。" : "选择一个例行任务，查看计划与上次结果。"));
+    clear(this.detail, placeholder(this.mode === "jobs" ? "execution" : "repeat", this.mode === "jobs" ? t("Select a run to see its report, logs and files.") : t("Select a routine to see its schedule and last result.")));
   }
 
   private refresh(): void {
@@ -123,11 +124,11 @@ export class ExecutionPane {
         this.taskTitles = tasks.map(t => ({ id: t.id, title: t.title }));
         if (runtimes) this.runtimeNames = new Map(runtimes.map(r => [r.actor, r.registration.name]));
         const sorted = jobs.slice().sort((a, b) => b.spec.created.localeCompare(a.spec.created));
-        if (!sorted.length) { clear(this.list, empty(this.statusFilter ? "没有这个状态的运行。" : "还没有运行记录。在任务详情里点「派出」，每一轮都会出现在这里。")); return; }
+        if (!sorted.length) { clear(this.list, empty(this.statusFilter ? t("No runs with this status.") : t("No runs yet. Click Dispatch on a task and each round shows up here."))); return; }
         clear(this.list, ...GROUPS.map(([label, statuses]) => {
           const items = sorted.filter(j => statuses.includes(j.status));
           if (!items.length) return null;
-          return h("section", { class: "group" }, h("div", { class: "group-head" }, label, h("span", { class: "count" }, items.length)),
+          return h("section", { class: "group" }, h("div", { class: "group-head" }, t(label), h("span", { class: "count" }, items.length)),
             h("div", { class: "group-body" }, ...items.map(job => this.jobRow(job))));
         }));
         markSelected(this.list, this.selected);
@@ -135,13 +136,13 @@ export class ExecutionPane {
         const routines = await this.client.executionRoutines();
         if (!this.active || generation !== this.listGeneration) return;
         this.routines = routines;
-        if (!routines.length) { clear(this.list, empty("还没有例行任务。让 agent 按计划重复做一件事，比如每周一整理实验结果。", { label: "新建例行任务", run: () => this.newRoutine() })); return; }
+        if (!routines.length) { clear(this.list, empty(t("No routines yet. Have an agent repeat something on a schedule — for example, summarize experiment results every Monday."), { label: t("New routine"), run: () => this.newRoutine() })); return; }
         clear(this.list, ...routines.map(info => this.routineRow(info)));
         markSelected(this.list, this.selected);
       } else {
         const runtimes = await this.client.runtimes();
         if (!this.active || generation !== this.listGeneration) return;
-        if (!runtimes.length) { clear(this.list, empty("还没有连接执行器。在已配置的终端运行 lumio runtime add 添加一台设备。")); return; }
+        if (!runtimes.length) { clear(this.list, empty(t("No runtimes connected. Run lumio runtime add in a configured terminal to add a device."))); return; }
         clear(this.list, ...runtimes.map(runtime => this.deviceCard(runtime)));
       }
     } catch (cause) {
@@ -163,18 +164,18 @@ export class ExecutionPane {
       onkeydown: (event: Event) => { if ((event as KeyboardEvent).key === "Enter") void this.openRoutine(r.id); } },
       statusIcon(r.status === "active" ? "active" : "paused"),
       h("span", { class: "row-main" }, h("span", { class: "row-title" }, r.title),
-        h("span", { class: "row-sub" }, info.problem ?? (info.next ? `下次 ${formatTime(info.next, r.timezone)}` : "暂无下一次运行"))),
+        h("span", { class: "row-sub" }, info.problem ?? (info.next ? t("Next: {0}", formatTime(info.next, r.timezone)) : t("No upcoming run")))),
       h("span", { class: "row-meta" }, h("span", { class: "cron" }, r.schedule)));
   }
 
   private deviceCard(runtime: RuntimeInfo): HTMLElement {
     const reg = runtime.registration;
     return h("article", { class: "card" },
-      h("div", { class: "card-head" }, icon("device"), h("strong", {}, reg.name), h("span", { class: `pill ${runtime.online ? "pill-green" : ""}` }, runtime.online ? "在线" : "离线")),
-      h("p", { class: "muted" }, `最近连接 ${ago(runtime.last_seen)}，最多同时运行 ${reg.max_concurrent} 项`),
+      h("div", { class: "card-head" }, icon("device"), h("strong", {}, reg.name), h("span", { class: `pill ${runtime.online ? "pill-green" : ""}` }, runtime.online ? t("Online") : t("Offline"))),
+      h("p", { class: "muted" }, t("Last seen {0} · up to {1} at a time", ago(runtime.last_seen), reg.max_concurrent)),
       reg.engines.length
         ? h("ul", {}, ...reg.engines.map(engine => h("li", {}, icon("bot"), h("span", {}, engine.name), h("span", { class: "mono" }, `${engine.version}${engine.sandbox === "os" ? "，系统隔离" : ""}`))))
-        : h("p", { class: "muted" }, "没有登记执行引擎"),
+        : h("p", { class: "muted" }, t("No engines registered")),
       reg.tags.length > 0 && h("div", { class: "button-row" }, ...reg.tags.map(tag => h("span", { class: "pill" }, tag))));
   }
 
@@ -197,13 +198,13 @@ export class ExecutionPane {
       const readArtifacts = async () => {
         const request = ++artifactGeneration;
         const privateScope = includePrivate.checked;
-        clear(artifacts, loading("正在查找产物…"));
+        clear(artifacts, loading(t("Looking for files…")));
         try {
           const files = await this.client.jobArtifacts(id, { includePrivate: privateScope });
           if (!this.active || generation !== this.detailGeneration || request !== artifactGeneration || privateScope !== includePrivate.checked) return;
           clear(artifacts, files.length
             ? h("div", { class: "files" }, ...files.map(file => this.artifactRow(file, () => privateScope === includePrivate.checked && generation === this.detailGeneration, privateScope)))
-            : h("p", { class: "muted" }, "暂无已归档的产物。结果与文件归档可能分别到达。"));
+            : h("p", { class: "muted" }, t("No archived files yet. Results and files may arrive separately.")));
         } catch (cause) {
           if (this.active && generation === this.detailGeneration && request === artifactGeneration) clear(artifacts, failure(errorText(cause)));
         }
@@ -211,37 +212,37 @@ export class ExecutionPane {
       includePrivate.addEventListener("change", () => { artifactGeneration++; clear(artifacts); void readArtifacts(); });
 
       const meta: Array<[string, Node | string]> = [
-        ["执行器", this.runtimeName(job.spec.runtime)],
-        ["引擎", job.spec.run.kind === "agent" ? job.spec.run.engine : "命令"],
-        ["工作目录", h("span", { class: "mono" }, job.spec.workdir)],
-        ["创建", formatTime(job.spec.created)],
-        ["最长运行", `${Math.round(job.spec.timeout_seconds / 60)} 分钟`],
+        [t("Runtime"), this.runtimeName(job.spec.runtime)],
+        [t("Engine"), job.spec.run.kind === "agent" ? job.spec.run.engine : t("Command")],
+        [t("Working directory"), h("span", { class: "mono" }, job.spec.workdir)],
+        [t("Created"), formatTime(job.spec.created)],
+        [t("Time limit"), t("{0} min", Math.round(job.spec.timeout_seconds / 60))],
       ];
-      if (job.result?.finished) meta.push(["结束", formatTime(job.result.finished)]);
-      if (job.result?.exit_code !== undefined) meta.push(["退出码", String(job.result.exit_code)]);
+      if (job.result?.finished) meta.push([t("Finished"), formatTime(job.result.finished)]);
+      if (job.result?.exit_code !== undefined) meta.push([t("Exit code"), String(job.result.exit_code)]);
       const live = LIVE.includes(job.status);
       const cancelling = this.cancellationRequested.has(id) && live;
       const task = job.spec.source?.task;
 
       clear(this.detail, h("div", { class: "detail" },
         h("div", { class: "detail-crumbs" },
-          h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": "返回列表", onclick: () => { this.selected = undefined; markSelected(this.list, undefined); this.showPlaceholder(); } }, icon("back")),
-          task ? h("button", { type: "button", onclick: () => this.navigate("work", task) }, icon("work"), "查看任务") : h("span", {}, job.spec.source?.routine ? "例行任务" : "独立运行"),
+          h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": t("Back to list"), onclick: () => { this.selected = undefined; markSelected(this.list, undefined); this.showPlaceholder(); } }, icon("back")),
+          task ? h("button", { type: "button", onclick: () => this.navigate("work", task) }, icon("work"), t("View task")) : h("span", {}, job.spec.source?.routine ? t("Routine") : t("Standalone run")),
           h("div", { class: "detail-actions" },
-            live && h("button", { type: "button", class: "btn btn-small", disabled: cancelling, onclick: () => this.cancel(job) }, icon("stop"), cancelling ? "正在取消…" : "取消运行"))),
+            live && h("button", { type: "button", class: "btn btn-small", disabled: cancelling, onclick: () => this.cancel(job) }, icon("stop"), cancelling ? t("Cancelling…") : t("Cancel run")))),
         h("div", { class: "detail-head" },
           h("h2", { class: "inline-title" }, h("span", { class: "button-row" }, statusIcon(job.status), jobTitle(job, this.taskTitles))),
           h("p", { class: "detail-sub button-row" }, h("span", { class: `pill ${pillFor(job.status)}` }, JOB_LABELS[job.status]), h("span", {}, jobSubtitle(job, this.runtimeName)), h("span", { class: "mono" }, job.spec.id))),
-        job.status === "unknown" && h("div", { class: "notice" }, icon("alert"), h("span", {}, "这次运行的结果无法确认。请先核查设备和产物；不会自动重跑。")),
+        job.status === "unknown" && h("div", { class: "notice" }, icon("alert"), h("span", {}, t("This run's result can't be confirmed. Check the device and files first; it won't be rerun automatically."))),
         job.result?.error && failure(job.result.error),
-        cancelling && h("p", { class: "success", role: "status" }, "取消请求已提交，正在等待设备确认。"),
-        job.result?.question && h("section", { class: "question" }, h("h3", {}, "等你回答"), h("p", {}, job.result.question)),
+        cancelling && h("p", { class: "success", role: "status" }, t("Cancellation requested. Waiting for the device to confirm.")),
+        job.result?.question && h("section", { class: "question" }, h("h3", {}, t("Waiting for you")), h("p", {}, job.result.question)),
         h("dl", { class: "meta-grid" }, ...meta.map(([k, v]) => h("div", {}, h("dt", {}, k), h("dd", {}, v)))),
-        job.spec.run.kind === "command" && h("section", { class: "section" }, h("div", { class: "section-head" }, h("h3", {}, "命令")),
+        job.spec.run.kind === "command" && h("section", { class: "section" }, h("div", { class: "section-head" }, h("h3", {}, t("Command"))),
           h("pre", { class: "code-block" }, job.spec.run.argv.map(arg => JSON.stringify(arg)).join(" "))),
-        h("section", { class: "section" }, h("div", { class: "section-head" }, h("h3", {}, "报告")),
-          job.result?.report ? report : h("p", { class: "muted" }, live ? "运行结束后在这里显示报告。" : "这次运行没有报告。")),
-        h("section", { class: "section" }, h("div", { class: "section-head" }, h("h3", {}, "文件与日志"), h("div", { class: "detail-actions" }, h("label", { class: "check" }, includePrivate, "包含私密产物"))), artifacts)));
+        h("section", { class: "section" }, h("div", { class: "section-head" }, h("h3", {}, t("Report"))),
+          job.result?.report ? report : h("p", { class: "muted" }, live ? t("The report appears here when the run finishes.") : t("This run has no report."))),
+        h("section", { class: "section" }, h("div", { class: "section-head" }, h("h3", {}, t("Files and logs")), h("div", { class: "detail-actions" }, h("label", { class: "check" }, includePrivate, t("Include private files")))), artifacts)));
       void readArtifacts();
     } catch (cause) {
       if (this.active && generation === this.detailGeneration) clear(this.detail, failure(errorText(cause)));
@@ -250,9 +251,9 @@ export class ExecutionPane {
 
   private artifactRow(file: StoredArtifact, current: () => boolean, includePrivate: boolean): HTMLElement {
     const message = h("span", { role: "status", class: "muted" });
-    const label = file.media_type.includes("jsonl") ? "运行过程记录" : file.media_type === "text/plain" ? "运行日志" : safeFileName(file.key);
+    const label = file.media_type.includes("jsonl") ? t("Run transcript") : file.media_type === "text/plain" ? t("Run log") : safeFileName(file.key);
     const button = h("button", { type: "button", class: "btn btn-small", disabled: file.status !== "ready", onclick: async () => {
-      button.disabled = true; message.textContent = "正在下载并校验…";
+      button.disabled = true; message.textContent = t("Downloading and verifying…");
       try {
         const response = await this.client.artifactContent(file.id, { includePrivate });
         const data = await response.arrayBuffer();
@@ -263,13 +264,13 @@ export class ExecutionPane {
         h("a", { href: url, download: safeFileName(file.key) }).click();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
         message.textContent = "";
-        toast("已校验并开始下载");
+        toast(t("Verified — download started"));
       } catch (cause) {
-        message.textContent = cause instanceof Error && cause.message === "FILE_INTEGRITY" ? "文件校验未通过，已停止保存" : errorText(cause);
+        message.textContent = cause instanceof Error && cause.message === "FILE_INTEGRITY" ? t("File verification failed; not saved") : errorText(cause);
       } finally { button.disabled = false; }
-    } }, icon("download"), "下载");
+    } }, icon("download"), t("Download"));
     return h("div", { class: "file" }, icon("file"),
-      h("span", { class: "row-main" }, h("span", { class: "row-title" }, label), h("span", { class: "row-sub" }, `${file.status === "ready" ? "已归档" : "交付中"}，${bytes(file.size)}`)),
+      h("span", { class: "row-main" }, h("span", { class: "row-title" }, label), h("span", { class: "row-sub" }, t("{0}, {1}", file.status === "ready" ? t("Archived") : t("Delivering"), bytes(file.size)))),
       message, button);
   }
 
@@ -280,11 +281,11 @@ export class ExecutionPane {
       try {
         await this.client.cancelJob(job.spec.id);
         this.cancellationRequested.add(job.spec.id);
-        dialog.close(); toast("已提交取消请求");
+        dialog.close(); toast(t("Cancellation requested"));
         this.refresh();
-      } catch (cause) { clear(error, failure(`${errorText(cause)}。请先刷新核对当前状态。`)); button.disabled = false; }
-    } }, "取消运行");
-    const dialog = openDialog("取消这次运行？", h("div", { class: "form-stack" }, h("p", {}, "取消请求会交给正在执行的设备，停止可能需要片刻。已经产生的修改不会被撤销。"), h("p", { class: "mono muted" }, job.spec.id), error), [button]);
+      } catch (cause) { clear(error, failure(t("{0} Refresh to check the current state first.", errorText(cause)))); button.disabled = false; }
+    } }, t("Cancel run"));
+    const dialog = openDialog(t("Cancel this run?"), h("div", { class: "form-stack" }, h("p", {}, t("The device running it will be asked to stop, which may take a moment. Changes it already made won't be undone.")), h("p", { class: "mono muted" }, job.spec.id), error), [button]);
   }
 
   // ───────────── 例行任务详情 ─────────────
@@ -304,25 +305,25 @@ export class ExecutionPane {
         toggle.disabled = true;
         try {
           await this.client.executionCommand(routineStatusCommand(routine, routine.status === "active" ? "paused" : "active"));
-          toast(routine.status === "active" ? "已暂停" : "已启用");
+          toast(routine.status === "active" ? t("Paused") : t("Enabled"));
           await this.load(); void this.openRoutine(id);
-        } catch (cause) { toast(`${errorText(cause)}。请刷新后核对。`, "error"); toggle.disabled = false; }
-      } }, icon(routine.status === "active" ? "stop" : "play"), routine.status === "active" ? "暂停" : "启用");
+        } catch (cause) { toast(t("{0} Refresh to check.", errorText(cause)), "error"); toggle.disabled = false; }
+      } }, icon(routine.status === "active" ? "stop" : "play"), routine.status === "active" ? t("Pause") : t("Enable"));
       clear(this.detail, h("div", { class: "detail" },
         h("div", { class: "detail-crumbs" },
-          h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": "返回列表", onclick: () => { this.selected = undefined; markSelected(this.list, undefined); this.showPlaceholder(); } }, icon("back")),
-          h("span", {}, "例行任务"),
+          h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": t("Back to list"), onclick: () => { this.selected = undefined; markSelected(this.list, undefined); this.showPlaceholder(); } }, icon("back")),
+          h("span", {}, t("Routine")),
           h("div", { class: "detail-actions" }, toggle,
-            h("button", { type: "button", class: "btn btn-small", onclick: () => void editRoutine(this.root, this.client, () => { toast("例行任务已保存"); void this.load(); void this.openRoutine(id); }, routine) }, icon("edit"), "编辑"))),
+            h("button", { type: "button", class: "btn btn-small", onclick: () => void editRoutine(this.root, this.client, () => { toast(t("Routine saved")); void this.load(); void this.openRoutine(id); }, routine) }, icon("edit"), t("Edit")))),
         h("div", { class: "detail-head" }, h("h2", { class: "inline-title" }, routine.title),
-          h("p", { class: "detail-sub" }, h("span", { class: `pill ${routine.status === "active" ? "pill-green" : ""}` }, routine.status === "active" ? "已启用" : "已暂停"))),
+          h("p", { class: "detail-sub" }, h("span", { class: `pill ${routine.status === "active" ? "pill-green" : ""}` }, routine.status === "active" ? t("Enabled") : t("Paused")))),
         info?.problem && h("div", { class: "notice" }, icon("alert"), h("span", {}, info.problem)),
         h("dl", { class: "meta-grid" },
-          ...([["计划", h("span", { class: "cron" }, routine.schedule)], ["时区", routine.timezone], ["执行目标", routine.assignee],
-            ["下次运行", info?.next ? formatTime(info.next, routine.timezone) : "—"], ["上下文", routine.context === "previous" ? "带上上次结果摘要" : "每次独立执行"],
-            ["工作目录", routine.workdir ?? "~"]] as Array<[string, Node | string]>).map(([k, v]) => h("div", {}, h("dt", {}, k), h("dd", {}, v)))),
-        h("section", { class: "section" }, h("div", { class: "section-head" }, h("h3", {}, "每次要做的事")), routine.description ? description : h("p", { class: "muted" }, "没有填写说明。")),
-        info?.last && h("section", { class: "section" }, h("div", { class: "section-head" }, h("h3", {}, "上次运行")),
+          ...([[t("Schedule"), h("span", { class: "cron" }, routine.schedule)], [t("Time zone"), routine.timezone], [t("Target"), routine.assignee],
+            [t("Next run"), info?.next ? formatTime(info.next, routine.timezone) : "—"], [t("Context"), routine.context === "previous" ? t("Include a summary of the last result") : t("Run independently each time")],
+            [t("Working directory"), routine.workdir ?? "~"]] as Array<[string, Node | string]>).map(([k, v]) => h("div", {}, h("dt", {}, k), h("dd", {}, v)))),
+        h("section", { class: "section" }, h("div", { class: "section-head" }, h("h3", {}, t("What to do each time"))), routine.description ? description : h("p", { class: "muted" }, t("No description."))),
+        info?.last && h("section", { class: "section" }, h("div", { class: "section-head" }, h("h3", {}, t("Last run"))),
           h("div", { class: "runs" }, h("button", { type: "button", class: "run", onclick: () => { this.switchMode("jobs"); void this.openJob(info.last!.job); } },
             icon("execution"), h("span", { class: "mono" }, info.last.job), h("span", { class: "row-meta" }, icon("chevron")))))));
     } catch (cause) {

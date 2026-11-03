@@ -6,6 +6,7 @@ import { clear, failure, h, icon, loading, statusIcon } from "../dom.ts";
 import { ago, dueLabel, jobTitle } from "../format.ts";
 import { JOB_LABELS } from "../labels.ts";
 import type { Navigate } from "../navigation.ts";
+import { t, tParts, locale } from "../i18n.ts";
 
 const LIVE = ["queued", "assigned", "running"];
 const ATTENTION = ["waiting_for_human", "failed", "unknown"];
@@ -17,7 +18,7 @@ export class OverviewPane {
 
   constructor(owner: HTMLElement, private client: Client, private navigate: Navigate) {
     owner.append(h("div", { class: "today" }, this.body));
-    clear(this.body, loading("正在整理今天的工作…"));
+    clear(this.body, loading(t("Gathering today's work…")));
     void this.load();
   }
   dispose(): void { this.active = false; this.generation++; }
@@ -37,36 +38,36 @@ export class OverviewPane {
     const running = jobData?.filter(j => LIVE.includes(j.status)) ?? [];
     const attentionJobs = jobData?.filter(j => ATTENTION.includes(j.status)) ?? [];
 
-    const date = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "long" }).format(new Date());
+    const date = new Intl.DateTimeFormat(locale(), { month: "long", day: "numeric", weekday: "long" }).format(new Date());
     const num = (n: number) => h("span", { class: `num${n ? "" : " zero"}` }, n);
     const decide = (approvalData?.length ?? 0) + attentionJobs.length;
     const headline = h("h1", { class: "today-headline" });
     if (taskData) {
-      headline.append("推进中 ", num(active.length), " 项，待办 ", num(todo.length), " 项。");
-      if (running.length) headline.append("agent 正在跑 ", num(running.length), " 轮，");
-      if (decide) headline.append("有 ", num(decide), " 件事等你决定。");
-      else headline.append(running.length ? "没有等你决定的事。" : "暂时没有等你决定的事。");
-    } else headline.append("今天");
+      headline.append(...tParts("{0} in progress, {1} to do. ", num(active.length), num(todo.length)));
+      if (running.length) headline.append(...tParts(running.length === 1 ? "Agents are running {0} round. " : "Agents are running {0} rounds. ", num(running.length)));
+      if (decide) headline.append(...tParts(decide === 1 ? "{0} item needs your decision." : "{0} items need your decision.", num(decide)));
+      else headline.append(running.length ? t("Nothing needs your decision.") : t("Nothing needs your decision right now."));
+    } else headline.append(t("Today"));
 
     clear(this.body,
       h("p", { class: "today-date" }, date),
       headline,
       h("div", { class: "today-grid" },
         h("div", { class: "today-col" },
-          this.block("推进中", active.length, "work", tasks.status === "rejected" ? failure(errorText(tasks.reason)) : this.taskList(active, projectData, "没有进行中的任务。从待办里挑一项开始吧。")),
-          this.block("待办", todo.length, "work", tasks.status === "rejected" ? null : this.taskList(todo.slice(0, 8), projectData, "待办清空了。")),
-          waiting.length ? this.block("等待中", waiting.length, "work", this.taskList(waiting, projectData, "")) : null),
+          this.block(t("In progress"), active.length, "work", tasks.status === "rejected" ? failure(errorText(tasks.reason)) : this.taskList(active, projectData, t("Nothing in progress. Pick something from your to-do list."))),
+          this.block(t("To do"), todo.length, "work", tasks.status === "rejected" ? null : this.taskList(todo.slice(0, 8), projectData, t("Your to-do list is clear."))),
+          waiting.length ? this.block(t("Waiting"), waiting.length, "work", this.taskList(waiting, projectData, "")) : null),
         h("div", { class: "today-col" },
           this.attention(approvalData, attentionJobs, approvals.status === "rejected" ? approvals.reason : undefined, taskData ?? []),
-          this.block("运行动态", running.length, "execution", jobs.status === "rejected" ? failure(errorText(jobs.reason)) : this.runs(jobData ?? [], taskData ?? [])),
-          this.block("项目", projectData.filter(p => p.status !== "done").length, "work", projects.status === "rejected" ? failure(errorText(projects.reason)) : this.projects(projectData, taskData ?? [])),
+          this.block(t("Recent runs"), running.length, "execution", jobs.status === "rejected" ? failure(errorText(jobs.reason)) : this.runs(jobData ?? [], taskData ?? [])),
+          this.block(t("Projects"), projectData.filter(p => p.status !== "done").length, "work", projects.status === "rejected" ? failure(errorText(projects.reason)) : this.projects(projectData, taskData ?? [])),
           this.ask())));
   }
 
   private block(title: string, count: number, section: "work" | "execution" | "approvals", body: Node | null): HTMLElement {
     return h("section", {},
       h("header", { class: "block-head" }, h("h2", {}, title), h("span", { class: "count" }, count || ""),
-        h("button", { type: "button", class: "text-btn", onclick: () => this.navigate(section) }, "全部")),
+        h("button", { type: "button", class: "text-btn", onclick: () => this.navigate(section) }, t("All"))),
       body);
   }
 
@@ -86,22 +87,22 @@ export class OverviewPane {
   }
 
   private attention(approvals: Proposal[] | undefined, jobs: Job[], error: unknown, tasks: WorkTask[]): HTMLElement | null {
-    if (error) return this.block("等你决定", 0, "approvals", failure(errorText(error)));
+    if (error) return this.block(t("Needs your decision"), 0, "approvals", failure(errorText(error)));
     const items = [
       ...(approvals ?? []).map(p => h("button", { type: "button", class: "row", onclick: () => this.navigate("approvals") },
         icon("approvals"), h("span", { class: "row-main" }, h("span", { class: "row-title" }, p.operation.op === "exec.privileged" ? p.operation.args.argv.join(" ") : p.operation.op),
-          h("span", { class: "row-sub" }, p.reason)), h("span", { class: "pill pill-ochre" }, "待审批"))),
+          h("span", { class: "row-sub" }, p.reason)), h("span", { class: "pill pill-ochre" }, t("Pending")))),
       ...jobs.map(j => h("button", { type: "button", class: "row", onclick: () => this.navigate("execution", j.spec.id) },
         statusIcon(j.status), h("span", { class: "row-main" }, h("span", { class: "row-title" }, jobTitle(j, tasks)), h("span", { class: "row-sub" }, j.result?.question ?? j.result?.error ?? "")),
         h("span", { class: `pill ${j.status === "waiting_for_human" ? "pill-ochre" : "pill-red"}` }, JOB_LABELS[j.status]))),
     ];
     if (!items.length) return null;
-    return h("section", {}, h("header", { class: "block-head" }, h("h2", {}, "等你决定"), h("span", { class: "count" }, items.length)), ...items);
+    return h("section", {}, h("header", { class: "block-head" }, h("h2", {}, t("Needs your decision")), h("span", { class: "count" }, items.length)), ...items);
   }
 
   private runs(jobs: Job[], tasks: WorkTask[]): HTMLElement {
     const recent = jobs.slice().sort((a, b) => b.spec.created.localeCompare(a.spec.created)).slice(0, 5);
-    if (!recent.length) return h("p", { class: "muted state" }, "还没有运行记录。在任务里点「派出」，agent 的每一轮都会出现在这里。");
+    if (!recent.length) return h("p", { class: "muted state" }, t("No runs yet. Click Dispatch on a task and each agent round shows up here."));
     return h("div", {}, ...recent.map(job => h("button", { type: "button", class: "row", onclick: () => this.navigate("execution", job.spec.id) },
       statusIcon(job.status),
       h("span", { class: "row-main" }, h("span", { class: "row-title" }, jobTitle(job, tasks))),
@@ -110,7 +111,7 @@ export class OverviewPane {
 
   private projects(projects: WorkProject[], tasks: WorkTask[]): HTMLElement {
     const open = projects.filter(p => p.status !== "done").slice(0, 5);
-    if (!open.length) return h("p", { class: "muted state" }, "还没有进行中的项目。");
+    if (!open.length) return h("p", { class: "muted state" }, t("No active projects."));
     return h("div", {}, ...open.map(project => {
       const related = tasks.filter(t => t.project === project.id && t.status !== "cancelled");
       const done = related.filter(t => t.status === "done").length;
@@ -123,10 +124,10 @@ export class OverviewPane {
   }
 
   private ask(): HTMLElement {
-    const input = h("input", { type: "text", placeholder: "例如：帮我列出 rebuttal 还缺哪些实验", "aria-label": "向助手提问", autocomplete: "off" });
-    const form = h("form", {}, input, h("button", { type: "submit", class: "btn" }, "提问"));
+    const input = h("input", { type: "text", placeholder: t("For example: list the experiments still missing for the rebuttal"), "aria-label": t("Ask the assistant"), autocomplete: "off" });
+    const form = h("form", {}, input, h("button", { type: "submit", class: "btn" }, t("Ask")));
     form.addEventListener("submit", event => { event.preventDefault(); const text = input.value.trim(); if (text) this.navigate("assistant", undefined, `ask:${text}`); });
-    return h("section", { class: "ask-card" }, h("h2", {}, "问问助手"), h("p", {}, "助手只使用 Hub 配置的模型；不会因为聊天而获得任务或私密笔记的访问权限。"), form);
+    return h("section", { class: "ask-card" }, h("h2", {}, t("Ask the assistant")), h("p", {}, t("The assistant only uses the model configured on your Hub. Chatting doesn't give it access to your tasks or private notes.")), form);
   }
 }
 

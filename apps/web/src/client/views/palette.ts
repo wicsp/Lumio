@@ -3,14 +3,17 @@ import type { WorkProject, WorkTask } from "@lumio/schema";
 import type { Client } from "../api.ts";
 import { clear, debounce, h, icon, statusIcon } from "../dom.ts";
 import type { Navigate, Section } from "../navigation.ts";
+import { lang, setLang, t, translated } from "../i18n.ts";
+import { LANGS, THEMES } from "../settings.ts";
+import { setTheme, themeChoice } from "../theme.ts";
 
 interface Item { group: string; label: string; hint?: string; icon: Node; run: () => void }
 
-const NOTE_TYPE: Record<string, string> = { paper: "论文", idea: "想法", experiment: "实验", source: "资料", post: "发布", asset: "资产" };
+const NOTE_TYPE: Record<string, string> = translated({ paper: "Paper", idea: "Idea", experiment: "Experiment", source: "Source", post: "Post", asset: "Asset" });
 
 export class CommandPalette {
   private dialog?: HTMLDialogElement;
-  private input = h("input", { type: "text", placeholder: "搜索任务、项目、笔记，或输入命令…", autocomplete: "off", spellcheck: "false", "aria-label": "命令面板" });
+  private input = h("input", { type: "text", placeholder: t("Search tasks, projects, notes, or type a command…"), autocomplete: "off", spellcheck: "false", "aria-label": t("Command palette") });
   private list = h("div", { class: "palette-list", role: "listbox" });
   private items: Item[] = [];
   private index = 0;
@@ -31,10 +34,10 @@ export class CommandPalette {
     if (this.dialog?.open) { this.input.select(); return; }
     this.input.value = "";
     this.index = 0;
-    this.dialog = h("dialog", { class: "dialog palette", "aria-label": "命令面板" },
+    this.dialog = h("dialog", { class: "dialog palette", "aria-label": t("Command palette") },
       h("div", { class: "palette-input" }, icon("search"), this.input),
       this.list,
-      h("div", { class: "palette-foot" }, h("span", {}, "↑↓ 选择"), h("span", {}, "↵ 打开"), h("span", {}, "esc 关闭")));
+      h("div", { class: "palette-foot" }, h("span", {}, t("↑↓ select")), h("span", {}, t("↵ open")), h("span", {}, t("esc close"))));
     this.dialog.addEventListener("close", () => { this.dialog?.remove(); this.dialog = undefined; });
     this.dialog.addEventListener("click", event => { if (event.target === this.dialog) this.dialog?.close(); });
     document.body.append(this.dialog);
@@ -49,16 +52,18 @@ export class CommandPalette {
   private commands(): Item[] {
     const go = (section: Section, intent?: string) => () => this.navigate(section, undefined, intent);
     return [
-      { group: "操作", label: "新建任务", hint: "C", icon: icon("plus"), run: go("work", "new") },
-      { group: "操作", label: "新建项目", icon: icon("folder"), run: go("work", "new-project") },
-      { group: "操作", label: "向助手提问", icon: icon("assistant"), run: go("assistant", "new") },
-      { group: "操作", label: "新建例行任务", icon: icon("repeat"), run: go("execution", "new-routine") },
-      { group: "跳转", label: "今日", hint: "1", icon: icon("home"), run: go("overview") },
-      { group: "跳转", label: "项目与任务", hint: "2", icon: icon("work"), run: go("work") },
-      { group: "跳转", label: "知识库", hint: "3", icon: icon("knowledge"), run: go("knowledge") },
-      { group: "跳转", label: "执行", hint: "4", icon: icon("execution"), run: go("execution") },
-      { group: "跳转", label: "助手", hint: "5", icon: icon("assistant"), run: go("assistant") },
-      { group: "跳转", label: "审批", hint: "6", icon: icon("approvals"), run: go("approvals") },
+      { group: t("Actions"), label: t("New task"), hint: "C", icon: icon("plus"), run: go("work", "new") },
+      { group: t("Actions"), label: t("New project"), icon: icon("folder"), run: go("work", "new-project") },
+      { group: t("Actions"), label: t("Ask the assistant"), icon: icon("assistant"), run: go("assistant", "new") },
+      { group: t("Actions"), label: t("New routine"), icon: icon("repeat"), run: go("execution", "new-routine") },
+      ...THEMES.filter(([key]) => key !== themeChoice()).map(([key, label, name]) => ({ group: t("Settings"), label: `${t("Theme")}: ${t(label)}`, icon: icon(name), run: () => setTheme(key) })),
+      ...LANGS.filter(([key]) => key !== lang()).map(([key, label]) => ({ group: t("Settings"), label: `${t("Language")}: ${label}`, icon: icon("globe"), run: () => setLang(key) })),
+      { group: t("Go to"), label: t("Today"), hint: "1", icon: icon("home"), run: go("overview") },
+      { group: t("Go to"), label: t("Projects & tasks"), hint: "2", icon: icon("work"), run: go("work") },
+      { group: t("Go to"), label: t("Knowledge"), hint: "3", icon: icon("knowledge"), run: go("knowledge") },
+      { group: t("Go to"), label: t("Execution"), hint: "4", icon: icon("execution"), run: go("execution") },
+      { group: t("Go to"), label: t("Assistant"), hint: "5", icon: icon("assistant"), run: go("assistant") },
+      { group: t("Go to"), label: t("Approvals"), hint: "6", icon: icon("approvals"), run: go("approvals") },
     ];
   }
 
@@ -78,9 +83,9 @@ export class CommandPalette {
     const items: Item[] = this.commands().filter(item => match(item.label));
     if (this.cache) {
       const open = this.cache.tasks.filter(t => (q ? true : t.status === "active") && match(t.title));
-      items.push(...open.slice(0, q ? 8 : 5).map(task => ({ group: q ? "任务" : "进行中的任务", label: task.title, hint: this.cache!.projects.find(p => p.id === task.project)?.title,
+      items.push(...open.slice(0, q ? 8 : 5).map(task => ({ group: q ? t("Tasks") : t("In progress"), label: task.title, hint: this.cache!.projects.find(p => p.id === task.project)?.title,
         icon: statusIcon(task.status), run: () => this.navigate("work", task.id) })));
-      if (q) items.push(...this.cache.projects.filter(p => match(p.title)).slice(0, 5).map(project => ({ group: "项目", label: project.title, icon: icon("folder"), run: () => this.navigate("work", project.id) })));
+      if (q) items.push(...this.cache.projects.filter(p => match(p.title)).slice(0, 5).map(project => ({ group: t("Projects"), label: project.title, icon: icon("folder"), run: () => this.navigate("work", project.id) })));
     }
     items.push(...extra);
     this.items = items;
@@ -94,7 +99,7 @@ export class CommandPalette {
     try {
       const result = await this.client.search(q, { limit: 6 });
       if (generation !== this.generation || !this.dialog?.open) return;
-      this.renderStatic(result.hits.filter(hit => NOTE_TYPE[hit.note.type]).map(hit => ({ group: "知识", label: hit.note.title, hint: NOTE_TYPE[hit.note.type],
+      this.renderStatic(result.hits.filter(hit => NOTE_TYPE[hit.note.type]).map(hit => ({ group: t("Knowledge"), label: hit.note.title, hint: NOTE_TYPE[hit.note.type],
         icon: icon("knowledge"), run: () => this.navigate("knowledge", hit.note.id ?? hit.note.path) })));
     } catch { /* 知识库不可用时只显示本地结果 */ }
   }, 180);
@@ -109,7 +114,7 @@ export class CommandPalette {
         onmousemove: () => { if (this.index !== i) { this.index = i; this.render(); } }, onclick: () => this.run(item) },
         item.icon, h("span", { class: "label" }, item.label), item.hint && h("span", { class: "hint" }, item.hint)));
     });
-    if (!this.items.length) nodes.push(h("p", { class: "state" }, "没有匹配的结果"));
+    if (!this.items.length) nodes.push(h("p", { class: "state" }, t("No results")));
     clear(this.list, ...nodes);
     this.list.querySelector(".is-active")?.scrollIntoView({ block: "nearest" });
   }
