@@ -95,7 +95,7 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
   const ask = async (question: string, fallback: string) => {
     if (options.yes || !interactive) return fallback;
     if (options.ask) return (await options.ask(question, fallback)).trim() || fallback;
-    return terminal ? (askTerminal(terminal, `${question} [${fallback}]：`) ?? "").trim() || fallback : fallback;
+    return terminal ? (askTerminal(terminal, `${question} [${fallback}]${msg(": ")}`) ?? "").trim() || fallback : fallback;
   };
   const privateFile = (path: string, content: string) => atomicFile(path, content, 0o600, true, fs);
   const configPath = join(home, ".config/lumio/config.json");
@@ -174,7 +174,7 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
   if (env.LUMIO_TRUSTED_PROXY) Object.assign(serviceEnv, { LUMIO_TRUSTED_PROXY: env.LUMIO_TRUSTED_PROXY });
   await privateFile(envFile, environmentText(serviceEnv));
   const diagnostics = { platform, uid: options.uid ?? process.getuid?.() ?? -1, run, find, fetch: fetcher };
-  const report = (items: Awaited<ReturnType<typeof extraServices>>) => { for (const item of items) if (!item.ok || item.problem) log(`${item.name}：${item.problem ?? ""}${item.fix ? `；${item.fix}` : ""}`); };
+  const report = (items: Awaited<ReturnType<typeof extraServices>>) => { for (const item of items) if (!item.ok || item.problem) log(`${item.name}${msg(": ")}${item.problem ?? ""}${item.fix ? `${msg("; ")}${item.fix}` : ""}`); };
   report(await extraServices(diagnostics));
   let managed = true;
   if (platform === "darwin") {

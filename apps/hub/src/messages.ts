@@ -4,6 +4,10 @@ const locale = new AsyncLocalStorage<Language>();
 export const withLanguage = <T>(lang: Language, action: () => T): T => locale.run(lang, action);
 
 export const en = {
+  ", ": ", ",
+  "(${0})": (v: unknown) => `(${String(v)})`,
+  ": ": ": ",
+  "; ": "; ",
   "Invalid value (${0})": (code: unknown) => `Invalid value (${String(code)})`,
   "validation.invalid_field": (path: unknown, code: unknown) => `${String(path)}: Invalid value (${String(code)})`,
   "arguments.invalid": "Invalid command arguments; check the command usage",
@@ -741,6 +745,10 @@ ${String(p0)}${String(p1)}`,
   "Run tailscale serve status to check": "Run tailscale serve status to check",
 };
 export const zh: typeof en = {
+  ", ": "、",
+  "(${0})": (v: unknown) => `（${String(v)}）`,
+  ": ": "：",
+  "; ": "；",
   "Invalid value (${0})": (code: unknown) => `值不合法（${String(code)}）`,
   "validation.invalid_field": (path: unknown, code: unknown) => `${String(path)}：值不合法（${String(code)}）`,
   "arguments.invalid": "命令参数不合法，请检查命令用法",

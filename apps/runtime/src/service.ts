@@ -109,7 +109,7 @@ export async function installService(options: ServiceOptions = {}): Promise<void
     try {
       const info = RuntimeInfo.parse(JSON.parse(await readFile(receipt, "utf8")));
       if (info.registration.name === env.LUMIO_RUNTIME_NAME) {
-        log(msg("service.connected_to_hub_detected", info.registration.engines.map((engine) => `${engine.name} ${engine.version}`).join("、") || msg("service.no_agent_found_check_path")));
+        log(msg("service.connected_to_hub_detected", info.registration.engines.map((engine) => `${engine.name} ${engine.version}`).join(", ") || msg("service.no_agent_found_check_path")));
         return;
       }
     } catch { /* wait for a fresh successful registration */ }

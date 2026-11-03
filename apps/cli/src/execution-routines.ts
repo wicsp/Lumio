@@ -22,7 +22,7 @@ export async function runExecutionRoutines(args: string[], log: (line: string) =
   if (!["new", "create", "list"].includes(action) && !/^rtn_[0-9A-HJKMNP-TV-Z]{26}$/.test(reference ?? "")) return;
   const client = createClient({ ...hubCredentials(), language: language() }), request = values["request-id"] ?? randomUUID();
   const send = (op: string, fields: object) => client.executionCommand(ExecutionRoutineCommandRequest.parse({ request_id: request, operation: { op, args: fields } }));
-  const emit = (value: unknown) => log(values.json ? JSON.stringify(value) : typeof value === "object" && value && "title" in value ? `${value.title}（${"id" in value ? value.id : ""}）` : JSON.stringify(value));
+  const emit = (value: unknown) => log(values.json ? JSON.stringify(value) : typeof value === "object" && value && "title" in value ? `${value.title}${msg("(${0})", "id" in value ? value.id : "")}` : JSON.stringify(value));
   if (action === "new" || action === "create") {
     emit(await send("execution.routine.create", { title: positionals.slice(1).join(" "), schedule: values.schedule, timezone: values.timezone,
       assignee: values.to, context: values.context, description: values.file ? await readFile(values.file, "utf8") : values.description })); return 0;
@@ -33,7 +33,7 @@ export async function runExecutionRoutines(args: string[], log: (line: string) =
       const rows = await client.executionRoutines(); resolved = true;
       if (values.json) log(JSON.stringify(rows)); else {
         if (!rows.length) log(msg("execution-routines.no_routines"));
-        for (const row of rows) log(`${row.routine.id}  ${row.routine.title}  ${row.routine.schedule}（${row.routine.timezone}）  ${row.problem ?? (row.routine.status === "paused" ? msg("execution-routines.paused") : msg("execution-routines.next", row.next ?? "—"))}  ${row.last ? msg("execution-routines.last", row.last.status) : msg("execution-routines.not_run_yet")}`);
+        for (const row of rows) log(`${row.routine.id}  ${row.routine.title}  ${row.routine.schedule}${msg("(${0})", row.routine.timezone)}  ${row.problem ?? (row.routine.status === "paused" ? msg("execution-routines.paused") : msg("execution-routines.next", row.next ?? "—"))}  ${row.last ? msg("execution-routines.last", row.last.status) : msg("execution-routines.not_run_yet")}`);
       }
       return 0;
     }

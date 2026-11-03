@@ -121,7 +121,7 @@ export class Routines {
       this.saveRow({ ...row, problem });
     };
     const parsed = Routine.safeParse(data);
-    if (!parsed.success) { refuse(msg("routines.invalid_routine_format", parsed.error.issues.map((i) => msg("validation.invalid_field", i.path.join("."), i.code)).join("；"))); return; }
+    if (!parsed.success) { refuse(msg("routines.invalid_routine_format", parsed.error.issues.map((i) => msg("validation.invalid_field", i.path.join("."), i.code)).join(msg("; ")))); return; }
     const routine = parsed.data;
     try { parseCron(routine.schedule); } catch { refuse(msg("routines.invalid_schedule", routine.schedule)); return; }
     if (!validTimeZone(row.timezone)) { refuse(msg("routines.unknown_time_zone", row.timezone)); return; }
@@ -215,7 +215,7 @@ export class Routines {
     const outcome = status === "done" ? "" : ` · ${status === "failed" ? msg("tasks.failed_2", r?.error ?? (r?.exit_code !== undefined ? msg("tasks.exit_code", r.exit_code) : msg("tasks.unknown_reason"))) : OUTCOME[status] ?? status}`;
     const runtime = this.store.runtimes(new Date(this.clock.now())).find((x) => x.actor === job.spec.runtime)?.registration.name ?? job.spec.runtime;
     const engine = r?.engine ? `${r.engine.name} ${r.engine.version} · ${r.engine.sandbox === "os" ? msg("jobs.os_sandbox") : msg("jobs.no_sandbox")}` : job.spec.run.kind === "agent" ? job.spec.run.engine : "command";
-    const lines = [msg("routines.result_for", localTime(firedAt, row.timezone), outcome), "", `（${engine} · ${runtime}）`, ""];
+    const lines = [msg("routines.result_for", localTime(firedAt, row.timezone), outcome), "", msg("(${0})", `${engine} · ${runtime}`), ""];
     // 执行器离线期间错过的触发：只补跑了最近一次，其余记为跳过（P2-5）。
     const earlier = this.store.db.query<{ fired_at: string }, [string, string]>(
       "SELECT max(fired_at) AS fired_at FROM routine_runs WHERE routine=? AND fired_at<?").get(row.routine, firedAt)?.fired_at;

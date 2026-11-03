@@ -30,7 +30,7 @@ test("application and library source has no Chinese literals outside app message
   for (const path of paths.filter(path => !path.includes("/api-client/"))) {
     const source = readFileSync(path, "utf8"), tree = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true);
     function visit(node: ts.Node): void {
-      if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateHead(node) || ts.isTemplateMiddle(node) || ts.isTemplateTail(node)) && /\p{Script=Han}/u.test(node.text)) {
+      if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateHead(node) || ts.isTemplateMiddle(node) || ts.isTemplateTail(node)) && /[\p{Script=Han}：；，（）。、]/u.test(node.text)) {
         violations.push(`${path.slice(root.length)}:${tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1}`);
       }
       ts.forEachChild(node, visit);

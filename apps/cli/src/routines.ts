@@ -32,7 +32,7 @@ export async function runRoutines(args: string[], log: (line: string) => void): 
     for (const r of routines) {
       const state = r.problem ? msg("routines.inactive", r.problem) : r.status === "paused" ? msg("execution-routines.paused") : msg("routines.next_runtime", r.next ? localTime(r.next, r.timezone) : "—", r.runtime ?? "—");
       const last = r.last ? msg("routines.last", localTime(r.last.fired_at, r.timezone), outcomes()[r.last.status] ?? r.last.status) : msg("routines.no_runs_yet");
-      log(`${r.routine.title}  ${r.schedule}（${r.timezone}）  ${state}  ${last}`);
+      log(`${r.routine.title}  ${r.schedule}${msg("(${0})", r.timezone)}  ${state}  ${last}`);
     }
     return 0;
   }
@@ -45,7 +45,7 @@ export async function runRoutines(args: string[], log: (line: string) => void): 
   const matches = runs.filter((j) => localTime(j.spec.source.fired_at, timezone).startsWith(wanted));
   if (!matches.length) throw new Error(msg("routines.no_run_record_for_at", note.note.title, wanted));
   if (matches.length > 1) {
-    throw new Error(msg("routines.has_runs_specify_the_minute", wanted, matches.length, matches.map((j) => localTime(j.spec.source.fired_at, timezone)).join("、")));
+    throw new Error(msg("routines.has_runs_specify_the_minute", wanted, matches.length, matches.map((j) => localTime(j.spec.source.fired_at, timezone)).join(msg(", "))));
   }
   const operation = RoutineFollowup.parse({ op: "routine.followup", args: { routine, job: matches[0]!.spec.id } });
   const result = await client.operation({ operation });

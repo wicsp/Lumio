@@ -327,7 +327,7 @@ export class TaskRounds {
     const runtime = this.store.runtimes(new Date()).find((x) => x.actor === job.spec.runtime)?.registration.name ?? job.spec.runtime;
     const engine = r?.engine ? `${r.engine.name} ${r.engine.version} · ${r.engine.sandbox === "os" ? msg("jobs.os_sandbox") : msg("jobs.no_sandbox")}` : job.spec.run.kind === "agent" ? job.spec.run.engine : "command";
     const time = (t?: string) => t ? t.slice(0, 16).replace("T", " ") : "—";
-    const lines = [msg("tasks.round_2", round, title), "", `（${engine} · ${runtime} · ${time(r?.started)} → ${time(r?.finished)}）`, ""];
+    const lines = [msg("tasks.round_2", round, title), "", msg("(${0})", `${engine} · ${runtime} · ${time(r?.started)} → ${time(r?.finished)}`), ""];
     const report = r?.report ?? "";
     const question = r?.question;
     if (containsSecret(report) || (question && containsSecret(question))) {
@@ -337,7 +337,7 @@ export class TaskRounds {
       if (question) lines.push(msg("tasks.question", question), "");
     }
     if (r?.git?.before || r?.git?.after) {
-      lines.push(`git：${r.git.before?.commit.slice(0, 8) ?? "—"} → ${r.git.after?.commit.slice(0, 8) ?? "—"}${r.git.after?.dirty ? msg("jobs.uncommitted_changes") : ""}`);
+      lines.push(`git${msg(": ")}${r.git.before?.commit.slice(0, 8) ?? "—"} → ${r.git.after?.commit.slice(0, 8) ?? "—"}${r.git.after?.dirty ? msg("jobs.uncommitted_changes") : ""}`);
     }
     lines.push(msg("tasks.full_report_lumio_job_show", job.spec.id));
     const block = lines.join("\n");

@@ -136,7 +136,7 @@ export class LegacyMigration {
         || (source?.routine && (!table(this.db, "execution_routines") || !this.db.query("SELECT 1 FROM execution_routines WHERE id=?").get(source.routine))));
     });
     const active = blocking();
-    if (active.length) throw new StorageError("CONFLICT", { key: "migration.unfinished_legacy_note_jobs_remain", args: [active.map(job => `${job.spec.id}（${job.status}）`).join("、")] });
+    if (active.length) throw new StorageError("CONFLICT", { key: "migration.unfinished_legacy_note_jobs_remain", args: [active.map(job => `${job.spec.id} (${job.status})`).join(", ")] });
     // Retirement deliberately does not validate import-only metadata, active schedules, or dispatch switches.
     const paths = (await scanVault(this.vault, ["project", "task", "routine"])).map(file => file.relativePath).sort();
     await backupBusiness(stateDir, backup);

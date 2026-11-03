@@ -9,7 +9,7 @@ export async function saveNewNote(vault: string, note: NewNote): Promise<string>
     const type = entityTypeOfPath(note.relativePath);
     const name = type && note.relativePath.slice(entityDirectory(type).length + 1);
     if (!type || !name || !/^[^/\\]+\.md$/.test(name)) {
-      const dirs = VAULT_LAYOUT.map((e) => `${e.dir}/`).join("、");
+      const dirs = VAULT_LAYOUT.map((e) => `${e.dir}/`).join(", ");
       throw new CoreError("INVALID_NOTE_PATH", { key: "create.new_notes_must_be_directly_inside_the_type_directory", args: [dirs] });
     }
     if (!(await stat(vault)).isDirectory()) throw new Error("INVALID_VAULT");

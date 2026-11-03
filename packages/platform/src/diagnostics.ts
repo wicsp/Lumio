@@ -75,7 +75,7 @@ export function printChecks(checks: Check[], json: boolean, log: (line: string) 
     for (const item of checks) {
       const status = checkStatus(item);
       const symbol = status === "pass" ? colors.green("✓") : status === "warning" ? colors.yellow("!") : colors.red("✗");
-      log(`${symbol} ${item.name}${item.problem ? `：${item.problem}` : ""}${item.fix ? ` → ${item.fix}` : ""}`);
+      log(`${symbol} ${item.name}${item.problem ? `${msg(": ")}${item.problem}` : ""}${item.fix ? ` → ${item.fix}` : ""}`);
     }
     const color = counts.fail ? colors.red : counts.warning ? colors.yellow : colors.green;
     log(color(msg("${0} passed, ${1} warnings, ${2} failed", counts.pass, counts.warning, counts.fail)));

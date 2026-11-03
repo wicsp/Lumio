@@ -85,7 +85,7 @@ export async function switchLegacy(args: string[], options: SwitchOptions = {}):
   if (result.stderr) stderr(result.stderr);
   if (result.code) {
     const failed = result.stdout.split(/\r?\n/).filter(line => line.replace(/\x1b\[[0-9;]*m/g, "").startsWith("✗"));
-    log(msg("switch.switch_completed_these_checks_failed", failed.length ? failed.join("；") : msg("switch.see_doctor_output_above")));
+    log(msg("switch.switch_completed_these_checks_failed", failed.length ? failed.join(msg("; ")) : msg("switch.see_doctor_output_above")));
     return 1;
   }
   log(msg("switch.switch_completed_legacy_notes_are_knowledge_files_manage_tasks_and_r"));

@@ -64,7 +64,7 @@ test.skipIf(!script || process.platform !== "linux")("lumio login asks the overw
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: (req) => Response.json(new URL(req.url).pathname === "/health" ? { ok: true, version: "0.0.0-dev" } : joined) });
   try {
     const main = new URL("../src/main.ts", import.meta.url).pathname;
-    const command = `echo piped | HOME=${JSON.stringify(home)} ${JSON.stringify(process.execPath)} ${JSON.stringify(main)} login http://127.0.0.1:${server.port} --code ${code}`;
+    const command = `echo piped | LUMIO_LANG=zh HOME=${JSON.stringify(home)} ${JSON.stringify(process.execPath)} ${JSON.stringify(main)} login http://127.0.0.1:${server.port} --code ${code}`;
     const args = process.platform === "darwin" ? [script!, "-q", "/dev/null", "sh", "-c", command] : [script!, "-q", "-e", "-c", command, "/dev/null"];
     const child = Bun.spawn(args, { stdin: "pipe", stdout: "pipe", stderr: "pipe", timeout: 20_000 });
     await Bun.sleep(1500); child.stdin.write("yes\n"); child.stdin.flush(); child.stdin.end();

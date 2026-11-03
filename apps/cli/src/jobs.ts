@@ -91,9 +91,9 @@ export async function runJobs(args: string[], log: (line: string) => void) {
       log(`${job.spec.id}  ${job.status}  ${runtime?.registration.name ?? job.spec.runtime}${runtime?.online === false ? msg("jobs.runtime_disconnected") : ""}`);
       if (action === "show") {
         const r = job.result;
-        if (job.spec.run.kind === "agent") log(`agent：${job.spec.run.engine}${r?.engine ? msg("jobs.isolation", r.engine.version, r.engine.sandbox === "os" ? msg("jobs.os_sandbox") : msg("jobs.no_sandbox")) : ""}`);
+        if (job.spec.run.kind === "agent") log(`agent${msg(": ")}${job.spec.run.engine}${r?.engine ? msg("jobs.isolation", r.engine.version, r.engine.sandbox === "os" ? msg("jobs.os_sandbox") : msg("jobs.no_sandbox")) : ""}`);
         if (r?.question) log(msg("jobs.question", r.question));
-        if (r?.git) log(`git：${r.git.before?.commit.slice(0, 8) ?? "—"} → ${r.git.after?.commit.slice(0, 8) ?? "—"}${r.git.after?.dirty ? msg("jobs.uncommitted_changes") : ""}`);
+        if (r?.git) log(`git${msg(": ")}${r.git.before?.commit.slice(0, 8) ?? "—"} → ${r.git.after?.commit.slice(0, 8) ?? "—"}${r.git.after?.dirty ? msg("jobs.uncommitted_changes") : ""}`);
         if (r?.error) log(msg("jobs.error", r.error));
         log(JSON.stringify(job, null, 2));
       }

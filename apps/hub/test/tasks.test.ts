@@ -98,7 +98,7 @@ test("assignee agent → one round after the note is quiet; result block written
   expect((await front()).status).toBe("active");
   expect(text).toContain("<!-- lumio:ai start name=round-1 job=");
   expect(text).toContain("### Round 1 · Completed");
-  expect(text).toContain("（pi 1.4.0 · No sandbox · server ·");
+  expect(text).toContain("(pi 1.4.0 · No sandbox · server ·");
   expect(parseFrontmatter(Buffer.from(text)).body.toString().startsWith(body)).toBe(true);
   const [job] = await rounds();
   expect(job!.spec.source).toMatchObject({ task: TASK, round: 1 });

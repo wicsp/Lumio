@@ -123,7 +123,7 @@ export async function runSelftest(args: string[], log: (line: string) => void): 
     return printChecks(failed, Boolean(values.json), log);
   }
   const results = await selftest({ ...hubCredentials(config), runtime: values.runtime, agents: values.agents?.split(","), notes: values.notes, vault: config.vault,
-    onResult: values.json ? undefined : (r) => log(msg("selftest.seconds", r.ok ? "✓" : "✗", r.name, (r.elapsed_ms / 1000).toFixed(1), r.job ? ` ${r.job}` : "", r.problem ? `：${r.problem}` : "", r.fix ? ` → ${r.fix}` : "")) });
+    onResult: values.json ? undefined : (r) => log(msg("selftest.seconds", r.ok ? "✓" : "✗", r.name, (r.elapsed_ms / 1000).toFixed(1), r.job ? ` ${r.job}` : "", r.problem ? `${msg(": ")}${r.problem}` : "", r.fix ? ` → ${r.fix}` : "")) });
   if (values.json) return printChecks(results, true, log);
   log(msg("selftest.checks_passed", results.filter((r) => r.ok).length, results.length));
   return results.every((r) => r.ok) ? 0 : 1;
