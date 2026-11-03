@@ -7,6 +7,8 @@ case "${LC_ALL:-${LANG:-}}" in zh*) install_language=zh ;; esac
 message() {
   message_key=$1
   shift
+  # The PATH hint is shown for the user to copy, so $HOME stays literal there.
+  # shellcheck disable=SC2016
   case "$install_language:$message_key" in
     zh:install_failed) message_format='Lumio 安装失败：%s\n' ;;
     en:install_failed) message_format='Lumio installation failed: %s\n' ;;
@@ -82,6 +84,8 @@ message() {
     en:path) message_format='Add ~/.local/bin to PATH: export PATH="$HOME/.local/bin:$PATH"\n' ;;
     *) return 1 ;;
   esac
+  # Formats come only from the fixed table above; arguments go through %s.
+  # shellcheck disable=SC2059
   printf "$message_format" "$@"
 }
 
