@@ -50,12 +50,22 @@ export async function switchLegacy(args: string[], options: SwitchOptions = {}):
     throw new HubError("INVALID", name === "hub" ? "Hub 启动超时" : "本机执行器登记超时");
   });
   const command = async (argv: string[]) => { if ((await run(argv)).code) throw new HubError("INVALID", "命令未成功；请检查服务状态与日志"); };
+  const stop = async (name: "hub" | "runtime") => {
+    const result = await run(service(name, false));
+    if (!result.code) return;
+    if (platform === "darwin") {
+      const status = await run(["launchctl", "print", `${domain}/io.lumio.${name}`]);
+      // bootout also fails for permission and I/O errors. Only a confirmed missing service is harmless.
+      if (status.code && /could not find (?:service|domain)|no such process/i.test(status.stderr)) return;
+    }
+    throw new HubError("INVALID", "停止服务未成功；请检查服务状态与日志");
+  };
   async function step(label: string, action: () => Promise<void>) {
     log(`切换：${label}`); await action(); completed.push(label);
   }
   try {
-    await step("停止 Hub", () => command(service("hub", false)));
-    await step("停止本机执行器", () => command(service("runtime", false)));
+    await step("停止 Hub", () => stop("hub"));
+    await step("停止本机执行器", () => stop("runtime"));
     await step("准备本机执行器", () => command([join(bin, "lumio-runtime"), "prepare-migration", "--state-dir", runtimeState]));
     await step("完整备份、验证并退役旧笔记", () => options.retire ? options.retire(vault, state) : runMigration(["retire", "--vault", vault], log, { stateDir: state }));
     await step("启动 Hub", async () => { await command(service("hub", true)); await ready("hub"); });
