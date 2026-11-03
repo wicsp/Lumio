@@ -56,6 +56,11 @@ Foundation 提供 ID 和错误；Platform 提供终端、诊断、下载与升�
 - **一个代码仓库**，数据（vault）不放在仓库里（ADR 0001）。
 - **全部 TypeScript，运行在 Bun 上**；Bun 固定为 1.3.x，与人类的 Nix 环境一致（ADR 0002，AGENTS.md）。
 - 全部角色用 `bun build --compile` 编译成**一个程序** `lumio`，以子命令区分 `lumio hub …`、`lumio runtime …`；`lumio-hub`、`lumio-runtime` 是指向它的兼容链接（ADR 0002、0027）。
+- **界面语言**（ADR 0028）：面向人的输出默认英文，中文环境用中文。命令行按 `LUMIO_LANG`、`LC_ALL`、`LC_MESSAGES`、`LANG` 的第一个非空值判断（`zh` 开头用中文）；
+  后台服务日志固定英文；Hub 的错误说明按请求 `Accept-Language` 选择，`code` 不变、客户端不依赖文字判断；Web 可切换并保存在浏览器。
+  文案集中在各 app 的中英两张同键文案表里（测试保证一致）；库代码只抛带 `code` 与参数的错误，由 app 层翻译。不引入 i18n 依赖。开发文档仍用中文。
+- **终端输出**（ADR 0028）：终端里下载进度原地刷新并带进度条，大小一律用 B/KB/MB/GB；通过/提醒/失败分别用绿色 `✓`、黄色 `!`、红色 `✗`，
+  遵循 `NO_COLOR`、`FORCE_COLOR`、非终端与 `TERM=dumb` 不着色；只有失败计入未通过与非零退出码。
 - **契约**：`packages/schema` 中的 Zod 定义是数据格式的唯一事实来源；其他语言用 `bun run schema:export`
   导出的 JSON Schema（ADR 0003）。vault 实体用宽松对象（未知字段原样保留），协议用严格对象（未知字段拒绝）。
 
@@ -225,6 +230,7 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
   Hub 与本机执行器的后台服务（macOS：launchd；Linux：systemd 用户服务；服务命令为 `lumio hub serve`、`lumio runtime serve`，进程仍分开）。Web 由 Hub 在自己的地址上提供，没有单独的 Web 服务（ADR 0027）。
   加执行器：`lumio runtime add <名称>` 生成一次性配对码（10 分钟、一次有效），那台机器上 `lumio runtime join` 换取令牌并装好后台服务；
   另一台机器上的 CLI 用 `lumio login`。`lumio doctor`、`lumio runtime doctor` 检查安装（含 Web 服务与助手配置）；`lumio selftest` 用真实 agent 和数据库任务验证关键路径；`upgrade` 升级（从 v0.1.x 升级时替换为单个程序并改写本机服务文件）。
+  `upgrade` 始终直接升到目标版本（默认最新），已是该版本时不下载；发布包格式或安装布局变化时，上一个已发布版本的升级程序必须能直接完成升级（ADR 0028）。
   从旧笔记模式切到数据库任务：不需要保留旧任务时 `lumio hub switch --retire-legacy` 一条命令退役旧笔记（不导入、不改文件，ADR 0027）；需要导入时按 `docs/migration-v2.md`。
   Nix 以后作为另一种安装方式。作者自己的用法见 `docs/personal-setup.md`。
 - 只信任配置过的反向代理传来的客户端信息。
@@ -314,6 +320,7 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
   - Assistant：流式会话与停止；可查看已保存状态，不重放；记忆显式管理。
   - 审批：展示完整 argv、job、runtime 与理由，由用户显式接受或拒绝。
 - **渲染**：只支持安全的 Markdown 子集。转义原始 HTML，过滤不安全协议，不加载外部图片。沿用 source/private 过滤，并丢弃过期请求的结果。
+- **主题与语言**（ADR 0028）：可切换「跟随系统 / 浅色 / 深色」与「English / 中文」，默认分别跟随系统与浏览器语言，选择保存在本浏览器；请求带 `Accept-Language`。
 - **交互**：⌘K 命令面板（跳转、新建、搜索）；数字键切换模块、C 新建任务、J/K 列表导航；明暗主题；860px 以下为底部导航并分屏显示列表与详情。
 - **部署**：前端资源构建时嵌入 `lumio` 程序，随 Hub 一起提供与升级（ADR 0027）。仓库内 `bun run demo:web` 用合成数据试用。
 - **App**：提供 Web App Manifest 与图标，可在 Safari「添加到程序坞」、Chrome「安装」、iPad/iPhone「添加到主屏幕」；不注册 Service Worker、不缓存业务数据。原生 Mac App 以后另定（ADR 0027）。
@@ -378,5 +385,6 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
 | P1 | 本地查询与 `export bib`；Hub（身份与令牌、查询 API、监听、自动提交、操作与提议框架）；按引用导出与断链检查；skill | ✅（pi 的 skill 验收待补） |
 | P2 | 执行器与派活：执行器登记、可靠的派活核心、三种 agent 适配器、任务笔记里的一问一答、例行任务、`lumio runtime sudo` 审批的门（P2-1 至 P2-6）；安装、配对与自检（P2-7 至 P2-9、P2-11、P2-12，ADR 0021、0022、0023）；识别 Markdown 链接（P2-10）；负责人即交接开关（P2-13，ADR 0024） | ✅（v0.1.6；剩余人工验收见 `docs/tasks/README.md`） |
 | P3 | 飞书 Bot（派活、批准、通知）、审批模型、资产到期提醒、多维表格镜像；Chrome 插件入库论文 | |
-| R1 | v0.2 上线：一个程序 `lumio`、Hub 提供 Web 与 PWA、`assistant setup`、旧笔记退役与一条命令切换（ADR 0027，[R1-0](tasks/R1-0-v0.2-release.md)） | 进行中 |
+| R1 | v0.2 上线：一个程序 `lumio`、Hub 提供 Web 与 PWA、`assistant setup`、旧笔记退役与一条命令切换（ADR 0027，[R1-0](tasks/R1-0-v0.2-release.md)） | v0.2.0 已发布，作者 Mac 已切换（2026-11-03），人工验收进行中 |
+| R2 | v0.2.1：默认英文、中文环境用中文；终端进度与颜色；Web 主题与语言切换；升级不重复下载（ADR 0028，[R2-0](tasks/R2-0-language-terminal-theme.md)） | 进行中 |
 | P4 | Web GUI 提前按用户要求实现（知识只读、项目任务、执行、助手、审批）；知识写入、Docker / Nix、SDK 与原生手机端后续规划 | Web 工作台已合并（#63、#64），其余未排期 |

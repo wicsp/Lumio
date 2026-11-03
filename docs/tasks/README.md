@@ -46,6 +46,10 @@
 | [R1-3](R1-0-v0.2-release.md) | `lumio hub assistant setup / status / clear` | 后端（Codex） | — |
 | [R1-4](R1-0-v0.2-release.md) | `migrate retire`、`switch --retire-legacy`、selftest 改用数据库任务 | 后端（Codex） | — |
 | R1-5 | 发布 v0.2.0，真实切换与人工验收（见下方清单） | 人类 + Claude | R1-1 至 R1-4 |
+| [R2-1](R2-0-language-terminal-theme.md) | 终端进度与颜色、`upgrade` 已是最新时不下载、`switch` 显示 doctor 结果 | 后端（Codex） | — |
+| [R2-2](R2-0-language-terminal-theme.md) | 命令行与 Hub 错误说明的中英文 | 后端（Codex） | R2-1 |
+| [R2-3](R2-0-language-terminal-theme.md) | Web 主题切换与中英文界面 | Claude | — |
+| R2-4 | 发布 v0.2.1 与验收 | 人类 + Claude | R2-1 至 R2-3 |
 
 P1 的设计决定见 ADR 0014、0016、0017、0018；P2 见 ADR 0019、0020、0021、0022 与修订后的 ADR 0005；契约见 `packages/schema/src/` 中的 `query.ts`、`actor.ts`、`operation.ts`、`proposal.ts`、`api.ts`。
 
