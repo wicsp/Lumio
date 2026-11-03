@@ -1,7 +1,26 @@
 # 从任务笔记切换到数据库工作管理
 
 这份说明用于人类安排真实切换；自动测试只用合成数据，重构不会自动升级服务、迁移 vault 或覆盖现有数据库。
-升级程序后仍保留旧笔记兼容，直到首次显式 apply 成功。
+升级程序后仍保留旧笔记兼容，直到显式 apply 或 retire 成功。
+
+## 不需要导入旧任务：直接退役
+
+```sh
+lumio hub switch --retire-legacy
+```
+
+对 setup 管理的本机 Hub 和执行器，依次停止两项服务、运行本机执行器 prepare-migration、完整备份并验证、退役旧笔记、启动服务、运行 doctor。
+任何步骤失败即停止，输出已完成步骤与恢复说明；非托管环境不会自动继续，需手动停止与准备后运行：
+
+```sh
+lumio hub migrate retire --vault <知识目录>
+```
+
+R1-2 合并前上述命令用 `lumio-hub` 代替 `lumio hub`。退役要求独占 Hub 状态目录；有 queued/assigned/running/waiting_for_human 的旧笔记 Job 时拒绝并列出。
+无需暂停笔记中的 Routine 或关闭派活开关：退役后它们全部失效。远程执行器仍需各自在停止后 prepare-migration，清除离线派生计划。
+备份默认保存到状态目录 `backups/retire-<随机编号>`，命令输出回执（kind、时间、备份路径、旧笔记数量、路径与路径摘要）。
+不导入任何任务、项目或例行任务，不修改或移动旧文件；旧笔记仍可搜索、阅读。退役与 apply 只能二选一。
+`lumio selftest` 始终创建数据库自检任务，结果写入任务讨论，结束标为 done；`--notes` 只是兼容别名，不再写 vault。
 
 ## 先准备恢复点
 
@@ -58,7 +77,7 @@ Task 的负责人保持原值，显式 continue 才会创建 Job，Job 成功不
 - 新日志和产物独立归档；`lumio job artifacts <Job ID>` 查看状态，`job download <文件 ID> --output <新文件>` 校验下载。
   较老 Runtime 未归档的日志仍可能只在对应设备本地，不会凭一个旧路径伪造归档完成。
 
-相同清单可重放，已有成功回执不会重复导入；源内容变了仍会拒绝。之后新增的文件可另做 dry-run，但不会自行派活。
+已有任何成功回执时，再次 apply 或 retire 均拒绝，并显示切换时间与方式。每个工作区只能选择一次导入或退役。
 
 ## 回退
 

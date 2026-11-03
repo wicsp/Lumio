@@ -32,10 +32,10 @@ test("management migration preserves sources, is repeatable, excludes the runnin
     expect(rejected.code).toBe(1); expect(rejected.stderr).toContain("另一个 Hub");
     await hub.stop(); hub = undefined;
     const saved = await manage(["backup", "business", backup]); expect(saved.code).toBe(0); BackupManifest.parse(JSON.parse(saved.stdout));
-    for (let repeat = 0; repeat < 2; repeat++) {
-      const applied = await manage(["migrate", "apply", "--vault", vault, "--plan", planFile, "--backup", backup, "--runtimes-prepared"]);
-      expect(applied.stderr).toBe(""); expect(applied.code).toBe(0); expect(MigrationPlan.parse(JSON.parse(applied.stdout))).toEqual(plan);
-    }
+    const applied = await manage(["migrate", "apply", "--vault", vault, "--plan", planFile, "--backup", backup, "--runtimes-prepared"]);
+    expect(applied.stderr).toBe(""); expect(applied.code).toBe(0); expect(MigrationPlan.parse(JSON.parse(applied.stdout))).toEqual(plan);
+    const repeated = await manage(["migrate", "apply", "--vault", vault, "--plan", planFile, "--backup", backup, "--runtimes-prepared"]);
+    expect(repeated.code).toBe(1); expect(repeated.stderr).toContain("apply 切换");
     const mapped = await manage(["migrate", "sources"]); expect(MigrationEntry.array().parse(JSON.parse(mapped.stdout))).toHaveLength(3);
     const exported = join(root, "original-task.md"), source = await manage(["migrate", "source", task, "--output", exported]); expect(source.code).toBe(0); expect(await readFile(exported)).toEqual(original);
     // Change both ID and control fields before startup: the original path is no longer a control surface.
@@ -61,3 +61,35 @@ test("management migration preserves sources, is repeatable, excludes the runnin
     expect(result.job.spec.run.kind === "agent" && result.job.spec.run.prompt).not.toContain("旧文件的新指令");
   } finally { await hub?.stop(); await rm(root, { recursive: true, force: true }); }
 }, 30_000);
+
+test("retire is offline, backs up and disables active legacy files while preserving knowledge queries", async () => {
+  const root = await mkdtemp(join(tmpdir(), "lumio-retire-hub-")), state = join(root, "state"), vault = join(root, "vault");
+  await cp(new URL("../../../fixtures/query-vault", import.meta.url).pathname, vault, { recursive: true });
+  const config = { ...readConfig({ LUMIO_STATE_DIR: state, LUMIO_VAULT: vault }), port: 0 };
+  let hub: Awaited<ReturnType<typeof startHub>> | undefined;
+  const manage = async () => {
+    const child = Bun.spawn([process.execPath, new URL("../src/main.ts", import.meta.url).pathname, "migrate", "retire", "--vault", vault], { env: { HOME: root, PATH: root, LUMIO_STATE_DIR: state }, stdout: "pipe", stderr: "pipe" });
+    const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]); return { code, stdout, stderr };
+  };
+  try {
+    const store = await HubStore.open(state); store.createActor("owner", "human"); const token = store.createToken("owner", "owner"); store.close();
+    hub = await startHub(config, { log() {}, tasks: { quietMs: 0 } });
+    expect((await manage()).stderr).toContain("另一个 Hub"); await hub.stop(); hub = undefined;
+    const taskPath = join(vault, "plan/tasks/Task.md");
+    await writeFile(taskPath, (await readFile(taskPath, "utf8")).replace("assignee: human", "assignee: pi@server"));
+    await mkdir(join(vault, "plan/routines"));
+    await writeFile(join(vault, "plan/routines/Active.md"), `---\nid: ${routine}\ntype: routine\ntitle: Active\ncreated: 2026-11-02T00:00:00Z\nupdated: 2026-11-02T00:00:00Z\nschedule: '* * * * *'\nstatus: active\nassignee: pi@server\n---\n合成例行\n`);
+    const original = await readFile(taskPath), retired = await manage(); expect(retired.code).toBe(0);
+    const receipt = JSON.parse(retired.stdout); expect(receipt).toMatchObject({ kind: "retire", count: 3 });
+    const { verifyBusinessBackup } = await import("@lumio/storage"); BackupManifest.parse(await verifyBusinessBackup(receipt.backup));
+    expect(await readFile(taskPath)).toEqual(original); expect((await manage()).stderr).toContain("retire 切换");
+    hub = await startHub(config, { log() {}, tasks: { quietMs: 0 } });
+    await writeFile(taskPath, original.toString() + "\n退役后的指令\n");
+    await hub.tasks.noteChanged("plan/tasks/Task.md"); await hub.tasks.tick(); await hub.routines.noteChanged("plan/routines/Active.md"); await hub.routines.tick();
+    expect(hub.store.db.query("SELECT * FROM jobs").all()).toEqual([]); expect(hub.modules.workStore.tasks()).toEqual([]);
+    const headers = { Authorization: `Bearer ${token}` }, base = `http://127.0.0.1:${hub.server.port}`;
+    const old = await fetch(`${base}/v1/operations`, { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ operation: { op: "task.dispatch", args: { task, trigger: "cli", to: "pi@server" } } }) });
+    expect(old.status).toBe(409);
+    expect((await fetch(`${base}/v1/search?q=`, { headers })).status).toBe(200);
+  } finally { await hub?.stop(); await rm(root, { recursive: true, force: true }); }
+});

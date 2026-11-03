@@ -11,7 +11,7 @@ import { ExecutionRoutines, parseCron, validTimeZone, nextFire } from "@lumio/ex
 import { scanVault } from "./knowledge/vault.ts";
 import { SqliteWorkStore } from "./work.ts";
 import { SqliteRoutineStore } from "./routines.ts";
-import { verifyBusinessBackup } from "./backup.ts";
+import { backupBusiness, verifyBusinessBackup } from "./backup.ts";
 import { safeStoredFile } from "./artifacts.ts";
 import { StorageError } from "./errors.ts";
 import { Database as Sqlite } from "bun:sqlite";
@@ -25,6 +25,21 @@ export function isMigratedSource(db: Database, path: string): boolean {
 export function legacyControlDisabled(db: Database): boolean {
   return table(db, "migration_receipts") && !!db.query("SELECT 1 FROM migration_receipts LIMIT 1").get();
 }
+export interface MigrationReceipt { id: string; kind: "apply" | "retire"; applied: string; backup: string }
+export function migrationReceipt(db: Database): MigrationReceipt | undefined {
+  if (!table(db, "migration_receipts")) return;
+  const row = db.query("SELECT * FROM migration_receipts ORDER BY applied LIMIT 1").get() as Record<string, unknown> | null;
+  return row ? { id: String(row.id), kind: row.kind === "retire" ? "retire" : "apply", applied: String(row.applied), backup: String(row.backup) } : undefined;
+}
+function refuseReceipt(db: Database): void {
+  const receipt = migrationReceipt(db);
+  if (receipt) throw new StorageError("CONFLICT", `工作区已于 ${receipt.applied} 通过 ${receipt.kind} 切换，不能再次 apply 或 retire（回执 ${receipt.id}）`);
+}
+function receiptTable(db: Database): void {
+  db.exec("CREATE TABLE IF NOT EXISTS migration_receipts (id TEXT PRIMARY KEY,plan TEXT NOT NULL,backup TEXT NOT NULL,applied TEXT NOT NULL,kind TEXT NOT NULL DEFAULT 'apply')");
+  if (!(db.query("PRAGMA table_info(migration_receipts)").all() as { name: string }[]).some(column => column.name === "kind")) db.exec("ALTER TABLE migration_receipts ADD COLUMN kind TEXT NOT NULL DEFAULT 'apply'");
+}
+export interface RetirementReceipt extends MigrationReceipt { kind: "retire"; count: number; paths: string[]; path_hash: string }
 function rows(db: Database, name: string): Record<string, unknown>[] { return table(db, name) ? db.query(`SELECT * FROM ${name} ORDER BY rowid`).all() as Record<string, unknown>[] : []; }
 /** Logical contents avoid comparing SQLite page layouts or missing WAL commits when validating the required pre-migration backup. */
 export function businessContentHash(db: Database): string {
@@ -110,12 +125,38 @@ export class LegacyMigration {
     entries.sort((a, b) => a.path.localeCompare(b.path));
     return MigrationPlan.parse({ schema_version: 1, id: newId("mig", this.options.now?.() ?? new Date(), randomBytes), created: (this.options.now?.() ?? new Date()).toISOString(), source_hash: sha(JSON.stringify(entries)), entries, problems: [...new Set(problems)].sort() });
   }
+  /** Caller holds the same exclusive state lease as Hub; backup completes before any receipt is written. */
+  async retire(stateDir: string, backup: string): Promise<RetirementReceipt> {
+    refuseReceipt(this.db);
+    const blocking = () => histories(this.db).filter(job => {
+      if (!["queued", "assigned", "running", "waiting_for_human"].includes(job.status)) return false;
+      const source = job.spec.source;
+      return Boolean((source?.task && (!table(this.db, "work_tasks") || !this.db.query("SELECT 1 FROM work_tasks WHERE id=?").get(source.task)))
+        || (source?.routine && (!table(this.db, "execution_routines") || !this.db.query("SELECT 1 FROM execution_routines WHERE id=?").get(source.routine))));
+    });
+    const active = blocking();
+    if (active.length) throw new StorageError("CONFLICT", `仍有未结束的旧笔记 Job：${active.map(job => `${job.spec.id}（${job.status}）`).join("、")}`);
+    // Retirement deliberately does not validate import-only metadata, active schedules, or dispatch switches.
+    const paths = (await scanVault(this.vault, ["project", "task", "routine"])).map(file => file.relativePath).sort();
+    await backupBusiness(stateDir, backup);
+    const manifest = await verifyBusinessBackup(backup), snapshot = new Sqlite(join(backup, manifest.database.path), { readonly: true });
+    let expected: string; try { expected = businessContentHash(snapshot); } finally { snapshot.close(); }
+    const applied = (this.options.now?.() ?? new Date()).toISOString();
+    const receipt: RetirementReceipt = { id: newId("mig", new Date(applied), randomBytes), kind: "retire", applied, backup, count: paths.length, paths, path_hash: sha(JSON.stringify(paths)) };
+    this.db.transaction(() => {
+      refuseReceipt(this.db);
+      if (blocking().length || businessContentHash(this.db) !== expected) throw new StorageError("CONFLICT", "备份之后业务状态已变化，未退役");
+      receiptTable(this.db);
+      this.db.query("INSERT INTO migration_receipts(id,plan,backup,applied,kind) VALUES(?,?,?,?,?)").run(receipt.id, JSON.stringify(receipt), backup, applied, "retire");
+    }).immediate();
+    return receipt;
+  }
   async apply(input: unknown, backup: string, runtimesPrepared: boolean): Promise<MigrationPlan> {
+    refuseReceipt(this.db);
     const parsed = MigrationPlan.safeParse(input);
     if (!parsed.success) throw new StorageError("INVALID", "迁移清单不合法");
     const plan = parsed.data;
     if (plan.problems.length || !runtimesPrepared) throw new StorageError("CONFLICT", "先解决 dry-run 问题，并确认执行器已停止、结果交回和旧计划缓存清理完成");
-    const receipt = table(this.db, "migration_receipts") ? this.db.query<{ plan: string }, [string]>("SELECT plan FROM migration_receipts WHERE id=?").get(plan.id) : undefined;
     const inputs: Input[] = [];
     for (const entry of plan.entries) {
       let bytes: Buffer;
@@ -123,7 +164,6 @@ export class LegacyMigration {
       if (sha(bytes) !== entry.sha256) throw new StorageError("CONFLICT", "迁移源文件已变化，请重新 dry-run");
       inputs.push(convert(entry, bytes, this.zone()));
     }
-    if (receipt) { if (receipt.plan !== JSON.stringify(plan)) throw new StorageError("CONFLICT", "迁移编号已用于不同清单"); return plan; }
     const manifest = await verifyBusinessBackup(backup), snapshot = new Sqlite(join(backup, manifest.database.path), { readonly: true });
     let expected: string; try { expected = businessContentHash(snapshot); } finally { snapshot.close(); }
     if (expected !== businessContentHash(this.db)) throw new StorageError("CONFLICT", "备份不是当前业务状态，请先重新完整备份");
@@ -133,8 +173,9 @@ export class LegacyMigration {
       input_snapshot: job.spec.run.kind === "agent" ? job.spec.run.prompt : JSON.stringify(job.spec.run.argv), created: job.spec.created, applied: true })) : []);
     this.db.transaction(() => {
       if (businessContentHash(this.db) !== expected) throw new StorageError("CONFLICT", "备份之后业务库已变化");
-      this.db.exec(`CREATE TABLE IF NOT EXISTS migration_sources (id TEXT PRIMARY KEY,path TEXT NOT NULL UNIQUE,migration TEXT NOT NULL,entry TEXT NOT NULL,bytes BLOB NOT NULL);
-        CREATE TABLE IF NOT EXISTS migration_receipts (id TEXT PRIMARY KEY,plan TEXT NOT NULL,backup TEXT NOT NULL,applied TEXT NOT NULL);`);
+      refuseReceipt(this.db);
+      receiptTable(this.db);
+      this.db.exec("CREATE TABLE IF NOT EXISTS migration_sources (id TEXT PRIMARY KEY,path TEXT NOT NULL UNIQUE,migration TEXT NOT NULL,entry TEXT NOT NULL,bytes BLOB NOT NULL)");
       for (const record of inputs) this.db.query("INSERT INTO migration_sources(id,path,migration,entry,bytes) VALUES(?,?,?,?,?)").run(record.entry.id, record.entry.path, plan.id, JSON.stringify(record.entry), record.bytes);
       const work = new WorkService(new SqliteWorkStore(this.db), { now: () => new Date(), id: () => { throw new StorageError("INTERNAL", "历史导入不生成业务 ID"); } });
       work.importSettled({ projects: inputs.flatMap((record) => record.project ? [record.project] : []), tasks: inputs.flatMap((record) => record.task ? [record.task] : []), executions });

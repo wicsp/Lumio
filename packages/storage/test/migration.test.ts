@@ -40,7 +40,7 @@ async function fixture(action: (f: { root: string; state: string; vault: string;
 test("legacy import preserves IDs, exact bytes, unknown fields, body, source mapping, Job input, sessions and round gaps; replay never dispatches", async () => fixture(async (f) => {
   const original = await readFile(join(f.vault, t)), jobs = f.db.query("SELECT * FROM jobs ORDER BY id").all();
   const plan = await f.migration.plan(); expect(MigrationPlan.safeParse(plan).success).toBe(true); expect(plan.entries).toHaveLength(3); expect(plan.problems).toEqual([]);
-  await backupBusiness(f.state, f.backup); await f.migration.apply(plan, f.backup, true); await f.migration.apply(plan, f.backup, true);
+  await backupBusiness(f.state, f.backup); await f.migration.apply(plan, f.backup, true); await expect(f.migration.apply(plan, f.backup, true)).rejects.toThrow("apply 切换");
   const store = new SqliteWorkStore(f.db), current = store.task(task)!;
   expect(current.id).toBe(task); expect(current.assignee).toBe("pi@server"); expect(current.description).toContain("人写的正文与 [[旧链接]]"); expect(current.description).toContain("旧汇报");
   expect(f.migration.source(task).bytes).toEqual(original); expect(await readFile(join(f.vault, t))).toEqual(original);
@@ -87,4 +87,29 @@ test("a mid-import failure rolls back source archives, objects, histories and re
   await expect(f.migration.apply(plan, f.backup, true)).rejects.toThrow("synthetic import failure");
   expect(work.projects()).toEqual([]); expect(work.tasks()).toEqual([]); expect(work.executions()).toEqual([]);
   expect(f.db.query("SELECT name FROM sqlite_master WHERE name='migration_sources'").get()).toBeNull(); expect(f.db.query("SELECT * FROM jobs").all()).toHaveLength(2);
+}));
+
+test("retire accepts active legacy switches without importing or editing, verifies backup and refuses either later transition", async () => fixture(async f => {
+  await writeFile(join(f.vault, t), note(task, "task", "合成任务", "status: active\r\nassignee: pi@server\r\nturn: agent"));
+  await writeFile(join(f.vault, r), note(routine, "routine", "合成例行", 'status: active\r\nschedule: "* * * * *"\r\nassignee: pi@server'));
+  const originals = await Promise.all([p, t, r].map(path => readFile(join(f.vault, path))));
+  const receipt = await f.migration.retire(f.state, f.backup);
+  expect(receipt).toMatchObject({ kind: "retire", count: 3, backup: f.backup }); expect(receipt.path_hash).toHaveLength(64);
+  const { verifyBusinessBackup } = await import("../src/backup.ts"); await verifyBusinessBackup(f.backup);
+  expect(f.db.query("SELECT kind FROM migration_receipts").get()).toEqual({ kind: "retire" });
+  expect(f.db.query("SELECT name FROM sqlite_master WHERE name IN ('work_tasks','migration_sources')").all()).toEqual([]);
+  expect(await Promise.all([p, t, r].map(path => readFile(join(f.vault, path))))).toEqual(originals);
+  await expect(f.migration.retire(f.state, join(f.root, "other"))).rejects.toThrow("retire 切换");
+  await expect(f.migration.apply(await f.migration.plan(), f.backup, true)).rejects.toThrow("retire 切换");
+}));
+
+test("retire rejects only active legacy Job sources and leaves no receipt or backup", async () => fixture(async f => {
+  for (const status of ["queued", "assigned", "running", "waiting_for_human"] as const) {
+    const row = f.db.query<{ record: string }, []>("SELECT record FROM jobs LIMIT 1").get()!, original = Job.parse(JSON.parse(row.record));
+    const { result: _result, ...pending } = original;
+    const job = Job.parse({ ...pending, status, ...(status === "waiting_for_human" ? { result: { job: original.spec.id, lease: original.spec.lease, status, finished: time, question: "合成问题" } } : {}) });
+    f.db.query("UPDATE jobs SET record=? WHERE id=?").run(JSON.stringify(job), job.spec.id);
+    await expect(f.migration.retire(f.state, f.backup)).rejects.toThrow(job.spec.id);
+    expect(f.db.query("SELECT name FROM sqlite_master WHERE name='migration_receipts'").get()).toBeNull();
+  }
 }));
