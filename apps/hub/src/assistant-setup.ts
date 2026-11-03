@@ -90,7 +90,7 @@ export async function assistantConfiguration(args: string[], options: AssistantS
       try {
         response = await (options.fetch ?? fetch)(`${config.baseUrl}/chat/completions`, { method: "POST", redirect: "error", signal,
           headers: { "Content-Type": "application/json", ...(config.credential() ? { Authorization: `Bearer ${config.credential()}` } : {}) },
-          body: JSON.stringify({ model: config.model, stream: false, messages: [{ role: "user", content: "ping" }], max_tokens: 1 }),
+          body: JSON.stringify({ model: config.model, stream: false, messages: [{ role: "user", content: "ping" }] }),
         });
         if (!response.ok) throw new HubError("INVALID", response.status === 401 || response.status === 403 ? "鉴权失败（401/403），请检查密钥与权限" : response.status === 404 ? "地址或模型不存在（404），请检查 API 基础路径与模型名称" : response.status >= 500 ? "模型服务错误（5xx），请稍后重试" : "模型服务拒绝请求（4xx），请检查地址与模型名称");
         // A 2xx HTML/error page is not evidence of a working Chat Completions endpoint.

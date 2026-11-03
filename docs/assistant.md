@@ -18,6 +18,7 @@ lumio hub assistant clear
 
 交互式密钥输入不回显。setup 先用一次最小请求验证，失败不写配置；`--skip-check` 可跳过验证。
 配置写入 Hub 服务的私有环境文件 `~/.config/lumio/hub.env`（权限 600），保留原有项目并重启托管服务；
+macOS 上配置（含密钥）同时存于 launchd 服务文件 `~/Library/LaunchAgents/io.lumio.hub.plist` 的 `EnvironmentVariables`（权限 600）。
 非托管环境需要手动加载环境文件并重启。status 只显示地址、模型和密钥是否设置；clear 删除这三项并重启。
 `lumio doctor` 显示本机助手是否配置；未配置仅提醒。
 

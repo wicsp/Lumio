@@ -23,7 +23,7 @@ test("minimal HTTP validation, private atomic environment, launchd reload, statu
   await writeFile(service, hubPlist("/synthetic/lumio-hub", f.env, "/synthetic/state"));
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
     expect(request.headers.get("authorization")).toBe(`Bearer ${f.secret}`);
-    expect(await request.json()).toEqual({ model: "synthetic-model", stream: false, messages: [{ role: "user", content: "ping" }], max_tokens: 1 });
+    expect(await request.json()).toEqual({ model: "synthetic-model", stream: false, messages: [{ role: "user", content: "ping" }] });
     return Response.json({ choices: [{ message: { role: "assistant", content: "pong" } }] });
   } });
   try {
@@ -39,6 +39,20 @@ test("minimal HTTP validation, private atomic environment, launchd reload, statu
     expect(await readFile(service, "utf8")).not.toContain(f.secret);
     await assistantConfiguration(["status"], f.options); expect(f.logs.join("\n")).toContain("密钥：未设置");
     expect(f.logs.join("\n")).not.toContain(f.secret);
+  } finally { await server.stop(true); }
+});
+test("validation succeeds on a compatible endpoint that rejects max_tokens", async () => {
+  const f = await fixture(); let requests = 0;
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
+    requests++;
+    const body = await request.json() as Record<string, unknown>;
+    if (Object.hasOwn(body, "max_tokens")) return Response.json({ error: "unsupported max_tokens" }, { status: 400 });
+    return Response.json({ choices: [{ message: { role: "assistant", content: "pong" } }] });
+  } });
+  try {
+    await assistantConfiguration(["setup", "--base-url", server.url.href, "--model", "synthetic-reasoning", "--api-key-stdin"], { ...f.options, stdin: async () => f.secret });
+    expect(requests).toBe(1);
+    expect(parseEnvironment(await readFile(f.path, "utf8"))).toMatchObject({ LUMIO_ASSISTANT_MODEL: "synthetic-reasoning", LUMIO_ASSISTANT_API_KEY: f.secret });
   } finally { await server.stop(true); }
 });
 test("401/403, 404, other 4xx, 5xx, invalid success and timeout never write or restart, nor echo errors", async () => {
