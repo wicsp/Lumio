@@ -1,11 +1,17 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { buildWebAssets } from "../../web/src/entry.ts";
+import { releaseShim } from "@lumio/platform";
 
 export interface BinaryOptions { outfile: string; target?: string; version?: string }
+/** The release tarball keeps three regular files so the v0.1.x upgrader can install it. */
+export async function writeReleaseShims(directory: string): Promise<void> {
+  await mkdir(directory, { recursive: true });
+  for (const role of ["hub", "runtime"] as const) await writeFile(join(directory, `lumio-${role}`), releaseShim(role), { mode: 0o755, flag: "wx" });
+}
 /** Build browser assets once and import their text into the compiled program (#66). */
 export async function buildBinary(options: BinaryOptions): Promise<void> {
   if (options.version !== undefined && !/^\d+\.\d+\.\d+([.-][a-zA-Z0-9.-]+)?$/.test(options.version)) throw new Error("版本应为 X.Y.Z");
@@ -35,8 +41,10 @@ export async function buildBinary(options: BinaryOptions): Promise<void> {
 }
 if (import.meta.main) {
   try {
-    const { values, positionals } = parseArgs({ args: process.argv.slice(2), options: { outfile: { type: "string" }, target: { type: "string" }, version: { type: "string" } } });
-    if (positionals.length || !values.outfile) throw new Error("用法：build-binary.ts --outfile <路径> [--target bun-<平台>] [--version X.Y.Z]");
+    const { values, positionals } = parseArgs({ args: process.argv.slice(2), options: { outfile: { type: "string" }, target: { type: "string" }, version: { type: "string" }, "release-shims": { type: "boolean" } } });
+    if (positionals.length || !values.outfile) throw new Error("用法：build-binary.ts --outfile <路径> [--target bun-<平台>] [--version X.Y.Z] [--release-shims]");
+    if (values["release-shims"] && !resolve(values.outfile).endsWith("/lumio")) throw new Error("生成发布垫片时输出文件必须命名为 lumio");
     await buildBinary({ outfile: values.outfile, ...(values.target ? { target: values.target } : {}), ...(values.version ? { version: values.version } : {}) });
+    if (values["release-shims"]) await writeReleaseShims(dirname(resolve(values.outfile)));
   } catch (cause) { console.error(cause instanceof Error ? cause.message : "编译失败"); process.exitCode = 1; }
 }

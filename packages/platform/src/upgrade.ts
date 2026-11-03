@@ -4,6 +4,7 @@ import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readlink, rename, rm,
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { diagnosticIO, environment, httpURL, localAddress, serviceCommand, type DiagnosticOptions } from "./diagnostics.ts";
+import { releaseShim } from "./release-shims.ts";
 
 export class UpgradeError extends Error { readonly code = "UPGRADE_FAILED"; }
 export interface UpgradeOptions extends DiagnosticOptions {
@@ -46,10 +47,18 @@ export async function upgrade(options: UpgradeOptions = {}): Promise<void> {
     const tar = join(temp, archive), extracted = join(temp, "extracted");
     await writeFile(tar, bytes, { mode: 0o600 }); await mkdir(extracted, { mode: 0o700 });
     const entries = (await command(["tar", "-tzf", tar])).trim().split("\n"), types = (await command(["tar", "-tvzf", tar])).trim().split("\n");
-    if (entries.length !== 1 || entries[0] !== "lumio" || types.length !== 1 || !types[0]?.startsWith("-")) throw new UpgradeError("压缩包必须只包含一个普通 lumio 程序，未替换程序");
+    if (entries.length !== 3 || binaries.some(name => entries.filter(entry => entry === name).length !== 1)
+      || types.length !== 3 || types.some(line => !line.startsWith("-"))) throw new UpgradeError("压缩包必须包含 lumio 与两个普通转发垫片，未替换程序");
     await command(["tar", "-xzf", tar, "-C", extracted]);
-    const source = join(extracted, "lumio"), info = await lstat(source);
-    if (!info.isFile() || info.nlink !== 1) throw new UpgradeError("压缩包必须包含普通程序文件");
+    for (const name of binaries) {
+      const info = await lstat(join(extracted, name));
+      if (!info.isFile() || info.nlink !== 1) throw new UpgradeError("压缩包必须包含三个普通文件");
+    }
+    for (const role of ["hub", "runtime"] as const) {
+      const bytes = await readFile(join(extracted, `lumio-${role}`));
+      if (!bytes.equals(Buffer.from(releaseShim(role)))) throw new UpgradeError("发布包转发垫片内容不匹配，未替换程序");
+    }
+    const source = join(extracted, "lumio");
     await chmod(source, 0o755);
     const target = releaseVersion.exec((await command([source, "--version"])).trim())?.[1];
     if (!target || (options.version && target !== options.version.slice(1))) throw new UpgradeError("下载程序的版本不一致，未替换程序");

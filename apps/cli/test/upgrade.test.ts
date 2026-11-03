@@ -4,6 +4,7 @@ import { chmod, lstat, readlink, stat, mkdir, mkdtemp, readFile, rm, symlink, wr
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { upgrade } from "../src/upgrade.ts";
+import { releaseShim } from "@lumio/platform";
 const roots: string[] = [];
 afterEach(async () => { for (const p of roots.splice(0)) await rm(p, { recursive: true, force: true }); });
 const names = ["lumio", "lumio-hub", "lumio-runtime"];
@@ -12,13 +13,13 @@ async function fixture() {
   const archiveDir = join(home, "archive"), bin = join(home, ".local/bin");
   await mkdir(archiveDir); await mkdir(bin, { recursive: true });
   for (const name of names) {
-    await writeFile(join(archiveDir, name), '#!/bin/sh\nprintf "2.3.4\\n"\n', { mode: 0o755 });
-    await writeFile(join(bin, name), '#!/bin/sh\nprintf "1.0.0\\n"\n', { mode: 0o755 });
+    await writeFile(join(archiveDir, name), name === "lumio" ? '#!/bin/sh\nprintf "2.3.4\\n"\n' : releaseShim(name === "lumio-hub" ? "hub" : "runtime"), { mode: 0o755 });
+    await writeFile(join(bin, name), '#!/bin/sh\nprintf "0.1.6\\n"\n', { mode: 0o755 });
   }
   const file = join(home, "release.tar.gz");
-  async function pack() { const child = Bun.spawn(["tar", "-czf", file, "-C", archiveDir, "lumio"]); expect(await child.exited).toBe(0); }
+  async function pack() { const child = Bun.spawn(["tar", "-czf", file, "-C", archiveDir, ...names]); expect(await child.exited).toBe(0); }
   await pack();
-  let corrupt = false, duplicate = false, health = "1.0.0", restarts = 0;
+  let corrupt = false, duplicate = false, health = "0.1.6", restarts = 0;
   const requests: string[] = [], commands: string[][] = [], logs: string[] = [];
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(req) {
     const path = new URL(req.url).pathname; requests.push(path);
@@ -34,6 +35,7 @@ async function fixture() {
   const options = { home, env: {}, platform: "linux", arch: "x64", releaseBase: url, log: (l: string) => logs.push(l),
     run: async (argv: string[]) => {
       commands.push(argv);
+      if (argv[0] === "plutil") return { code: 0, stdout: "", stderr: "" };
       if (argv[0] === "systemctl" || argv[0] === "launchctl") { restarts++; health = "2.3.4"; return { code: 0, stdout: "", stderr: "" }; }
       const p = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe" });
       const [stdout, stderr, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
@@ -62,7 +64,7 @@ test("upgrade leaves installed programs unchanged on checksum, duplicate sum, ar
       if (mode === "symlink") { await rm(join(f.archiveDir, "lumio")); await symlink("/etc/passwd", join(f.archiveDir, "lumio")); await f.pack(); }
       await expect(upgrade({ ...f.options, ...(mode === "version" ? { version: "v9.9.9" } : {}) })).rejects.toThrow();
       expect(f.restarts()).toBe(0);
-      for (const name of names) expect(await readFile(join(f.bin, name), "utf8")).toContain("1.0.0");
+      for (const name of names) expect(await readFile(join(f.bin, name), "utf8")).toContain("0.1.6");
     } finally { await f.server.stop(true); }
   }
 });
@@ -74,7 +76,7 @@ test("runtime-only upgrade restarts only runtime, supports launchd and reminds a
     expect(f.restarts()).toBe(2); expect(f.commands).not.toContainEqual(["systemctl", "--user", "restart", "lumio-hub.service"]);
     expect(f.logs.at(-1)).toContain("sudo lumio-runtime install-sudo-helper");
     // Same downloaded bytes stand in for the macOS build; only service orchestration changes.
-    await writeFile(join(f.bin, "lumio-runtime"), '#!/bin/sh\nprintf "1.0.0\\n"'); await chmod(join(f.bin, "lumio-runtime"), 0o755);
+    await writeFile(join(f.bin, "lumio-runtime"), '#!/bin/sh\nprintf "0.1.6\\n"'); await chmod(join(f.bin, "lumio-runtime"), 0o755);
     await mkdir(join(f.home, "Library/LaunchAgents"), { recursive: true }); await writeFile(join(f.home, "Library/LaunchAgents/io.lumio.runtime.plist"), `<plist><dict><key>ProgramArguments</key><array><string>${f.bin}/lumio-runtime</string></array></dict></plist>`);
     const fetcher = (async (input, init) => {
       const r = await fetch(String(input).replaceAll("darwin-arm64", "linux-x64"), init);
@@ -91,7 +93,7 @@ test("upgrade rejects unsupported platforms and options, and detects a Hub that 
     await expect(upgrade({ ...f.options, version: "../../bad" })).rejects.toThrow("版本");
     let clock = 0;
     await expect(upgrade({ ...f.options, now: () => clock, sleep: async (ms) => { clock += ms; },
-      fetch: (async (input, init) => String(input).endsWith("/health") ? Response.json({ ok: true, version: "1.0.0" }) : fetch(input, init)) as typeof fetch,
+      fetch: (async (input, init) => String(input).endsWith("/health") ? Response.json({ ok: true, version: "0.1.6" }) : fetch(input, init)) as typeof fetch,
     })).rejects.toThrow("Hub 未在 30 秒");
   } finally { await f.server.stop(true); }
 });

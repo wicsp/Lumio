@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { mkdtemp, readdir, rm, symlink } from "node:fs/promises";
+import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildBinary } from "../src/build-binary.ts";
+import { buildBinary, writeReleaseShims } from "../src/build-binary.ts";
 import { invocation } from "../src/main.ts";
 let root: string, binary: string;
 beforeAll(async () => {
@@ -84,4 +84,33 @@ test("source invocation builds Web assets on demand in a synthetic state directo
     if (!url) throw new Error("source Hub did not start");
     expect((await fetch(url)).status).toBe(200); expect((await (await fetch(url + "/assets/app.js")).text()).length).toBeGreaterThan(1000);
   } finally { reader.releaseLock(); child.kill("SIGTERM"); await child.exited; }
+});
+
+test("release archive passes v0.1.6 archive, regular-file and executable-version checks", async () => {
+  const directory = join(root, "release with spaces"), extracted = join(root, "old upgrader extraction"), archive = join(root, "release.tar.gz");
+  await mkdir(directory); await mkdir(extracted); await copyFile(binary, join(directory, "lumio")); await writeReleaseShims(directory);
+  async function command(argv: string[]) {
+    const child = Bun.spawn(argv, { cwd: root, env: { HOME: root, PATH: process.env.PATH }, stdout: "pipe", stderr: "pipe" });
+    const [code, output, error] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    if (code) throw new Error(error); return output;
+  }
+  await command(["tar", "-czf", archive, "-C", directory, "lumio", "lumio-hub", "lumio-runtime"]);
+  // These are the archive and executable checks from v0.1.6 apps/{cli,runtime}/src/upgrade.ts.
+  const binaries = ["lumio", "lumio-hub", "lumio-runtime"] as const;
+  const entries = (await command(["tar", "-tzf", archive])).trim().split("\n");
+  const types = (await command(["tar", "-tvzf", archive])).trim().split("\n");
+  if (entries.length !== 3 || binaries.some(name => entries.filter(entry => entry === name).length !== 1)
+    || types.length !== 3 || types.some(line => !line.startsWith("-"))) throw new Error("v0.1.6 rejected release paths or file types");
+  await command(["tar", "-xzf", archive, "-C", extracted]);
+  let target: string | undefined;
+  for (const name of binaries) {
+    const path = join(extracted, name), stat = await lstat(path);
+    if (!stat.isFile() || stat.nlink !== 1) throw new Error("v0.1.6 requires ordinary files");
+    await chmod(path, 0o755);
+    const version = /^(?:v)?(\d+\.\d+\.\d+(?:[.-][a-zA-Z0-9.-]+)?)$/.exec((await command([path, "--version"])).trim())?.[1];
+    if (!version || (target && version !== target)) throw new Error("v0.1.6 requires matching versions");
+    target = version;
+  }
+  expect(target).toBe("9.8.7");
+  expect(await readFile(join(extracted, "lumio-hub"), "utf8")).toContain('exec "$(dirname "$0")/lumio" hub "$@"');
 });
