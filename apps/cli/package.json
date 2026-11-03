@@ -7,6 +7,7 @@
     "lumio": "./src/main.ts"
   },
   "scripts": {
+    "build:binary": "bun run src/build-binary.ts",
     "build": "bun build --compile src/main.ts --outfile dist/lumio"
   },
   "dependencies": {

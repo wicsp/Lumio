@@ -68,17 +68,27 @@ tar -tzf "$tmp/$archive" > "$tmp/contents" || fail '读取压缩包'
 for binary in lumio lumio-hub lumio-runtime; do
   [ "$(awk -v file="$binary" '$0 == file { n++ } END { print n+0 }' "$tmp/contents")" = 1 ] || fail '压缩包缺少程序或含非预期路径'
 done
+tar -tvzf "$tmp/$archive" > "$tmp/types" || fail '读取压缩包类型'
+[ "$(wc -l < "$tmp/types" | tr -d ' ')" = 3 ] || fail '压缩包类型记录不合法'
+[ "$(cut -c1 "$tmp/types" | tr -d '\n')" = --- ] || fail '压缩包含非普通程序文件'
 mkdir "$tmp/extracted"
 tar -xzf "$tmp/$archive" -C "$tmp/extracted" || fail '解压程序'
 for binary in lumio lumio-hub lumio-runtime; do
   if [ ! -f "$tmp/extracted/$binary" ] || [ -L "$tmp/extracted/$binary" ]; then fail '压缩包含非普通程序文件'; fi
 done
+for role in hub runtime; do
+  # shellcheck disable=SC2016 # Compare literal shim bytes; do not expand its shell variables here.
+  printf '#!/bin/sh\nexec "$(dirname "$0")/lumio" %s "$@"\n' "$role" > "$tmp/expected-$role"
+  cmp -s "$tmp/expected-$role" "$tmp/extracted/lumio-$role" || fail '发布包转发垫片内容不匹配，未安装任何程序'
+done
 bin=$HOME/.local/bin
 mkdir -p "$bin" || fail '创建 ~/.local/bin'
-for binary in lumio lumio-hub lumio-runtime; do
-  cp "$tmp/extracted/$binary" "$bin/.$binary.new.$$" || fail '复制程序'
-  chmod 755 "$bin/.$binary.new.$$" || fail '设置程序权限'
-  mv -f "$bin/.$binary.new.$$" "$bin/$binary" || fail '替换程序'
+cp "$tmp/extracted/lumio" "$bin/.lumio.new.$$" || fail '复制程序'
+chmod 755 "$bin/.lumio.new.$$" || fail '设置程序权限'
+mv -f "$bin/.lumio.new.$$" "$bin/lumio" || fail '替换程序'
+for alias in lumio-hub lumio-runtime; do
+  ln -s lumio "$bin/.$alias.new.$$" || fail '创建兼容链接'
+  mv -f "$bin/.$alias.new.$$" "$bin/$alias" || fail '替换兼容链接'
 done
 printf '已安装到 %s\n' "$bin"
 case ":${PATH-}:" in
@@ -89,9 +99,9 @@ case ":${PATH-}:" in
 esac
 [ "$setup" = yes ] || exit 0
 if [ "$mode" = runtime ]; then
-  "$bin/lumio-runtime" join --hub "$hub" --code "$code" || fail 'lumio-runtime join'
+  "$bin/lumio" runtime join --hub "$hub" --code "$code" || fail 'lumio-runtime join'
 else
-  set -- "$bin/lumio-hub" setup
+  set -- "$bin/lumio" hub setup
   if [ "$server" = yes ]; then set -- "$@" --server; fi
   if [ -n "$vault" ]; then set -- "$@" --vault "$vault"; fi
   if [ -n "$public_url" ]; then set -- "$@" --public-url "$public_url"; fi

@@ -17,24 +17,24 @@ async function fixture() {
 test("install-service writes launchd and systemd configurations, waits for registration and reports detected agents", async () => {
   for (const platform of ["darwin", "linux"]) {
     const { home, state, info } = await fixture(); const commands: string[][] = [], logs: string[] = [];
-    await installService({ home, platform, binary: join(home, "bin/lumio-runtime"), uid: 123, user: "synthetic", log: (line) => logs.push(line), run: async (argv) => {
+    await installService({ home, platform, binary: join(home, "bin/lumio"), uid: 123, user: "synthetic", log: (line) => logs.push(line), run: async (argv) => {
       commands.push(argv);
       if (argv.includes("bootstrap") || argv.includes("enable")) await writeFile(join(state, "registered.json"), JSON.stringify(info));
       return { code: 0, stdout: "Linger=no", stderr: "" };
     } });
     const content = await readFile(join(home, platform === "darwin" ? "Library/LaunchAgents/io.lumio.runtime.plist" : ".config/systemd/user/lumio-runtime.service"), "utf8");
-    expect(content).toContain(home + "/bin/lumio-runtime"); expect(content).not.toContain("~");
-    if (platform === "darwin") { expect(content).toContain("/synthetic/agents"); expect(content).toContain("runtime.err.log"); expect(content).toContain("io.lumio.runtime"); }
+    expect(content).toContain(home + "/bin/lumio"); expect(content).not.toContain("~");
+    if (platform === "darwin") { expect(content).toContain("<string>runtime</string><string>serve</string>"); expect(content).toContain("/synthetic/agents"); expect(content).toContain("runtime.err.log"); expect(content).toContain("io.lumio.runtime"); }
     else { expect(content).toContain("Restart=always"); expect(content).toContain("EnvironmentFile="); expect(commands).toContainEqual(["systemctl", "--user", "restart", "lumio-runtime.service"]); expect(logs.join("\n")).toContain("loginctl enable-linger synthetic"); }
     expect((await stat(state)).mode & 0o777).toBe(0o700); expect(logs.join("\n")).toContain("codex 0.163.0"); expect(logs.join("\n")).not.toContain("synthetic-token");
   }
 });
 test("no systemd prints a manual fallback; stale registration is ignored and timeout identifies logs", async () => {
   const { home, state, info } = await fixture(); const logs: string[] = [];
-  await installService({ home, binary: join(home, "bin/lumio-runtime"), platform: "linux", log: (line) => logs.push(line), run: async () => ({ code: 1, stdout: "", stderr: "" }) });
+  await installService({ home, binary: join(home, "bin/lumio"), platform: "linux", log: (line) => logs.push(line), run: async () => ({ code: 1, stdout: "", stderr: "" }) });
   expect(logs.join("\n")).toContain("nohup"); expect(logs.join("\n")).toContain("@reboot");
   await writeFile(join(state, "registered.json"), JSON.stringify(info)); let time = 0;
-  await expect(installService({ home, binary: join(home, "bin/lumio-runtime"), platform: "linux", now: () => time, sleep: async (ms) => { time += ms; }, log: () => {}, run: async () => ({ code: 0, stdout: "Linger=yes", stderr: "" }) })).rejects.toThrow("journalctl");
+  await expect(installService({ home, binary: join(home, "bin/lumio"), platform: "linux", now: () => time, sleep: async (ms) => { time += ms; }, log: () => {}, run: async () => ({ code: 0, stdout: "Linger=yes", stderr: "" }) })).rejects.toThrow("journalctl");
 });
 test("daemon loads runtime.env with explicit environment taking precedence, and systemd escapes percent specifiers", async () => {
   const { home } = await fixture(); const env = await runtimeEnvironment(home, { LUMIO_RUNTIME_NAME: "override" });
@@ -52,7 +52,7 @@ test("runtime service files preserve shared directory permissions and use approp
     await writeFile(path, "old service"); await chmod(path, 0o666);
     const mask = process.umask(0o077);
     try {
-      await installService({ home, platform, binary: join(home, "bin/lumio-runtime"), uid: 123, log: () => {}, run: async (argv) => {
+      await installService({ home, platform, binary: join(home, "bin/lumio"), uid: 123, log: () => {}, run: async (argv) => {
         if (argv.includes("bootstrap") || argv.includes("enable")) await writeFile(join(state, "registered.json"), JSON.stringify(info));
         return { code: 0, stdout: "Linger=yes", stderr: "" };
       } });

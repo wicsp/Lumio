@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { doctor, supported, verifiedVersions } from "../src/doctor.ts";
+import { doctor, supported, verifiedVersions, type DoctorOptions } from "../src/doctor.ts";
 import { printChecks, type DiagnosticOptions } from "../src/diagnostics.ts";
 import { readFile } from "node:fs/promises";
 const token = "synthetic-secret-never-print";
@@ -10,14 +10,17 @@ function fixture() {
   const modes: Record<string, number> = {};
   const bodies: Record<string, unknown> = { "/health": { ok: true, version: "0.0.0-dev" }, "/v1/actors": [], "/v1/status": { watching: true, issues: [] }, "/v1/runtimes": [runtime], "/v1/routines": [routine], "/v1/proposals": [] };
   const fail = new Set<string>(), commands: string[][] = [], urls: string[] = [];
-  const options: DiagnosticOptions = { home: "/synthetic", env: {}, uid: 501, find: () => null, platform: "darwin",
+  const options: DoctorOptions = { home: "/synthetic", env: {}, uid: 501, find: () => null, platform: "darwin",
+    realpath: async () => "/synthetic/.local/bin/lumio",
     read: async (p) => { if (!(p in files)) throw new Error(token); return files[p]!; },
     stat: async (p) => { if (!(p in files)) throw new Error(token); return { mode: modes[p] ?? 0o600, uid: 501, isFile: () => true, isDirectory: () => false }; },
-    run: async (argv) => { commands.push(argv); return { code: fail.has("service") ? 1 : 0, stdout: "", stderr: token }; },
+    run: async (argv) => { commands.push(argv); return { code: fail.has("service") ? 1 : 0, stdout: argv.includes("--version") ? "0.0.0-dev" : "", stderr: token }; },
     fetch: (async (input, init) => {
       const u = new URL(String(input)); urls.push(u.href);
-      if (u.pathname !== "/health") expect(new Headers(init?.headers).get("Authorization")).toBe(`Bearer ${token}`);
+      if (!["/health", "/", "/assets/app.js"].includes(u.pathname)) expect(new Headers(init?.headers).get("Authorization")).toBe(`Bearer ${token}`);
       if (fail.has(u.pathname)) throw new Error(token);
+      if (u.pathname === "/") return new Response('<script src="/assets/app.js"></script>', { headers: { "Content-Type": "text/html" } });
+      if (u.pathname === "/assets/app.js") return new Response("synthetic();", { headers: { "Content-Type": "text/javascript" } });
       return Response.json(bodies[u.pathname]);
     }) as typeof fetch };
   return { options, files, modes, bodies, fail, commands, urls };
@@ -26,7 +29,7 @@ test("CLI doctor reports every item, HTTP warning and pending proposals without 
   const f = fixture();
   let checks = await doctor(f.options); expect(checks.every((c) => c.ok)).toBe(true);
   expect(checks.some((c) => c.name === "对外地址警告")).toBe(true);
-  expect(f.commands).toEqual([["launchctl", "list"], ["launchctl", "print", "gui/501/io.lumio.hub"], ["launchctl", "print", "gui/501/io.lumio.runtime"]]);
+  expect(f.commands).toEqual([["/synthetic/.local/bin/lumio", "--version"], ["/synthetic/.local/bin/lumio-hub", "--version"], ["/synthetic/.local/bin/lumio-runtime", "--version"], ["launchctl", "list"], ["launchctl", "print", "gui/501/io.lumio.hub"], ["launchctl", "print", "gui/501/io.lumio.runtime"]]);
   const output: string[] = []; expect(printChecks(checks, false, (l) => output.push(l))).toBe(0); expect(output.at(-1)).toMatch(/项通过/);
   f.bodies["/v1/proposals"] = [{ id: "prop_00000000000000000000000001", author: runtime.actor, reason: "synthetic", status: "pending", created: runtime.last_seen,
     operation: { op: "task.dispatch", args: { task: "task_00000000000000000000000001", trigger: "cli" } } }];
@@ -34,10 +37,10 @@ test("CLI doctor reports every item, HTTP warning and pending proposals without 
   expect(JSON.stringify(checks)).not.toContain(token);
   f.options.platform = "linux"; await doctor(f.options); expect(f.commands.at(-1)).toEqual(["systemctl", "--user", "is-active", "--quiet", "lumio-runtime.service"]);
   f.options.env = { LUMIO_HUB_URL: "https://remote.synthetic" }; f.commands.length = 0;
-  checks = await doctor(f.options); expect(f.commands).toHaveLength(0); expect(checks.every((c) => c.ok)).toBe(true);
+  checks = await doctor(f.options); expect(f.commands.every(command => command.includes("--version"))).toBe(true); expect(checks.every((c) => c.ok)).toBe(true);
 });
 test("CLI doctor isolates config, permissions, health, auth, vault, services, runtime, routine and public URL failures", async () => {
-  for (const route of ["/health", "/v1/actors", "/v1/status", "/v1/runtimes", "/v1/routines", "/v1/proposals", "service"]) {
+  for (const route of ["/", "/assets/app.js", "/health", "/v1/actors", "/v1/status", "/v1/runtimes", "/v1/routines", "/v1/proposals", "service"]) {
     const f = fixture(); f.fail.add(route); const checks = await doctor(f.options);
     expect(checks.some((c) => !c.ok)).toBe(true); expect(checks.at(-1)!.name).toBe("待批准提议");
     expect(JSON.stringify(checks)).not.toContain(token); expect(checks.filter((c) => !c.ok).every((c) => c.fix)).toBe(true);
@@ -96,4 +99,12 @@ test("doctor treats a missing assistant model as a reminder and never prints the
   const checks = await doctor(f.options);
   expect(checks.find(c => c.name === "助手模型")).toMatchObject({ ok: true, problem: "已配置" });
   expect(JSON.stringify(checks)).not.toContain("synthetic-private-key");
+});
+
+test("doctor independently detects broken compatibility targets and mismatched local program versions", async () => {
+  const f = fixture(); f.options.realpath = async path => path.endsWith("lumio-runtime") ? "/synthetic/old-runtime" : "/synthetic/.local/bin/lumio";
+  expect((await doctor(f.options)).find(check => check.name === "本机程序与兼容链接")?.ok).toBe(false);
+  f.options.realpath = async () => "/synthetic/.local/bin/lumio";
+  f.options.run = async argv => ({ code: 0, stdout: argv.includes("--version") ? "0.1.6" : "", stderr: token });
+  const checks = await doctor(f.options); expect(checks.find(check => check.name === "本机程序与兼容链接")?.ok).toBe(false); expect(JSON.stringify(checks)).not.toContain(token);
 });

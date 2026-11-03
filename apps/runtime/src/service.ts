@@ -50,7 +50,7 @@ export function runtimePlist(binary: string, env: Record<string, string>, state:
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Label</key><string>io.lumio.runtime</string>
-<key>ProgramArguments</key><array><string>${xml(binary)}</string></array>
+<key>ProgramArguments</key><array><string>${xml(binary)}</string><string>runtime</string><string>serve</string></array>
 <key>EnvironmentVariables</key><dict>${Object.entries(env).map(([key, value]) => `<key>${xml(key)}</key><string>${xml(value)}</string>`).join("")}</dict>
 <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
 <key>StandardOutPath</key><string>${xml(join(state, "runtime.log"))}</string>
@@ -58,7 +58,7 @@ export function runtimePlist(binary: string, env: Record<string, string>, state:
 </dict></plist>\n`;
 }
 export function runtimeUnit(binary: string, envFile: string): string {
-  return `[Unit]\nDescription=Lumio runtime\nAfter=network.target\n\n[Service]\nExecStart=${unitString(binary)}\nEnvironmentFile=${unitPath(envFile)}\nRestart=always\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n`;
+  return `[Unit]\nDescription=Lumio runtime\nAfter=network.target\n\n[Service]\nExecStart=${unitString(binary)} runtime serve\nEnvironmentFile=${unitPath(envFile)}\nRestart=always\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n`;
 }
 export interface ServiceOptions {
   home?: string; platform?: string; binary?: string; uid?: number; user?: string;
@@ -91,7 +91,7 @@ export async function installService(options: ServiceOptions = {}): Promise<void
     let available = false;
     try { available = (await run(["systemctl", "--user", "show-environment"])).code === 0; } catch { /* manual fallback */ }
     if (!available) {
-      log(`没有 systemd 用户服务。手动运行：nohup '${binary.replaceAll("'", "'\\''")}' > '${state.replaceAll("'", "'\\''")}/runtime.log' 2>&1 &（程序自动读取 ${envFile}）；也可放入 crontab @reboot。`);
+      log(`没有 systemd 用户服务。手动运行：nohup '${binary.replaceAll("'", "'\\''")}' runtime serve > '${state.replaceAll("'", "'\\''")}/runtime.log' 2>&1 &（程序自动读取 ${envFile}）；也可放入 crontab @reboot。`);
       return;
     }
     const active = (await run(["systemctl", "--user", "is-active", "--quiet", "lumio-runtime.service"])).code === 0;

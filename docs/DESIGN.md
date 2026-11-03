@@ -55,7 +55,7 @@ Foundation 提供 ID 和错误；Platform 提供终端、诊断、下载与升�
 
 - **一个代码仓库**，数据（vault）不放在仓库里（ADR 0001）。
 - **全部 TypeScript，运行在 Bun 上**；Bun 固定为 1.3.x，与人类的 Nix 环境一致（ADR 0002，AGENTS.md）。
-- 全部角色用 `bun build --compile` 编译成**一个程序** `lumio`，以子命令区分 `lumio hub …`、`lumio runtime …`；`lumio-hub`、`lumio-runtime` 是指向它的兼容链接（ADR 0002、0027；R1-2 实施中）。
+- 全部角色用 `bun build --compile` 编译成**一个程序** `lumio`，以子命令区分 `lumio hub …`、`lumio runtime …`；`lumio-hub`、`lumio-runtime` 是指向它的兼容链接（ADR 0002、0027）。
 - **契约**：`packages/schema` 中的 Zod 定义是数据格式的唯一事实来源；其他语言用 `bun run schema:export`
   导出的 JSON Schema（ADR 0003）。vault 实体用宽松对象（未知字段原样保留），协议用严格对象（未知字段拒绝）。
 
@@ -74,7 +74,7 @@ Foundation 提供 ID 和错误；Platform 提供终端、诊断、下载与升�
 | `apps/cli` | 唯一程序入口 `lumio`：命令行（联网获取论文元数据、本地知识模式、Hub 客户端），并分派 `hub`、`runtime` 子命令 | api-client, knowledge, storage, foundation, platform, schema；以及 `apps/(hub\|runtime\|web)/src/entry.ts`（ADR 0027） |
 | `apps/hub` | API、模块组装、跨模块协调、身份与旧路径兼容 | 业务包、storage、foundation、platform、schema |
 | `apps/runtime` | 设备 daemon，与 Hub 只走 HTTP | execution 的纯计划能力、storage 的日志适配、foundation、platform、schema |
-| `apps/web` | 中文 GUI 与静态资源构建，入口 `src/entry.ts`；网页由 Hub 提供（ADR 0027；R1-2 前仍保留独立服务与代理） | api-client, schema |
+| `apps/web` | 中文 GUI 与静态资源构建，入口 `src/entry.ts`；网页由 Hub 提供（ADR 0027） | api-client, schema |
 | `apps/feishu-bot` 等 | 后续客户端 | api-client |
 
 依赖方向由 `bun run lint:deps` 强制：`packages` 不依赖 `apps`，`apps` 之间不互相依赖——唯一例外是 `apps/cli` 可以引用其他 app 的入口模块 `src/entry.ts`，hub、runtime、web 之间仍不互相引用（ADR 0027）；四个业务包不导入其他业务包实现或具体适配器，禁止文件/网络/SQLite/进程 I/O；应用不依赖 Core 兼容汇总入口（ADR 0025）。
@@ -182,9 +182,9 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 ### 4.2 存放
 - Hub 的运行数据放在 `~/.local/share/lumio/`（可配置），**不在 vault、不在同步目录里**：
   `index.sqlite`（派生索引，可重建）、`hub.sqlite`（身份、令牌、提议、审计、Job、数据库 Work 和 Assistant，需要备份）。
-  `lumio-hub backup <目标文件>` 仍提供旧数据库单文件备份；完整业务备份用 `lumio-hub backup business <新目录>`，
+  `lumio hub backup <目标文件>` 仍提供旧数据库单文件备份；完整业务备份用 `lumio hub backup business <新目录>`，
   以数据库一致性快照确定 ready 托管文件，复制文件并生成校验清单（ADR 0014、0016、0025）。
-- `lumio-hub backup verify <目录>` 校验清单、数据库和引用文件；`lumio-hub restore business <备份目录> <新状态目录>` 只恢复到新目录。
+- `lumio hub backup verify <目录>` 校验清单、数据库和引用文件；`lumio hub restore business <备份目录> <新状态目录>` 只恢复到新目录。
   拒绝缺失或被篡改的文件、重复清单与符号链接，不覆盖已有状态。知识目录与安装配置单独备份，索引可重建（ADR 0025）。
 - Hub 与离线迁移通过同一业务目录的 SQLite OS 租约互斥；进程崩溃自动释放锁，不删除锁文件或凭 PID 猜测锁失效。
 
@@ -220,10 +220,11 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
   HTTPS 推荐放 Caddy 等反向代理（文档有示例）。非本机监听且对外地址是 `http://` 时只警告、不拒绝。
   Tailscale 等私有网络是补充：`setup` 检测到时可以帮忙填对外地址，核心代码不依赖它。
 - **安装**（ADR 0021、0027）：打 `v*` 标签时 CI 为每个平台编译一个 `lumio`（嵌入 Web 资源）发布到 GitHub Releases；`install.sh` 下载、校验、装到 `~/.local/bin` 并建立 `lumio-hub`、`lumio-runtime` 兼容链接，
-  再运行 `lumio-hub setup`（可重复运行；`--server` 为服务器模式）：vault 路径、身份、CLI 配置文件 `~/.config/lumio/config.json`、
+  为兼容 v0.1.x 升级器，压缩包保留三个普通文件：主程序与两个固定 shell 转发垫片；新安装器/升级器逐字节核对垫片后建立符号链接。从 v0.1.x 升级须执行两次 upgrade：第一次安装主程序与垫片，第二次转换链接、改写服务文件并显示切换提示。
+  再运行 `lumio hub setup`（可重复运行；`--server` 为服务器模式）：vault 路径、身份、CLI 配置文件 `~/.config/lumio/config.json`、
   Hub 与本机执行器的后台服务（macOS：launchd；Linux：systemd 用户服务；服务命令为 `lumio hub serve`、`lumio runtime serve`，进程仍分开）。Web 由 Hub 在自己的地址上提供，没有单独的 Web 服务（ADR 0027）。
-  加执行器：`lumio runtime add <名称>` 生成一次性配对码（10 分钟、一次有效），那台机器上 `lumio-runtime join` 换取令牌并装好后台服务；
-  另一台机器上的 CLI 用 `lumio login`。`lumio doctor`、`lumio-runtime doctor` 检查安装（含 Web 服务与助手配置）；`lumio selftest` 用真实 agent 和数据库任务验证关键路径；`upgrade` 升级（从 v0.1.x 升级时替换为单个程序并改写本机服务文件）。
+  加执行器：`lumio runtime add <名称>` 生成一次性配对码（10 分钟、一次有效），那台机器上 `lumio runtime join` 换取令牌并装好后台服务；
+  另一台机器上的 CLI 用 `lumio login`。`lumio doctor`、`lumio runtime doctor` 检查安装（含 Web 服务与助手配置）；`lumio selftest` 用真实 agent 和数据库任务验证关键路径；`upgrade` 升级（从 v0.1.x 升级时替换为单个程序并改写本机服务文件）。
   从旧笔记模式切到数据库任务：不需要保留旧任务时 `lumio hub switch --retire-legacy` 一条命令退役旧笔记（不导入、不改文件，ADR 0027）；需要导入时按 `docs/migration-v2.md`。
   Nix 以后作为另一种安装方式。作者自己的用法见 `docs/personal-setup.md`。
 - 只信任配置过的反向代理传来的客户端信息。
@@ -231,7 +232,7 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 
 ### 4.6 Runtime 与旧任务笔记兼容（P2，ADR 0005、0019）
 
-本节的文件开关和写回语义仅适用于尚未执行 v2 apply 的旧模式；Job 的可靠执行协议继续共用。
+本节的文件开关和写回语义仅适用于尚未执行 v2 apply/retire 的旧模式；Job 的可靠执行协议继续共用。
 数据库 Work 的负责人、显式派活与结果规则见第 4.7 节。
 
 本节关于修改笔记负责人触发、元数据交接和 AI 区块写回的条款适用于旧笔记路径；新版数据库 Work 使用第 4.7 节。
@@ -260,7 +261,7 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
   `context: previous` 时带上上一次的摘要。执行器离线错过的只补跑最近一次，其余在结果里注明跳过了几次。
   结果按时间追加在这篇笔记的 `run-<日期时间>` AI 区块里。`lumio routine list` 列出计划；
   `lumio routine followup <例行任务> <日期>`（操作 `routine.followup`）从某一次开出普通任务：执行配置照抄，`assignee: human`。
-- **高权限申请**（ADR 0020）：每轮单独的本地 socket 凭据经 `lumio-runtime sudo -- <绝对路径程序>` 发起；人用 `lumio proposals` 查看并批准或拒绝。批准后 Hub 签发 10 分钟有效的一次性凭据，root 助手独立验证并在执行前记为已用；输出只返回调用者，执行状态离线时保留交回。安装见 `infra/sudo-helper.md`。
+- **高权限申请**（ADR 0020）：每轮单独的本地 socket 凭据经 `lumio runtime sudo -- <绝对路径程序>` 发起；人用 `lumio proposals` 查看并批准或拒绝。批准后 Hub 签发 10 分钟有效的一次性凭据，root 助手独立验证并在执行前记为已用；输出只返回调用者，执行状态离线时保留交回。安装见 `infra/sudo-helper.md`。
 - **适配器**：`codex exec`、`claude -p`、`pi -p` 的非交互模式；锁定验证过的版本；如实声明隔离级别（`os`/`none`）。
   不经过 shell；command 类型只执行登记过的程序；密钥在执行节点上才解析。
 - **不做**：跨设备调用工具、每一轮单独的权限、上下文管理、模型路由；留给以后自研的 agent（作为执行器里的一种引擎接入）。
@@ -280,10 +281,11 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
   `edit` 打开带版本的外部编辑副本；用 `--file` 提交已有正文时必须带 `--revision`，冲突保留内容。
 - `routine new/list/show/update/edit/status/followup` 使用数据库路径；`--legacy` 选择旧笔记。
   新版追问从指定执行创建人工 Work 任务并保留执行来源；旧 v1 followup 拒绝数据库 Routine。
-- `lumio-hub migrate plan/apply/sources/source` 提供显式迁移，完整步骤见 [切换与回退](migration-v2.md)。
+- `lumio hub migrate plan/apply/retire/sources/source` 提供显式迁移，完整步骤见 [切换与回退](migration-v2.md)。
   apply 要求匹配的完整备份、源摘要和设备准备确认，并与 Hub 独占同一状态目录；原始字节和未知字段进入来源档案。
-  第一次成功 apply 后关闭整个工作区的旧 Task/Routine 文件控制与旧派活/追问；知识文件继续可编辑，不再由旧字段覆盖数据库。
+  第一次成功 apply 或 retire 后关闭整个工作区的旧 Task/Routine 文件控制与旧派活/追问；知识文件继续可编辑，不再由旧字段覆盖数据库。
 - Runtime 与离线准备也持有独占状态租约。`prepare-migration --state-dir <目录>` 只在执行器停止且无待执行/交付数据时清空派生计划缓存。
+  retire 在独占状态目录下自动完整备份并验证，只写退役回执（kind/时间/备份/数量/路径摘要），不导入或改写旧笔记；仍有未结束的旧笔记 Job 时拒绝。已有任何回执时 apply/retire 都拒绝，并说明切换时间与方式（ADR 0027）。
   迁移仅导入已处理历史关联与已经暂停的 Routine，不生成 Job 或重放工具/审批；下一轮取历史最高轮次加一。
 - `/v2/assistant/chat` 支持 JSON 与 NDJSON；对话、轮次、工具调用和记忆归 Assistant。CLI 用 `chat`、`chat list/show`。
   模型和工具通过注入接口提供。Hub 的兼容 Chat Completions 适配器须配置 LUMIO_ASSISTANT_BASE_URL 与 LUMIO_ASSISTANT_MODEL，凭据仅运行时环境注入；无默认供应商或模型。用 `lumio hub assistant setup` 配置：验证后写入 Hub 服务的私有环境文件（600，与 Hub 令牌同一文件）并重启，密钥只从隐藏输入或标准输入读取，不经命令行参数、不进日志（ADR 0027）。支持 SSE 与 JSON 响应，限制响应字节/时限，工具仅在完整响应校验后交付，不自动重试。
@@ -294,22 +296,15 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
 - 助手持久化工具调用状态；中断或写操作结果不明标为 unknown，不自动重放。最终空回复明确失败，工具调用中间消息可无文本。
 - 新 v2 工作与助手入口目前仅 human 可访问，不自动放宽 agent/runtime 权限；搜索来源与私密规则继续适用。
 
-### 4.8 Web 工作台（ADR 0026）
+### 4.8 Web 工作台（ADR 0026、0027）
 
-本地 GUI，决定见 ADR 0026。
+中文 GUI，网页由 Hub 提供；决定见 ADR 0026、0027。
 
-- **技术栈**：原生 TypeScript、DOM 与 CSS，用 Bun 1.3.x 构建和提供服务。只依赖 `@lumio/api-client` 与 `@lumio/schema`。
+- **技术栈**：原生 TypeScript、DOM 与 CSS，用 Bun 1.3.x 构建静态资源，由 Hub 提供。只依赖 `@lumio/api-client` 与 `@lumio/schema`。
 - **类型隔离**：浏览器端与服务端是两个独立的 TypeScript 程序，根 typecheck 同时检查两者。
-- **访问路径**（ADR 0027，R1-2 实施中）：网页由 Hub 在自己的地址上提供（单机 `http://127.0.0.1:7420`；服务器模式为 Hub 的对外地址），浏览器与 Hub 同源，直接调用 `/v1`、`/v2`。
+- **访问路径**（ADR 0027）：网页由 Hub 在自己的地址上提供（单机 `http://127.0.0.1:7420`；服务器模式为 Hub 的对外地址），浏览器与 Hub 同源，直接调用 `/v1`、`/v2`。
   Hub 为页面与资源设置限制性 CSP；浏览器请求（带 `Origin` 或 `Sec-Fetch-Site`）的 Origin/Host 必须是本机监听地址、`LUMIO_PUBLIC_URL` 或 `LUMIO_WEB_ORIGINS` 列出的来源。
-  在 R1-2 完成前，旧的独立 Web 服务（`127.0.0.1:4317`，经同源 `/hub` 代理转发）仍可用，下面的「代理规则」只适用于它。
-- **代理规则**：
-  - 用户路由按 GET/POST 白名单放行；runtime 注册、归档上传与邀请接口不可达。
-  - 只转发 `Authorization`、`Content-Type`、`Accept`。
-  - 校验 Host 与 Origin；经反向代理访问时，需配置 `LUMIO_WEB_ORIGINS`。
-  - 限制请求大小，拒绝跟随重定向，NDJSON 按流转发。
-  - 响应带 `no-store` 与限制性 CSP。
-- **会话**：先用 `lumio login-code --name web` 配对。身份验证后，默认以 sessionStorage 保留当前标签页登录，刷新自动恢复；勾选「记住这台设备」时使用 localStorage，关闭重开仍可恢复。仅保存凭据，按 Web 来源和固定 Hub 来源隔离；代理在转发前核对页面启动时的 Hub 来源，配置改变需刷新。恢复前验证 human 身份。同源脚本可读，受现有 CSP 与安全渲染保护；不等同 HttpOnly 或钥匙串隔离。验证遇到 401/403 或登出时清除对应凭据，任何 401 或登出中止请求、清空模块；临时断线保留凭据并允许重试。存储受限时降级并提示，不缓存业务数据或直接访问 vault。
+- **会话**：先用 `lumio login-code --name web` 配对。身份验证后，默认以 sessionStorage 保留当前标签页登录，刷新自动恢复；勾选「记住这台设备」时使用 localStorage，关闭重开仍可恢复。仅保存凭据，按网页所在的 Hub 来源隔离。恢复前验证 human 身份。同源脚本可读，受现有 CSP 与安全渲染保护；不等同 HttpOnly 或钥匙串隔离。验证遇到 401/403 或登出时清除对应凭据，任何 401 或登出中止请求、清空模块；临时断线保留凭据并允许重试。存储受限时降级并提示，不缓存业务数据或直接访问 vault。
 - **模块**：
   - 概览。
   - Knowledge：只读，支持搜索、类型与链接视图，私有内容需显式开启。
@@ -360,7 +355,7 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
 - 编辑器的插件设置可能含明文密钥：建议在 vault 的 `.gitignore` 里排除（Lumio 不管理编辑器配置，ADR 0022）。
 - **派活的安全底线**（ADR 0019）：
   - 执行器用普通账号运行，不用 root；工作目录不能在笔记库里；能用 agent 自带沙箱的就打开，每一轮记录隔离级别。
-  - 高权限命令只能在一轮之内经 `lumio-runtime sudo` 发起，成为需要批准的操作 `exec.privileged`；人接受后 Hub 签发一次性、10 分钟内有效的
+  - 高权限命令只能在一轮之内经 `lumio runtime sudo` 发起，成为需要批准的操作 `exec.privileged`；人接受后 Hub 签发一次性、10 分钟内有效的
     批准凭据，root 助手程序用 Hub 公钥验证后执行一次（ADR 0020：agent 与执行器同一账号，助手程序不信任调用者）。审批模型（P3）只看命令和人写的要求。
   - AI 汇报写回笔记前检查疑似卡号和常见密钥格式，命中的不写入。
   - 每一轮有最长运行时间（默认 2 小时）；取消时杀掉整个进程组；`gpus` 只暴露指定的 GPU。
@@ -381,7 +376,7 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
 | P0 | `lumio new paper`、`lumio new idea`、`lumio sync`；vault 目录结构；source / post / asset 契约 | ✅ |
 | P0-7 | 迁移真实 vault 到新目录 | ✅ |
 | P1 | 本地查询与 `export bib`；Hub（身份与令牌、查询 API、监听、自动提交、操作与提议框架）；按引用导出与断链检查；skill | ✅（pi 的 skill 验收待补） |
-| P2 | 执行器与派活：执行器登记、可靠的派活核心、三种 agent 适配器、任务笔记里的一问一答、例行任务、`lumio-runtime sudo` 审批的门（P2-1 至 P2-6）；安装、配对与自检（P2-7 至 P2-9、P2-11、P2-12，ADR 0021、0022、0023）；识别 Markdown 链接（P2-10）；负责人即交接开关（P2-13，ADR 0024） | ✅（v0.1.6；剩余人工验收见 `docs/tasks/README.md`） |
+| P2 | 执行器与派活：执行器登记、可靠的派活核心、三种 agent 适配器、任务笔记里的一问一答、例行任务、`lumio runtime sudo` 审批的门（P2-1 至 P2-6）；安装、配对与自检（P2-7 至 P2-9、P2-11、P2-12，ADR 0021、0022、0023）；识别 Markdown 链接（P2-10）；负责人即交接开关（P2-13，ADR 0024） | ✅（v0.1.6；剩余人工验收见 `docs/tasks/README.md`） |
 | P3 | 飞书 Bot（派活、批准、通知）、审批模型、资产到期提醒、多维表格镜像；Chrome 插件入库论文 | |
 | R1 | v0.2 上线：一个程序 `lumio`、Hub 提供 Web 与 PWA、`assistant setup`、旧笔记退役与一条命令切换（ADR 0027，[R1-0](tasks/R1-0-v0.2-release.md)） | 进行中 |
 | P4 | Web GUI 提前按用户要求实现（知识只读、项目任务、执行、助手、审批）；知识写入、Docker / Nix、SDK 与原生手机端后续规划 | Web 工作台已合并（#63、#64），其余未排期 |

@@ -1,3 +1,4 @@
+import { browserOrigins } from "./web.ts";
 import { isIP } from "node:net";
 import { randomUUID } from "node:crypto";
 import { readFile, mkdir, writeFile, rename, rm } from "node:fs/promises";
@@ -31,6 +32,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env) {
   }
   return {
     assistantModel: modelConfiguration(env),
+    webOrigins: browserOrigins(env.LUMIO_WEB_ORIGINS),
     localRuntime: undefined as string | undefined,
     publicUrl,
     autosaveIdle,

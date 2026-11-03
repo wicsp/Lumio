@@ -23,15 +23,10 @@ jobs:
           mkdir -p release
           for platform in darwin-arm64 linux-x64 linux-arm64; do
             mkdir -p "build/$platform"
-            for app in cli hub runtime; do
-              binary=lumio-$app
-              if [ "$app" = cli ]; then binary=lumio; fi
-              bun build --compile --target="bun-$platform" --define "LUMIO_VERSION=\"$VERSION\"" "apps/$app/src/main.ts" --outfile "build/$platform/$binary"
-              if [ "$platform" = darwin-arm64 ]; then
-                codesign --force --sign - "build/$platform/$binary"
-                codesign --verify "build/$platform/$binary"
-              fi
-            done
+            bun run apps/cli/src/build-binary.ts --target "bun-$platform" --version "$VERSION" --outfile "build/$platform/lumio" --release-shims
+            if [ "$platform" = darwin-arm64 ]; then
+              codesign --verify "build/$platform/lumio"
+            fi
             tar -czf "release/lumio-$platform.tar.gz" -C "build/$platform" lumio lumio-hub lumio-runtime
           done
           (cd release && shasum -a 256 lumio-*.tar.gz > SHA256SUMS)

@@ -16,7 +16,7 @@ lumio hub switch --retire-legacy
 lumio hub migrate retire --vault <知识目录>
 ```
 
-R1-2 合并前上述命令用 `lumio-hub` 代替 `lumio hub`。退役要求独占 Hub 状态目录；有 queued/assigned/running/waiting_for_human 的旧笔记 Job 时拒绝并列出。
+退役要求独占 Hub 状态目录；有 queued/assigned/running/waiting_for_human 的旧笔记 Job 时拒绝并列出。
 无需暂停笔记中的 Routine 或关闭派活开关：退役后它们全部失效。远程执行器仍需各自在停止后 prepare-migration，清除离线派生计划。
 备份默认保存到状态目录 `backups/retire-<随机编号>`，命令输出回执（kind、时间、备份路径、旧笔记数量、路径与路径摘要）。
 不导入任何任务、项目或例行任务，不修改或移动旧文件；旧笔记仍可搜索、阅读。退役与 apply 只能二选一。
@@ -27,11 +27,11 @@ R1-2 合并前上述命令用 `lumio-hub` 代替 `lumio hub`。退役要求独�
 1. 确认使用同一版本的 Hub、CLI、Runtime。Job 协议保持 2；新 Hub 可以先在旧笔记模式运行。
 2. 保留可运行的旧二进制、Hub/Runtime 配置和知识目录的完整备份。知识目录、安装配置不在业务备份中。
 3. 暂停旧 Routine，完成 Task 当前轮次；把待派活的旧任务交回 human 或暂停。检查 Job、审批结果和文件都已交回。
-4. 停止每台 Runtime 服务，再在对应机器运行 `lumio-runtime prepare-migration --state-dir <执行器状态目录>`。
+4. 停止每台 Runtime 服务，再在对应机器运行 `lumio runtime prepare-migration --state-dir <执行器状态目录>`。
    命令会拒绝执行中、排队中、待交回结果/审批报告/文件的状态，只清空派生计划缓存，保留历史和原始日志。
    运行中的执行器持有独占租约，不能在它仍运行时清缓存。离线机器尚未准备好时不要继续 apply。
-5. 停止 Hub，并暂时停止外部编辑工作笔记。执行 `lumio-hub backup business <新备份目录>`，
-   再用 `lumio-hub backup verify <备份目录>` 验证数据库和它引用的文件。
+5. 停止 Hub，并暂时停止外部编辑工作笔记。执行 `lumio hub backup business <新备份目录>`，
+   再用 `lumio hub backup verify <备份目录>` 验证数据库和它引用的文件。
    原来的 `backup <文件>` 只备份数据库，不能替代这里的完整业务备份。
 
 上述命令按当前配置选择 Hub 状态目录；需要时显式设置 `LUMIO_STATE_DIR`。不会自动停止任何服务。
@@ -41,7 +41,7 @@ R1-2 合并前上述命令用 `lumio-hub` 代替 `lumio hub`。退役要求独�
 生成计划：
 
 ```text
-lumio-hub migrate plan --vault <知识目录> --output <新的清单.json>
+lumio hub migrate plan --vault <知识目录> --output <新的清单.json>
 ```
 
 清单版本为 1，列出旧 Project/Task/Routine 的 ID、类型、标题、路径与原始字节摘要；problems 非空不能 apply。
@@ -51,7 +51,7 @@ dry-run 不修改笔记或业务对象，输出文件也不覆盖。
 确认所有 Runtime 已完成上述准备后，运行：
 
 ```text
-lumio-hub migrate apply --vault <知识目录> --plan <清单.json> --backup <完整备份目录> --runtimes-prepared
+lumio hub migrate apply --vault <知识目录> --plan <清单.json> --backup <完整备份目录> --runtimes-prepared
 ```
 
 `--runtimes-prepared` 是人类对所有设备准备完成的明确确认，Hub 无法证明离线机器的队列已经交回。
@@ -70,7 +70,7 @@ Task 的负责人保持原值，显式 continue 才会创建 Job，Job 成功不
 ## 保留下来的内容
 
 - ID、原始 Markdown 字节（含未知字段、换行、正文和原有链接）存入数据库来源档案，原文件不重写。
-- `lumio-hub migrate sources` 导出路径到业务 ID 的兼容映射；`migrate source <ID> --output <新文件>` 导出原始字节。
+- `lumio hub migrate sources` 导出路径到业务 ID 的兼容映射；`migrate source <ID> --output <新文件>` 导出原始字节。
   既有文件链接继续指向原文件，它是来源视图，不能代表后续数据库状态。
 - Job、结果、会话和引擎资料保留。Work 历史关联使用 Job 中实际保存的 prompt/argv；修订 1 是迁移基准，不伪称历史笔记修订。
   轮次即使缺号，下一轮仍取最高轮次加一。旧 turn 只保留作来源，不再是控制开关。
@@ -83,6 +83,6 @@ Task 的负责人保持原值，显式 continue 才会创建 Job，Job 成功不
 
 停止新版 Hub 与所有 Runtime。先导出并核对切换后新增的任务、对话、结果和文件；回退到旧备份会失去该备份之后的数据，不能用旧程序直接打开新库。
 
-运行 `lumio-hub restore business <迁移前备份> <新状态目录>`，验证恢复内容；恢复配套的知识目录和配置快照，
+运行 `lumio hub restore business <迁移前备份> <新状态目录>`，验证恢复内容；恢复配套的知识目录和配置快照，
 再把旧二进制指向恢复目录并启动。恢复命令只写新目录，不替换或删除原状态；具体服务配置切换由人类执行。
 这不是自动降级，不能只换回旧程序或只恢复一份数据库而忽略配套文件。

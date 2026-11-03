@@ -13,10 +13,10 @@ async function fixture(platform = "darwin") {
   const home = await mkdtemp(join(tmpdir(), "lumio-setup-")); homes.push(home);
   const commands: string[][] = [], logs: string[] = [];
   const options: SetupOptions = {
-    home, platform, host: "My Mac.local", binary: `${home}/bin/lumio-hub`, yes: true,
+    home, platform, host: "My Mac.local", binary: `${home}/bin/lumio`, yes: true,
     env: { HOME: home, USER: "synthetic", PATH: `${home}/agents:/usr/bin:/bin` }, uid: 123,
     find: (name) => name === "git" ? "/opt/git/bin/git" : null,
-    run: async (argv) => { commands.push(argv); return { code: 0, stdout: argv[0]?.endsWith("lumio-runtime") ? "已连上 Hub；检测到：codex 0.163.0" : "Linger=yes", stderr: "" }; },
+    run: async (argv) => { commands.push(argv); return { code: 0, stdout: argv.includes("install-service") ? "已连上 Hub；检测到：codex 0.163.0" : "Linger=yes", stderr: "" }; },
     fetch: (async () => Response.json({ ok: true, version: "0.0.0-dev" })), log: (line) => logs.push(line),
   };
   return { home, options, commands, logs, config: async () => CliConfig.parse(JSON.parse(await readFile(join(home, ".config/lumio/config.json"), "utf8"))) };
@@ -29,10 +29,10 @@ test("first setup creates default vault, private config, launchd services and lo
   for (const path of [".config/lumio/config.json", ".config/lumio/hub.env", ".config/lumio-runtime/runtime.env"]) expect((await stat(join(f.home, path))).mode & 0o777).toBe(0o600);
   for (const path of [".config/lumio", ".local/share/lumio", ".config/lumio-runtime"]) expect((await stat(join(f.home, path))).mode & 0o777).toBe(0o700);
   const plist = await readFile(join(f.home, "Library/LaunchAgents/io.lumio.hub.plist"), "utf8");
-  for (const value of [f.home + "/bin/lumio-hub", config.vault!, "127.0.0.1:7420", "/opt/git/bin", "hub.err.log"]) expect(plist).toContain(value);
-  expect(plist).not.toContain("~"); expect(plist).not.toContain("LUMIO_PUBLIC_URL");
+  for (const value of [f.home + "/bin/lumio", config.vault!, "127.0.0.1:7420", "/opt/git/bin", "hub.err.log"]) expect(plist).toContain(value);
+  expect(plist).toContain("<string>hub</string><string>serve</string>"); expect(plist).not.toContain("~"); expect(plist).not.toContain("LUMIO_PUBLIC_URL");
   expect(f.commands).toContainEqual(["plutil", "-lint", join(f.home, "Library/LaunchAgents/io.lumio.hub.plist")]);
-  expect(f.commands).toContainEqual([f.home + "/bin/lumio-runtime", "install-service"]);
+  expect(f.commands).toContainEqual([f.home + "/bin/lumio", "runtime", "install-service"]);
   const runtimeFile = join(f.home, ".config/lumio-runtime/runtime.env");
   const oldRuntime = parseEnvironment(await readFile(runtimeFile, "utf8"));
   expect(oldRuntime.PATH).toBe(f.options.env!.PATH!); expect(oldRuntime.LUMIO_RUNTIME_NAME).toBe("my-mac.local");
@@ -61,7 +61,7 @@ test("explicit vault must exist; existing configuration supplies the vault on su
 test("server setup writes Linux units and HTTPS proxy guidance; HTTP warns, no systemd falls back to manual commands", async () => {
   const f = await fixture("linux");
   await setup({ ...f.options, server: true, yes: false, ask: async (question, fallback) => question.startsWith("对外") ? "http://hub.example.org" : fallback });
-  expect(await readFile(join(f.home, ".config/systemd/user/lumio-hub.service"), "utf8")).toContain(`ExecStart="${f.home}/bin/lumio-hub"`);
+  expect(await readFile(join(f.home, ".config/systemd/user/lumio-hub.service"), "utf8")).toContain(`ExecStart="${f.home}/bin/lumio" hub serve`);
   const env = parseEnvironment(await readFile(join(f.home, ".config/lumio/hub.env"), "utf8"));
   expect(env.LUMIO_HUB_LISTEN).toBe("0.0.0.0:7420"); expect(env.LUMIO_PUBLIC_URL).toBe("http://hub.example.org");
   expect(f.logs.join("\n")).toContain("明文"); expect(f.logs.join("\n")).toContain("reverse_proxy 127.0.0.1:7420");
@@ -117,7 +117,7 @@ test("setup connects a real synthetic Hub and local runtime through HTTP without
           const env = parseEnvironment(await readFile(join(f.home, ".config/lumio/hub.env"), "utf8"));
           hub = await startHub(readConfig(env), { log: () => {} });
         }
-        if (argv[0]?.endsWith("lumio-runtime")) {
+        if (argv.includes("install-service")) {
           child = Bun.spawn([process.execPath, new URL("../../runtime/src/main.ts", import.meta.url).pathname], {
             env: { HOME: f.home, PATH: join(f.home, "no-agents") }, stdout: "pipe", stderr: "pipe",
           });

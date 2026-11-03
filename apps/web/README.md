@@ -4,18 +4,17 @@
 
 ## 试用
 
-不想动已安装的 Hub 时，在仓库根目录运行 `bun run demo:web`：会启动一个用合成数据的临时 Hub（端口 7499）和 Web（端口 4399），终端里打印访问地址和令牌。助手使用本地假模型。Ctrl+C 退出并删除临时数据。
+不想动已安装的 Hub 时，在仓库根目录运行 `bun run demo:web`：会启动一个用合成数据的临时 Hub（网页与 API 共用端口 7499），终端里打印访问地址和令牌。助手使用本地假模型。Ctrl+C 退出并删除临时数据。
 
 ## 启动
 
-在仓库根目录安装依赖（Bun 1.3.x），确认 Hub 已运行，然后：
+安装后打开 Hub 地址（单机默认为 `http://127.0.0.1:7420`）。源码开发在仓库根目录运行（Bun 1.3.x）：
 
 ```sh
-cd apps/web
-bun start
+bun apps/cli/src/main.ts hub serve
 ```
 
-打开 `http://127.0.0.1:4317`。在已配置的 CLI 上运行 `lumio login-code --name web`，输入一次性配对码；也可输入已有 human 令牌。默认刷新当前标签页会自动恢复登录；勾选「记住这台设备」后，在同一个浏览器中关闭重开也能恢复。只在自己的设备上勾选。配对码要求 Hub 已配置对外地址；未配置时 CLI 会给出设置说明，已有 human 令牌仍可直接连接。
+网页由 Hub 提供，没有单独的 Web 服务或端口。在已配置的 CLI 上运行 `lumio login-code --name web`，输入一次性配对码；也可输入已有 human 令牌。默认刷新当前标签页会自动恢复登录；勾选「记住这台设备」后，在同一个浏览器中关闭重开也能恢复。只在自己的设备上勾选。配对码要求 Hub 已配置对外地址；未配置时 CLI 会给出设置说明，已有 human 令牌仍可直接连接。
 
 默认 Hub 为 `http://127.0.0.1:7420`。使用包含 v2 Work/Execution/Assistant API 的 Hub；知识旧笔记与数据库工作是不同视图，旧任务需按[迁移说明](../../docs/migration-v2.md)显式切换。Web 不自动迁移或升级已有服务。
 
@@ -32,7 +31,7 @@ bun start
 
 ## 由 Hub 提供与 App（ADR 0027）
 
-`src/entry.ts` 是给 `apps/cli` 用的入口：`buildWebAssets()` 构建浏览器资源，`webFiles(assets, { apiBase: "" })` 返回页面、JS/CSS、PWA 清单与图标的文件表，`WEB_CSP` 是页面的 CSP。R1-2 起网页由 Hub 在自己的地址上提供，浏览器与 Hub 同源；下面的独立服务与 `/hub` 代理届时删除。
+`src/entry.ts` 是给 `apps/cli` 用的入口：`buildWebAssets()` 构建浏览器资源，`webFiles(assets, { apiBase: "" })` 返回页面、JS/CSS、PWA 清单与图标的文件表，`WEB_CSP` 是页面的 CSP。网页由 Hub 在自己的地址上提供，浏览器与 Hub 同源，直接请求 `/v1` 和 `/v2`。发布构建把 JS/CSS 以文本方式嵌入 `lumio`；源码运行时即时构建。
 
 页面带 Web App Manifest 与图标：Safari「文件 → 添加到程序坞」、Chrome「安装」、iPad/iPhone「添加到主屏幕」即可当 App 用。不注册 Service Worker，不缓存业务数据。
 
@@ -40,19 +39,22 @@ bun start
 
 | 环境变量 | 默认值 | 用途 |
 |---|---|---|
-| `LUMIO_WEB_LISTEN` | `127.0.0.1:4317` | 本地监听地址 |
-| `LUMIO_WEB_HUB_URL` | `http://127.0.0.1:7420` | 固定 Hub 源地址，不能包含路径、凭据、查询或锚点 |
-| `LUMIO_WEB_ORIGINS` | 空 | 逗号分隔的额外浏览器来源，用于反向代理 |
+| `LUMIO_HUB_LISTEN` | `127.0.0.1:7420` | Hub 与网页的监听地址 |
+| `LUMIO_PUBLIC_URL` | 空 | Hub 的对外地址（HTTPS 由部署者提供） |
+| `LUMIO_WEB_ORIGINS` | 空 | Hub 额外允许的浏览器来源，逗号分隔 |
 
-例如已有 HTTPS 反向代理把 `https://lumio.example.com` 转发到本地 Web 服务，可设置 `LUMIO_WEB_ORIGINS=https://lumio.example.com`。Web 本身不提供 HTTPS 或安装后台服务。
+反向代理直接转发到 Hub，保留 Host；配置 `LUMIO_PUBLIC_URL=https://lumio.example.com` 后同一地址即可访问网页和 API。
+额外来源只接受无路径、凭据、查询或片段的 HTTP(S) 来源。Hub 不提供 HTTPS。
 
 ## 边界与实现
 
 原生 TypeScript、DOM、CSS，Bun 构建并提供静态资源；没有新增第三方依赖。浏览器与 Bun 服务端分开检查类型，避免 DOM 类型影响后端。
 
-同源 `/hub` 只允许明确列出的 GET/POST 用户接口。固定上游、检查 Host/Origin、限制请求体 1 MiB 和查询串、拒绝重定向；全程 130 秒时限包含请求和响应流，断开会取消上游读取。不转发 cookie、forwarded 类头或上游 Set-Cookie。业务响应禁止缓存，页面设置 CSP。它不是可指定任意目标的代理。
+Hub 为页面和资源设置限制性 CSP、DENY、nosniff 和 no-referrer，API 响应禁止缓存。
+浏览器请求（带 Origin 或 Sec-Fetch-Site）的 Host 与 Origin（若有）须匹配监听地址、对外地址或额外允许来源。
+接口继续按原有令牌鉴权、授权和审计；CLI/执行器请求没有浏览器头时不受来源限制。
 
-登录凭据默认保存在当前标签页的 sessionStorage，可选保存在当前浏览器同源的 localStorage；按固定 Hub 来源隔离，上游配置改变时阻止旧页面转发并提示刷新。恢复时先验证身份，退出或验证收到 401/403 清除对应凭据并清空页面；临时断线保留凭据并支持重试。刚配对但尚未验证的令牌只在连接页内存保留，可重试验证，不重复消耗配对码。已记住登录的其他标签页会响应退出/账号变化。存储被禁用时明确提示降级。令牌不写入 URL 或日志，业务内容不缓存在浏览器；浏览器凭据对同源脚本可读，保护依赖既有 CSP、安全渲染与设备访问限制。Markdown 转义原始 HTML，只允许安全链接，不加载远程图片；过期请求不能恢复已关闭的私密内容。
+登录凭据默认保存在当前标签页的 sessionStorage，可选保存在当前浏览器同源的 localStorage；按网页所在的 Hub 来源隔离。恢复时先验证身份，退出或验证收到 401/403 清除对应凭据并清空页面；临时断线保留凭据并支持重试。刚配对但尚未验证的令牌只在连接页内存保留，可重试验证，不重复消耗配对码。已记住登录的其他标签页会响应退出/账号变化。存储被禁用时明确提示降级。令牌不写入 URL 或日志，业务内容不缓存在浏览器；浏览器凭据对同源脚本可读，保护依赖既有 CSP、安全渲染与设备访问限制。Markdown 转义原始 HTML，只允许安全链接，不加载远程图片；过期请求不能恢复已关闭的私密内容。
 
 目前知识只读，任务关系和资料引用可查看；不提供现有 API 以外的编辑能力。停止助手接收不承诺撤销服务端已经进行的工作，界面会核查持久化记录。
 
@@ -60,7 +62,6 @@ bun start
 
 ```sh
 # 在 apps/web 下
-bun dev                 # 文件变化后重新启动
 bun run build           # 输出浏览器 JS/CSS 到 dist
 bun run typecheck       # 服务端与浏览器类型检查
 bun test test           # Web 测试
@@ -69,6 +70,6 @@ bun test test           # Web 测试
 bun run check
 ```
 
-测试覆盖配置、代理白名单与流生命周期、契约命令、Markdown 安全、文件校验和会话清理。浏览器验收用临时合成 Hub、知识库、模型和执行器，不读取真实 vault 或调用真实 AI。完整证据见 [P4-1](../../docs/tasks/P4-1-web-workbench.md)。
+测试覆盖静态资源与 PWA 文件、契约命令、Markdown 安全、文件校验和会话清理。浏览器验收用临时合成 Hub、知识库、模型和执行器，不读取真实 vault 或调用真实 AI。完整证据见 [P4-1](../../docs/tasks/P4-1-web-workbench.md)。
 
 设计依据：[ADR 0026](../../docs/adr/0026-web-workbench.md)、[现行设计](../../docs/DESIGN.md)。

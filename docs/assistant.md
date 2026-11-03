@@ -6,7 +6,7 @@
 ## 配置模型
 
 Hub 支持兼容 Chat Completions 的 HTTP 服务；不预设供应商、服务地址或模型。
-推荐用命令配置（R1-2 合并前使用 `lumio-hub assistant …`）：
+推荐用命令配置：
 
 ```sh
 lumio hub assistant setup
