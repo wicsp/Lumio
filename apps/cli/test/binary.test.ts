@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink } from "node:fs/promises";
+import { chmod, copyFile, cp, lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildBinary, writeReleaseShims } from "../src/build-binary.ts";
@@ -113,4 +113,69 @@ test("release archive passes v0.1.6 archive, regular-file and executable-version
   }
   expect(target).toBe("9.8.7");
   expect(await readFile(join(extracted, "lumio-hub"), "utf8")).toContain('exec "$(dirname "$0")/lumio" hub "$@"');
+});
+
+
+test("both compiled runtime upgrade invocations share the terminal flow and skip current releases", async () => {
+  const bin = join(root, ".local/bin"); await mkdir(bin, { recursive: true });
+  await symlink(binary, join(bin, "lumio"));
+  for (const role of ["hub", "runtime"]) await symlink("lumio", join(bin, `lumio-${role}`));
+  const requests: string[] = [];
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(request) {
+    requests.push(new URL(request.url).pathname);
+    return new Response(null, { status: 302, headers: { Location: "/tag/v9.8.7" } });
+  } });
+  try {
+    for (const [name, args] of [["lumio", ["runtime", "upgrade"]], ["lumio-runtime", ["upgrade"]]] as const) {
+      const child = Bun.spawn([join(root, name), ...args], { env: { HOME: root, PATH: "", LUMIO_RELEASE_BASE_URL: server.url.href.replace(/\/$/, "") }, stdout: "pipe", stderr: "pipe" });
+      const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+      expect(code).toBe(0); expect(out.trim()).toBe("已是最新版本 9.8.7"); expect(err).toBe("");
+    }
+    expect(requests).toEqual(["/latest", "/latest"]);
+    const child = Bun.spawn([binary, "doctor"], { env: { HOME: root, PATH: "", FORCE_COLOR: "1" }, stdout: "pipe", stderr: "pipe" });
+    const [code, out] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    expect(code).toBe(1); expect(out).toContain("\x1b[31m✗\x1b[0m"); expect(out).toMatch(/\d+ 项通过，\d+ 项提醒，\d+ 项失败/);
+  } finally { await server.stop(true); }
+});
+
+
+test("compiled switch returns nonzero for doctor failures after completing retirement, without recovery instructions", async () => {
+  const { Database } = await import("bun:sqlite");
+  const home = join(root, "switch-home"), state = join(home, "state"), runtimeState = join(home, "runtime"), tools = join(home, "tools"), vault = join(home, "vault");
+  for (const directory of [tools, runtimeState, join(home, ".config/lumio"), join(home, ".config/lumio-runtime"), join(home, "Library/LaunchAgents"), join(home, ".config/systemd/user")]) await mkdir(directory, { recursive: true });
+  await cp(new URL("../../../fixtures/query-vault", import.meta.url), vault, { recursive: true });
+  for (const name of ["launchctl", "systemctl"]) await writeFile(join(tools, name), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  for (const role of ["hub", "runtime"]) {
+    await writeFile(join(home, `Library/LaunchAgents/io.lumio.${role}.plist`), "synthetic service");
+    await writeFile(join(home, `.config/systemd/user/lumio-${role}.service`), "synthetic service");
+  }
+  const db = new Database(join(runtimeState, "runtime.sqlite"));
+  db.exec("CREATE TABLE queue(state TEXT); CREATE TABLE outbox(id TEXT); CREATE TABLE routines(id TEXT)"); db.close();
+  const runtime = { actor: "act_00000000000000000000000001", registration: { protocol_version: 2, name: "synthetic-runtime", engines: [], tags: [], max_concurrent: 1 }, last_seen: "2026-11-03T00:00:00Z", online: true };
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(request) {
+    const path = new URL(request.url).pathname;
+    if (path === "/health") return Response.json({ ok: true, version: "9.8.7" });
+    if (path === "/") return new Response('<script src="/assets/app.js"></script>', { headers: { "Content-Type": "text/html" } });
+    if (path === "/assets/app.js") return new Response("synthetic();", { headers: { "Content-Type": "text/javascript" } });
+    return Response.json(path === "/v1/runtimes" ? [runtime] : path === "/v1/status" ? { watching: true, issues: [] } : []);
+  } });
+  const env = { HOME: home, PATH: tools, LUMIO_STATE_DIR: state };
+  const invoke = async (args: string[]) => {
+    const child = Bun.spawn([binary, "hub", ...args], { env, stdout: "pipe", stderr: "pipe" });
+    const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    return { code, out, err };
+  };
+  try {
+    await writeFile(join(home, ".config/lumio/config.json"), JSON.stringify({ hub_url: server.url.href, token: "synthetic" }), { mode: 0o600 });
+    await writeFile(join(home, ".config/lumio/hub.env"), `LUMIO_STATE_DIR="${state}"\nLUMIO_VAULT="${vault}"\n`);
+    await writeFile(join(home, ".config/lumio-runtime/runtime.env"), `LUMIO_RUNTIME_STATE_DIR="${runtimeState}"\nLUMIO_RUNTIME_NAME="synthetic-runtime"\n`);
+    expect((await invoke(["actor", "create", "synthetic-owner", "--role", "human"])).code).toBe(0);
+    const result = await invoke(["switch", "--retire-legacy"]);
+    expect(result.code).toBe(1); expect(result.out).toContain("! 助手模型：未配置");
+    expect(result.out).toContain("✗ synthetic-runtime agent：未检测到 agent");
+    expect(result.out).toContain("切换已完成；以下检查未通过："); expect(result.out).toMatch(/\d+ 项通过，\d+ 项提醒，\d+ 项失败/);
+    expect(result.out + result.err).not.toMatch(/切换已停止|恢复：/);
+    const retired = new Database(join(state, "hub.sqlite"), { readonly: true });
+    try { expect(retired.query("SELECT kind FROM migration_receipts").get()).toEqual({ kind: "retire" }); } finally { retired.close(); }
+  } finally { await server.stop(true); }
 });

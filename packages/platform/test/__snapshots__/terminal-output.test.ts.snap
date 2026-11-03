@@ -1,0 +1,16 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`download progress snapshot (tty=true) 1`] = `
+[
+  ""\\r下载 Lumio 0.2.1（darwin-arm64）  [░░░░░░░░░░░░░░░░░░░░]  0%  0.0 B / 2.0 KB  0.0 B/s"",
+  ""\\r下载 Lumio 0.2.1（darwin-arm64）  [██████████░░░░░░░░░░]  50%  1.0 KB / 2.0 KB  1.0 KB/s"",
+  ""\\r下载 Lumio 0.2.1（darwin-arm64）  [████████████████████]  100%  2.0 KB / 2.0 KB  2.0 KB/s\\n"",
+]
+`;
+
+exports[`download progress snapshot (tty=false) 1`] = `
+[
+  ""下载 Lumio 0.2.1（darwin-arm64）  0%  0.0 B / 2.0 KB  0.0 B/s\\n"",
+  ""下载 Lumio 0.2.1（darwin-arm64）  100%  2.0 KB / 2.0 KB  2.0 KB/s\\n"",
+]
+`;

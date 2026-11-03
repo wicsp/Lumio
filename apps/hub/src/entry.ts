@@ -16,7 +16,7 @@ export async function run(args: string[], options: Parameters<typeof startHub>[1
       const { "public-url": publicUrl, ...rest } = values;
       await setup({ ...rest, ...(publicUrl !== undefined ? { publicUrl } : {}) });
     }
-    else if (args.length && !(args.length === 1 && args[0] === "serve")) await runManagement(args);
+    else if (args.length && !(args.length === 1 && args[0] === "serve")) process.exitCode = await runManagement(args) ?? 0;
     else {
       const hub = await startHub(readConfig(), options);
       console.log(`Lumio Hub ${version}：http://${(hub.server.hostname ?? "127.0.0.1").includes(":") ? `[${hub.server.hostname}]` : hub.server.hostname}:${hub.server.port}`);

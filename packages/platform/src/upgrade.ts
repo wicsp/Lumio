@@ -1,14 +1,15 @@
-import { downloadRelease, DownloadError, type DownloadOptions } from "./download.ts";
+import { downloadRelease, DownloadError } from "./download.ts";
 import { createHash } from "node:crypto";
 import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readlink, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { diagnosticIO, environment, httpURL, localAddress, serviceCommand, type DiagnosticOptions } from "./diagnostics.ts";
+import { createProgressLine } from "./terminal.ts";
 import { releaseShim } from "./release-shims.ts";
 
 export class UpgradeError extends Error { readonly code = "UPGRADE_FAILED"; }
 export interface UpgradeOptions extends DiagnosticOptions {
-  tty?: boolean; progress?: DownloadOptions["progress"];
+  tty?: boolean; progress?: (chunk: string) => void; columns?: () => number;
   arch?: string; version?: string; runtimeOnly?: boolean; releaseBase?: string;
   log?: (line: string) => void; now?: () => number; sleep?: (ms: number) => Promise<void>;
 }
@@ -33,36 +34,11 @@ export async function upgrade(options: UpgradeOptions = {}): Promise<void> {
   if (!platform) throw new UpgradeError("不支持的平台（支持 macOS arm64、Linux x64/arm64）");
   if (options.version && !/^v\d+\.\d+\.\d+(?:[.-][a-zA-Z0-9.-]+)?$/.test(options.version)) throw new UpgradeError("版本应为 vX.Y.Z");
   const base = options.releaseBase ?? io.env.LUMIO_RELEASE_BASE_URL ?? "https://github.com/wicsp/Lumio/releases"; httpURL(base);
-  const download = `${base.replace(/\/+$/, "")}/${options.version ? `download/${options.version}` : "latest/download"}`;
   const archive = `lumio-${platform}.tar.gz`, bin = join(io.home, ".local/bin"), binary = join(bin, "lumio");
   const temp = await mkdtemp(join(tmpdir(), "lumio-upgrade-")), stages: string[] = [];
   const command = async (argv: string[]) => { const r = await io.run(argv); if (r.code) throw new UpgradeError("升级命令失败；请检查程序权限和后台服务日志；程序若已更新，可修复服务后重试 upgrade"); return r.stdout; };
-  try {
-    log(`下载 Lumio ${options.version ?? "最新版本"}（${platform}）…`);
-    const bytes = await downloadRelease(`${download}/${archive}`, { fetch: options.fetch ?? globalThis.fetch, tty: options.tty, progress: options.progress });
-    const sums = (await downloadRelease(`${download}/SHA256SUMS`, { fetch: options.fetch ?? globalThis.fetch, tty: false })).toString("utf8");
-    const matches = sums.split(/\r?\n/).map(line => line.trim().split(/\s+/)).filter(parts => parts[1] === archive);
-    if (matches.length !== 1 || matches[0]!.length !== 2 || !/^[0-9a-fA-F]{64}$/.test(matches[0]![0]!)) throw new UpgradeError("SHA256SUMS 缺少或重复校验记录，未替换程序");
-    if (createHash("sha256").update(bytes).digest("hex") !== matches[0]![0]!.toLowerCase()) throw new UpgradeError("SHA256 校验失败，未替换任何程序");
-    const tar = join(temp, archive), extracted = join(temp, "extracted");
-    await writeFile(tar, bytes, { mode: 0o600 }); await mkdir(extracted, { mode: 0o700 });
-    const entries = (await command(["tar", "-tzf", tar])).trim().split("\n"), types = (await command(["tar", "-tvzf", tar])).trim().split("\n");
-    if (entries.length !== 3 || binaries.some(name => entries.filter(entry => entry === name).length !== 1)
-      || types.length !== 3 || types.some(line => !line.startsWith("-"))) throw new UpgradeError("压缩包必须包含 lumio 与两个普通转发垫片，未替换程序");
-    await command(["tar", "-xzf", tar, "-C", extracted]);
-    for (const name of binaries) {
-      const info = await lstat(join(extracted, name));
-      if (!info.isFile() || info.nlink !== 1) throw new UpgradeError("压缩包必须包含三个普通文件");
-    }
-    for (const role of ["hub", "runtime"] as const) {
-      const bytes = await readFile(join(extracted, `lumio-${role}`));
-      if (!bytes.equals(Buffer.from(releaseShim(role)))) throw new UpgradeError("发布包转发垫片内容不匹配，未替换程序");
-    }
-    const source = join(extracted, "lumio");
-    await chmod(source, 0o755);
-    const target = releaseVersion.exec((await command([source, "--version"])).trim())?.[1];
-    if (!target || (options.version && target !== options.version.slice(1))) throw new UpgradeError("下载程序的版本不一致，未替换程序");
-    let current = true;
+  const installation = async (target: string | undefined) => {
+    let current = Boolean(target);
     for (const name of binaries) {
       try {
         const r = await io.run([join(bin, name), "--version"]);
@@ -84,6 +60,52 @@ export async function upgrade(options: UpgradeOptions = {}): Promise<void> {
         services.push({ role, path, old, content, mode: io.platform === "darwin" ? 0o600 : 0o644 });
       } catch (cause) { if (cause instanceof UpgradeError) throw cause; if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause; }
     }
+    return { current, services, localHub, hubUrl };
+  };
+  try {
+    let requested = options.version;
+    if (!requested) {
+      try {
+        const response = await io.fetch(`${base.replace(/\/+$/, "")}/latest`, { redirect: "manual" });
+        const location = response.headers.get("location");
+        if (response.status >= 300 && response.status < 400 && location) {
+          const match = /\/tag\/(v\d+\.\d+\.\d+(?:[.-][a-zA-Z0-9.-]+)?)$/.exec(new URL(location, base).pathname);
+          if (match) requested = match[1];
+        }
+        await response.body?.cancel();
+      } catch { /* Mirrors without a latest redirect retain the verified-download fallback. */ }
+    }
+    const initial = requested ? await installation(requested.slice(1)) : undefined;
+    if (initial?.current && initial.services.every(service => service.old === service.content)) {
+      log(`已是${options.version ? "指定" : "最新"}版本 ${requested!.slice(1)}`); return;
+    }
+    const download = `${base.replace(/\/+$/, "")}/${requested ? `download/${requested}` : "latest/download"}`;
+    const onProgress = createProgressLine({ label: `下载 Lumio ${requested?.slice(1) ?? "最新版本"}（${platform}）`,
+      tty: options.tty ?? false, columns: options.columns, write: options.progress ?? (() => {}) });
+    const bytes = await downloadRelease(`${download}/${archive}`, { fetch: options.fetch ?? globalThis.fetch, onProgress });
+    const sums = (await downloadRelease(`${download}/SHA256SUMS`, { fetch: options.fetch ?? globalThis.fetch, tty: false })).toString("utf8");
+    const matches = sums.split(/\r?\n/).map(line => line.trim().split(/\s+/)).filter(parts => parts[1] === archive);
+    if (matches.length !== 1 || matches[0]!.length !== 2 || !/^[0-9a-fA-F]{64}$/.test(matches[0]![0]!)) throw new UpgradeError("SHA256SUMS 缺少或重复校验记录，未替换程序");
+    if (createHash("sha256").update(bytes).digest("hex") !== matches[0]![0]!.toLowerCase()) throw new UpgradeError("SHA256 校验失败，未替换任何程序");
+    const tar = join(temp, archive), extracted = join(temp, "extracted");
+    await writeFile(tar, bytes, { mode: 0o600 }); await mkdir(extracted, { mode: 0o700 });
+    const entries = (await command(["tar", "-tzf", tar])).trim().split("\n"), types = (await command(["tar", "-tvzf", tar])).trim().split("\n");
+    if (entries.length !== 3 || binaries.some(name => entries.filter(entry => entry === name).length !== 1)
+      || types.length !== 3 || types.some(line => !line.startsWith("-"))) throw new UpgradeError("压缩包必须包含 lumio 与两个普通转发垫片，未替换程序");
+    await command(["tar", "-xzf", tar, "-C", extracted]);
+    for (const name of binaries) {
+      const info = await lstat(join(extracted, name));
+      if (!info.isFile() || info.nlink !== 1) throw new UpgradeError("压缩包必须包含三个普通文件");
+    }
+    for (const role of ["hub", "runtime"] as const) {
+      const bytes = await readFile(join(extracted, `lumio-${role}`));
+      if (!bytes.equals(Buffer.from(releaseShim(role)))) throw new UpgradeError("发布包转发垫片内容不匹配，未替换程序");
+    }
+    const source = join(extracted, "lumio");
+    await chmod(source, 0o755);
+    const target = releaseVersion.exec((await command([source, "--version"])).trim())?.[1];
+    if (!target || (requested && target !== requested.slice(1))) throw new UpgradeError("下载程序的版本不一致，未替换程序");
+    const { current, services, localHub, hubUrl } = initial ?? await installation(target);
     if (current && services.every(service => service.old === service.content)) { log(`已是${options.version ? "指定" : "最新"}版本 ${target}`); return; }
     await mkdir(bin, { recursive: true });
     const changes: { path: string; stage: string; restore?: string; link?: string; mode?: number }[] = [];

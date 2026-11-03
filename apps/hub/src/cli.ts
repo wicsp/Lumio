@@ -11,7 +11,7 @@ import { HubStore } from "./store.ts";
 import { backupBusiness, restoreBusiness, verifyBusinessBackup, StorageError } from "@lumio/storage";
 import { runMigration } from "./migrate.ts";
 
-export async function runManagement(args: string[], log: (line: string) => void = console.log): Promise<void> {
+export async function runManagement(args: string[], log: (line: string) => void = console.log): Promise<number | void> {
   if (args[0] === "switch") return switchLegacy(args.slice(1), { log });
   if (args[0] === "assistant") return assistantConfiguration(args.slice(1), { log });
   if (args[0] === "migrate") return runMigration(args.slice(1), log);

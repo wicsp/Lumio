@@ -1,7 +1,12 @@
+import type { DownloadProgress } from "./terminal.ts";
+
 // Shared release transport; callers own terminal detection and display.
 export class DownloadError extends Error { readonly code = "DOWNLOAD_FAILED"; }
 export interface DownloadOptions {
-  fetch?: typeof globalThis.fetch; tty?: boolean; progress?: (line: string) => void;
+  fetch?: typeof globalThis.fetch; tty?: boolean;
+  /** Legacy source transport callback. New displays consume onProgress. */
+  progress?: (line: string) => void;
+  onProgress?: (progress: DownloadProgress) => void;
   connectMs?: number; windowMs?: number; now?: () => number;
 }
 export async function downloadRelease(url: string, options: DownloadOptions = {}): Promise<Buffer> {
@@ -18,13 +23,17 @@ export async function downloadRelease(url: string, options: DownloadOptions = {}
     controller.abort(); void reader?.cancel().catch(() => {});
   };
   const progress = options.progress ?? (() => {});
+  let started: number | undefined, total: number | undefined, finished = false;
+  const reportProgress = (done: boolean, failed = false) => options.onProgress?.({ downloaded, total,
+    bytesPerSecond: started === undefined ? 0 : downloaded / Math.max(0.001, (now() - started) / 1000), done, ...(failed ? { failed } : {}) });
   try {
     timer = setTimeout(expire, options.connectMs ?? 20_000);
     const response = await Promise.race([(options.fetch ?? globalThis.fetch)(url, { redirect: "follow", signal: controller.signal }), deadline]);
     clearTimeout(timer);
     if (!response.ok) throw new DownloadError(`下载失败：HTTP ${response.status}，请检查网络与版本`);
     if (!response.body) throw new DownloadError("下载响应没有内容");
-    const size = Number(response.headers.get("content-length")), total = size > 0 ? size : undefined;
+    const size = Number(response.headers.get("content-length")); total = Number.isFinite(size) && size > 0 ? size : undefined;
+    started = now(); reportProgress(false);
     const report = () => progress(`已下载 ${downloaded} / ${total ?? "未知"} 字节 / ${total ? `${Math.min(100, downloaded / total * 100).toFixed(1)}%` : "百分比未知"}`);
     reader = response.body.getReader(); windowStart = now();
     interval = setInterval(() => {
@@ -33,7 +42,11 @@ export async function downloadRelease(url: string, options: DownloadOptions = {}
         if ((downloaded - windowBytes) / (elapsed / 1000) < 1024) { expire(); return; }
         windowStart = now(); windowBytes = downloaded;
       }
-      if ((options.tty ?? false) && now() - lastProgress >= 1000) { report(); lastProgress = now(); }
+      if (now() - lastProgress >= 1000) {
+        reportProgress(false);
+        if (!options.onProgress && options.tty) report();
+        lastProgress = now();
+      }
     }, Math.min(1000, windowMs));
     const chunks: Uint8Array[] = [];
     while (true) {
@@ -41,9 +54,11 @@ export async function downloadRelease(url: string, options: DownloadOptions = {}
       if (part.done) break;
       chunks.push(part.value!); downloaded += part.value!.byteLength;
     }
-    if (options.tty ?? false) report();
+    reportProgress(true); finished = true;
+    if (!options.onProgress && options.tty) report();
     return Buffer.concat(chunks);
   } catch (cause) {
+    if (started !== undefined && !finished) reportProgress(true, true);
     if (timeout) throw new DownloadError("下载太慢或卡住，请检查网络或代理（https_proxy）后重试");
     if (cause instanceof DownloadError) throw cause;
     throw new DownloadError("下载失败，请检查网络或代理（https_proxy）后重试");

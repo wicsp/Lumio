@@ -8,11 +8,12 @@ import { optional, parseEnvironment, runCommand } from "./setup.ts";
 export interface SwitchOptions {
   home?: string; platform?: string; uid?: number; binary?: string; env?: NodeJS.ProcessEnv;
   run?: typeof runCommand; log?: (line: string) => void;
+  stdout?: (chunk: string) => void; stderr?: (chunk: string) => void;
   ready?: (service: "hub" | "runtime") => Promise<void>;
   retire?: (vault: string, state: string) => Promise<void>;
 }
 /** Explicitly requested offline transition; never infer service paths from running processes. */
-export async function switchLegacy(args: string[], options: SwitchOptions = {}): Promise<void> {
+export async function switchLegacy(args: string[], options: SwitchOptions = {}): Promise<number> {
   if (args.length !== 1 || args[0] !== "--retire-legacy") throw new HubError("INVALID", "用法：lumio hub switch --retire-legacy");
   if (!options.binary && !Bun.main.startsWith("/$bunfs/")) throw new HubError("INVALID", "请用已安装的程序运行 switch；从源码运行不会操作后台服务");
   const home = options.home ?? process.env.HOME ?? homedir(), platform = options.platform ?? process.platform;
@@ -70,10 +71,22 @@ export async function switchLegacy(args: string[], options: SwitchOptions = {}):
     await step("完整备份、验证并退役旧笔记", () => options.retire ? options.retire(vault, state) : runMigration(["retire", "--vault", vault], log, { stateDir: state }));
     await step("启动 Hub", async () => { await command(service("hub", true)); await ready("hub"); });
     await step("启动本机执行器", async () => { await command(service("runtime", true)); await ready("runtime"); });
-    await step("运行 doctor", () => command([join(bin, "lumio"), "doctor"]));
-    log("切换完成：旧笔记只作知识文件，任务与例行任务请在数据库中管理。");
   } catch (cause) {
     const detail = cause instanceof HubError ? cause.message : "步骤失败";
     throw new HubError("INVALID", `切换已停止：${detail}。已完成：${completed.join(" → ") || "无"}。未继续后续步骤。恢复：先修复失败原因；退役回执写入前可按原配置启动服务，写入后不要再次退役；需要回退时按 docs/migration-v2.md 将退役前备份恢复到新状态目录。启动命令：${service("hub", true).join(" ")}；${service("runtime", true).join(" ")}；然后 lumio doctor。`);
   }
+  // Retirement and service startup succeeded. A diagnostic failure cannot undo the switch.
+  log("切换：运行 doctor");
+  const result = await run([join(bin, "lumio"), "doctor"]);
+  const stdout = options.stdout ?? (chunk => { process.stdout.write(chunk); });
+  const stderr = options.stderr ?? (chunk => { process.stderr.write(chunk); });
+  if (result.stdout) stdout(result.stdout);
+  if (result.stderr) stderr(result.stderr);
+  if (result.code) {
+    const failed = result.stdout.split(/\r?\n/).filter(line => line.replace(/\x1b\[[0-9;]*m/g, "").startsWith("✗"));
+    log(`切换已完成；以下检查未通过：${failed.length ? failed.join("；") : "请查看上方 doctor 输出"}`);
+    return 1;
+  }
+  log("切换完成：旧笔记只作知识文件，任务与例行任务请在数据库中管理。");
+  return 0;
 }

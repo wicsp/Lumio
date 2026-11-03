@@ -1,8 +1,9 @@
+import { allowsColor, terminalColors, type TerminalOutput } from "./terminal.ts";
 import { PlatformError } from "./errors.ts";
 import { readFile, lstat } from "node:fs/promises";
 import { homedir } from "node:os";
 
-export interface Check { name: string; ok: boolean; problem?: string; fix?: string }
+export interface Check { name: string; ok: boolean; warning?: boolean; problem?: string; fix?: string }
 export interface CommandResult { code: number; stdout: string; stderr: string }
 export interface DiagnosticOptions {
   find?: (name: string) => string | null;
@@ -57,13 +58,26 @@ export function environment(content: string): Record<string, string> {
   }
   return result;
 }
-export function printChecks(checks: Check[], json: boolean, log: (line: string) => void): number {
+/** ok means no failure; optional reminders remain compatible with existing JSON consumers. */
+export function checkStatus(check: Check): "pass" | "warning" | "fail" {
+  return !check.ok ? "fail" : check.warning ? "warning" : "pass";
+}
+export function printChecks(checks: Check[], json: boolean, log: (line: string) => void,
+  options: { output?: TerminalOutput; env?: NodeJS.ProcessEnv } = {}): number {
+  const colors = terminalColors(allowsColor(options.output ?? process.stdout, options.env));
+  const counts = { pass: 0, warning: 0, fail: 0 };
+  for (const check of checks) counts[checkStatus(check)]++;
   if (json) log(JSON.stringify(checks));
   else {
-    for (const item of checks) log(`${item.ok ? "✓" : "✗"} ${item.name}${item.problem ? `：${item.problem}` : ""}${item.fix ? ` → ${item.fix}` : ""}`);
-    log(`${checks.filter((c) => c.ok).length}/${checks.length} 项通过`);
+    for (const item of checks) {
+      const status = checkStatus(item);
+      const symbol = status === "pass" ? colors.green("✓") : status === "warning" ? colors.yellow("!") : colors.red("✗");
+      log(`${symbol} ${item.name}${item.problem ? `：${item.problem}` : ""}${item.fix ? ` → ${item.fix}` : ""}`);
+    }
+    const color = counts.fail ? colors.red : counts.warning ? colors.yellow : colors.green;
+    log(color(`${counts.pass} 项通过，${counts.warning} 项提醒，${counts.fail} 项失败`));
   }
-  return checks.every((c) => c.ok) ? 0 : 1;
+  return counts.fail ? 1 : 0;
 }
 export function serviceCommand(platform: string, uid: number, service: "hub" | "runtime", action: "status" | "restart") {
   if (platform === "darwin") return ["launchctl", ...(action === "status" ? ["print"] : ["kickstart", "-k"]), `gui/${uid}/io.lumio.${service}`];
