@@ -1,9 +1,13 @@
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { expect, test } from "bun:test";
 import { isolatedHome } from "./test-home.ts";
 const home = isolatedHome();
 async function command(app: "cli" | "runtime", args: string[]) {
   const main = new URL(`../../${app}/src/main.ts`, import.meta.url).pathname;
-  const p = Bun.spawn([process.execPath, main, ...args], { env: { HOME: home, PATH: "" }, stdout: "pipe", stderr: "pipe" });
+  const p = Bun.spawn([process.execPath, main, ...args], { env: { LUMIO_LANG: "zh", HOME: home, PATH: "" }, stdout: "pipe", stderr: "pipe" });
   const [stdout, stderr, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
   return { stdout, stderr, code };
 }

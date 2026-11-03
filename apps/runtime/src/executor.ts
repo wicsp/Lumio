@@ -1,3 +1,4 @@
+import { text as msg } from "./messages.ts";
 import type { SudoGate } from "./sudo.ts";
 import { StringDecoder } from "node:string_decoder";
 import { finished } from "node:stream/promises";
@@ -52,7 +53,7 @@ export function jobEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return Object.fromEntries(Object.entries(env).filter(([key]) => !key.startsWith("LUMIO_")));
 }
 export class Executor {
-  private running = new Map<string, { child: ChildProcess; stop?: Promise<void>; reason?: "超时" | "取消" }>();
+  private running = new Map<string, { child: ChildProcess; stop?: Promise<void>; reason?: "timeout" | "cancelled" }>();
   private pending = new Set<Promise<void>>();
   private stopping = false;
   constructor(private queue: Queue, private config: RuntimeConfig, private env: NodeJS.ProcessEnv, private wake: () => void,
@@ -63,17 +64,17 @@ export class Executor {
       await finalizeInterruptedLog(join(this.config.stateDir, "events"), job.spec.id);
       const log = join(this.config.stateDir, "logs", `${job.spec.id}.log`);
       this.queue.finish({ job: job.spec.id, lease: job.spec.lease, status: "unknown", ...(job.started ? { started: job.started } : {}),
-        ...(await Bun.file(log).exists() ? { log } : {}), finished: new Date().toISOString(), error: "执行器重启" });
+        ...(await Bun.file(log).exists() ? { log } : {}), finished: new Date().toISOString(), error: "restarted" });
     }
   }
   cancel(ids: string[]) {
     for (const id of ids) {
       const job = this.queue.jobs().find((j) => j.spec.id === id);
       if (job?.state === "queued") { this.queue.finish({ job: id, lease: job.spec.lease, status: "cancelled", finished: new Date().toISOString() }); this.wake(); }
-      else this.stop(id, "取消");
+      else this.stop(id, "cancelled");
     }
   }
-  private stop(id: string, reason: "超时" | "取消") {
+  private stop(id: string, reason: "timeout" | "cancelled") {
     const run = this.running.get(id);
     if (!run || run.stop) return;
     this.sudo?.end(id);
@@ -96,7 +97,7 @@ export class Executor {
     let trace: RunLogWriter | undefined;
     const finish = async (fields: Parameters<Queue["finish"]>[0]) => {
       try { if (trace) { await trace.append("status", { status: fields.status }); await trace.close(); } }
-      catch { fields = { ...fields, status: fields.status === "cancelled" || fields.status === "unknown" ? fields.status : "failed", error: "无法封存运行日志" }; }
+      catch { fields = { ...fields, status: fields.status === "cancelled" || fields.status === "unknown" ? fields.status : "failed", error: msg("executor.could_not_seal_run_log") }; }
       this.queue.finish(fields);
     };
     const fail = (error: string) => finish({ job: spec.id, lease: spec.lease, started, finished: new Date().toISOString(), status: "failed", error });
@@ -105,15 +106,15 @@ export class Executor {
     let argv: string[];
     let agent: { adapter: Adapter; version: string; lastMessageFile: string; before?: GitState } | undefined;
     if (run.kind === "command") {
-      if (!this.config.allowedCommands.includes(run.argv[0]!)) { await fail("程序不在 LUMIO_RUNTIME_ALLOWED_COMMANDS 允许列表中"); return; }
+      if (!this.config.allowedCommands.includes(run.argv[0]!)) { await fail(msg("executor.program_is_not_in_lumio_runtime_allowed_commands")); return; }
       argv = run.argv;
     } else {
       const adapter: Adapter = ADAPTERS[run.engine]!;
       const detected = this.engines.find((e) => e.name === run.engine);
       const executable = Bun.which(adapter.command, { PATH: this.env.PATH ?? "" });
-      if (!detected || !executable) { await fail(`执行器上没有安装 ${run.engine}`); return; }
+      if (!detected || !executable) { await fail(msg("executor.is_not_installed_on_runtime", run.engine)); return; }
       if (!versionSupported(adapter, detected.version)) {
-        await fail(`${run.engine} ${detected.version} 不在验证过的版本范围 [${adapter.versions.min}, ${adapter.versions.below}) 内；请先验证新版本再放宽范围`); return;
+        await fail(msg("executor.is_outside_verified_version_range_verify_the_new_version_before_exte", run.engine, detected.version, adapter.versions.min, adapter.versions.below)); return;
       }
       const lastMessageFile = join(this.config.stateDir, "logs", `${spec.id}.last.txt`);
       agent = { adapter, version: detected.version, lastMessageFile, before: gitState(workdir, this.env) };
@@ -121,7 +122,7 @@ export class Executor {
     }
     const logs = join(this.config.stateDir, "logs");
     // Synchronous reservation above is counted even while mkdir awaits.
-    const placeholder: { child: ChildProcess; stop?: Promise<void>; reason?: "超时" | "取消" } = { child: {} as ChildProcess };
+    const placeholder: { child: ChildProcess; stop?: Promise<void>; reason?: "timeout" | "cancelled" } = { child: {} as ChildProcess };
     this.running.set(spec.id, placeholder);
     let report = "", stdoutAll = "";
     const log = join(logs, `${spec.id}.log`), completion = join(logs, `${spec.id}.exit.json`);
@@ -138,7 +139,7 @@ export class Executor {
       let outputError = false;
       const written = finished(output).catch(() => { outputError = true; });
       const decoder = new StringDecoder("utf8");
-      output.on("error", () => { outputError = true; this.stop(spec.id, "取消"); });
+      output.on("error", () => { outputError = true; this.stop(spec.id, "cancelled"); });
       const workerArgs = process.argv[1]?.endsWith(".ts") ? [process.argv[1], "--job-worker"] : ["--job-worker"];
       const child = spawn(process.execPath, workerArgs, { detached: true, stdio: ["pipe", "pipe", "pipe"], env: this.env, shell: false });
       placeholder.child = child;
@@ -155,7 +156,7 @@ export class Executor {
         }
         tracing++; child.stdout!.pause(); child.stderr!.pause();
         void trace!.append("output", { stream, encoding: "base64", data: chunk.toString("base64") })
-          .catch(() => { outputError = true; this.stop(spec.id, "取消"); })
+          .catch(() => { outputError = true; this.stop(spec.id, "cancelled"); })
           .finally(() => { tracing--; resume(); });
       };
       child.stdout!.on("data", (chunk: Buffer) => {
@@ -169,7 +170,7 @@ export class Executor {
       const deadline = Date.now() + spec.timeout_seconds * 1000;
       const armTimeout = () => {
         const remaining = deadline - Date.now();
-        if (remaining <= 0) this.stop(spec.id, "超时");
+        if (remaining <= 0) this.stop(spec.id, "timeout");
         else timer = setTimeout(armTimeout, Math.min(remaining, 2_147_483_647));
       };
       armTimeout();
@@ -181,11 +182,11 @@ export class Executor {
       output.end(); await written;
       if (this.stopping) return;
       let result: { exit_code?: number; signal?: string; error?: string } = {};
-      try { result = JSON.parse(await readFile(completion, "utf8")); } catch { result.error = "程序未提供退出状态"; }
+      try { result = JSON.parse(await readFile(completion, "utf8")); } catch { result.error = msg("executor.program_did_not_provide_exit_status"); }
       await rm(completion, { force: true });
       const ok = !placeholder.reason && !outputError && result.exit_code === 0;
-      const stopped = placeholder.reason === "取消" ? "cancelled" : undefined;
-      const problem = placeholder.reason === "超时" ? { error: "超时" } : outputError ? { error: "无法写入日志" } : {};
+      const stopped = placeholder.reason === "cancelled" ? "cancelled" : undefined;
+      const problem = placeholder.reason === "timeout" ? { error: "timeout" } : outputError ? { error: msg("executor.could_not_write_log") } : {};
       if (!agent) {
         await finish({ job: spec.id, lease: spec.lease, started, finished: new Date().toISOString(), ...result, report, log,
           status: stopped ?? (ok ? "done" : "failed"), ...problem });
@@ -206,7 +207,7 @@ export class Executor {
         ...(agent.before || after ? { git: { ...(agent.before ? { before: agent.before } : {}), ...(after ? { after } : {}) } } : {}),
         ...problem });
     } catch {
-      if (!this.stopping) await finish({ job: spec.id, lease: spec.lease, started, finished: new Date().toISOString(), status: "failed", error: "无法执行程序", report, log });
+      if (!this.stopping) await finish({ job: spec.id, lease: spec.lease, started, finished: new Date().toISOString(), status: "failed", error: msg("executor.could_not_execute_program"), report, log });
     } finally { await trace?.close().catch(() => {}); this.sudo?.end(spec.id); if (timer) clearTimeout(timer); this.running.delete(spec.id); }
   }
   async shutdown() {

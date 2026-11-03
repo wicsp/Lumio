@@ -1,3 +1,7 @@
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { chmod, cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -16,7 +20,7 @@ const agentFixture = new URL("./fixtures/agent.ts", import.meta.url).pathname;
 const git = Bun.which("git")!;
 const base = () => `http://127.0.0.1:${hub!.server.port}`;
 async function request(path: string, body?: unknown) {
-  return fetch(`${base()}${path}`, { method: body === undefined ? "GET" : "POST", headers: { Authorization: `Bearer ${human}`, "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  return fetch(`${base()}${path}`, { method: body === undefined ? "GET" : "POST", headers: { "Accept-Language": "zh", Authorization: `Bearer ${human}`, "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 }
 async function get(id: string) { return Job.parse(await (await request(`/v1/jobs/${id}`)).json()); }
 async function eventually(check: () => boolean | Promise<boolean>, timeout = 15_000) {
@@ -102,7 +106,7 @@ test("versions outside the verified range fail without running; Hub rejects engi
   await startRuntime({ FAKE_PI_VERSION: "2.0.1" });
   const before = (await calls()).length;
   const old = (await done((await submit({ engine: "pi", prompt: "不该执行" })).job!.spec.id)).result!;
-  expect(old.status).toBe("failed"); expect(old.error).toContain("版本范围");
+  expect(old.status).toBe("failed"); expect(old.error).toContain("verified version range");
   expect((await calls()).length).toBe(before);
   const rejected = await submit({ engine: "codex", prompt: "x" }, { runtime: "nope" });
   expect(rejected.response.status).toBe(400);
@@ -114,5 +118,5 @@ test("versions outside the verified range fail without running; Hub rejects engi
   await eventually(async () => !RuntimeInfo.array().parse(await (await request("/v1/runtimes")).json())[0]!.registration.engines.some((e) => e.name === "codex"));
   expect((await submit({ engine: "codex", prompt: "x" })).response.status).toBe(400);
   const slow = (await done((await submit({ engine: "pi", prompt: "SLEEP" }, { timeout_seconds: 1 })).job!.spec.id)).result!;
-  expect(slow.status).toBe("failed"); expect(slow.error).toBe("超时");
+  expect(slow.status).toBe("failed"); expect(slow.error).toBe("timeout");
 }, 40_000);

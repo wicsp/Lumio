@@ -42,10 +42,10 @@ test("diagnostics distinguish pass, warning, failure, summarize and only fail fo
   const checks = [{ name: "通过", ok: true }, { name: "提醒", ok: true, warning: true }, { name: "失败", ok: false }];
   const output: string[] = [];
   expect(printChecks(checks, false, line => output.push(line), { output: { isTTY: true }, env: {} })).toBe(1);
-  expect(output).toEqual(["\x1b[32m✓\x1b[0m 通过", "\x1b[33m!\x1b[0m 提醒", "\x1b[31m✗\x1b[0m 失败", "\x1b[31m1 项通过，1 项提醒，1 项失败\x1b[0m"]);
+  expect(output).toEqual(["\x1b[32m✓\x1b[0m 通过", "\x1b[33m!\x1b[0m 提醒", "\x1b[31m✗\x1b[0m 失败", "\x1b[31m1 passed, 1 warnings, 1 failed\x1b[0m"]);
   output.length = 0;
   expect(printChecks(checks.slice(0, 2), false, line => output.push(line), { output: { isTTY: false }, env: {} })).toBe(0);
-  expect(output).toEqual(["✓ 通过", "! 提醒", "1 项通过，1 项提醒，0 项失败"]);
+  expect(output).toEqual(["✓ 通过", "! 提醒", "1 passed, 1 warnings, 0 failed"]);
   output.length = 0;
   expect(printChecks(checks, true, line => output.push(line), { env: { FORCE_COLOR: "1" } })).toBe(1);
   expect(JSON.parse(output[0]!)).toEqual(checks);

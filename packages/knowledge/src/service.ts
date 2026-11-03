@@ -29,11 +29,11 @@ function identity(value: unknown, kind: "arxiv" | "doi"): string | undefined {
 export class KnowledgeService {
   constructor(private readonly repository: KnowledgeRepository) {}
   private visible(notes: NoteRef[], options: KnowledgeQueryOptions): void {
-    if (!options.includePrivate && notes.some((note) => isPrivateType(note.type))) throw new CoreError("INVALID_QUERY_RESULT", "查询返回了不可见的知识条目");
+    if (!options.includePrivate && notes.some((note) => isPrivateType(note.type))) throw new CoreError("INVALID_QUERY_RESULT", { key: "service.query_returned_an_invisible_knowledge_entry", args: [] });
   }
   async search(query: string, options: KnowledgeQueryOptions = {}): Promise<SearchResult> {
-    if (query && !query.trim()) throw new CoreError("INVALID_QUERY", "查询不能只包含空白");
-    if (options.limit !== undefined && (!Number.isSafeInteger(options.limit) || options.limit < 1)) throw new CoreError("INVALID_LIMIT", "limit 必须是正整数");
+    if (query && !query.trim()) throw new CoreError("INVALID_QUERY", { key: "service.query_must_not_contain_only_whitespace", args: [] });
+    if (options.limit !== undefined && (!Number.isSafeInteger(options.limit) || options.limit < 1)) throw new CoreError("INVALID_LIMIT", { key: "query.limit_must_be_a_positive_integer", args: [] });
     const result = SearchResult.parse(await this.repository.search(query, options));
     this.visible(result.hits.map((hit) => hit.note), options); return result;
   }
@@ -57,7 +57,7 @@ export class KnowledgeService {
     const checkDuplicate = async () => {
       for (const file of await this.repository.papers()) {
         if ((arxiv && identity(file.frontmatter.arxiv, "arxiv") === arxiv) || (doi && identity(file.frontmatter.doi, "doi") === doi)) {
-          throw new CoreError("DUPLICATE_PAPER", `该论文已存在：${file.path}`);
+          throw new CoreError("DUPLICATE_PAPER", { key: "service.paper_already_exists", args: [file.path] });
         }
       }
     };
@@ -68,10 +68,10 @@ export class KnowledgeService {
         try { return await this.repository.saveNew(note); }
         catch (cause) { if (!(cause instanceof CoreError) || cause.code !== "FILE_EXISTS") throw cause; await checkDuplicate(); }
       }
-      throw new CoreError("CITEKEY_EXHAUSTED", `citekey ${citekey} 及后缀 b 到 z 已全部占用`);
+      throw new CoreError("CITEKEY_EXHAUSTED", { key: "service.citekey_and_suffixes_b_through_z_are_all_taken", args: [citekey] });
     } catch (cause) {
       if (cause instanceof CoreError) throw cause;
-      throw new CoreError("CREATE_FAILED", "无法创建论文笔记", { cause });
+      throw new CoreError("CREATE_FAILED", { key: "service.could_not_create_paper_note", args: [] }, { cause });
     }
   }
 }

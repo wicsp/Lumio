@@ -1,3 +1,7 @@
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -26,7 +30,7 @@ beforeEach(async () => {
 afterEach(async () => { await hub?.stop(); await rm(temp, { recursive: true, force: true }); });
 function request(path: string, body?: unknown, token = human) {
   return fetch(`http://127.0.0.1:${hub.server.port}${path}`, { method: body === undefined ? "GET" : "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    headers: { "Accept-Language": "zh", Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 }
 test("a second Hub cannot own the same business directory; stopping releases the OS lease", async () => {
   await expect(startHub({ ...readConfig({ LUMIO_STATE_DIR: temp }), port: 0 }, { log() {} })).rejects.toMatchObject({ code: "CONFLICT" });
@@ -87,7 +91,7 @@ test("all v2 routes obey the shared deny policy before reading bodies or exposin
   await hub.stop(); hub = await startHub({ ...readConfig({ LUMIO_STATE_DIR: temp }), port: 0 }, { log() {}, authorize: () => ({ result: "deny", reason: "synthetic denial" }) });
   for (const route of V2_ROUTES) {
     const path = route.path.replace("<job>", "job_00000000000000000000000001").replace("<artifact>", "art_00000000000000000000000001").replace("<id>", route.path.includes("conversations") ? "conv_00000000000000000000000001" : route.path.includes("projects") ? "prj_00000000000000000000000001" : route.path.includes("routines") ? "rtn_00000000000000000000000001" : "task_00000000000000000000000001");
-    const response = await fetch(`http://127.0.0.1:${hub.server.port}${path}`, { method: route.method, headers: { Authorization: `Bearer ${human}` } });
+    const response = await fetch(`http://127.0.0.1:${hub.server.port}${path}`, { method: route.method, headers: { "Accept-Language": "zh", Authorization: `Bearer ${human}` } });
     expect(response.status).toBe(403); expect(ApiError.parse(await response.json()).error.reason).toBe("synthetic denial");
   }
 });
@@ -141,7 +145,7 @@ test("file routes enforce runtime ownership, explicit private reads and staged c
   hub.store.createActor("other-runtime", "runtime"); const other = hub.store.createToken("other-runtime", "other-runtime");
   expect((await request("/v2/execution/artifacts", metadata, other)).status).toBe(403);
   expect((await request("/v2/execution/artifacts", metadata, runtime)).status).toBe(200);
-  const upload = (data: Uint8Array) => fetch(`http://127.0.0.1:${hub.server.port}/v2/execution/artifacts/${id}`, { method: "PUT", headers: { Authorization: `Bearer ${runtime}` }, body: data });
+  const upload = (data: Uint8Array) => fetch(`http://127.0.0.1:${hub.server.port}/v2/execution/artifacts/${id}`, { method: "PUT", headers: { "Accept-Language": "zh", Authorization: `Bearer ${runtime}` }, body: data });
   expect((await upload(Buffer.from("wrong"))).status).toBe(400); expect(hub.modules.artifacts.get(id).status).toBe("staged");
   expect((await upload(bytes)).status).toBe(200); expect((await upload(bytes)).status).toBe(200);
   expect(await (await request(`/v2/execution/jobs/${dispatched.job.spec.id}/artifacts`)).json()).toEqual([]);
@@ -150,7 +154,7 @@ test("file routes enforce runtime ownership, explicit private reads and staged c
   expect(await (await request(`/v2/execution/artifacts/${id}/content?include_private=true`)).text()).toBe("合成私密文件");
   async function cli(args: string[]) {
     const child = Bun.spawn([process.execPath, new URL("../../cli/src/main.ts", import.meta.url).pathname, ...args], {
-      env: { HOME: temp, PATH: temp, LUMIO_HUB_URL: `http://127.0.0.1:${hub.server.port}`, LUMIO_TOKEN: human }, stdout: "pipe", stderr: "pipe",
+      env: { LUMIO_LANG: "zh", HOME: temp, PATH: temp, LUMIO_HUB_URL: `http://127.0.0.1:${hub.server.port}`, LUMIO_TOKEN: human }, stdout: "pipe", stderr: "pipe",
     });
     const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]); return { code, stdout, stderr };
   }
@@ -165,7 +169,7 @@ test("file routes enforce runtime ownership, explicit private reads and staged c
 test("CLI uses database tasks and projects, preserves conflicting edit files, and exposes assistant JSON and streams", async () => {
   async function cli(args: string[]) {
     const child = Bun.spawn([process.execPath, new URL("../../cli/src/main.ts", import.meta.url).pathname, ...args], {
-      env: { HOME: temp, PATH: process.env.PATH, LUMIO_HUB_URL: `http://127.0.0.1:${hub.server.port}`, LUMIO_TOKEN: human }, stdout: "pipe", stderr: "pipe",
+      env: { LUMIO_LANG: "zh", HOME: temp, PATH: process.env.PATH, LUMIO_HUB_URL: `http://127.0.0.1:${hub.server.port}`, LUMIO_TOKEN: human }, stdout: "pipe", stderr: "pipe",
     });
     const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
     return { stdout, stderr, code };

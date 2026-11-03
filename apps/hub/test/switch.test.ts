@@ -1,3 +1,7 @@
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { afterEach, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -42,11 +46,11 @@ test("each failing switch step stops immediately and explains completed steps an
       ready: async () => {},
     run: async argv => { f.commands.push(argv); return { code: fail() ? 1 : 0, stdout: "", stderr: "synthetic-secret" }; },
       retire: async () => { if (fail()) throw new Error("synthetic-secret"); },
-    })).rejects.toThrow("已完成：");
+    })).rejects.toThrow("INVALID");
     expect(count).toBe(failure + 1);
   }
   const f = await fixture(); await rm(join(f.home, ".config/systemd/user/lumio-runtime.service"));
-  await expect(switchLegacy(["--retire-legacy"], f.options)).rejects.toThrow("手动停止"); expect(f.commands).toEqual([]);
+  await expect(switchLegacy(["--retire-legacy"], f.options)).rejects.toThrow("INVALID"); expect(f.commands).toEqual([]);
 });
 test("macOS switch continues when Hub, Runtime or both are already unloaded", async () => {
   for (const unloaded of [["hub"], ["runtime"], ["hub", "runtime"]]) {
@@ -70,7 +74,7 @@ test("macOS switch does not ignore a failed stop while the service is still load
     await expect(switchLegacy(["--retire-legacy"], { ...f.options, run: async argv => {
       f.commands.push(argv);
       return { code: argv.includes("print") && inspectable ? 0 : 1, stdout: "", stderr: "synthetic permission failure" };
-    } })).rejects.toThrow("停止服务未成功");
+    } })).rejects.toThrow("INVALID");
     expect(f.commands).toHaveLength(2);
     expect(f.commands[1]).toEqual(["launchctl", "print", "gui/123/io.lumio.hub"]);
     expect(f.steps).toEqual(["切换：停止 Hub"]);

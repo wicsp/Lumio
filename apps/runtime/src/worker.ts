@@ -1,3 +1,4 @@
+import { text as msg } from "./messages.ts";
 import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { JobSpec } from "@lumio/schema";
@@ -14,7 +15,7 @@ export async function runWorker() {
   if (!argv.length) return;
   const command = spawn(argv[0]!, argv.slice(1), { cwd: spec.workdir, env, stdio: ["ignore", "inherit", "inherit"], shell: false });
   await new Promise<void>((resolve) => {
-    command.once("error", () => { writeFileSync(completion, JSON.stringify({ error: "无法启动程序" })); resolve(); });
+    command.once("error", () => { writeFileSync(completion, JSON.stringify({ error: msg("worker.could_not_start_program") })); resolve(); });
     command.once("exit", (code, signal) => { writeFileSync(completion, JSON.stringify({ exit_code: code ?? undefined, signal: signal ?? undefined })); resolve(); });
   });
 }

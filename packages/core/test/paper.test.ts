@@ -25,8 +25,8 @@ test("a rendered paper passes its contract, has all sections and no invented lin
   expect(parsed.data).toMatchObject({ type: "paper", citekey: "He_2020_LightGCN", title: metadata.title, authors: metadata.authors, year: metadata.year, doi: metadata.doi });
   for (const field of ["status", "tags", "related", "arxiv", "firstAuthorFamily"]) expect(parsed.data).not.toHaveProperty(field);
   const body = parsed.body.toString();
-  expect(body.startsWith("\n## 一句话\n")).toBe(true);
-  expect(body.match(/^## .+$/gm)).toEqual(["## 一句话", "## 我的笔记", "## 可以引用的点", "## 和我的研究的关系", "## BibTeX"]);
+  expect(body.startsWith("\n## One sentence\n")).toBe(true);
+  expect(body.match(/^## .+$/gm)).toEqual(["## One sentence", "## My notes", "## Points to cite", "## Relation to my research", "## BibTeX"]);
   expect(body).toContain("```bibtex\n");
   expect(body).toContain("@inproceedings{He_2020_LightGCN,");
   expect(body).not.toContain("[[");

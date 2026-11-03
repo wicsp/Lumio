@@ -1,3 +1,4 @@
+import { text as msg } from "./messages.ts";
 import { Database } from "bun:sqlite";
 import { chmodSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -24,7 +25,7 @@ export class Queue {
     this.db.transaction(() => {
       for (const spec of specs) {
         const existing = this.jobs().find((j) => j.spec.id === spec.id);
-        if (existing && JSON.stringify(existing.spec) !== JSON.stringify(spec)) throw new RuntimeError("Hub 重发了不同的 Job");
+        if (existing && JSON.stringify(existing.spec) !== JSON.stringify(spec)) throw new RuntimeError(msg("queue.hub_redelivered_a_different_job"));
         this.db.query("INSERT OR IGNORE INTO queue(id,spec,state) VALUES (?,?,'queued')").run(spec.id, JSON.stringify(spec));
       }
     })();

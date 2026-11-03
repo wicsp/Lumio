@@ -1,3 +1,5 @@
+import { withLanguage, errorMessage, text as msg } from "./messages.ts";
+import { language } from "@lumio/platform";
 import { browserAllowed, browserDenied, webResponse, type HubWeb } from "./web.ts";
 import { Pairing, handlePairing } from "./pairing.ts";
 import { Privileged, handlePrivileged } from "./privileged.ts";
@@ -72,7 +74,7 @@ async function startHubInstance(config: HubConfig, options: {
   assistantModel?: AssistantModel;
   assistantTools?: AssistantTool[];
 } = {}) {
-  if (config.vault && !(await stat(config.vault)).isDirectory()) throw new HubError("INVALID", "LUMIO_VAULT 必须是目录");
+  if (config.vault && !(await stat(config.vault)).isDirectory()) throw new HubError("INVALID", { key: "server.lumio_vault_must_be_a_directory", args: [] });
   config = { ...config, localRuntime: await rememberLocalRuntime(config.stateDir, config.localRuntime) };
   const store = await HubStore.open(config.stateDir);
   const knowledge = config.vault ? new KnowledgeService(new FileKnowledgeRepository(config.vault, { stateDir: config.stateDir })) : undefined;
@@ -135,13 +137,13 @@ async function startHubInstance(config: HubConfig, options: {
             status = 200;
             return new Response(request.method === "HEAD" ? null : typeof file.body === "string" ? file.body : Buffer.from(file.body), { headers: { "Content-Type": file.type } });
           }
-          if (url.pathname === "/" && !options.web) { status = 404; return Response.json(ApiError.parse({ error: { code: "NOT_FOUND", message: "找不到端点" } }), { status }); }
+          if (url.pathname === "/" && !options.web) { status = 404; return Response.json(ApiError.parse({ error: { code: "NOT_FOUND", message: msg("server.endpoint_not_found") } }), { status }); }
           if (route?.operation === "health") identity = store.authenticate(request.headers.get("authorization"));
           if (route?.operation !== "health" && route?.operation !== "runtime.join" && route?.operation !== "client.join") {
             identity = store.authenticate(request.headers.get("authorization"));
-            if (!identity) throw new HubError("UNAUTHENTICATED", "需要有效的 Bearer 令牌");
+            if (!identity) throw new HubError("UNAUTHENTICATED", { key: "server.a_valid_bearer_token_is_required", args: [] });
           }
-          if (!route) throw new HubError("NOT_FOUND", "找不到端点");
+          if (!route) throw new HubError("NOT_FOUND", { key: "server.endpoint_not_found", args: [] });
           if (v2) {
             const response = await handleV2(request, v2, identity!, store, modules!, decide);
             status = response.status; return response;
@@ -172,7 +174,7 @@ async function startHubInstance(config: HubConfig, options: {
             const decision = decide(identity!.actor, { operation: "routines" });
             if (decision.result !== "allow") {
               store.auditDenied(identity!, route.operation);
-              throw new HubError("FORBIDDEN", "请求未获授权", { reason: decision.result === "deny" ? decision.reason : "Approval required" });
+              throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: decision.result === "deny" ? decision.reason : "Approval required" });
             }
             status = 200; return Response.json(routines!.list());
           }
@@ -181,7 +183,7 @@ async function startHubInstance(config: HubConfig, options: {
             const decision = decide(identity.actor, { operation: route.operation });
             if (decision.result !== "allow") {
               store.auditDenied(identity, route.operation);
-              throw new HubError("FORBIDDEN", "请求未获授权", { reason: decision.result === "deny" ? decision.reason : "Approval required" });
+              throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: decision.result === "deny" ? decision.reason : "Approval required" });
             }
           }
           if (route.operation === "operations" || route.operation === "actors" || route.operation === "proposals" || route.operation === "proposal.accept" || route.operation === "proposal.reject") {
@@ -199,12 +201,12 @@ async function startHubInstance(config: HubConfig, options: {
           if (decision.result !== "allow") {
             if (identity) store.auditDenied(identity, route.operation);
             status = 403;
-            return Response.json(ApiError.parse({ error: { code: "FORBIDDEN", message: "请求未获授权", reason: decision.result === "deny" ? decision.reason : "Approval required" } }), { status });
+            return Response.json(ApiError.parse({ error: { code: "FORBIDDEN", message: msg("server.request_not_authorized"), reason: decision.result === "deny" ? decision.reason : "Approval required" } }), { status });
           }
           if (route.operation === "health") { status = 200; return Response.json({ ok: true, version }); }
-          if (privateValue !== null && privateValue !== "true" && privateValue !== "false") throw new HubError("INVALID", "include_private 必须是 true 或 false");
+          if (privateValue !== null && privateValue !== "true" && privateValue !== "false") throw new HubError("INVALID", { key: "server.include_private_must_be_true_or_false", args: [] });
           const queryOptions: SearchOptions = { stateDir: config.stateDir, includePrivate };
-          if (!config.vault && ["search", "show", "links", "check"].includes(route.operation)) throw new HubError("INVALID", "尚未配置知识目录；工作管理和执行功能可独立使用");
+          if (!config.vault && ["search", "show", "links", "check"].includes(route.operation)) throw new HubError("INVALID", { key: "server.no_knowledge_directory_configured_work_and_execution_are_available_i", args: [] });
           let result: unknown;
           if (route.operation === "status") {
             result = await vaultWatch!.status(includePrivate);
@@ -213,26 +215,26 @@ async function startHubInstance(config: HubConfig, options: {
           } else if (route.operation === "search") {
             const type = url.searchParams.get("type");
             const limit = url.searchParams.get("limit");
-            if (type !== null && !NOTE_TYPES.includes(type as SearchOptions["type"] & string)) throw new HubError("INVALID", "未知笔记类型");
-            if (limit !== null && (!/^[1-9]\d*$/.test(limit) || !Number.isSafeInteger(Number(limit)))) throw new HubError("INVALID", "limit 必须是正整数");
+            if (type !== null && !NOTE_TYPES.includes(type as SearchOptions["type"] & string)) throw new HubError("INVALID", { key: "query.unknown_note_type", args: [] });
+            if (limit !== null && (!/^[1-9]\d*$/.test(limit) || !Number.isSafeInteger(Number(limit)))) throw new HubError("INVALID", { key: "query.limit_must_be_a_positive_integer", args: [] });
             result = await knowledge!.search(url.searchParams.get("q") ?? "", {
               ...queryOptions, ...(type !== null ? { type: type as SearchOptions["type"] } : {}), ...(limit !== null ? { limit: Number(limit) } : {}),
             });
           } else {
             let reference: string;
             try { reference = decodeURIComponent(route.pattern.exec(url.pathname)![1]!); }
-            catch { throw new HubError("INVALID", "引用 URL 编码不合法"); }
+            catch { throw new HubError("INVALID", { key: "server.invalid_url_encoding_in_reference", args: [] }); }
             result = await (route.operation === "show" ? knowledge!.show(reference, queryOptions) : knowledge!.links(reference, queryOptions));
           }
           status = 200;
           return Response.json(result);
         } catch (cause) {
-          let code: ApiErrorCode = "INTERNAL", message = "Hub 无法处理请求";
+          let code: ApiErrorCode = "INTERNAL", message = msg("server.hub_could_not_process_the_request");
           let details: Omit<ApiError["error"], "code" | "message"> = {};
-          if (cause instanceof HubError) { code = cause.code; message = cause.message; details = cause.details; }
+          if (cause instanceof HubError) { code = cause.code; message = errorMessage(cause); details = cause.details; }
           else if (cause instanceof CoreError) {
-            if (cause.code === "NOTE_NOT_FOUND") { code = "NOT_FOUND"; message = cause.message; }
-            else if (["INVALID_QUERY", "INVALID_LIMIT", "AMBIGUOUS_REFERENCE"].includes(cause.code)) { code = "INVALID"; message = cause.message; }
+            if (cause.code === "NOTE_NOT_FOUND") { code = "NOT_FOUND"; message = errorMessage(cause); }
+            else if (["INVALID_QUERY", "INVALID_LIMIT", "AMBIGUOUS_REFERENCE"].includes(cause.code)) { code = "INVALID"; message = errorMessage(cause); }
           }
           status = STATUS[code];
           return Response.json(ApiError.parse({ error: { code, message, ...details } }), { status });
@@ -242,7 +244,7 @@ async function startHubInstance(config: HubConfig, options: {
         }
     };
     server = Bun.serve({ hostname: config.hostname, port: config.port,
-      async fetch(request, server) { return webResponse(await handle(request, server), options.web?.csp); },
+      async fetch(request, server) { return webResponse(await withLanguage(language({ LUMIO_LANG: request.headers.get("Accept-Language") ?? undefined }), () => handle(request, server)), options.web?.csp); },
     });
   } catch (cause) { modules?.stop(); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); throw cause; }
   return { server, store, tasks: tasks!, routines: routines!, modules: modules!, async stop() { modules?.stop(); await server.stop(true); await modules?.artifacts.drain(); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); } };
@@ -252,7 +254,7 @@ async function startHubInstance(config: HubConfig, options: {
 export async function startHub(config: HubConfig, options: Parameters<typeof startHubInstance>[1] = {}) {
   const lease = await acquireStateLease(config.stateDir);
   try {
-    const hub = await startHubInstance(config, options); let stopped: Promise<void> | undefined;
+    const hub = await withLanguage("en", () => startHubInstance(config, options)); let stopped: Promise<void> | undefined;
     return { ...hub, stop() { stopped ??= hub.stop().finally(() => lease.close()); return stopped; } };
   } catch (cause) { lease.close(); throw cause; }
 }

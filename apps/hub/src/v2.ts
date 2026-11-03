@@ -1,3 +1,4 @@
+import { text as msg } from "./messages.ts";
 import { AssistantChatRequest, WorkTask, WorkProject, WorkTaskDetail, ExecutionRoutine, ExecutionRoutineInfo, TaskStatus, idOf, type AssistantEvent } from "@lumio/schema";
 import { AssistantError } from "@lumio/assistant";
 import { WorkError } from "@lumio/work";
@@ -30,10 +31,10 @@ export const V2_ROUTES = [
 export type V2Route = (typeof V2_ROUTES)[number];
 
 async function json(request: Request): Promise<unknown> {
-  try { return await request.json(); } catch { throw new HubError("INVALID", "请求体必须是 JSON"); }
+  try { return await request.json(); } catch { throw new HubError("INVALID", { key: "runtime.request_body_must_be_json", args: [] }); }
 }
 export function moduleError(cause: unknown): HubError | undefined {
-  if (cause instanceof WorkError || cause instanceof AssistantError) return new HubError(cause.code, cause.message);
+  if (cause instanceof WorkError || cause instanceof AssistantError) return new HubError(cause.code, cause.params);
 }
 export async function handleV2(request: Request, route: V2Route, identity: Identity, store: HubStore,
   modules: BusinessModules, decide: typeof authorize): Promise<Response> {
@@ -42,7 +43,7 @@ export async function handleV2(request: Request, route: V2Route, identity: Ident
   let execution = "applied";
   let audited = false;
   try {
-    if (decision.result !== "allow") throw new HubError("FORBIDDEN", "请求未获授权", { reason: decision.result === "deny" ? decision.reason : "需要批准" });
+    if (decision.result !== "allow") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: decision.result === "deny" ? decision.reason : msg("v2.approval_required") });
     const url = new URL(request.url), id = route.pattern.exec(url.pathname)?.[1];
     if (url.pathname.includes("/artifacts")) return await handleArtifacts(request, identity, store, modules);
     if (route.operation === "work.command" || route.operation === "execution.command") {
@@ -59,8 +60,8 @@ export async function handleV2(request: Request, route: V2Route, identity: Ident
       if (url.pathname.startsWith("/v2/work/projects")) return Response.json(id ? WorkProject.parse(modules.work.project(id)) : WorkProject.array().parse(modules.work.projects()));
       if (id) return Response.json(WorkTaskDetail.parse(modules.work.detail(id)));
       const status = url.searchParams.get("status"), project = url.searchParams.get("project"), query = url.searchParams.get("q");
-      if (status !== null && !TaskStatus.safeParse(status).success) throw new HubError("INVALID", "任务状态不合法");
-      if (project !== null && !idOf("prj").safeParse(project).success) throw new HubError("INVALID", "项目 ID 不合法");
+      if (status !== null && !TaskStatus.safeParse(status).success) throw new HubError("INVALID", { key: "v2.invalid_task_status", args: [] });
+      if (project !== null && !idOf("prj").safeParse(project).success) throw new HubError("INVALID", { key: "v2.invalid_project_id", args: [] });
       return Response.json(WorkTask.array().parse(modules.work.tasks({ status: status ?? undefined, project: project ?? undefined, query: query ?? undefined })));
     }
     if (route.operation === "assistant.memory.read") return Response.json(await modules.assistant.memories(identity.actor.id));
@@ -72,7 +73,7 @@ export async function handleV2(request: Request, route: V2Route, identity: Ident
     }
     if (route.operation === "assistant.read") return Response.json(id ? modules.assistant.detail(id, identity.actor.id) : modules.assistant.conversations(identity.actor.id));
     const parsed = AssistantChatRequest.safeParse(await json(request));
-    if (!parsed.success) throw new HubError("INVALID", "助手请求参数不合法");
+    if (!parsed.success) throw new HubError("INVALID", { key: "v2.invalid_assistant_request_parameters", args: [] });
     const signal = AbortSignal.any([request.signal, modules.signal, AbortSignal.timeout(120_000)]);
     if (request.headers.get("accept")?.includes("application/x-ndjson")) {
       const encoder = new TextEncoder();
@@ -85,7 +86,7 @@ export async function handleV2(request: Request, route: V2Route, identity: Ident
         void modules.assistant.chat(parsed.data, identity.actor.id, { signal, event })
           .then((result) => {
             if (!terminal) event(result.turn.status === "done" ? { type: "result", turn: result.turn.id, messages: result.messages }
-              : { type: "error", turn: result.turn.id, error: result.turn.error ?? "这一轮仍在执行或结果不明，请查询对话" });
+              : { type: "error", turn: result.turn.id, error: result.turn.error ?? msg("v2.this_round_is_running_or_its_outcome_is_unknown_inspect_the_conversa") });
           })
           .catch(() => { /* The client can inspect the persisted turn after reconnecting. */ })
           .finally(() => { try { controller.close(); } catch { /* client disconnected */ } });

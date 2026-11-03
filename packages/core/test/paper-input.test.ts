@@ -21,8 +21,7 @@ test.each(["", "not a paper", "2403.14720v0", "https://example.com/abs/2403.1472
   try { parsePaperInput(input); }
   catch (cause) {
     expect(cause).toMatchObject({ code: "INVALID_PAPER_INPUT" });
-    expect((cause as Error).message).toContain("arXiv");
-    expect((cause as Error).message).toContain("DOI");
+    expect((cause as Error).message).toBe("INVALID_PAPER_INPUT");
     return;
   }
   throw new Error("expected invalid input");

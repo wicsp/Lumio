@@ -1,3 +1,7 @@
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import type { FSWatcher, watch } from "node:fs";
@@ -25,7 +29,7 @@ const path = "plan/tasks/加 XML 包装.md";
 const base = () => `http://127.0.0.1:${hub!.server.port}`;
 const file = () => join(vault, path);
 async function request(p: string, body?: unknown, token = human) {
-  return fetch(`${base()}${p}`, { method: body === undefined ? "GET" : "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  return fetch(`${base()}${p}`, { method: body === undefined ? "GET" : "POST", headers: { "Accept-Language": "zh", Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 }
 async function rounds() { return Job.array().parse(await (await request(`/v1/jobs?task=${TASK}`)).json()); }
 async function eventually(check: () => boolean | Promise<boolean>, timeout = 20_000) {
@@ -93,8 +97,8 @@ test("assignee agent → one round after the note is quiet; result block written
   const text = await note();
   expect((await front()).status).toBe("active");
   expect(text).toContain("<!-- lumio:ai start name=round-1 job=");
-  expect(text).toContain("### 第 1 轮 · 完成");
-  expect(text).toContain("（pi 1.4.0 · 无沙箱 · server ·");
+  expect(text).toContain("### Round 1 · Completed");
+  expect(text).toContain("(pi 1.4.0 · No sandbox · server ·");
   expect(parseFrontmatter(Buffer.from(text)).body.toString().startsWith(body)).toBe(true);
   const [job] = await rounds();
   expect(job!.spec.source).toMatchObject({ task: TASK, round: 1 });
@@ -115,8 +119,8 @@ test("flipping assignee back within the quiet window cancels the dispatch", asyn
 test("round 2 resumes the session and sends only what the human added; a question is shown and answered", async () => {
   await writeNote({ assignee: "pi@server" }, "要求：ASK 一下要不要重构\n");
   await eventually(async () => (await front()).assignee === "human");
-  expect(await note()).toContain("### 第 1 轮 · 有问题等你回答");
-  expect(await note()).toContain("> **问题**：要不要顺手重构？");
+  expect(await note()).toContain("### Round 1 · Waiting for your answer");
+  expect(await note()).toContain("> **Question**: 要不要顺手重构？");
   await setAssigneeAgent("\n回答：不用重构，只加 XML。\n");
   await eventually(async () => (await rounds()).length === 2 && (await front()).assignee === "human");
   const second = (await rounds())[1]!;
@@ -125,7 +129,7 @@ test("round 2 resumes the session and sends only what the human added; a questio
   expect(run?.session).toEqual({ id: TASK, resume: true });
   expect(run?.prompt).toContain("+ 回答：不用重构，只加 XML。");
   expect(run?.prompt).not.toContain("要求：ASK 一下要不要重构");
-  expect(await note()).toContain("### 第 2 轮 · 完成");
+  expect(await note()).toContain("### Round 2 · Completed");
 }, 30_000);
 
 test("without a session the next round gets the human text plus the last report", async () => {
@@ -137,7 +141,7 @@ test("without a session the next round gets the human text plus the last report"
   expect(run.kind === "agent" && run.session).toBeFalsy();
   expect(run.kind === "agent" && run.prompt).toContain("要求：NOSESSION 第一版");
   expect(run.kind === "agent" && run.prompt).toContain("意见：再改改");
-  expect(run.kind === "agent" && run.prompt).toContain("## 上一轮的汇报");
+  expect(run.kind === "agent" && run.prompt).toContain("## Previous round report");
 }, 30_000);
 
 test("pausing while a round runs cancels it; secrets in reports are not written to the note", async () => {
@@ -145,11 +149,11 @@ test("pausing while a round runs cancels it; secrets in reports are not written 
   await eventually(async () => (await rounds())[0]?.status === "running");
   await writeFile(file(), (await note()).replace("status: active", "status: paused")); notify(path);
   await eventually(async () => (await front()).assignee === "human");
-  expect(await note()).toContain("### 第 1 轮 · 已取消");
+  expect(await note()).toContain("### Round 1 · Cancelled");
   await writeFile(file(), (await note()).replace("status: paused", "status: active"));
   await setAssigneeAgent("\n这次：SECRET 打印一下\n");
   await eventually(async () => (await rounds()).length === 2 && (await front()).assignee === "human");
-  expect(await note()).toContain("汇报中疑似包含敏感信息");
+  expect(await note()).toContain("Report may contain sensitive information");
   expect(await note()).not.toContain("sk-aaaa");
 }, 40_000);
 
@@ -172,8 +176,8 @@ test("lumio task continue (CLI trigger) dispatches immediately; agents cannot di
   expect(audit.some((a) => a.authorization === "deny")).toBe(true);
 
   await writeNote({ assignee: "pi@server", workdir: join(vault, "research") }, "要求：在笔记库里干活\n");
-  await eventually(async () => (await note()).includes("### 无法派出"));
-  expect(await note()).toContain("工作目录不能在笔记库里");
+  await eventually(async () => (await note()).includes("### Could not dispatch"));
+  expect(await note()).toContain("Working directory must be outside the vault");
   expect((await front()).assignee).toBe("human");
   expect(await rounds()).toHaveLength(2);
 }, 40_000);
@@ -192,7 +196,7 @@ test("missing workdir executes in the runtime home and hands the legacy turn bac
 
 test("bare agent uses the local runtime; absent local runtime gives the required explanation", async () => {
   await writeNote({ assignee: "pi" }, "合成要求\n");
-  await eventually(async () => (await note()).includes("这台 Hub 没有本机执行器，请写 pi@<执行器名称>"));
+  await eventually(async () => (await note()).includes("This Hub has no local runtime; specify pi@<runtime-name>"));
   expect(await rounds()).toHaveLength(0);
   await startRuntime("local", localToken);
   await setAssigneeAgent("", "pi");
@@ -227,7 +231,7 @@ test("editing assignee during a running round records an issue without dispatch 
   await setAssigneeAgent("", "codex");
   await eventually(async () => {
     const status = await (await request("/v1/status")).json() as { issues: string[] };
-    return status.issues.some((s) => s.includes("修改 assignee 不生效"));
+    return status.issues.some((s) => s.includes("changing assignee has no effect"));
   });
   await Bun.sleep(600);
   expect(await rounds()).toHaveLength(1); expect((await rounds())[0]!.status).toBe("running");
@@ -260,7 +264,7 @@ test("body-only task is filled as human, then a single assignee edit dispatches 
   expect(await front()).not.toHaveProperty("turn"); expect(await front()).not.toHaveProperty("workdir");
   const id = (await front()).id;
   await setAssigneeAgent();
-  await eventually(async () => (await front()).assignee === "human" && (await note()).includes("### 第 1 轮"));
+  await eventually(async () => (await front()).assignee === "human" && (await note()).includes("### Round 1"));
   const jobs = Job.array().parse(await (await request(`/v1/jobs?task=${id}`)).json());
   expect(jobs).toHaveLength(1); expect(jobs[0]!.spec.workdir).toBe("~");
   expect(parseFrontmatter(await readFile(file())).body.toString()).toStartWith("只写正文的合成任务要求。\n");

@@ -1,3 +1,7 @@
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { createConnection } from "node:net";
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { cp, mkdtemp, readFile, rm, chmod } from "node:fs/promises";
@@ -12,7 +16,7 @@ let temp: string, hub: Awaited<ReturnType<typeof startHub>>, token: string, runt
 let errors: Promise<string> | undefined;
 const main = new URL("../../runtime/src/main.ts", import.meta.url).pathname;
 async function api(path: string, body?: unknown) {
-  return fetch(`http://127.0.0.1:${hub.server.port}${path}`, { method: body === undefined ? "GET" : "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  return fetch(`http://127.0.0.1:${hub.server.port}${path}`, { method: body === undefined ? "GET" : "POST", headers: { "Accept-Language": "zh", Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 }
 async function eventually(check: () => boolean | Promise<boolean>) {
   const deadline = Date.now() + 10_000;
@@ -66,7 +70,7 @@ test("approval reaches fake root helper once and caller receives exact output an
   expect((await api(`/v1/proposals/${p.id}/accept`, {})).status).toBe(200);
   const result = await done(j.spec.id); expect(result.exit_code).toBe(7);
   const report = JSON.parse(result.report!);
-  expect(report).toMatchObject({ out: "hello world\n", code: 7, tokenLeaked: false }); expect(report.err).toContain("helper stderr"); expect(report.err).toContain("等待用户批准");
+  expect(report).toMatchObject({ out: "hello world\n", code: 7, tokenLeaked: false }); expect(report.err).toContain("helper stderr"); expect(report.err).toContain("waiting for user approval");
   const received = await calls(); expect(received).toHaveLength(1); expect(PrivilegedApproval.parse(JSON.parse(received[0]!)).proposal).toBe(p.id);
   await eventually(() => !!hub.store.db.query("SELECT report FROM privileged_approvals WHERE report IS NOT NULL").get());
   const audits = JSON.stringify(hub.store.db.query("SELECT * FROM audit").all()); expect(audits).not.toContain("helper stderr"); expect(audits).toContain('exit_code');
@@ -75,14 +79,14 @@ test("approval reaches fake root helper once and caller receives exact output an
 
 test("reject and timeout return failure without executing; late approval after timeout cannot execute", async () => {
   await start("0.5"); const j = await submit(); const p = await proposal(); await api(`/v1/proposals/${p.id}/reject`, {});
-  const rejected = await done(j.spec.id); expect(JSON.parse(rejected.report!).code).toBe(1); expect(rejected.report).toContain("用户拒绝");
-  const j2 = await submit(); const p2 = await proposal(); const timed = await done(j2.spec.id); expect(JSON.parse(timed.report!).code).toBe(1); expect(timed.report).toContain("超时");
+  const rejected = await done(j.spec.id); expect(JSON.parse(rejected.report!).code).toBe(1); expect(rejected.report).toContain("User rejected");
+  const j2 = await submit(); const p2 = await proposal(); const timed = await done(j2.spec.id); expect(JSON.parse(timed.report!).code).toBe(1); expect(timed.report).toContain("timed out");
   expect((await api(`/v1/proposals/${p2.id}/accept`, {})).status).toBe(409); expect(await calls()).toHaveLength(0);
 });
 
 test("unsupported runtime and outside-job invocation exit 2 without creating proposals", async () => {
   const outside = Bun.spawn([process.execPath, main, "sudo", "--", "/bin/echo"], { env: {}, stdout: "pipe", stderr: "pipe" });
-  expect(await outside.exited).toBe(2); expect(await new Response(outside.stderr).text()).toContain("一轮之内");
+  expect(await outside.exited).toBe(2); expect(await new Response(outside.stderr).text()).toContain("within a round");
   await start("5", false);
   const invalid = await new Promise<string>((resolve) => {
     const socket = createConnection(join(temp, "rt/sudo.sock")); let data = "";
@@ -91,7 +95,7 @@ test("unsupported runtime and outside-job invocation exit 2 without creating pro
   });
   expect(JSON.parse(invalid).code).toBe(2);
   const j = await submit(); const result = await done(j.spec.id);
-  expect(JSON.parse(result.report!).code).toBe(2); expect(result.report).toContain("不支持提权"); expect(hub.store.proposals("pending")).toHaveLength(0); expect(await calls()).toHaveLength(0);
+  expect(JSON.parse(result.report!).code).toBe(2); expect(result.report).toContain("does not support privileged commands"); expect(hub.store.proposals("pending")).toHaveLength(0); expect(await calls()).toHaveLength(0);
 });
 
 test("job cancellation ends waiting requests and invalidates subsequent human approval", async () => {

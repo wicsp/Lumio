@@ -1,3 +1,7 @@
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { createPublicKey, verify } from "node:crypto";
 import { cp, mkdtemp, rm } from "node:fs/promises";
@@ -12,7 +16,7 @@ import { Privileged } from "../src/privileged.ts";
 
 let temp: string, hub: Awaited<ReturnType<typeof startHub>>, tokens: Record<string, string>, actor: string, now: number, logs: string[];
 async function api(path: string, who = "server", body?: unknown) {
-  return fetch(`http://127.0.0.1:${hub.server.port}${path}`, { method: body === undefined ? "GET" : "POST", headers: { Authorization: `Bearer ${tokens[who]}`, "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  return fetch(`http://127.0.0.1:${hub.server.port}${path}`, { method: body === undefined ? "GET" : "POST", headers: { "Accept-Language": "zh", Authorization: `Bearer ${tokens[who]}`, "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 }
 async function job() {
   const r = await api("/v1/jobs", "owner", { runtime: "server", run: { kind: "command", argv: ["/bin/echo", "safe"] } });
@@ -96,7 +100,7 @@ test("rejection never signs; cancellation/result before acceptance expires the p
 test("management prints the persistent public key and matching fingerprint, with the key preserved in a live backup", async () => {
   const key = new Privileged(hub.store).publicKey(); expect(Buffer.from(key, "base64url").length).toBe(32);
   for (const args of [["signing-key"], ["backup", join(temp, "backup.sqlite")], ["signing-key"]]) {
-    const child = Bun.spawn([process.execPath, new URL("../src/main.ts", import.meta.url).pathname, ...args], { env: { LUMIO_STATE_DIR: join(temp, "hub") }, stdout: "pipe", stderr: "pipe" });
+    const child = Bun.spawn([process.execPath, new URL("../src/main.ts", import.meta.url).pathname, ...args], { env: { LUMIO_LANG: "zh", LUMIO_STATE_DIR: join(temp, "hub") }, stdout: "pipe", stderr: "pipe" });
     const out = (await new Response(child.stdout).text()).trim(); expect(await child.exited).toBe(0);
     if (args[0] === "signing-key") {
       const remote = await api("/v1/runtime/signing-key");

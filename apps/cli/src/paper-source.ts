@@ -1,3 +1,4 @@
+import { errorMessage, text as msg } from "./messages.ts";
 import type { PaperInput } from "@lumio/knowledge";
 
 export type PaperFetcher = (url: string, init: RequestInit) => Promise<Response>;
@@ -13,7 +14,7 @@ export type PaperSource = { kind: "arxiv"; metadata: string; bibtex: string }
 export class PaperSourceError extends Error {
   readonly code = "PAPER_SOURCE_FAILED";
   constructor(source: string, cause: unknown) {
-    super(`${source} 请求失败：${cause instanceof Error ? cause.message : "未知错误"}`, { cause });
+    super(msg("paper-source.request_failed", source, cause instanceof Error ? errorMessage(cause) : msg("paper-source.unknown_error")), { cause });
     this.name = "PaperSourceError";
   }
 }

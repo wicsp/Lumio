@@ -1,3 +1,7 @@
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { cp, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
@@ -20,7 +24,7 @@ const heartbeat = { running: [], queued: [], outbox: 0 };
 const base = () => `http://127.0.0.1:${port}`;
 const boot = (listen = 0) => startHub({ ...readConfig({ LUMIO_VAULT: vault, LUMIO_STATE_DIR: state }), port: listen }, { log: () => {} });
 async function request(path: string, token = human, body?: unknown) {
-  return fetch(`${base()}${path}`, { method: body === undefined ? "GET" : "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  return fetch(`${base()}${path}`, { method: body === undefined ? "GET" : "POST", headers: { "Accept-Language": "zh", Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 }
 async function get(id: string) { return Job.parse(await (await request(`/v1/jobs/${id}`)).json()); }
 async function submit(mode = "quiet", path = join(temp, "calls"), delay = 0, fields: object = {}, extra = "literal") {
@@ -118,7 +122,7 @@ test("real command captures stdout tail, stderr log, cwd, literal argv, GPU and 
   expect((await get(failed.spec.id)).result!.exit_code).toBe(7);
   const denied = await submit("quiet", join(temp, "never"), 0, { run: { kind: "command", argv: ["/not/allowed", join(temp, "never")] } });
   await eventually(async () => (await get(denied.spec.id)).status === "failed");
-  expect((await get(denied.spec.id)).result!.error).toContain("允许列表"); expect(await exists(join(temp, "never"))).toBe(false);
+  expect((await get(denied.spec.id)).result!.error).toContain("LUMIO_RUNTIME_ALLOWED_COMMANDS"); expect(await exists(join(temp, "never"))).toBe(false);
   await eventually(async () => await localCount("SELECT count(*) AS count FROM outbox") === 0);
 });
 
@@ -162,7 +166,7 @@ test("file archival is independently durable: failed upload does not block resul
   for (const child of [...daemons]) await stop(child);
   const main = new URL("../src/main.ts", import.meta.url).pathname, backup = join(temp, "business-backup"), restored = join(temp, "restored");
   async function manage(args: string[]) {
-    const child = Bun.spawn([process.execPath, main, ...args], { env: { HOME: temp, PATH: temp, LUMIO_STATE_DIR: state }, stdout: "pipe", stderr: "pipe" });
+    const child = Bun.spawn([process.execPath, main, ...args], { env: { LUMIO_LANG: "zh", HOME: temp, PATH: temp, LUMIO_STATE_DIR: state }, stdout: "pipe", stderr: "pipe" });
     const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
     expect(stderr).toBe(""); expect(code).toBe(0); return BackupManifest.parse(JSON.parse(stdout));
   }
@@ -233,7 +237,7 @@ for (const mode of ["restart", "timeout", "cancel"] as const) test(`${mode} kill
   const final = mode === "restart" ? "unknown" : mode === "cancel" ? "cancelled" : "failed";
   await eventually(async () => (await get(job.spec.id)).status === final, 15_000);
   await eventually(() => !alive(pid) && !alive(grandchild));
-  if (mode !== "cancel") expect((await get(job.spec.id)).result!.error).toBe(mode === "restart" ? "执行器重启" : "超时");
+  if (mode !== "cancel") expect((await get(job.spec.id)).result!.error).toBe(mode === "restart" ? "restarted" : "timeout");
 }, 25_000);
 
 test("cancel racing receipt/ack cancels locally queued work without starting it", async () => {
@@ -275,7 +279,7 @@ test("timeout escalates to SIGKILL when command and grandchild ignore SIGTERM", 
   await eventually(() => exists(`${calls}.child`));
   const grandchild = Number(await readFile(`${calls}.child`, "utf8"));
   await eventually(async () => (await get(job.spec.id)).status === "failed", 15_000);
-  expect((await get(job.spec.id)).result!.error).toBe("超时");
+  expect((await get(job.spec.id)).result!.error).toBe("timeout");
   await eventually(() => !alive(grandchild));
 }, 20_000);
 

@@ -1,3 +1,7 @@
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { watch, type FSWatcher } from "node:fs";
@@ -171,7 +175,7 @@ test("commit lock failures log once and retry in the next idle cycle", async () 
   await cp(fixture, join(vault, relative)); hub.notify(relative); await tick(2000);
   await writeFile(join(temp, "gitdir/HEAD.lock"), "synthetic lock"); await tick(8000);
   expect(git("rev-list", "--count", "HEAD").trim()).toBe("1");
-  expect(logs.join("\n")).toContain("自动提交失败");
+  expect(logs.join("\n")).toContain("autosave commit failed");
   await rm(join(temp, "gitdir/HEAD.lock")); await tick(10_000);
   expect(git("rev-list", "--count", "HEAD").trim()).toBe("2");
 });
@@ -179,7 +183,7 @@ test("commit lock failures log once and retry in the next idle cycle", async () 
 test("git unavailable logs only on startup and does not stop sync or status", async () => {
   const hub = await start(); const relative = "research/ideas/x.md";
   await cp(fixture, join(vault, relative)); hub.notify(relative); await tick(2000); await tick(30_000);
-  expect(logs).toEqual(["vault git 不可用，跳过自动提交"]);
+  expect(logs).toEqual(["Vault git is unavailable; skipping autosave commit"]);
   expect((await hub.status()).pending_files).toBe(0); expect(indexedPaths()).toEqual([relative]);
 });
 
@@ -232,7 +236,7 @@ test("index.lock staging failures also retry automatically in the next cycle", a
   await cp(fixture, join(vault, relative)); hub.notify(relative); await tick(2000);
   await writeFile(join(temp, "gitdir/index.lock"), "synthetic lock"); await tick(8000);
   expect(git("rev-list", "--count", "HEAD").trim()).toBe("1");
-  expect(logs.join("\n")).toContain("自动提交失败");
+  expect(logs.join("\n")).toContain("autosave commit failed");
   await rm(join(temp, "gitdir/index.lock")); await tick(10_000);
   expect(git("rev-list", "--count", "HEAD").trim()).toBe("2");
 });

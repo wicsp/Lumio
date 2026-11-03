@@ -33,20 +33,20 @@ export class Pairing {
   }
   invite(kind: "runtime" | "client", name: string, identity: Identity) {
     const url = this.config.publicUrl;
-    if (!url) throw new HubError("INVALID", "Hub 还没有对外地址（别的机器连 Hub 用的地址）。单机模式：lumio-hub setup --public-url <地址>（如 Tailscale serve 的 https 地址）；服务器模式：lumio-hub setup --server");
+    if (!url) throw new HubError("INVALID", { key: "pairing.hub_has_no_public_url_for_other_machines_single_machine_lumio_hub_se", args: [] });
     return this.store.db.transaction(() => {
       let actor = identity.actor;
       if (kind === "client") {
         // 令牌标签全局唯一：同名标签属于别的身份时拒绝，避免顶掉别人的令牌。
         const taken = this.store.tokens().find((t) => t.label === name && !t.revoked && t.actor_id !== actor.id);
-        if (taken) throw new HubError("CONFLICT", "这个名称已被其他身份的令牌使用，请用 --name 换一个");
+        if (taken) throw new HubError("CONFLICT", { key: "pairing.this_name_is_used_by_another_actor_s_token_choose_a_different_name", args: [] });
       }
       if (kind === "runtime") {
         const existing = this.store.actors().find((a) => a.name === name);
-        if (existing && existing.role !== "runtime") throw new HubError("CONFLICT", "名称已被其他角色的身份使用");
+        if (existing && existing.role !== "runtime") throw new HubError("CONFLICT", { key: "pairing.name_is_used_by_an_actor_with_another_role", args: [] });
         actor = existing ?? this.store.createActor(name, "runtime");
         const registered = this.store.runtimes(this.now()).find((r) => r.registration.name === name || r.actor === actor.id);
-        if (registered && (registered.actor !== actor.id || registered.registration.name !== name)) throw new HubError("CONFLICT", "执行器登记名称与身份不一致");
+        if (registered && (registered.actor !== actor.id || registered.registration.name !== name)) throw new HubError("CONFLICT", { key: "pairing.runtime_registration_name_does_not_match_actor", args: [] });
       }
       const code = pairingCode(), expires = new Date(this.now().getTime() + 600_000).toISOString();
       this.store.db.query("UPDATE pairing_codes SET used=1 WHERE kind=? AND actor=? AND name=? AND used=0").run(kind, actor.id, name);
@@ -60,7 +60,7 @@ export class Pairing {
   }
   join(kind: "runtime" | "client", code?: string) {
     const now = this.now().getTime();
-    const invalid = () => new HubError("UNAUTHENTICATED", "配对失败：请生成新的配对码后重试");
+    const invalid = () => new HubError("UNAUTHENTICATED", { key: "pairing.pairing_failed_generate_a_new_pairing_code_and_retry", args: [] });
     if (now < this.blockedUntil) throw invalid();
     this.failures = this.failures.filter((at) => at > now - 60_000);
     return this.store.db.transaction(() => {
@@ -91,7 +91,7 @@ export class Pairing {
   remove(name: string, identity: Identity) {
     this.store.db.transaction(() => {
       const actor = this.store.actors().find((a) => a.name === name && a.role === "runtime");
-      if (!actor) throw new HubError("NOT_FOUND", "执行器身份不存在");
+      if (!actor) throw new HubError("NOT_FOUND", { key: "pairing.runtime_actor_not_found", args: [] });
       this.revokeActor(actor.id);
       this.store.db.query("UPDATE pairing_codes SET used=1 WHERE actor=? AND kind='runtime'").run(actor.id);
       this.store.audit(identity, JSON.stringify({ operation: "runtime.remove", name, actor: actor.id }), "allow", undefined, "applied");
@@ -104,13 +104,13 @@ export async function handlePairing(request: Request, operation: PairingOperatio
   const decision = decide(identity?.actor ?? null, { operation });
   if (decision.result !== "allow") {
     if (identity) store.auditDenied(identity, operation);
-    throw new HubError("FORBIDDEN", "请求未获授权");
+    throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] });
   }
   if (operation === "runtime.signing-key") return Response.json(signingKey(privileged.publicKey()));
   if (operation === "runtime.remove") {
     let decoded: string;
-    try { decoded = decodeURIComponent(name!); } catch { throw new HubError("INVALID", "执行器名称不合法"); }
-    if (!RuntimeName.safeParse(decoded).success) throw new HubError("INVALID", "执行器名称不合法");
+    try { decoded = decodeURIComponent(name!); } catch { throw new HubError("INVALID", { key: "pairing.invalid_runtime_name", args: [] }); }
+    if (!RuntimeName.safeParse(decoded).success) throw new HubError("INVALID", { key: "pairing.invalid_runtime_name", args: [] });
     pairing.remove(decoded, identity!); return new Response(null, { status: 204 });
   }
   let body: unknown; try { body = await request.json(); } catch { /* joins always use the same 401 */ }
@@ -121,6 +121,6 @@ export async function handlePairing(request: Request, operation: PairingOperatio
   }
   const kind = operation === "runtime.invite" ? "runtime" : "client";
   const parsed = (kind === "runtime" ? RuntimeInviteRequest : ClientInviteRequest).safeParse(body);
-  if (!parsed.success) throw new HubError("INVALID", "配对邀请内容不合法");
+  if (!parsed.success) throw new HubError("INVALID", { key: "pairing.invalid_pairing_invitation", args: [] });
   return Response.json(pairing.invite(kind, parsed.data.name, identity!));
 }

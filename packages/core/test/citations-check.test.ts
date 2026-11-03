@@ -21,13 +21,13 @@ afterEach(async () => { await rm(temp, { recursive: true, force: true }); });
 test("collects public paper citations by filename and LaTeX key, deduplicates, and ignores code/AI/nonpapers/related", async () => {
   const result = await collectCitations(vault, "Report", { stateDir });
   expect(result.papers.map((p) => NoteRef.parse(p).citekey).sort()).toEqual(["Alpha_2024_Paper", "NoBib_2026_Paper", "Zeta_2025_Study"]);
-  expect(result.warnings).toEqual(["AI 区块中有 3 处引用未计入", "找不到 citekey：Missing_2026_Paper"]);
+  expect(result.warnings).toEqual(["3 citations inside AI blocks were excluded", "Citekey not found: Missing_2026_Paper"]);
   const bib = await buildBib(vault, result.papers);
   expect(bib.count).toBe(2);
   expect(bib.content.indexOf("@article{Alpha_")).toBeLessThan(bib.content.indexOf("@article{Zeta_"));
   expect(bib.content.match(/@article\{/g)).toHaveLength(2);
   expect(bib.content).not.toContain("Gamma_"); expect(bib.content).not.toContain("wrong_key");
-  expect(bib.warnings).toContain("缺少 BibTeX 一节或代码块，跳过：library/papers/NoBib_2026_Paper.md");
+  expect(bib.warnings).toContain("Missing BibTeX section or code block; skipped: library/papers/NoBib_2026_Paper.md");
   const out = join(temp, "export.bib");
   expect((await exportBib(vault, out, result.papers)).changed).toBe(true);
   const before = await stat(out);
@@ -45,13 +45,13 @@ test("source references share show resolution and privacy; paper filenames and c
   try { await collectCitations(vault, "Twin", { stateDir }); throw new Error("Expected ambiguity"); }
   catch (cause) {
     expect(cause).toMatchObject({ code: "AMBIGUOUS_REFERENCE" });
-    expect(String(cause)).toContain("library/sources/b/Twin.md"); expect(String(cause)).toContain("research/ideas/a/Twin.md");
+    expect(JSON.stringify((cause as { params: unknown }).params)).toContain("library/sources/b/Twin.md"); expect(JSON.stringify((cause as { params: unknown }).params)).toContain("research/ideas/a/Twin.md");
   }
   await rename(join(vault, entityDirectory("paper"), "Alpha_2024_Paper.md"), join(vault, entityDirectory("paper"), "Renamed.md"));
   await writeFile(join(vault, entityDirectory("idea"), "Report.md"), "[[Renamed]] \\cite{Alpha_2024_Paper} \\cite{Renamed}");
   const result = await collectCitations(vault, "Report", { stateDir });
   expect(result.papers.map((p) => p.citekey)).toEqual(["Alpha_2024_Paper"]);
-  expect(result.warnings).toEqual(["找不到 citekey：Renamed"]);
+  expect(result.warnings).toEqual(["Citekey not found: Renamed"]);
 });
 
 test("all five LaTeX commands, multiple optional arguments, inline and unfinished fences/AI blocks", () => {

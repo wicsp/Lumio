@@ -1,3 +1,7 @@
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { afterEach, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -46,7 +50,7 @@ test("runtime add supports human text and strict JSON; login-code uses a label; 
 test("login failures keep existing config and hide untrusted response data", async () => {
   const { home, path } = await fixture(); await mkdir(dirname(path), { recursive: true }); const old = '{"hub_url":"https://synthetic.example","token":"old-token"}'; await writeFile(path, old);
   for (const body of [{ private: "sensitive-response" }, { actor, token: "secret", extra: true }]) {
-    await expect(runPairing(["login", "https://synthetic.example", "--code", code], { home, confirm: async () => true, fetch: (async (url: unknown) => Response.json(String(url).endsWith("/health") ? { ok: true, version: "0.0.0-dev" } : body)) as unknown as typeof fetch })).rejects.toThrow("Hub 返回了不合法的响应");
+    await expect(runPairing(["login", "https://synthetic.example", "--code", code], { home, confirm: async () => true, fetch: (async (url: unknown) => Response.json(String(url).endsWith("/health") ? { ok: true, version: "0.0.0-dev" } : body)) as unknown as typeof fetch })).rejects.toThrow("PAIRING_FAILED");
     expect(await readFile(path, "utf8")).toBe(old);
   }
 });
@@ -60,7 +64,7 @@ test.skipIf(!script || process.platform !== "linux")("lumio login asks the overw
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: (req) => Response.json(new URL(req.url).pathname === "/health" ? { ok: true, version: "0.0.0-dev" } : joined) });
   try {
     const main = new URL("../src/main.ts", import.meta.url).pathname;
-    const command = `echo piped | HOME=${JSON.stringify(home)} ${JSON.stringify(process.execPath)} ${JSON.stringify(main)} login http://127.0.0.1:${server.port} --code ${code}`;
+    const command = `echo piped | LUMIO_LANG=zh HOME=${JSON.stringify(home)} ${JSON.stringify(process.execPath)} ${JSON.stringify(main)} login http://127.0.0.1:${server.port} --code ${code}`;
     const args = process.platform === "darwin" ? [script!, "-q", "/dev/null", "sh", "-c", command] : [script!, "-q", "-e", "-c", command, "/dev/null"];
     const child = Bun.spawn(args, { stdin: "pipe", stdout: "pipe", stderr: "pipe", timeout: 20_000 });
     await Bun.sleep(1500); child.stdin.write("yes\n"); child.stdin.flush(); child.stdin.end();

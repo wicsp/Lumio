@@ -6,3 +6,5 @@ export * from "./upgrade.ts";
 export * from "./release-shims.ts";
 export * from "./pairing-feedback.ts";
 export * from "./hub-checks.ts";
+
+export * from "./language.ts";

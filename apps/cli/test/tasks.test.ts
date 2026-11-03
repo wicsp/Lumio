@@ -1,3 +1,7 @@
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { isolatedHome } from "./test-home.ts";
 import { expect, test } from "bun:test";
 import { Job, OperationRequest } from "@lumio/schema";
@@ -27,7 +31,7 @@ async function cli(args: string[]) {
   } });
   try {
     const child = Bun.spawn([process.execPath, new URL("../src/main.ts", import.meta.url).pathname, "task", ...args], {
-      env: { HOME: home, LUMIO_HUB_URL: `http://127.0.0.1:${server.port}`, LUMIO_TOKEN: "synthetic" }, stdout: "pipe", stderr: "pipe",
+      env: { LUMIO_LANG: "zh", HOME: home, LUMIO_HUB_URL: `http://127.0.0.1:${server.port}`, LUMIO_TOKEN: "synthetic" }, stdout: "pipe", stderr: "pipe",
     });
     const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
     return { stdout, stderr, code, operations };

@@ -1,9 +1,10 @@
+import { text as msg } from "./messages.ts";
 import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { CliConfig } from "@lumio/schema";
 
-export const setupHint = "还没有配置，请先运行 install.sh 或 lumio-hub setup";
+export const setupHint = () => msg("config.no_configuration_run_install_sh_or_lumio_hub_setup_first");
 
 /** Read once per command; credentials are never included in diagnostics. */
 export function readCliConfig(options: { env?: NodeJS.ProcessEnv; home?: string; warn?: (line: string) => void } = {}) {
@@ -13,11 +14,11 @@ export function readCliConfig(options: { env?: NodeJS.ProcessEnv; home?: string;
   try {
     const mode = statSync(path).mode & 0o777;
     let value: unknown;
-    try { value = JSON.parse(readFileSync(path, "utf8")); } catch { throw new Error("CLI 配置无法解析，请重新运行 lumio-hub setup"); }
+    try { value = JSON.parse(readFileSync(path, "utf8")); } catch { throw new Error(msg("config.could_not_parse_cli_configuration_run_lumio_hub_setup_again")); }
     const parsed = CliConfig.partial({ token: true }).safeParse(value);
-    if (!parsed.success) throw new Error("CLI 配置格式不合法，请重新运行 lumio-hub setup");
+    if (!parsed.success) throw new Error(msg("config.invalid_cli_configuration_format_run_lumio_hub_setup_again"));
     file = parsed.data;
-    if (mode !== 0o600) (options.warn ?? console.error)(`配置文件权限不是 0600，请运行 chmod 600 '${path.replaceAll("'", "'\\''")}'`);
+    if (mode !== 0o600) (options.warn ?? console.error)(msg("config.configuration_file_permissions_are_not_0600_run_chmod_600", path.replaceAll("'", "'\\''")));
   } catch (cause) {
     if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause;
   }
@@ -25,12 +26,12 @@ export function readCliConfig(options: { env?: NodeJS.ProcessEnv; home?: string;
 }
 
 export function hubCredentials(config: { url?: string; token?: string } = readCliConfig()) {
-  if (!config.url || !config.token) throw new Error(setupHint);
+  if (!config.url || !config.token) throw new Error(setupHint());
   return { url: config.url, token: config.token };
 }
 
 export function localVault(explicit?: string, config: { vault?: string } = readCliConfig()): string {
   const vault = explicit ?? config.vault;
-  if (!vault) throw new Error(setupHint);
+  if (!vault) throw new Error(setupHint());
   return vault;
 }

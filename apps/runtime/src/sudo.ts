@@ -1,3 +1,4 @@
+import { text as msg } from "./messages.ts";
 import { StringDecoder } from "node:string_decoder";
 import { randomBytes } from "node:crypto";
 import { createServer, createConnection, type Server, type Socket } from "node:net";
@@ -39,7 +40,7 @@ export class SudoGate {
         if (!input.includes("\n")) return;
         received = true; socket.setTimeout(0);
         const pending = this.handle(socket, input.slice(0, input.indexOf("\n"))).catch(() => {
-          write(socket, { message: "申请失败或这一轮已结束", code: 1 });
+          write(socket, { message: msg("sudo.request_failed_or_this_round_ended"), code: 1 });
         }).finally(() => { socket.end(); this.pending.delete(pending); });
         this.pending.add(pending);
       });
@@ -60,14 +61,14 @@ export class SudoGate {
       ...(body === undefined ? {} : { body: JSON.stringify(body) }), redirect: "error", signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]) });
   }
   private async handle(socket: Socket, input: string) {
-    let value: { token?: string; argv?: unknown }; try { value = JSON.parse(input); } catch { write(socket, { message: "申请不合法", code: 2 }); return; }
+    let value: { token?: string; argv?: unknown }; try { value = JSON.parse(input); } catch { write(socket, { message: msg("sudo.invalid_request"), code: 2 }); return; }
     const entry = typeof value.token === "string" ? this.jobs.get(value.token) : undefined;
-    if (!entry || entry.controller.signal.aborted) { write(socket, { message: "只能在执行器派出的一轮之内使用", code: 2 }); return; }
-    if (!this.config.sudoCommand.length) { write(socket, { message: "此执行器不支持提权", code: 2 }); return; }
+    if (!entry || entry.controller.signal.aborted) { write(socket, { message: msg("sudo.only_available_within_a_round_dispatched_by_the_runtime"), code: 2 }); return; }
+    if (!this.config.sudoCommand.length) { write(socket, { message: msg("sudo.this_runtime_does_not_support_privileged_commands"), code: 2 }); return; }
     const actor = this.actor() ?? entry.spec.runtime;
-    const parsed = OperationRequest.safeParse({ operation: { op: "exec.privileged", args: { runtime: actor, job: entry.spec.id, argv: value.argv } }, reason: `第 ${entry.spec.source?.round ?? 1} 轮的 agent 申请` });
+    const parsed = OperationRequest.safeParse({ operation: { op: "exec.privileged", args: { runtime: actor, job: entry.spec.id, argv: value.argv } }, reason: msg("sudo.agent_request_for_round", entry.spec.source?.round ?? 1) });
     if (!parsed.success || parsed.data.operation.op !== "exec.privileged" || !isAbsolute(parsed.data.operation.args.argv[0]!) || parsed.data.operation.args.argv.some((a) => a.includes("\0"))) {
-      write(socket, { message: "程序必须是绝对路径且参数合法", code: 2 }); return;
+      write(socket, { message: msg("sudo.program_must_be_an_absolute_path_with_valid_arguments"), code: 2 }); return;
     }
     const disconnected = new AbortController();
     socket.once("close", () => disconnected.abort());
@@ -76,14 +77,14 @@ export class SudoGate {
     while (!signal.aborted && !proposal) {
       try {
         const response = await this.request("/v1/operations", parsed.data, signal);
-        if (!response.ok) { write(socket, { message: "Hub 拒绝了申请", code: 1 }); return; }
+        if (!response.ok) { write(socket, { message: msg("sudo.hub_rejected_the_request"), code: 1 }); return; }
         const result = OperationResult.parse(await response.json());
         if (result.status !== "pending_approval") throw new Error("unexpected result");
         proposal = result.proposal.id;
       } catch { if (!signal.aborted) await sleep(this.config.pollSeconds * 1000, undefined, { signal }).catch(() => {}); }
     }
-    if (!proposal) { write(socket, { message: "未获批准：等待超时或这一轮已结束", code: 1 }); return; }
-    write(socket, { message: `已提交申请 ${proposal}，等待用户批准` });
+    if (!proposal) { write(socket, { message: msg("sudo.not_approved_timed_out_or_this_round_ended"), code: 1 }); return; }
+    write(socket, { message: msg("sudo.submitted_request_waiting_for_user_approval", proposal) });
     while (!signal.aborted) {
       let status: PrivilegedStatus | undefined;
       try {
@@ -91,7 +92,7 @@ export class SudoGate {
         if (response.ok) status = PrivilegedStatus.parse(await response.json());
       } catch { /* Hub 离线时仍在超时内等待。 */ }
       if (signal.aborted) break;
-      if (status?.status === "rejected" || status?.status === "expired") { write(socket, { message: status.status === "rejected" ? "用户拒绝了这条命令" : "申请已失效", code: 1 }); return; }
+      if (status?.status === "rejected" || status?.status === "expired") { write(socket, { message: status.status === "rejected" ? msg("sudo.user_rejected_this_command") : msg("sudo.request_expired"), code: 1 }); return; }
       if (status?.status === "accepted") {
         const started = new Date().toISOString();
         const code = await this.execute(status.approval, socket, AbortSignal.any([this.signal, entry.controller.signal, disconnected.signal]));
@@ -101,7 +102,7 @@ export class SudoGate {
       }
       await sleep(this.config.pollSeconds * 1000, undefined, { signal }).catch(() => {});
     }
-    write(socket, { message: "未获批准：等待超时或这一轮已结束", code: 1 });
+    write(socket, { message: msg("sudo.not_approved_timed_out_or_this_round_ended"), code: 1 });
   }
   private async execute(approval: unknown, socket: Socket, signal: AbortSignal): Promise<number> {
     if (signal.aborted) return 126;
@@ -127,7 +128,7 @@ export class SudoGate {
       try {
         const response = await this.request("/v1/runtime/privileged", JSON.parse(row.report), this.signal);
         if (response.ok) this.queue.db.query("DELETE FROM privileged_outbox WHERE proposal=?").run(row.proposal);
-        else if (response.status === 409) { this.conflicts.add(row.proposal); this.log(`高权限命令 ${row.proposal} 回报冲突（409），已保留，等待人工处理`); }
+        else if (response.status === 409) { this.conflicts.add(row.proposal); this.log(msg("sudo.privileged_command_report_conflict_409_retained_for_manual_handling", row.proposal)); }
       } catch { break; }
     }
   }
@@ -139,8 +140,8 @@ export class SudoGate {
 }
 
 export async function runSudo(args: string[], env: NodeJS.ProcessEnv = process.env): Promise<number> {
-  if (!env.LUMIO_SUDO_SOCKET || !env.LUMIO_SUDO_TOKEN) { console.error("只能在执行器派出的一轮之内使用"); return 2; }
-  if (args[0] !== "--" || !args[1] || !isAbsolute(args[1])) { console.error("用法：lumio-runtime sudo -- <绝对路径的程序> [参数…]"); return 2; }
+  if (!env.LUMIO_SUDO_SOCKET || !env.LUMIO_SUDO_TOKEN) { console.error(msg("sudo.only_available_within_a_round_dispatched_by_the_runtime")); return 2; }
+  if (args[0] !== "--" || !args[1] || !isAbsolute(args[1])) { console.error(msg("sudo.usage_lumio_runtime_sudo_absolute_program_path_arguments")); return 2; }
   return new Promise<number>((resolve) => {
     const socket = createConnection(env.LUMIO_SUDO_SOCKET!);
     let input = "", code: number | undefined;
@@ -159,7 +160,7 @@ export async function runSudo(args: string[], env: NodeJS.ProcessEnv = process.e
         } catch { socket.destroy(); }
       }
     });
-    socket.on("error", () => { console.error("无法联系这一轮的执行器"); });
+    socket.on("error", () => { console.error(msg("sudo.could_not_contact_this_round_s_runtime")); });
     socket.once("close", () => resolve(code ?? 2));
   });
 }

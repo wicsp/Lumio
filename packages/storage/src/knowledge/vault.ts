@@ -39,7 +39,7 @@ export async function vaultFileAt(root: string, path: string): Promise<VaultFile
     return { path: target, relativePath, type, private: isPrivateType(type) };
   } catch (cause) {
     if ((cause as NodeJS.ErrnoException).code === "ENOENT") return;
-    throw new CoreError("VAULT_READ_FAILED", "无法读取 vault 文件", { cause });
+    throw new CoreError("VAULT_READ_FAILED", { key: "vault.could_not_read_vault_file", args: [] }, { cause });
   }
 }
 
@@ -58,7 +58,7 @@ export async function scanVault(root: string, types?: readonly EntityType[]): Pr
     }
   }
   try {
-    if (!(await stat(root)).isDirectory()) throw new Error("vault 路径不是目录");
+    if (!(await stat(root)).isDirectory()) throw new Error("INVALID_VAULT");
     for (const entry of VAULT_LAYOUT) {
       if (types && !types.includes(entry.type)) continue;
       const path = join(root, ...entry.dir.split("/"));
@@ -72,6 +72,6 @@ export async function scanVault(root: string, types?: readonly EntityType[]): Pr
     }
     return files;
   } catch (cause) {
-    throw new CoreError("VAULT_READ_FAILED", `无法扫描 vault：${root}`, { cause });
+    throw new CoreError("VAULT_READ_FAILED", { key: "vault.could_not_scan_vault", args: [root] }, { cause });
   }
 }

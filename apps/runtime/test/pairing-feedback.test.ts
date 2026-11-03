@@ -1,3 +1,8 @@
+import { errorMessage } from "../src/messages.ts";
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, rm, access, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -38,7 +43,7 @@ async function attempt(url: string, fetcher = fetch) {
   let error = "";
   try {
     await joinRuntime(["--hub", url, "--code", code], { home, env: {}, fetch: fetcher, log: (l) => logs.push(l), warn: (l) => logs.push(l), install: async () => { throw new Error("must not install"); } });
-  } catch (cause) { error = (cause as Error).message; }
+  } catch (cause) { error = errorMessage(cause); }
   expect(error).not.toBe(""); expect(error + logs.join("\n")).not.toContain(code); expect(error + logs.join("\n")).not.toContain(secret);
   await expect(access(join(home, ".config/lumio-runtime/runtime.env"))).rejects.toThrow();
   return error;
@@ -84,7 +89,7 @@ test("runtime command prints the specific pairing diagnosis through its entry po
       return new Response(secret, { status: scenario === "missing-join" ? 404 : scenario === "unauthorized" ? 401 : 503 });
     } });
     try {
-      const child = Bun.spawn([process.execPath, new URL("../src/main.ts", import.meta.url).pathname, "join", "--hub", server.url.href, "--code", code], { env: { HOME: home }, stdout: "pipe", stderr: "pipe" });
+      const child = Bun.spawn([process.execPath, new URL("../src/main.ts", import.meta.url).pathname, "join", "--hub", server.url.href, "--code", code], { env: { LUMIO_LANG: "zh", HOME: home }, stdout: "pipe", stderr: "pipe" });
       const [exit, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
       expect(exit).toBe(1); expect(out + err).not.toContain(code); expect(out + err).not.toContain(secret);
       if (scenario === "version") expect(err).toContain("Hub 是 0.1.0，本程序是 0.0.0-dev，建议保持一致");

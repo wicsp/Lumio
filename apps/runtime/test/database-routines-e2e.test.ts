@@ -1,3 +1,7 @@
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -42,7 +46,7 @@ test("database Routine uses protocol 2 on a real runtime with no Knowledge, reta
     const config = readConfig({ LUMIO_HUB_URL: url, LUMIO_TOKEN: token, LUMIO_RUNTIME_NAME: "server", LUMIO_RUNTIME_POLL_SECONDS: "0.05", LUMIO_RUNTIME_STATE_DIR: runtimeState });
     const start = () => {
       controller = new AbortController();
-      running = runRuntime(config, { signal: controller.signal, env: { HOME: temp, PATH: temp }, log() {}, now: () => new Date(now) });
+      running = runRuntime(config, { signal: controller.signal, env: { LUMIO_LANG: "zh", HOME: temp, PATH: temp }, log() {}, now: () => new Date(now) });
     };
     const stop = async () => { controller?.abort(); await running; running = undefined; };
     process.argv[1] = new URL("../src/main.ts", import.meta.url).pathname;
@@ -50,7 +54,7 @@ test("database Routine uses protocol 2 on a real runtime with no Knowledge, reta
     await eventually(() => { try { return local("SELECT * FROM routines").length === 1; } catch { return false; } });
     now = Date.parse("2026-10-26T10:10:30Z");
     await eventually(async () => Job.array().parse(await api(`/v1/jobs?routine=${routine.id}`))[0]?.status === "done");
-    await eventually(() => local<{ spec: string }>("SELECT spec FROM routines")[0]!.spec.includes("上一次的汇报"));
+    await eventually(() => local<{ spec: string }>("SELECT spec FROM routines")[0]!.spec.includes("Previous report"));
     await halt(); now = Date.parse("2026-10-26T10:20:30Z");
     await eventually(() => local("SELECT * FROM outbox").length === 1);
     await boot(); await eventually(async () => Job.array().parse(await api(`/v1/jobs?routine=${routine.id}`)).length === 2);

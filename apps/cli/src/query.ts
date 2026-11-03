@@ -1,3 +1,4 @@
+import { text as msg } from "./messages.ts";
 import { readFile } from "node:fs/promises";
 import { vaultFileAt, buildBib, checkLinks, collectCitations, excludedCardPaths, exportBib, noteLinks, searchNotes, showNote, type SearchOptions } from "@lumio/storage";
 import { parseFrontmatter } from "@lumio/knowledge";
@@ -20,21 +21,21 @@ export interface QueryCommand {
 export async function runQuery(root: string | undefined, command: QueryCommand, log: (line: string) => void, warn: (line: string) => void, remote?: ReturnType<typeof createClient>): Promise<number> {
   const local = root ? new KnowledgeService(new FileKnowledgeRepository(root)) : undefined;
   if (command.command === "export") {
-    const citations = command.from === undefined ? undefined : await collectCitations(root!, command.from);
+    const citations = command.from === undefined ? undefined : await collectCitations(root!, command.from, { text: msg });
     for (const warning of citations?.warnings ?? []) warn(warning);
     if (citations && command.out === undefined) {
-      const result = await buildBib(root!, citations.papers);
+      const result = await buildBib(root!, citations.papers, msg);
       for (const warning of result.warnings) warn(warning);
       log(result.content.endsWith("\n") ? result.content.slice(0, -1) : result.content);
       return 0;
     }
-    const result = await exportBib(root!, command.out, citations?.papers);
+    const result = await exportBib(root!, command.out, citations?.papers, msg);
     for (const warning of result.warnings) warn(warning);
-    log(`导出 ${result.count} 篇论文：${result.path}${result.changed ? "" : "（未变化）"}`);
+    log(msg("query.exported_papers", result.count, result.path, result.changed ? "" : msg("query.unchanged")));
     return 0;
   }
-  if (command.type !== undefined && !NOTE_TYPES.includes(command.type as NoteRef["type"])) throw new Error("未知笔记类型");
-  if (command.limit !== undefined && !/^[1-9]\d*$/.test(command.limit)) throw new Error("limit 必须是正整数");
+  if (command.type !== undefined && !NOTE_TYPES.includes(command.type as NoteRef["type"])) throw new Error(msg("query.unknown_note_type"));
+  if (command.limit !== undefined && !/^[1-9]\d*$/.test(command.limit)) throw new Error(msg("query.limit_must_be_a_positive_integer"));
   const options: SearchOptions = {
     includePrivate: command.includePrivate, type: command.type as NoteRef["type"] | undefined,
     ...(command.limit !== undefined ? { limit: Number(command.limit) } : {}),
@@ -52,25 +53,25 @@ export async function runQuery(root: string | undefined, command: QueryCommand, 
       if (fm.assignee !== null && typeof fm.assignee === "object") {
         try {
           const assignee = parseAssignee(fm.assignee);
-          if (assignee !== "human") warn(`${note.path}  提示：旧 assignee 对象可以改成字符串 assignee: ${assignee.agent}${assignee.device ? `@${assignee.device}` : ""}（例如 pi@server）`);
+          if (assignee !== "human") warn(msg("query.hint_replace_the_legacy_assignee_object_with_assignee_e_g_pi_server", note.path, assignee.agent, assignee.device ? `@${assignee.device}` : ""));
         } catch { /* 格式错误由元数据校验报告，不把兼容性提示变成错误。 */ }
       }
-      if (Object.hasOwn(fm, "turn")) warn(`${note.path}  提示：turn 已不再使用，可以删掉；派活请改 assignee（例如 pi@server）`);
+      if (Object.hasOwn(fm, "turn")) warn(msg("query.hint_turn_is_no_longer_used_and_can_be_removed_dispatch_by_changing", note.path));
     }
     if (command.json) log(JSON.stringify(result));
-    else if (!result.total) log("没有悬空链接");
+    else if (!result.total) log(msg("query.no_dangling_links"));
     else {
       for (const link of result.dangling) log(`${link.from.path}  →  [[${link.target}]]`);
-      log(`共 ${result.total} 条悬空链接`);
+      log(msg("query.dangling_links", result.total));
     }
   } else if (command.command === "search") {
     const result = await (remote ? remote.search(command.argument, options) : local!.search(command.argument, options));
     if (command.json) log(JSON.stringify(result));
     else {
-      log(`找到 ${result.total} 篇笔记`);
+      log(msg("query.found_notes", result.total));
       for (const hit of result.hits) log(`${hit.note.title}  ${hit.note.path}\n  ${hit.snippet}`);
       const paths = remote ? [] : await excludedCardPaths(root!, options);
-      if (paths.length) log(`有 ${paths.length} 个文件因疑似含卡号未被索引\n${paths.join("\n")}`);
+      if (paths.length) log(msg("query.files_were_not_indexed_because_they_may_contain_card_numbers", paths.length, paths.join("\n")));
     }
   } else if (command.command === "show") {
     const result = await (remote ? remote.show(command.argument, options) : local!.show(command.argument, options));
@@ -79,9 +80,9 @@ export async function runQuery(root: string | undefined, command: QueryCommand, 
     const result = await (remote ? remote.links(command.argument, options) : local!.links(command.argument, options));
     if (command.json) log(JSON.stringify(result));
     else {
-      log(`${result.note.title}  ${result.note.path}\n出链：`);
-      for (const link of result.outgoing) log(`  [${link.source}] ${link.target}${link.dangling ? "（悬空）" : ` → ${link.note!.path}`}`);
-      log("反向链接：");
+      log(msg("query.outgoing_links", result.note.title, result.note.path));
+      for (const link of result.outgoing) log(`  [${link.source}] ${link.target}${link.dangling ? msg("query.dangling") : ` → ${link.note!.path}`}`);
+      log(msg("query.backlinks"));
       for (const link of result.incoming) log(`  [${link.source}] ${link.note.title}  ${link.note.path}`);
     }
   }

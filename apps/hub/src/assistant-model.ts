@@ -10,17 +10,17 @@ export interface ModelConfiguration {
 export function modelConfiguration(env: NodeJS.ProcessEnv): ModelConfiguration | undefined {
   const base = env.LUMIO_ASSISTANT_BASE_URL, model = env.LUMIO_ASSISTANT_MODEL;
   if (base === undefined && model === undefined && !env.LUMIO_ASSISTANT_API_KEY) return;
-  if (!base || !model?.trim()) throw new AssistantError("INVALID", "助手需要同时配置 LUMIO_ASSISTANT_BASE_URL 和 LUMIO_ASSISTANT_MODEL");
+  if (!base || !model?.trim()) throw new AssistantError("INVALID", { key: "assistant-model.configure_both_lumio_assistant_base_url_and_lumio_assistant_model_fo", args: [] });
   let url: URL;
   try {
     url = new URL(base);
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error();
-  } catch { throw new AssistantError("INVALID", "助手模型地址必须是不含凭据、查询或片段的 HTTP(S) 地址"); }
+  } catch { throw new AssistantError("INVALID", { key: "assistant-model.assistant_model_url_must_be_http_s_without_credentials_query_or_frag", args: [] }); }
   const key = env.LUMIO_ASSISTANT_API_KEY;
   return { baseUrl: url.href.replace(/\/+$/, ""), model, credential: () => key || undefined };
 }
 
-const invalid = () => new AssistantError("INVALID", "模型返回了不完整或不支持的响应；请检查兼容接口配置");
+const invalid = () => new AssistantError("INVALID", { key: "assistant-model.model_returned_an_incomplete_or_unsupported_response_check_api_compa", args: [] });
 const object = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw invalid();
   return value as Record<string, unknown>;
@@ -47,7 +47,7 @@ export class ChatCompletionsModel implements AssistantModel {
           ...(input.tools.length ? { tools: input.tools.map(tool => ({ type: "function", function: { name: tool.name, description: tool.description, parameters: tool.input_schema } })) } : {}),
         }),
       });
-      if (!response.ok) throw new AssistantError("INVALID", response.status === 401 || response.status === 403 ? "模型服务拒绝授权，请检查运行时凭据" : "模型服务未接受请求，请检查地址、模型与服务状态");
+      if (!response.ok) throw new AssistantError("INVALID", response.status === 401 || response.status === 403 ? { key: "assistant-model.model_service_denied_authorization_check_runtime_credentials", args: [] } : { key: "assistant-model.model_service_rejected_the_request_check_url_model_and_service_statu", args: [] });
       if (!response.body) throw invalid();
       const reader = response.body.getReader(), decoder = new TextDecoder("utf-8", { fatal: true });
       let bytes = 0;
@@ -116,8 +116,8 @@ export class ChatCompletionsModel implements AssistantModel {
       } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
     } catch (cause) {
       if (cause instanceof AssistantError) throw cause;
-      if (signal.aborted) throw new AssistantError("INTERNAL", "模型请求已取消或超时");
-      throw new AssistantError("INTERNAL", "无法连接模型服务或解析其响应，请检查配置与服务状态");
+      if (signal.aborted) throw new AssistantError("INTERNAL", { key: "assistant-model.model_request_cancelled_or_timed_out", args: [] });
+      throw new AssistantError("INTERNAL", { key: "assistant-model.could_not_connect_to_the_model_service_or_parse_its_response_check_c", args: [] });
     } finally { if (response?.body && !response.body.locked) await response.body.cancel().catch(() => {}); }
   }
   private json(raw: unknown, input: AssistantModelRequest, token: (text: string) => void): AssistantModelResponse {
@@ -148,5 +148,5 @@ export class ChatCompletionsModel implements AssistantModel {
 }
 
 export function configuredModel(config?: ModelConfiguration): AssistantModel {
-  return config ? new ChatCompletionsModel(config) : { async complete() { throw new AssistantError("INVALID", "助手尚未配置模型地址与模型名称"); } };
+  return config ? new ChatCompletionsModel(config) : { async complete() { throw new AssistantError("INVALID", { key: "assistant-model.assistant_model_url_and_name_are_not_configured", args: [] }); } };
 }

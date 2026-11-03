@@ -45,7 +45,7 @@ export class HubStore {
       const binding = this.db.query<{ actor: string }, []>("SELECT actor FROM internal_actors WHERE purpose='assistant-tools'").get();
       if (binding) {
         const actor = this.actors().find((value) => value.id === binding.actor);
-        if (!actor || actor.role !== "agent") throw new HubError("INVALID", "助手工具身份配置无效");
+        if (!actor || actor.role !== "agent") throw new HubError("INVALID", { key: "store.invalid_assistant_tool_identity_configuration", args: [] });
         return actor;
       }
       const actor = this.createActor(`assistant-${randomBytes(6).toString("hex")}`, "agent");
@@ -56,8 +56,8 @@ export class HubStore {
   createActor(name: string, role: ActorRole): Actor {
     const now = new Date();
     const parsed = Actor.safeParse({ id: newId("act", now, randomBytes), name, role, created: now.toISOString() });
-    if (!parsed.success) throw new HubError("INVALID", "身份名称或角色不合法");
-    if (this.db.query("SELECT id FROM actors WHERE name=?").get(name)) throw new HubError("CONFLICT", "身份名称已存在");
+    if (!parsed.success) throw new HubError("INVALID", { key: "store.invalid_actor_name_or_role", args: [] });
+    if (this.db.query("SELECT id FROM actors WHERE name=?").get(name)) throw new HubError("CONFLICT", { key: "store.actor_name_already_exists", args: [] });
     const actor = parsed.data;
     this.db.query("INSERT INTO actors VALUES (?, ?, ?, ?)").run(actor.id, actor.name, actor.role, actor.created);
     return actor;
@@ -66,10 +66,10 @@ export class HubStore {
   actors(): Actor[] { return this.db.query("SELECT * FROM actors ORDER BY created, id").all().map((row) => Actor.parse(row)); }
 
   createToken(label: string, actorName: string): string {
-    if (!label) throw new HubError("INVALID", "令牌标签不能为空");
+    if (!label) throw new HubError("INVALID", { key: "store.token_label_must_not_be_empty", args: [] });
     const row = this.db.query("SELECT * FROM actors WHERE name=?").get(actorName);
-    if (!row) throw new HubError("NOT_FOUND", "身份不存在");
-    if (this.db.query("SELECT label FROM tokens WHERE label=?").get(label)) throw new HubError("CONFLICT", "令牌标签已存在");
+    if (!row) throw new HubError("NOT_FOUND", { key: "store.actor_not_found", args: [] });
+    if (this.db.query("SELECT label FROM tokens WHERE label=?").get(label)) throw new HubError("CONFLICT", { key: "store.token_label_already_exists", args: [] });
     const actor = Actor.parse(row);
     const token = `lumio_${randomBytes(32).toString("base64url")}`;
     this.db.query("INSERT INTO tokens VALUES (?, ?, ?, ?, NULL)")
@@ -92,7 +92,7 @@ export class HubStore {
 
   revokeToken(label: string): void {
     const result = this.db.query("UPDATE tokens SET revoked=COALESCE(revoked, ?) WHERE label=?").run(new Date().toISOString(), label);
-    if (!result.changes) throw new HubError("NOT_FOUND", "令牌不存在");
+    if (!result.changes) throw new HubError("NOT_FOUND", { key: "store.token_not_found", args: [] });
   }
 
   authenticate(header: string | null): Identity | null {
@@ -130,7 +130,7 @@ export class HubStore {
   createProposal(operation: Operation, reason: string, author: string): Proposal {
     // 内容相同的待批准提议只保留一个（按完整操作比较，与操作种类无关）。
     const duplicate = this.proposals("pending").find((p) => JSON.stringify(p.operation) === JSON.stringify(operation));
-    if (duplicate) throw new HubError("CONFLICT", "已有相同的待批准提议", { operation, proposal: duplicate.id });
+    if (duplicate) throw new HubError("CONFLICT", { key: "store.an_identical_proposal_is_already_pending", args: [] }, { operation, proposal: duplicate.id });
     const now = new Date();
     const proposal = Proposal.parse({ id: newId("prop", now, randomBytes), operation, reason, author, status: "pending", created: now.toISOString() });
     this.db.query("INSERT INTO proposals VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)")

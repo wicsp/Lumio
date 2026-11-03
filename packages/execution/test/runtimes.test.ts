@@ -26,14 +26,14 @@ test("Execution owns runtime names, capability replacement and online facts thro
   expect(changed.registration).toMatchObject({ max_concurrent: 2, tags: ["gpu:4"], engines: [{ name: "pi" }] });
   runtimes.sync(first, new Date(now.getTime() + 200_000));
   expect(runtimes.list(new Date(now.getTime() + 200_001)).filter((value) => value.online).map((value) => value.actor)).toEqual([first]);
-  expect(() => runtimes.sync("act_00000000000000000000000003", now)).toThrow("尚未登记");
+  expect(() => runtimes.sync("act_00000000000000000000000003", now)).toThrow("NOT_FOUND");
 });
 
 test("an identity cannot rename itself or occupy another device name; malformed protocol never alters registry state", () => {
   const store = new MemoryRegistry(), runtimes = new ExecutionRuntimes(store); runtimes.register(first, registration, now);
   const before = structuredClone(store.list());
-  expect(() => runtimes.register(first, { ...registration, name: "another" }, now)).toThrow("不能更换名称");
-  expect(() => runtimes.register(second, registration, now)).toThrow("另一身份");
+  expect(() => runtimes.register(first, { ...registration, name: "another" }, now)).toThrow("CONFLICT");
+  expect(() => runtimes.register(second, registration, now)).toThrow("CONFLICT");
   for (const input of [{ ...registration, protocol_version: 1 }, { ...registration, extra: "synthetic private text" }, { ...registration, max_concurrent: 0 }]) {
     try { runtimes.register(first, input, now); throw new Error("expected failure"); }
     catch (cause) { expect(cause).toHaveProperty("code", "INVALID"); expect(String(cause)).not.toContain("synthetic private text"); }

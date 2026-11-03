@@ -17,7 +17,7 @@ export class FileKnowledgeRepository implements KnowledgeRepository {
     const papers: { path: string; frontmatter: Record<string, unknown> }[] = [];
     for (const file of await scanVault(this.root, ["paper"])) {
       try { papers.push({ path: file.relativePath, frontmatter: parseFrontmatter(await readFile(file.path)).data }); }
-      catch (cause) { throw new CoreError("DUPLICATE_CHECK_FAILED", `无法检查已有论文：${file.relativePath}，请先修复该文件`, { cause }); }
+      catch (cause) { throw new CoreError("DUPLICATE_CHECK_FAILED", { key: "adapter.could_not_check_existing_paper_repair_the_file_first", args: [file.relativePath] }, { cause }); }
     }
     return papers;
   }

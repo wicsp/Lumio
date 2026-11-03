@@ -60,7 +60,7 @@ test.each([["Spotlighting", "Spotlighting"], ["GPT-4!", "GPT4"], ["two words", "
 });
 
 test.each(["", "!!", " \t", "中文"])("explicit empty-after-cleaning abbreviation is rejected: %j", (abbreviation) => {
-  expect(() => generateCitekey(metadata, abbreviation)).toThrow("--abbr 删除非法字符后为空");
+  expect(() => generateCitekey(metadata, abbreviation)).toThrow("INVALID_ABBREVIATION");
 });
 
 test.each([20, 999, 10000, 2020.5, NaN, Infinity, -2020])("invalid year %s is not hidden by fallbacks", (year) => {

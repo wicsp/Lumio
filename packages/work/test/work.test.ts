@@ -59,7 +59,7 @@ test("Work operates without Knowledge, keeps owner separate from dispatch, snaps
   expect(f.service.detail(task.id).executions[0]!.input_snapshot).not.toContain("第二版要求");
   expect(f.command("work.task.dispatch", { task: task.id }, "synthetic-dispatch-001")).toEqual(started);
   expect(f.dispatches()).toBe(1);
-  expect(() => f.command("work.task.dispatch", { task: task.id })).toThrow("已有一轮");
+  expect(() => f.command("work.task.dispatch", { task: task.id })).toThrow("CONFLICT");
   const run = details.executions[0]!;
   const result = Job.parse({ spec: { id: run.job, protocol_version: 2, runtime: owner, lease: "synthetic-lease-0000",
     run: { kind: "command", argv: ["/bin/true"] }, workdir: "~", timeout_seconds: 60, created: timestamp }, status: "done",
@@ -74,20 +74,20 @@ test("revision conflicts preserve descriptions; null clears optional fields and 
   f.command("work.task.update", { task: task.id, expected_revision: 1, patch: { due: null } });
   expect(f.service.task(task.id).due).toBeUndefined();
   f.command("work.task.update", { task: task.id, expected_revision: 2, patch: { description: "保留的正文" } });
-  expect(() => f.command("work.task.update", { task: task.id, expected_revision: 1, patch: { description: "陈旧修改" } })).toThrow("已被修改");
+  expect(() => f.command("work.task.update", { task: task.id, expected_revision: 1, patch: { description: "陈旧修改" } })).toThrow("CONFLICT");
   expect(f.service.task(task.id).description).toBe("保留的正文");
   const first = f.command("work.task.create", { title: "相同输入" }, "synthetic-request-replay");
   expect(f.command("work.task.create", { title: "相同输入" }, "synthetic-request-replay")).toEqual(first);
-  expect(() => f.command("work.task.create", { title: "不同输入" }, "synthetic-request-replay")).toThrow("不同的操作");
+  expect(() => f.command("work.task.create", { title: "不同输入" }, "synthetic-request-replay")).toThrow("CONFLICT");
   expect(f.command("work.task.create", { title: "相同输入" }, "synthetic-request-replay", "act_00000000000000000000000002")).not.toEqual(first);
 });
 
 test("dependency and parent cycles are refused, incomplete dependencies block dispatch and completion", () => {
   const f = fixture(), a = f.create("依赖"), b = f.create("后续", { dependencies: [a.id], parent: a.id, assignee: "pi" });
-  expect(() => f.command("work.task.dispatch", { task: b.id })).toThrow("依赖任务尚未完成");
-  expect(() => f.command("work.task.update", { task: b.id, expected_revision: b.revision, patch: { status: "done" } })).toThrow("依赖任务尚未完成");
-  expect(() => f.command("work.task.update", { task: a.id, expected_revision: a.revision, patch: { dependencies: [b.id] } })).toThrow("依赖不能形成循环");
-  expect(() => f.command("work.task.update", { task: a.id, expected_revision: a.revision, patch: { parent: b.id } })).toThrow("父任务关系不能形成循环");
+  expect(() => f.command("work.task.dispatch", { task: b.id })).toThrow("CONFLICT");
+  expect(() => f.command("work.task.update", { task: b.id, expected_revision: b.revision, patch: { status: "done" } })).toThrow("CONFLICT");
+  expect(() => f.command("work.task.update", { task: a.id, expected_revision: a.revision, patch: { dependencies: [b.id] } })).toThrow("CONFLICT");
+  expect(() => f.command("work.task.update", { task: a.id, expected_revision: a.revision, patch: { parent: b.id } })).toThrow("CONFLICT");
   f.command("work.task.update", { task: a.id, expected_revision: a.revision, patch: { status: "done" } });
   expect(f.command("work.task.dispatch", { task: b.id }).kind).toBe("job");
 });
@@ -96,8 +96,8 @@ test("paused and cancelled tasks request cancellation; blocked statuses never di
   const f = fixture(), task = f.create("合成任务");
   f.command("work.task.update", { task: task.id, expected_revision: 1, patch: { status: "paused" } });
   expect(f.cancellations()).toBe(1);
-  expect(() => f.command("work.task.dispatch", { task: task.id })).toThrow("已暂停");
+  expect(() => f.command("work.task.dispatch", { task: task.id })).toThrow("CONFLICT");
   const before = structuredClone(f.store.data);
-  expect(() => f.command("work.task.update", { task: task.id, expected_revision: 2, patch: { id: task.id } })).toThrow("参数不合法");
+  expect(() => f.command("work.task.update", { task: task.id, expected_revision: 2, patch: { id: task.id } })).toThrow("INVALID");
   expect(f.store.data).toEqual(before);
 });

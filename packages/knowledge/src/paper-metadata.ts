@@ -14,7 +14,7 @@ export interface PaperMetadata {
 export const normalizeWhitespace = (value: string): string => value.replace(/\s+/gu, " ").trim();
 
 function record(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("预期对象");
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("INVALID_METADATA");
   return value as Record<string, unknown>;
 }
 
@@ -29,11 +29,11 @@ export function parseCrossrefMetadata(json: unknown): PaperMetadata {
     const mainTitle = firstText(message.title);
     const subtitle = firstText(message.subtitle);
     const title = mainTitle && subtitle && subtitle !== mainTitle ? `${mainTitle}: ${subtitle}` : mainTitle;
-    if (!title || !Array.isArray(message.author) || !message.author.length) throw new Error("缺少标题或作者");
+    if (!title || !Array.isArray(message.author) || !message.author.length) throw new Error("INVALID_METADATA");
     const authors = message.author.map((value) => {
       const author = record(value);
       const name = [firstText(author.given), firstText(author.family)].filter(Boolean).join(" ") || firstText(author.name);
-      if (!name) throw new Error("缺少作者姓名");
+      if (!name) throw new Error("INVALID_METADATA");
       return name;
     });
     let year: number | undefined;
@@ -45,7 +45,7 @@ export function parseCrossrefMetadata(json: unknown): PaperMetadata {
       const candidate = Array.isArray(date) ? date[0] : undefined;
       if (typeof candidate === "number" && Number.isInteger(candidate)) { year = candidate; break; }
     }
-    if (year === undefined) throw new Error("缺少发表年份");
+    if (year === undefined) throw new Error("INVALID_METADATA");
     const family = firstText(record(message.author[0]).family);
     const doi = firstText(message.DOI);
     const url = firstText(message.URL);
@@ -56,6 +56,6 @@ export function parseCrossrefMetadata(json: unknown): PaperMetadata {
       ...(doi ? { doi } : {}), ...(url ? { url } : {}), ...(venue ? { venue } : {}),
     };
   } catch (cause) {
-    throw new CoreError("INVALID_CROSSREF_METADATA", "Crossref 元数据不完整或不是合法响应", { cause });
+    throw new CoreError("INVALID_CROSSREF_METADATA", { key: "paper-metadata.crossref_metadata_is_incomplete_or_response_is_invalid", args: [] }, { cause });
   }
 }

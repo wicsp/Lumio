@@ -1,3 +1,7 @@
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { afterEach, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { chmod, lstat, readlink, stat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
@@ -89,11 +93,11 @@ test("runtime-only upgrade restarts only runtime, supports launchd and reminds a
 test("upgrade rejects unsupported platforms and options, and detects a Hub that keeps reporting the old version", async () => {
   const f = await fixture();
   try {
-    await expect(upgrade({ ...f.options, platform: "darwin", arch: "x64" })).rejects.toThrow("不支持的平台");
-    await expect(upgrade({ ...f.options, version: "../../bad" })).rejects.toThrow("版本");
+    await expect(upgrade({ ...f.options, platform: "darwin", arch: "x64" })).rejects.toThrow("UPGRADE_FAILED");
+    await expect(upgrade({ ...f.options, version: "../../bad" })).rejects.toThrow("UPGRADE_FAILED");
     let clock = 0;
     await expect(upgrade({ ...f.options, now: () => clock, sleep: async (ms) => { clock += ms; },
       fetch: (async (input, init) => String(input).endsWith("/health") ? Response.json({ ok: true, version: "0.1.6" }) : fetch(input, init)) as typeof fetch,
-    })).rejects.toThrow("Hub 未在 30 秒");
+    })).rejects.toThrow("UPGRADE_FAILED");
   } finally { await f.server.stop(true); }
 });

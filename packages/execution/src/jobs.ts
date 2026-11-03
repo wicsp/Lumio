@@ -2,8 +2,8 @@ import { JOB_PROTOCOL_VERSION, Job, JobResult, JobRun, JobSpec, RuntimeName, Run
   type RoutineSpec, type RuntimeInfo, type RuntimeHeartbeat, type ApiErrorCode, type ApiError } from "@lumio/schema";
 
 export class ExecutionError extends Error {
-  constructor(public readonly code: ApiErrorCode, message: string, public readonly details: Omit<ApiError["error"], "code" | "message"> = {}) {
-    super(message); this.name = "ExecutionError";
+  constructor(public readonly code: ApiErrorCode, public readonly params: { key: string; args: readonly unknown[] }, public readonly details: Omit<ApiError["error"], "code" | "message"> = {}) {
+    super(code); this.name = "ExecutionError";
   }
 }
 export interface ExecutionStore {
@@ -30,7 +30,7 @@ export class ExecutionJobs {
   constructor(private readonly store: ExecutionStore, private readonly context: ExecutionContext, private readonly routines?: RoutineHooks) {}
   get(id: string): Job {
     const value = this.store.get(id);
-    if (!value) throw new ExecutionError("NOT_FOUND", "Job 不存在");
+    if (!value) throw new ExecutionError("NOT_FOUND", { key: "jobs.job_not_found", args: [] });
     return Job.parse(value);
   }
   list(status?: string, task?: string, routine?: string): Job[] { return Job.array().parse(this.store.list({ status, task, routine: task ? undefined : routine })); }
@@ -47,11 +47,11 @@ export class ExecutionJobs {
   }
   submit(body: unknown, now: Date): Job {
     const parsed = SubmitJob.safeParse(body);
-    if (!parsed.success) throw new ExecutionError("INVALID", "Job 提交内容不合法");
+    if (!parsed.success) throw new ExecutionError("INVALID", { key: "jobs.invalid_job_submission", args: [] });
     const runtime = this.store.runtimes(now).find((value) => value.registration.name === parsed.data.runtime);
-    if (!runtime) throw new ExecutionError("INVALID", "指定的执行器不存在");
+    if (!runtime) throw new ExecutionError("INVALID", { key: "jobs.specified_runtime_does_not_exist", args: [] });
     const run = parsed.data.run;
-    if (run.kind === "agent" && !runtime.registration.engines.some((engine) => engine.name === run.engine)) throw new ExecutionError("INVALID", `执行器 ${parsed.data.runtime} 上没有登记 ${run.engine}`);
+    if (run.kind === "agent" && !runtime.registration.engines.some((engine) => engine.name === run.engine)) throw new ExecutionError("INVALID", { key: "tasks.is_not_registered_on_runtime", args: [parsed.data.runtime, run.engine] });
     return this.create({ ...parsed.data, runtime: runtime.actor }, now);
   }
   cancel(id: string): Job {
@@ -65,7 +65,7 @@ export class ExecutionJobs {
   private owned(actor: string, id: string, now = this.context.now(), lease?: string): Job {
     let job = this.store.get(id);
     if (!job) job = this.routines?.adopt(actor, id, now, lease);
-    if (!job || job.spec.runtime !== actor) throw new ExecutionError("CONFLICT", "Job 与执行器不匹配");
+    if (!job || job.spec.runtime !== actor) throw new ExecutionError("CONFLICT", { key: "jobs.job_does_not_match_runtime", args: [] });
     return Job.parse(job);
   }
   ack(actor: string, ids: string[], now: Date): void {
@@ -78,9 +78,9 @@ export class ExecutionJobs {
     const result = JobResult.parse(input);
     this.store.transaction(() => {
       const job = this.owned(actor, result.job, this.context.now(), result.lease);
-      if (job.spec.lease !== result.lease || !job.assigned || (job.status === "cancelled" && result.status !== "cancelled")) throw new ExecutionError("CONFLICT", "Job lease 或指派状态不匹配");
+      if (job.spec.lease !== result.lease || !job.assigned || (job.status === "cancelled" && result.status !== "cancelled")) throw new ExecutionError("CONFLICT", { key: "jobs.job_lease_or_assignment_status_does_not_match", args: [] });
       if (job.result) {
-        if (JSON.stringify(job.result) !== JSON.stringify(result)) throw new ExecutionError("CONFLICT", "Job 已有不同的结果");
+        if (JSON.stringify(job.result) !== JSON.stringify(result)) throw new ExecutionError("CONFLICT", { key: "jobs.job_already_has_a_different_result", args: [] });
         return;
       }
       this.store.save({ ...job, result, status: result.status });

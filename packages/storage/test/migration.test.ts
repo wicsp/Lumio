@@ -40,7 +40,7 @@ async function fixture(action: (f: { root: string; state: string; vault: string;
 test("legacy import preserves IDs, exact bytes, unknown fields, body, source mapping, Job input, sessions and round gaps; replay never dispatches", async () => fixture(async (f) => {
   const original = await readFile(join(f.vault, t)), jobs = f.db.query("SELECT * FROM jobs ORDER BY id").all();
   const plan = await f.migration.plan(); expect(MigrationPlan.safeParse(plan).success).toBe(true); expect(plan.entries).toHaveLength(3); expect(plan.problems).toEqual([]);
-  await backupBusiness(f.state, f.backup); await f.migration.apply(plan, f.backup, true); await expect(f.migration.apply(plan, f.backup, true)).rejects.toThrow("apply 切换");
+  await backupBusiness(f.state, f.backup); await f.migration.apply(plan, f.backup, true); await expect(f.migration.apply(plan, f.backup, true)).rejects.toThrow("CONFLICT");
   const store = new SqliteWorkStore(f.db), current = store.task(task)!;
   expect(current.id).toBe(task); expect(current.assignee).toBe("pi@server"); expect(current.description).toContain("人写的正文与 [[旧链接]]"); expect(current.description).toContain("旧汇报");
   expect(f.migration.source(task).bytes).toEqual(original); expect(await readFile(join(f.vault, t))).toEqual(original);
@@ -65,7 +65,7 @@ test("dry-run refuses active schedules, pending switches, duplicate IDs, missing
   const { result: _result, ...active } = job; f.db.query("UPDATE jobs SET record=? WHERE id=?").run(JSON.stringify({ ...active, status: "running" }), job.spec.id);
   f.db.query("UPDATE task_state SET pending_since=1 WHERE task=?").run(task);
   const plan = await f.migration.plan();
-  for (const text of ["暂停", "ID 重复", "待派活", "项目不存在", "执行或等待", "等待派出"]) expect(plan.problems.some((problem) => problem.includes(text))).toBe(true);
+  for (const text of ["pause legacy routine", "duplicate ID", "requests dispatch", "project does not exist", "running or awaiting", "awaiting dispatch"]) expect(plan.problems.some((problem) => problem.includes(text))).toBe(true);
   await expect(f.migration.apply(plan, f.backup, true)).rejects.toMatchObject({ code: "CONFLICT" });
 }));
 
@@ -73,10 +73,10 @@ test("apply rejects changed source, incomplete preparation, stale backups and ID
   const plan = await f.migration.plan(); await backupBusiness(f.state, f.backup);
   await expect(f.migration.apply(plan, f.backup, false)).rejects.toMatchObject({ code: "CONFLICT" });
   const original = await readFile(join(f.vault, t)); await writeFile(join(f.vault, t), Buffer.concat([original, Buffer.from("changed")]));
-  await expect(f.migration.apply(plan, f.backup, true)).rejects.toThrow("源文件已变化"); await writeFile(join(f.vault, t), original);
-  f.db.exec("CREATE TABLE new_business(id TEXT)"); await expect(f.migration.apply(plan, f.backup, true)).rejects.toThrow("当前业务状态");
+  await expect(f.migration.apply(plan, f.backup, true)).rejects.toThrow("CONFLICT"); await writeFile(join(f.vault, t), original);
+  f.db.exec("CREATE TABLE new_business(id TEXT)"); await expect(f.migration.apply(plan, f.backup, true)).rejects.toThrow("CONFLICT");
   const work = new SqliteWorkStore(f.db); work.putProject(WorkProject.parse({ schema_version: 2, type: "project", id: project, title: "existing", description: "", revision: 1, status: "planning", tags: [], created: time, updated: time }));
-  expect((await f.migration.plan()).problems.some((problem) => problem.includes("相同 ID"))).toBe(true);
+  expect((await f.migration.plan()).problems.some((problem) => problem.includes("ID already exists"))).toBe(true);
   expect(await readFile(join(f.vault, t))).toEqual(original); expect(f.db.query("SELECT name FROM sqlite_master WHERE name='migration_receipts'").get()).toBeNull();
 }));
 
@@ -99,8 +99,8 @@ test("retire accepts active legacy switches without importing or editing, verifi
   expect(f.db.query("SELECT kind FROM migration_receipts").get()).toEqual({ kind: "retire" });
   expect(f.db.query("SELECT name FROM sqlite_master WHERE name IN ('work_tasks','migration_sources')").all()).toEqual([]);
   expect(await Promise.all([p, t, r].map(path => readFile(join(f.vault, path))))).toEqual(originals);
-  await expect(f.migration.retire(f.state, join(f.root, "other"))).rejects.toThrow("retire 切换");
-  await expect(f.migration.apply(await f.migration.plan(), f.backup, true)).rejects.toThrow("retire 切换");
+  await expect(f.migration.retire(f.state, join(f.root, "other"))).rejects.toThrow("CONFLICT");
+  await expect(f.migration.apply(await f.migration.plan(), f.backup, true)).rejects.toThrow("CONFLICT");
 }));
 
 test("retire rejects only active legacy Job sources and leaves no receipt or backup", async () => fixture(async f => {
@@ -109,7 +109,7 @@ test("retire rejects only active legacy Job sources and leaves no receipt or bac
     const { result: _result, ...pending } = original;
     const job = Job.parse({ ...pending, status, ...(status === "waiting_for_human" ? { result: { job: original.spec.id, lease: original.spec.lease, status, finished: time, question: "合成问题" } } : {}) });
     f.db.query("UPDATE jobs SET record=? WHERE id=?").run(JSON.stringify(job), job.spec.id);
-    await expect(f.migration.retire(f.state, f.backup)).rejects.toThrow(job.spec.id);
+    await expect(f.migration.retire(f.state, f.backup)).rejects.toMatchObject({ code: "CONFLICT", params: { args: [expect.stringContaining(job.spec.id)] } });
     expect(f.db.query("SELECT name FROM sqlite_master WHERE name='migration_receipts'").get()).toBeNull();
   }
 }));

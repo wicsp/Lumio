@@ -22,9 +22,9 @@ export async function backupHub(stateDir: string, destination: string): Promise<
     await link(snapshot, path);
   } catch (cause) {
     const code = (cause as NodeJS.ErrnoException).code;
-    if (code === "EEXIST") throw new HubError("CONFLICT", "备份目标已存在");
-    if (code === "ENOENT") throw new HubError("INVALID", "备份目标目录或 hub.sqlite 不存在");
-    throw new HubError("INTERNAL", "无法备份 hub.sqlite");
+    if (code === "EEXIST") throw new HubError("CONFLICT", { key: "backup.backup_destination_already_exists", args: [] });
+    if (code === "ENOENT") throw new HubError("INVALID", { key: "backup.backup_destination_directory_or_hub_sqlite_does_not_exist", args: [] });
+    throw new HubError("INTERNAL", { key: "backup.could_not_back_up_hub_sqlite", args: [] });
   } finally {
     db?.close();
     if (temporary) await rm(temporary, { recursive: true, force: true });

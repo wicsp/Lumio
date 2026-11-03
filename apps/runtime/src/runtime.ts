@@ -1,3 +1,4 @@
+import { withLanguage, text as msg } from "./messages.ts";
 import { SudoGate } from "./sudo.ts";
 import { privateFile } from "./service.ts";
 import { join } from "node:path";
@@ -61,7 +62,7 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
   }
   async function post<T>(path: string, body: unknown, schema: { parse(value: unknown): T }): Promise<T> {
     const response = await send(path, body);
-    if (!response.ok) throw new Error("Hub 请求失败");
+    if (!response.ok) throw new Error(msg("selftest.hub_request_failed"));
     return schema.parse(await response.json());
   }
   async function deliver() {
@@ -78,8 +79,8 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
         try {
           const response = await send("/v1/runtime/results", result);
           if (response.status === 200) { queue.delivered(result.job); retries.delete(result.job); }
-          else if (response.status === 409) { conflicts.add(result.job); log(`Job ${result.job} 结果交回冲突（409），已保留，等待人工处理`); }
-          else throw new Error("Hub 请求失败");
+          else if (response.status === 409) { conflicts.add(result.job); log(msg("runtime.job_result_conflict_409_retained_for_manual_handling", result.job)); }
+          else throw new Error(msg("selftest.hub_request_failed"));
         } catch {
           if (signal.aborted) break;
           const delay = Math.min(retry ? retry.delay * 2 : config.pollSeconds, 60);
@@ -100,7 +101,7 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
       while (!signal.aborted) {
         let next = Math.min(config.pollSeconds, 60) * 1000;
         try { next = await archives.flush(signal); }
-        catch { if (!signal.aborted) log("文件归档暂时中断，原始日志与待交付记录已保留，稍后重试"); }
+        catch { if (!signal.aborted) log(msg("runtime.file_archiving_interrupted_original_logs_and_pending_records_retaine")); }
         await archiveWake.wait(Math.max(1, next), signal);
       }
     })();
@@ -113,8 +114,8 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
           actor = info.actor;
           await privateFile(join(config.stateDir, "registered.json"), JSON.stringify(info));
           registered = true;
-          log("执行器登记成功");
-          if (disconnected) log("Hub 连接已恢复");
+          log(msg("runtime.runtime_registered"));
+          if (disconnected) log(msg("runtime.hub_connection_restored"));
           disconnected = false;
           archives.retryNow(); archiveWake.notify();
         } else {
@@ -131,7 +132,7 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
         backoff = Math.min(config.pollSeconds, 60);
       } catch {
         if (signal.aborted) break;
-        if (!disconnected) log("Hub 连接失联，正在重试");
+        if (!disconnected) log(msg("runtime.hub_disconnected_retrying"));
         disconnected = true; registered = false;
         delay = backoff; backoff = Math.min(backoff * 2, 60);
       }
@@ -153,5 +154,5 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
 
 export async function runRuntime(config: RuntimeConfig, options: Parameters<typeof runRuntimeInstance>[1]): Promise<void> {
   const lease = await acquireStateLease(config.stateDir);
-  try { await runRuntimeInstance(config, options); } finally { lease.close(); }
+  try { await withLanguage("en", () => runRuntimeInstance(config, options)); } finally { lease.close(); }
 }

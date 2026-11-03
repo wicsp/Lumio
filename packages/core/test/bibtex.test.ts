@@ -10,5 +10,5 @@ test.each(["2002.02126", "2403.14720", "2406.13352", "crossref-lightgcn"])("rewr
 });
 
 test.each(["<html>error</html>", "@misc{missing", "@comment{a comment}", ""])("rejects invalid BibTeX %j", (source) => {
-  expect(() => rewriteBibtexKey(source, "He_2020_LightGCN")).toThrow("合法的 BibTeX");
+  expect(() => rewriteBibtexKey(source, "He_2020_LightGCN")).toThrow("INVALID_BIBTEX");
 });

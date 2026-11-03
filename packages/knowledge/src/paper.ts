@@ -8,8 +8,9 @@ import type { PaperMetadata } from "./paper-metadata.ts";
 import { entityDirectory } from "./layout.ts";
 
 export function renderPaper(metadata: PaperMetadata, citekey: string, bibtex: string, ctx: FillContext): NewNote {
+  const msg = ctx.text ?? ((key: string, ...args: unknown[]) => key.replace(/\$\{(\d+)\}/g, (_, index: string) => String(args[Number(index)])));
   if (!Citekey.safeParse(citekey).success) {
-    throw new CoreError("INVALID_CITEKEY", "论文 citekey 不符合契约");
+    throw new CoreError("INVALID_CITEKEY", { key: "paper.paper_citekey_does_not_match_contract", args: [] });
   }
   const original: Record<string, unknown> = {
     title: metadata.title, citekey, authors: metadata.authors, year: metadata.year,
@@ -22,9 +23,9 @@ export function renderPaper(metadata: PaperMetadata, citekey: string, bibtex: st
     birthtime: ctx.now, mtime: ctx.now,
   }, ctx);
   const frontmatter = { ...original, ...patch };
-  if (issues.length || !Paper.safeParse(frontmatter).success) throw new CoreError("INVALID_METADATA", "无法生成合法的论文元数据");
+  if (issues.length || !Paper.safeParse(frontmatter).success) throw new CoreError("INVALID_METADATA", { key: "paper.could_not_generate_valid_paper_metadata", args: [] });
   const rewritten = rewriteBibtexKey(bibtex, citekey);
-  const body = ["", "## 一句话", "", "## 我的笔记", "", "## 可以引用的点", "", "## 和我的研究的关系", "", "## BibTeX", "", "```bibtex", rewritten, "```", ""].join("\n");
+  const body = ["", msg("## One sentence"), "", msg("## My notes"), "", msg("## Points to cite"), "", msg("## Relation to my research"), "", "## BibTeX", "", "```bibtex", rewritten, "```", ""].join("\n");
   return { relativePath: `${entityDirectory("paper")}/${citekey}.md`, content: parseFrontmatter(body).render(frontmatter) };
 }
 

@@ -11,6 +11,7 @@ import { extractLinks, plainText, resolveMarkdownPath } from "@lumio/knowledge";
 
 const VERSION = 3; // 3：同时索引按路径解析的 Markdown 链接（P2-10），旧索引自动重建
 export interface IndexOptions {
+  text?: (key: string, ...args: unknown[]) => string;
   stateDir?: string;
   /** Dependency injection lets tests assert unchanged notes are never parsed again. */
   parse?: typeof parseFrontmatter;
@@ -195,7 +196,7 @@ export async function withIndex<T>(root: string, options: IndexOptions, query: (
     return query(database);
   } catch (cause) {
     if (cause instanceof CoreError) throw cause;
-    throw new CoreError("INDEX_FAILED", "无法更新或查询本地索引", { cause });
+    throw new CoreError("INDEX_FAILED", { key: "store.could_not_update_or_query_local_index", args: [] }, { cause });
   } finally { db?.close(); }
 }
 

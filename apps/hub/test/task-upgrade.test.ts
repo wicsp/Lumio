@@ -1,3 +1,7 @@
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import type { FSWatcher, watch } from "node:fs";
@@ -72,7 +76,7 @@ for (const status of ["done", "cancelled", "paused"]) {
     expect(jobs().list()).toHaveLength(0);
     const before = await bytes();
     const response = await fetch(`http://127.0.0.1:${hub!.server.port}/v1/operations`, {
-      method: "POST", headers: { Authorization: `Bearer ${human}`, "Content-Type": "application/json" },
+      method: "POST", headers: { "Accept-Language": "zh", Authorization: `Bearer ${human}`, "Content-Type": "application/json" },
       body: JSON.stringify({ operation: { op: "task.dispatch", args: { task: TASK, trigger: "cli", to: "pi@server" } } }),
     });
     expect(response.status).toBe(409); expect(ApiError.parse(await response.json()).error.message).toContain("status 改回 active 或 todo");

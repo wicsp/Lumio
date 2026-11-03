@@ -23,18 +23,18 @@ export async function handleJobs(request: Request, operation: "job.submit" | "jo
   const decision = decide(identity.actor, { operation });
   let execution = "applied";
   try {
-    if (decision.result !== "allow") throw new HubError("FORBIDDEN", "请求未获授权", { reason: decision.result === "deny" ? decision.reason : "Approval required" });
+    if (decision.result !== "allow") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: decision.result === "deny" ? decision.reason : "Approval required" });
     const jobs = new Jobs(store);
     if (operation === "job.submit") {
-      let body: unknown; try { body = await request.json(); } catch { throw new HubError("INVALID", "请求体必须是 JSON"); }
+      let body: unknown; try { body = await request.json(); } catch { throw new HubError("INVALID", { key: "runtime.request_body_must_be_json", args: [] }); }
       return Response.json(jobs.submit(body, now));
     }
     if (operation === "jobs") {
       const params = new URL(request.url).searchParams;
       const status = params.get("status"), task = params.get("task"), routine = params.get("routine");
-      if (status !== null && !JobStatus.safeParse(status).success) throw new HubError("INVALID", "Job 状态不合法");
-      if (task !== null && !/^task_[0-9A-HJKMNP-TV-Z]{26}$/.test(task)) throw new HubError("INVALID", "task 必须是任务 ID");
-      if (routine !== null && !/^rtn_[0-9A-HJKMNP-TV-Z]{26}$/.test(routine)) throw new HubError("INVALID", "routine 必须是例行任务 ID");
+      if (status !== null && !JobStatus.safeParse(status).success) throw new HubError("INVALID", { key: "jobs.invalid_job_status", args: [] });
+      if (task !== null && !/^task_[0-9A-HJKMNP-TV-Z]{26}$/.test(task)) throw new HubError("INVALID", { key: "jobs.task_must_be_a_task_id", args: [] });
+      if (routine !== null && !/^rtn_[0-9A-HJKMNP-TV-Z]{26}$/.test(routine)) throw new HubError("INVALID", { key: "jobs.routine_must_be_a_routine_id", args: [] });
       return Response.json(jobs.list(status ?? undefined, task ?? undefined, routine ?? undefined));
     }
     return Response.json(operation === "job.cancel" ? jobs.cancel(id!) : jobs.get(id!));

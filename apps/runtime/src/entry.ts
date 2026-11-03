@@ -1,3 +1,4 @@
+import { withLanguage, errorMessage, text as msg } from "./messages.ts";
 import { parseArgs } from "node:util";
 import { doctor } from "./doctor.ts";
 import { printChecks } from "./diagnostics.ts";
@@ -21,39 +22,39 @@ export async function run(args: string[]): Promise<void> {
   } else if (args[0] === "prepare-migration") {
     try {
       const { values, positionals } = parseArgs({ args: args.slice(1), allowPositionals: true, options: { "state-dir": { type: "string" } } });
-      if (positionals.length || !values["state-dir"]) throw new RuntimeError("用法：lumio-runtime prepare-migration --state-dir <执行器状态目录>（请先停止执行器服务）");
-      await prepareMigration(values["state-dir"]); console.log("迁移准备完成：旧计划缓存已清理，历史和日志保留");
-    } catch (cause) { console.error(cause instanceof RuntimeError || cause instanceof StorageError ? cause.message : "执行器迁移准备失败"); process.exitCode = 1; }
+      if (positionals.length || !values["state-dir"]) throw new RuntimeError(msg("entry.usage_lumio_runtime_prepare_migration_state_dir_runtime_state_direct"));
+      await prepareMigration(values["state-dir"]); console.log(msg("entry.migration_preparation_complete_legacy_plan_cache_cleared_history_and"));
+    } catch (cause) { console.error(cause instanceof RuntimeError || cause instanceof StorageError ? errorMessage(cause) : msg("entry.runtime_migration_preparation_failed")); process.exitCode = 1; }
   } else if (args[0] === "doctor" || args[0] === "upgrade") {
     try {
       if (args[0] === "upgrade") process.exitCode = await runUpgrade(args.slice(1), true);
       else {
         const { values, positionals } = parseArgs({ args: args.slice(1), allowPositionals: true, options: { json: { type: "boolean" } } });
-        if (positionals.length) throw new RuntimeError("用法：lumio-runtime doctor [--json]");
+        if (positionals.length) throw new RuntimeError(msg("entry.usage_lumio_runtime_doctor_json"));
         process.exitCode = printChecks(await doctor(), Boolean(values.json), console.log);
       }
-    } catch (cause) { console.error(cause instanceof Error ? cause.message : "执行器检查或升级失败"); process.exitCode = 1; }
+    } catch (cause) { console.error(cause instanceof Error ? errorMessage(cause) : msg("entry.runtime_check_or_upgrade_failed")); process.exitCode = 1; }
   } else if (args[0] === "join" || args[0] === "install-sudo-helper") {
     try {
       if (args[0] === "join") await joinRuntime(args.slice(1));
       else await installSudoHelper(args.slice(1));
-    } catch (cause) { console.error((cause instanceof RuntimeError || cause instanceof PairingError) ? cause.message : "执行器安装失败，请检查配置与权限"); process.exitCode = 1; }
+    } catch (cause) { console.error((cause instanceof RuntimeError || cause instanceof PairingError) ? errorMessage(cause) : msg("entry.runtime_installation_failed_check_configuration_and_permissions")); process.exitCode = 1; }
   } else if (args[0] === "--configure-sudo-helper") {
     try {
-      if (process.getuid?.() === 0 || !process.env.HOME || args.length > 2) throw new RuntimeError("请通过提权助手安装命令更新配置");
+      if (process.getuid?.() === 0 || !process.env.HOME || args.length > 2) throw new RuntimeError(msg("entry.update_configuration_through_the_privileged_helper_installation_comm"));
       await configureSudoEnvironment(process.env.HOME, args[1]);
-    } catch { console.error("无法更新执行器提权配置"); process.exitCode = 1; }
+    } catch { console.error(msg("entry.could_not_update_runtime_privileged_configuration")); process.exitCode = 1; }
   } else if (args[0] === "install-service") {
     try { await installService(); }
-    catch (cause) { console.error(cause instanceof RuntimeError ? cause.message : "执行器服务安装失败，请检查 runtime.env 与服务日志"); process.exitCode = 1; }
+    catch (cause) { console.error(cause instanceof RuntimeError ? errorMessage(cause) : msg("entry.runtime_service_installation_failed_check_runtime_env_and_service_lo")); process.exitCode = 1; }
   } else if (args[0] === "--job-worker") {
-    await runWorker();
+    await withLanguage("en", () => runWorker());
   } else if (args[0] === "--sudo-helper") {
-    process.exitCode = await runSudoHelper();
+    process.exitCode = await withLanguage("en", () => runSudoHelper());
   } else if (args[0] === "sudo") {
     process.exitCode = await runSudo(args.slice(1));
   } else if (args.length && !(args.length === 1 && args[0] === "serve")) {
-    console.error("未知执行器命令");
+    console.error(msg("entry.unknown_runtime_command"));
     process.exitCode = 1;
   } else {
     const controller = new AbortController();
@@ -61,12 +62,12 @@ export async function run(args: string[]): Promise<void> {
     process.once("SIGTERM", shutdown);
     process.once("SIGINT", shutdown);
     try {
-      const env = await runtimeEnvironment();
-      await runRuntime(readConfig(env), { signal: controller.signal, env });
+      const env = await withLanguage("en", () => runtimeEnvironment());
+      await withLanguage("en", () => runRuntime(readConfig(env), { signal: controller.signal, env }));
     }
     catch (cause) {
       // Never print fetch exceptions, environment values or agent output.
-      console.error(cause instanceof RuntimeError || cause instanceof StorageError ? cause.message : "执行器无法启动；请检查配置与状态目录权限");
+      withLanguage("en", () => console.error(cause instanceof RuntimeError || cause instanceof StorageError ? errorMessage(cause) : msg("entry.runtime_could_not_start_check_configuration_and_state_directory_perm")));
       process.exitCode = 1;
     } finally {
       process.removeListener("SIGTERM", shutdown);

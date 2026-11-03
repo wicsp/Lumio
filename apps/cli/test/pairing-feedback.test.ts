@@ -1,3 +1,8 @@
+import { errorMessage } from "../src/messages.ts";
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, rm, access, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -36,7 +41,7 @@ async function attempt(url: string, fetcher = fetch) {
   let error = "";
   try {
     await runPairing(["login", url, "--code", code], { home, fetch: fetcher, log: (l) => logs.push(l), warn: (l) => logs.push(l) });
-  } catch (cause) { error = (cause as Error).message; }
+  } catch (cause) { error = errorMessage(cause); }
   expect(error).not.toBe(""); expect(error + logs.join("\n")).not.toContain(code); expect(error + logs.join("\n")).not.toContain(secret);
   await expect(access(join(home, ".config/lumio/config.json"))).rejects.toThrow();
   return error;

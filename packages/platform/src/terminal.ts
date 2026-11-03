@@ -1,3 +1,4 @@
+import { type Text, untranslated } from "./language.ts";
 import { closeSync, openSync, readSync, writeSync } from "node:fs";
 
 /**
@@ -49,15 +50,16 @@ export function formatSize(bytes: number): string {
 export function formatSpeed(bytesPerSecond: number): string { return `${formatSize(bytesPerSecond)}/s`; }
 export interface DownloadProgress { downloaded: number; total?: number; bytesPerSecond: number; done: boolean; failed?: boolean }
 export interface ProgressLineOptions {
-  label: string; tty: boolean; columns?: () => number; write: (chunk: string) => void;
+  text?: Text; label: string; tty: boolean; columns?: () => number; write: (chunk: string) => void;
 }
 /** The sink receives complete terminal control sequences/newlines, not console.log lines. */
 export function createProgressLine(options: ProgressLineOptions): (progress: DownloadProgress) => void {
+  const msg = options.text ?? untranslated;
   let started = false, finished = false, previousWidth = 0;
   return (progress) => {
     if (finished || (!options.tty && started && !progress.done)) return;
     const percent = progress.total ? `${Math.min(100, progress.downloaded / progress.total * 100).toFixed(0)}%` : "?%";
-    const numbers = `${percent}  ${formatSize(progress.downloaded)} / ${progress.total ? formatSize(progress.total) : "未知"}  ${formatSpeed(progress.bytesPerSecond)}${progress.failed ? "（下载失败）" : ""}`;
+    const numbers = `${percent}  ${formatSize(progress.downloaded)} / ${progress.total ? formatSize(progress.total) : msg("Unknown")}  ${formatSpeed(progress.bytesPerSecond)}${progress.failed ? msg("(download failed)") : ""}`;
     const columns = Math.max(1, options.columns?.() ?? 80);
     let label = options.label;
     // Leave a column spare so writing never wraps before the next carriage return.

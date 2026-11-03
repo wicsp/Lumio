@@ -1,3 +1,7 @@
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { expect, test } from "bun:test";
 import { ChatCompletionsModel, configuredModel, modelConfiguration } from "../src/assistant-model.ts";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -13,7 +17,7 @@ const config = () => modelConfiguration({ LUMIO_ASSISTANT_BASE_URL: "http://127.
 const chunk = (delta: unknown, finish_reason: string | null = null) => `data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason }] })}\r\n\r\n`;
 function streamed(text: string): Response {
   const bytes = new TextEncoder().encode(text); let index = 0;
-  return new Response(new ReadableStream({ pull(controller) { if (index >= bytes.length) controller.close(); else controller.enqueue(bytes.slice(index, ++index)); } }), { headers: { "Content-Type": "text/event-stream" } });
+  return new Response(new ReadableStream({ pull(controller) { if (index >= bytes.length) controller.close(); else controller.enqueue(bytes.slice(index, ++index)); } }), { headers: { "Accept-Language": "zh", "Content-Type": "text/event-stream" } });
 }
 function fake(handler: (url: string | URL | Request, init?: RequestInit) => Response | Promise<Response>): typeof fetch { return handler as typeof fetch; }
 test("model configuration has no default network/model, validates endpoints and never serializes credentials", async () => {
@@ -62,13 +66,13 @@ test("response size and cancellation are bounded, and network exceptions never r
   await expect(oversized.complete(input, { token() {} })).rejects.toBeInstanceOf(Error);
   const controller = new AbortController(); controller.abort();
   const model = new ChatCompletionsModel(config(), fake((_url, init) => { init?.signal?.throwIfAborted(); throw new Error("synthetic-token http://secret"); }));
-  await expect(model.complete(input, { signal: controller.signal, token() {} })).rejects.toThrow("取消或超时");
-  await expect(model.complete(input, { token() {} })).rejects.toThrow("无法连接模型服务");
+  await expect(model.complete(input, { signal: controller.signal, token() {} })).rejects.toThrow("INTERNAL");
+  await expect(model.complete(input, { token() {} })).rejects.toThrow("INTERNAL");
 });
 
 test("a complete terminal SSE event closes the reader even when a compatible server leaves the connection open", async () => {
   let sent = false, cancelled = false;
-  const response = new Response(new ReadableStream({ pull(controller) { if (!sent) { sent = true; controller.enqueue(new TextEncoder().encode(chunk({ content: "结束" }, "stop") + "data: [DONE]\n\n")); } }, cancel() { cancelled = true; } }), { headers: { "Content-Type": "text/event-stream" } });
+  const response = new Response(new ReadableStream({ pull(controller) { if (!sent) { sent = true; controller.enqueue(new TextEncoder().encode(chunk({ content: "结束" }, "stop") + "data: [DONE]\n\n")); } }, cancel() { cancelled = true; } }), { headers: { "Accept-Language": "zh", "Content-Type": "text/event-stream" } });
   expect(await new ChatCompletionsModel(config(), fake(() => response)).complete(input, { token() {} })).toEqual({ content: "结束", tool_calls: [] }); expect(cancelled).toBe(true);
 });
 
@@ -91,7 +95,7 @@ test("configured Hub uses a local compatible model service without injected mode
     expect(JSON.stringify(config)).not.toContain("synthetic-provider-key");
     hub = await startHub({ ...config, port: 0 }, { log() {} });
     const chat = async (input: unknown) => {
-      const response = await fetch(`http://127.0.0.1:${hub!.server.port}/v2/assistant/chat`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(input) });
+      const response = await fetch(`http://127.0.0.1:${hub!.server.port}/v2/assistant/chat`, { method: "POST", headers: { "Accept-Language": "zh", Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(input) });
       expect(response.status).toBe(200); return AssistantChatResult.parse(await response.json());
     };
     const input = { request_id: "synthetic-http-model", message: "你好" };

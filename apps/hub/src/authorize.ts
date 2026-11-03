@@ -1,3 +1,4 @@
+import { text as msg } from "./messages.ts";
 import type { Actor } from "@lumio/schema";
 
 export const PAIRING_OPERATIONS = ["runtime.invite", "runtime.join", "client.invite", "client.join", "runtime.remove", "runtime.signing-key"] as const;
@@ -16,25 +17,25 @@ export type Decision = { result: "allow" } | { result: "deny"; reason: string } 
 export const AUTHORIZATION_RULES = [
   ...(["human", "agent", "runtime"] as const).flatMap((role) => V2_OPERATIONS.flatMap((operation) => (operation === "execution.read" ? [false, true] : [false]).map((includePrivate) => ({
     role, operation, includePrivate,
-    decision: (operation === "execution.archive" ? role === "runtime" : role === "human") ? { result: "allow" as const } : { result: "deny" as const, reason: "请求未获授权" },
+    decision: (operation === "execution.archive" ? role === "runtime" : role === "human") ? { result: "allow" as const } : { result: "deny" as const, reason: msg("server.request_not_authorized") },
   })))),
   ...PAIRING_OPERATIONS.flatMap((operation) => ([null, "human", "agent", "runtime"] as const).map((role) => ({
     role, operation, includePrivate: false,
     decision: (operation.endsWith(".join") ? role === null : operation === "runtime.signing-key" ? role === "runtime" : role === "human")
-      ? { result: "allow" as const } : { result: "deny" as const, reason: "请求未获授权" },
+      ? { result: "allow" as const } : { result: "deny" as const, reason: msg("server.request_not_authorized") },
   }))),
   { role: null, operation: "health", includePrivate: false, decision: { result: "allow" } },
   ...(["human", "agent"] as const).map((role) => ({ role, operation: "health", includePrivate: false, decision: { result: "allow" } } as const)),
   ...EXISTING_OPERATIONS.flatMap((operation) => [false, true].map((includePrivate) => ({
-    role: "runtime", operation, includePrivate, decision: operation === "exec.privileged" && !includePrivate ? { result: "needs_approval" as const } : { result: "deny" as const, reason: "请求未获授权" },
+    role: "runtime", operation, includePrivate, decision: operation === "exec.privileged" && !includePrivate ? { result: "needs_approval" as const } : { result: "deny" as const, reason: msg("server.request_not_authorized") },
   } as const))),
   ...(["human", "agent", "runtime"] as const).flatMap((role) => RUNTIME_OPERATIONS.map((operation) => ({
     role, operation, includePrivate: false,
     decision: (operation === "runtimes" ? role === "human" : role === "runtime")
-      ? { result: "allow" as const } : { result: "deny" as const, reason: "请求未获授权" },
+      ? { result: "allow" as const } : { result: "deny" as const, reason: msg("server.request_not_authorized") },
   }))),
   ...(["human", "agent", "runtime"] as const).flatMap((role) => JOB_OPERATIONS.map((operation) => ({
-    role, operation, includePrivate: false, decision: role === "human" ? { result: "allow" as const } : { result: "deny" as const, reason: "请求未获授权" },
+    role, operation, includePrivate: false, decision: role === "human" ? { result: "allow" as const } : { result: "deny" as const, reason: msg("server.request_not_authorized") },
   }))),
   ...(["human", "agent"] as const).flatMap((role) => [
     { role, operation: "actors", includePrivate: false, decision: { result: "allow" } },

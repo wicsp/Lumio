@@ -1,3 +1,4 @@
+import { text as msg } from "./messages.ts";
 import { ApiError } from "@lumio/schema";
 import { HubError } from "./errors.ts";
 
@@ -11,7 +12,7 @@ export function browserOrigins(input: string | undefined): string[] {
       const url = new URL(value);
       if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.pathname !== "/" || url.search || url.hash) throw new Error();
       return url.origin;
-    } catch { throw new HubError("INVALID", "LUMIO_WEB_ORIGINS 必须是逗号分隔的 HTTP(S) 来源，不含路径、凭据、查询或片段"); }
+    } catch { throw new HubError("INVALID", { key: "web.lumio_web_origins_must_be_comma_separated_http_s_origins_without_pat", args: [] }); }
   });
 }
 /** Browser-only defense in depth. CLI and Runtime continue to authenticate via their existing tokens. */
@@ -25,7 +26,7 @@ export function browserAllowed(request: Request, config: { hostname: string; pub
   return Boolean(host && allowedHosts.has(host.toLowerCase()) && (origin === null || origins.has(origin)));
 }
 export function browserDenied(): Response {
-  return Response.json(ApiError.parse({ error: { code: "FORBIDDEN", message: "浏览器来源或 Host 未获允许" } }), { status: 403 });
+  return Response.json(ApiError.parse({ error: { code: "FORBIDDEN", message: msg("web.browser_origin_or_host_is_not_allowed") } }), { status: 403 });
 }
 export function webResponse(response: Response, csp?: string): Response {
   const headers = new Headers(response.headers);

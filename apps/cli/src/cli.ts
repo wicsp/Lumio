@@ -1,3 +1,5 @@
+import { errorMessage, text as msg } from "./messages.ts";
+import { language } from "@lumio/platform";
 import { doctor } from "./doctor.ts";
 import { printChecks } from "./diagnostics.ts";
 import { runSelftest } from "./selftest.ts";
@@ -34,8 +36,8 @@ export async function runCli(args: string[], options: CliOptions = {}): Promise<
   catch (cause) {
     if (!["job", "task", "project", "chat", "routine", "proposals", "runtime"].includes(args[0] ?? "") || !args.includes("--json")) throw cause;
     const error = cause instanceof ApiClientError ? {
-      code: cause.code, message: cause.message, operation: cause.operation, reason: cause.reason, proposal: cause.proposal,
-    } : { code: "INVALID", message: cause instanceof Error ? cause.message : "无法执行命令" };
+      code: cause.code, message: errorMessage(cause), operation: cause.operation, reason: cause.reason, proposal: cause.proposal,
+    } : { code: "INVALID", message: cause instanceof Error ? errorMessage(cause) : msg("cli.could_not_execute_command") };
     (options.log ?? console.log)(JSON.stringify(ApiError.parse({ error })));
     return 1;
   }
@@ -45,7 +47,7 @@ async function executeCli(args: string[], options: CliOptions): Promise<number> 
   const log = options.log ?? console.log;
   if (args[0] === "doctor") {
     const { values, positionals } = parseArgs({ args: args.slice(1), allowPositionals: true, options: { json: { type: "boolean" } } });
-    if (positionals.length) throw new Error("用法：lumio doctor [--json]");
+    if (positionals.length) throw new Error(msg("cli.usage_lumio_doctor_json"));
     return printChecks(await doctor(), Boolean(values.json), log);
   }
   if (args[0] === "selftest") return runSelftest(args.slice(1), log);
@@ -69,31 +71,31 @@ async function executeCli(args: string[], options: CliOptions): Promise<number> 
   const command = positionals[0];
   if (command === "runtime") {
     if (positionals.length !== 2 || positionals[1] !== "list" || Object.keys(values).some((key) => key !== "json")) {
-      throw new Error("用法：lumio runtime list [--json]");
+      throw new Error(msg("cli.usage_lumio_runtime_list_json"));
     }
     const { url, token } = hubCredentials(readCliConfig({ warn: options.warn }));
-    const runtimes = await createClient({ url, token }).runtimes();
+    const runtimes = await createClient({ language: language(), url, token }).runtimes();
     if (values.json) log(JSON.stringify(runtimes));
     else for (const runtime of runtimes) {
       const registration = runtime.registration;
-      log(`${registration.name}  ${runtime.online ? "在线" : "失联"}（最近一次：${runtime.last_seen}）  ${registration.engines.map((engine) => `${engine.name} ${engine.version}`).join(", ")}  ${registration.tags.join(", ")}`);
+      log(msg("cli.last_seen", registration.name, runtime.online ? msg("cli.online") : msg("cli.disconnected"), runtime.last_seen, registration.engines.map((engine) => `${engine.name} ${engine.version}`).join(", "), registration.tags.join(", ")));
     }
     return 0;
   }
   if (command === "proposals") {
-    if (Object.keys(values).some((key) => !["reason", "status", "json"].includes(key))) throw new Error("链接与提议命令不支持此选项");
+    if (Object.keys(values).some((key) => !["reason", "status", "json"].includes(key))) throw new Error(msg("cli.link_and_proposal_commands_do_not_support_this_option"));
     return runOperations(positionals, values, log);
   }
-  if (values.reason !== undefined || values.status !== undefined) throw new Error("reason 和 status 只用于链接与提议命令");
+  if (values.reason !== undefined || values.status !== undefined) throw new Error(msg("cli.reason_and_status_are_only_for_link_and_proposal_commands"));
   if (command === "hub" && positionals[1] === "status") {
-    if (positionals.length !== 2 || Object.keys(values).length) throw new Error("用法：lumio hub status");
+    if (positionals.length !== 2 || Object.keys(values).length) throw new Error(msg("cli.usage_lumio_hub_status"));
     const { url, token } = hubCredentials(readCliConfig({ warn: options.warn }));
     const endpoint = new URL(url);
-    if (!["http:", "https:"].includes(endpoint.protocol) || endpoint.username || endpoint.password) throw new Error("LUMIO_HUB_URL 必须是 HTTP(S) 地址");
+    if (!["http:", "https:"].includes(endpoint.protocol) || endpoint.username || endpoint.password) throw new Error(msg("cli.lumio_hub_url_must_be_an_http_s_url"));
     endpoint.pathname = `${endpoint.pathname.replace(/\/$/, "")}/v1/status`;
     endpoint.search = ""; endpoint.hash = "";
-    const response = await fetch(endpoint, { headers: { Authorization: `Bearer ${token}` }, redirect: "error" });
-    if (!response.ok) throw new Error(`无法获取 Hub 状态（HTTP ${response.status}）`);
+    const response = await fetch(endpoint, { headers: { "Accept-Language": language(), Authorization: `Bearer ${token}` }, redirect: "error" });
+    if (!response.ok) throw new Error(msg("cli.could_not_get_hub_status_http", response.status));
     log(JSON.stringify(await response.json()));
     return 0;
   }
@@ -105,14 +107,14 @@ async function executeCli(args: string[], options: CliOptions): Promise<number> 
       || (!bib && (values.out !== undefined || values.from !== undefined)) || values.from === ""
       || (command !== "search" && (values.type !== undefined || values.limit !== undefined))
       || (bib && (values.json !== undefined || values["include-private"] !== undefined))) {
-      throw new Error("用法：lumio search <查询> [--type 类型] [--limit N] [--include-private] [--json]；lumio show|links <引用> [--include-private] [--json]；lumio check [--include-private] [--json]；lumio export bib [--from 引用] [--out 路径]");
+      throw new Error(msg("cli.usage_lumio_search_query_type_type_limit_n_include_private_json_lumi"));
     }
     const config = readCliConfig({ warn: options.warn });
     const { url, token } = config;
     if (query && ((url !== undefined) !== (token !== undefined) || url === "" || token === "")) {
-      throw new Error("还没有配置，请先运行 install.sh 或 lumio-hub setup；远程查询需要同时设置非空的 LUMIO_HUB_URL 和 LUMIO_TOKEN");
+      throw new Error(msg("cli.no_configuration_run_install_sh_or_lumio_hub_setup_first_remote_quer"));
     }
-    const remote = query && url && token ? createClient({ url, token }) : undefined;
+    const remote = query && url && token ? createClient({ language: language(), url, token }) : undefined;
     return runQuery(remote ? undefined : resolveVault(localVault(values.vault, config), undefined), {
       command: bib ? "export" : command as "search" | "show" | "links" | "check", argument: positionals[1] ?? "",
       type: values.type, limit: values.limit, out: values.out, from: values.from,
@@ -125,12 +127,12 @@ async function executeCli(args: string[], options: CliOptions): Promise<number> 
   if ((!sync && !idea && !paper) || (!sync && values["dry-run"] !== undefined)
     || (!paper && values.abbr !== undefined)
     || [values.type, values.limit, values.out, values.from, values.json, values["include-private"]].some((v) => v !== undefined)) {
-    throw new Error("用法：lumio sync [--vault <路径>] [--dry-run]；lumio new idea <标题> [--vault <路径>]；lumio new paper <输入> [--vault <路径>] [--abbr <缩写>]");
+    throw new Error(msg("cli.usage_lumio_sync_vault_path_dry_run_lumio_new_idea_title_vault_path"));
   }
   const root = resolveVault(localVault(values.vault, readCliConfig({ warn: options.warn })), undefined);
   const now = new Date();
   const ctx = {
-    now, tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    text: msg, now, tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
     newId: (prefix: Parameters<typeof newId>[0]) => newId(prefix, now, randomBytes),
   };
   if (paper) {
@@ -139,9 +141,9 @@ async function executeCli(args: string[], options: CliOptions): Promise<number> 
       version, fetcher: options.fetcher, contactEmail: process.env.LUMIO_CONTACT_EMAIL,
     });
     const metadata = source.kind === "arxiv" ? parseArxivMetadata(source.metadata) : parseCrossrefMetadata(source.metadata);
-    if (input.kind === "arxiv" && metadata.arxiv !== input.id) throw new Error("arXiv API 返回的论文 ID 与输入不一致");
+    if (input.kind === "arxiv" && metadata.arxiv !== input.id) throw new Error(msg("cli.arxiv_api_returned_a_paper_id_different_from_the_input"));
     if (input.kind === "doi") {
-      if (metadata.doi && metadata.doi.toLowerCase() !== input.doi.toLowerCase()) throw new Error("Crossref 返回的 DOI 与输入不一致");
+      if (metadata.doi && metadata.doi.toLowerCase() !== input.doi.toLowerCase()) throw new Error(msg("cli.crossref_returned_a_doi_different_from_the_input"));
       metadata.doi ??= input.doi;
     }
     log(await createPaper(root, metadata, generateCitekey(metadata, values.abbr), source.bibtex, ctx));

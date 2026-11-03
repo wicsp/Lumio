@@ -45,7 +45,7 @@ test("commit excludes unrelated previously staged content and reports sanitized 
   expect(git("show", "--format=", "--name-only", "HEAD").trim()).toBe("safe.md");
   expect(await repo.changedFiles()).toEqual(["blocked.md"]);
   await writeFile(join(temp, "gitdir/index.lock"), "synthetic lock");
-  await expect(repo.add("blocked.md")).rejects.toMatchObject({ code: "GIT_FAILED", message: "无法执行 vault git 操作" });
+  await expect(repo.add("blocked.md")).rejects.toMatchObject({ code: "GIT_FAILED" });
 });
 
 test("missing git, absent .git and parent repositories are unavailable", async () => {

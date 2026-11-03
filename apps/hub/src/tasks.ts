@@ -1,3 +1,4 @@
+import { serviceText, serviceErrorMessage, errorMessage, text as msg } from "./messages.ts";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -40,15 +41,7 @@ export function containsSecret(text: string): boolean {
 }
 const MAX_SUMMARY = 3000;
 
-export const INSTRUCTIONS = (fields: { round: number; title: string; id: string; workdir: string }) => `你正在为用户的一个任务工作，这是第 ${fields.round} 轮。
-任务：${fields.title}（${fields.id}）
-工作目录：${fields.workdir}
-
-要求：
-- 只在工作目录内工作。不要读写用户的 Lumio 笔记库，需要 root 时运行 \`lumio-runtime sudo -- <命令>\` 并等待用户批准（可能要等很久，也可能被拒绝）；不要直接使用 sudo。
-- 完成后，用中文简要汇报：做了什么、改了哪些文件、结果如何、还有什么遗留问题。
-- 如果需要用户做决定才能继续，在最后的回复里用 <lumio-question>你的问题</lumio-question> 写出问题，然后结束这一轮，不要自行假设。
-`;
+export const INSTRUCTIONS = (fields: { round: number; title: string; id: string; workdir: string }) => msg("tasks.you_are_working_on_round_of_a_user_task_task_working_directory_requi", fields.round, fields.title, fields.id, fields.workdir);
 
 /** 按行比较两个版本，返回新增与删除的行（LCS）。 */
 export function lineDiff(before: string, after: string): { added: string[]; removed: string[] } {
@@ -71,8 +64,8 @@ export function lineDiff(before: string, after: string): { added: string[]; remo
 /** 未指定 device 时只使用 Hub 配置里的本机执行器。 */
 export function pickRuntime(store: HubStore, now: Date, engine: AgentRun["engine"], device: string | undefined, localRuntime?: string): RuntimeInfo {
   const runtime = store.runtimes(now).find((r) => r.registration.name === (device ?? localRuntime));
-  if (!runtime) throw new HubError("INVALID", device ? `没有可用的执行器：${device} 未登记` : "这台 Hub 没有本机执行器，请写 pi@<执行器名称>");
-  if (!runtime.registration.engines.some((e) => e.name === engine)) throw new HubError("INVALID", `执行器 ${runtime.registration.name} 上没有登记 ${engine}`);
+  if (!runtime) throw new HubError("INVALID", device ? { key: "tasks.no_runtime_available_is_not_registered", args: [device] } : { key: "tasks.this_hub_has_no_local_runtime_specify_pi_runtime_name", args: [] });
+  if (!runtime.registration.engines.some((e) => e.name === engine)) throw new HubError("INVALID", { key: "tasks.is_not_registered_on_runtime", args: [runtime.registration.name, engine] });
   return runtime;
 }
 
@@ -91,7 +84,7 @@ function handBack(bytes: Buffer): Buffer {
 }
 
 export const OUTCOME: Record<string, string> = {
-  done: "完成", waiting_for_human: "有问题等你回答", unknown: "情况不明", cancelled: "已取消",
+  done: msg("tasks.completed"), waiting_for_human: msg("tasks.waiting_for_your_answer"), unknown: msg("tasks.unknown"), cancelled: msg("tasks.cancelled"),
 };
 
 export class TaskRounds {
@@ -165,9 +158,9 @@ export class TaskRounds {
       // 升级前的 last_turn=agent 表示已派出，与当前的具体负责人 key 等价。
       if (Object.hasOwn(data, "turn") && s.last_turn === "agent") s.last_turn = assigneeKey(data.assignee);
     }
-    catch (cause) { s.pending_since = null; this.issue(path, `跳过  ${path}  ${(cause as Error).message}`); this.save(s); return; }
+    catch (cause) { s.pending_since = null; this.issue(path, serviceText("tasks.skip", path, serviceErrorMessage(cause))); this.save(s); return; }
     if (active) {
-      if (assignee !== s.last_turn) this.issue(path, `跳过  ${path}  这一轮还在执行，修改 assignee 不生效；结束后会交回 human`);
+      if (assignee !== s.last_turn) this.issue(path, serviceText("tasks.skip_this_round_is_still_running_changing_assignee_has_no_effect_unt", path));
       s.pending_since = null;
     } else {
       if (assignee !== "human" && assignee !== s.last_turn) s.pending_since = now;
@@ -183,7 +176,7 @@ export class TaskRounds {
     for (const s of this.store.db.query<TaskState, []>("SELECT * FROM task_state WHERE pending_since IS NOT NULL").all()) {
       if (now - (this.lastChange.get(s.path) ?? s.pending_since!) < this.quietMs) continue;
       const owner = this.owner();
-      if (!owner) { this.issue(s.path, `跳过  ${s.path}  Hub 中没有 human 身份，无法派出任务`); continue; }
+      if (!owner) { this.issue(s.path, serviceText("tasks.skip_hub_has_no_human_actor_cannot_dispatch_task", s.path)); continue; }
       try {
         await this.dispatch(s.task, "assignee", owner, now);
         this.store.audit(owner, JSON.stringify({ op: "task.dispatch", args: { task: s.task, trigger: "assignee" } }), "allow", undefined, "applied");
@@ -194,7 +187,7 @@ export class TaskRounds {
           // 重新读取开关与状态；监听漏掉的暂停或交回不能留下陈旧的派活状态。
           await this.noteChanged(s.path); continue;
         }
-        await this.refuse(s, cause instanceof HubError || cause instanceof CoreError ? cause.message : "无法派出任务");
+        await this.refuse(s, cause instanceof HubError || cause instanceof CoreError ? errorMessage(cause) : msg("tasks.could_not_dispatch_task"));
       }
     }
     await this.writeResults();
@@ -203,8 +196,8 @@ export class TaskRounds {
   /** 派不出去：写一个说明区块，assignee 交回给人，避免每次 tick 重复尝试。 */
   private async refuse(s: TaskState, message: string) {
     s.pending_since = null; s.last_turn = "human"; this.save(s);
-    this.issue(s.path, `跳过  ${s.path}  ${message}`);
-    await this.edit(s.path, (bytes) => handBack(upsertBlock(bytes, "dispatch-error", "", `### 无法派出\n${message}`)));
+    this.issue(s.path, serviceText("tasks.skip", s.path, message));
+    await this.edit(s.path, (bytes) => handBack(upsertBlock(bytes, "dispatch-error", "", msg("tasks.could_not_dispatch", message))));
   }
 
   /** 派出下一轮。调用方负责在写入队列中执行、已通过授权，并写审计。 */
@@ -214,34 +207,34 @@ export class TaskRounds {
     if (!s) {
       let note;
       try { note = await showNote(this.config.vault, task, { stateDir: this.config.stateDir }); }
-      catch { throw new HubError("NOT_FOUND", "找不到这个任务"); }
+      catch { throw new HubError("NOT_FOUND", { key: "tasks.task_not_found", args: [] }); }
       s = { task, path: note.note.path, last_turn: null, session: null, snapshot: null, rounds: 0, pending_since: null };
     }
-    if (this.isManaged(s.path, task)) throw new HubError("CONFLICT", "这个来源已由数据库管理，旧文件不能再派活");
+    if (this.isManaged(s.path, task)) throw new HubError("CONFLICT", { key: "tasks.this_source_is_managed_by_the_database_the_legacy_file_cannot_dispat", args: [] });
     const bytes = await readFile(join(this.config.vault, s.path));
     const parsed = parseFrontmatter(bytes);
     const data = parsed.data;
-    if (data.id !== task) throw new HubError("CONFLICT", "任务笔记在处理中被修改，请重试");
-    if (dispatchBlocked(data)) throw new HubError("CONFLICT", "任务已完成、已取消或已暂停；请先把 status 改回 active 或 todo");
-    if (trigger === "assignee" && (taskAssignee(data) === "human" || taskAssignee(data) !== s.last_turn)) throw new HubError("CONFLICT", "派活开关已变化，请等待重新触发");
-    if (this.jobs.activeForTask(task)) throw new HubError("CONFLICT", "这个任务已有一轮在执行");
+    if (data.id !== task) throw new HubError("CONFLICT", { key: "tasks.task_note_changed_during_processing_retry", args: [] });
+    if (dispatchBlocked(data)) throw new HubError("CONFLICT", { key: "tasks.task_is_done_cancelled_or_paused_set_status_to_active_or_todo_first", args: [] });
+    if (trigger === "assignee" && (taskAssignee(data) === "human" || taskAssignee(data) !== s.last_turn)) throw new HubError("CONFLICT", { key: "tasks.dispatch_setting_changed_waiting_for_the_next_trigger", args: [] });
+    if (this.jobs.activeForTask(task)) throw new HubError("CONFLICT", { key: "tasks.this_task_already_has_an_active_round", args: [] });
     const previous = this.jobs.list(undefined, task).at(-1);
     let target: unknown = data.assignee ?? "human";
     if (trigger === "cli") {
       if (to !== undefined) target = to;
       else if (previous?.spec.run.kind === "agent") {
         const device = this.store.runtimes(now).find((r) => r.actor === previous.spec.runtime)?.registration.name;
-        if (!device) throw new HubError("INVALID", "上一轮的执行器未登记，请用 --to pi@server 指定负责人");
+        if (!device) throw new HubError("INVALID", { key: "tasks.the_previous_runtime_is_not_registered_specify_an_assignee_with_to_p", args: [] });
         target = `${previous.spec.run.engine}@${device}`;
       }
     }
     let assignee;
-    try { assignee = parseAssignee(target); } catch (cause) { throw new HubError("INVALID", (cause as Error).message); }
-    if (assignee === "human") throw new HubError("INVALID", "请用 --to pi@server 指定 agent 负责人，不能派给 human");
+    try { assignee = parseAssignee(target); } catch (cause) { throw new HubError("INVALID", { key: "modules.specify_an_agent_e_g_pi_server", args: [] }); }
+    if (assignee === "human") throw new HubError("INVALID", { key: "tasks.specify_an_agent_with_to_pi_server_cannot_dispatch_to_human", args: [] });
     const engine = assignee.agent;
     const workdir = data.workdir == null ? "~" : data.workdir;
-    if (typeof workdir !== "string" || !workdir) throw new HubError("INVALID", "workdir 必须是非空的工作目录");
-    if (workdirInVault(this.config.vault, workdir)) throw new HubError("INVALID", "工作目录不能在笔记库里（ADR 0019）");
+    if (typeof workdir !== "string" || !workdir) throw new HubError("INVALID", { key: "tasks.workdir_must_be_a_non_empty_working_directory", args: [] });
+    if (workdirInVault(this.config.vault, workdir)) throw new HubError("INVALID", { key: "tasks.working_directory_must_be_outside_the_vault_adr_0019", args: [] });
     const runtime = pickRuntime(this.store, now, engine, assignee.device, this.config.localRuntime);
     const targetKey = assigneeKey(target);
 
@@ -259,18 +252,18 @@ export class TaskRounds {
     else if (resumable) {
       const { added, removed } = lineDiff(s.snapshot, human);
       content = added.length || removed.length
-        ? `上一轮之后，用户在任务笔记里更新了下面的内容：\n${added.length ? `\n新增或修改：\n${added.map((l) => `+ ${l}`).join("\n")}\n` : ""}${removed.length ? `\n删除：\n${removed.map((l) => `- ${l}`).join("\n")}\n` : ""}`
-        : "用户没有补充新内容，请在上一轮的基础上继续。";
+        ? msg("tasks.the_user_updated_this_task_note_since_the_previous_round", added.length ? msg("tasks.added_or_changed", added.map((l) => `+ ${l}`).join("\n")) : "", removed.length ? msg("tasks.removed", removed.map((l) => `- ${l}`).join("\n")) : "")
+        : msg("tasks.the_user_added_no_new_content_continue_from_the_previous_round");
     } else {
       const last = previous?.result?.report;
-      content = `# ${title}\n\n${human}${last ? `\n\n## 上一轮的汇报\n\n${last.slice(0, 20_000)}` : ""}`;
+      content = `# ${title}\n\n${human}${last ? msg("tasks.previous_round_report", last.slice(0, 20_000)) : ""}`;
     }
     // 从例行任务开出的追问（P2-5）：那一次的汇报放在 routine-run 区块里，人写的部分不含它；没接上会话时附上。
     const origin = /<!--\s*lumio:ai start name=routine-run job=(job_[0-9A-HJKMNP-TV-Z]{26})/.exec(parsed.body.toString("utf8"))?.[1];
     if (origin && !resumable) {
       let report: string | undefined;
       try { report = this.jobs.get(origin).result?.report; } catch { /* 记录已不在 */ }
-      if (report) content += `\n\n## 例行任务那一次的汇报\n\n${report.slice(0, 20_000)}`;
+      if (report) content += msg("tasks.routine_run_report", report.slice(0, 20_000));
     }
     const prompt = `${INSTRUCTIONS({ round, title, id: task, workdir })}\n${content}\n`;
     const timeout = typeof data.timeout_minutes === "number" && data.timeout_minutes > 0 ? data.timeout_minutes * 60 : 7200;
@@ -296,7 +289,7 @@ export class TaskRounds {
       }
       if (d.status === undefined || d.status === null || d.status === "todo") patch.status = "active";
       return Object.keys(patch).length ? setFields(b, patch) : b;
-    }, { message: `lumio: task.dispatch ${title} 第 ${round} 轮`, trailers: { "Lumio-Actor": identity.actor.id, "Lumio-Job": job.spec.id } });
+    }, { message: msg("tasks.lumio_task_dispatch_round", title, round), trailers: { "Lumio-Actor": identity.actor.id, "Lumio-Job": job.spec.id } });
     return job;
   }
 
@@ -313,10 +306,10 @@ export class TaskRounds {
       const block = this.render(job, row.round);
       try {
         await this.edit(s.path, (b) => handBack(upsertBlock(b, `round-${row.round}`, `job=${job.spec.id}`, block)),
-          { message: `lumio: 第 ${row.round} 轮结果 ${job.status}`, trailers: { "Lumio-Actor": job.spec.runtime, "Lumio-Job": job.spec.id } });
+          { message: msg("tasks.lumio_round_result", row.round, job.status), trailers: { "Lumio-Actor": job.spec.runtime, "Lumio-Job": job.spec.id } });
       } catch (cause) {
         if (cause instanceof CoreError && cause.code === "FILE_CHANGED") continue;
-        this.issue(s.path, `跳过  ${s.path}  无法写回第 ${row.round} 轮的结果`);
+        this.issue(s.path, serviceText("tasks.skip_could_not_write_back_round_result", s.path, row.round));
         continue;
       }
       s.last_turn = "human"; s.pending_since = null;
@@ -330,30 +323,30 @@ export class TaskRounds {
   private render(job: Job, round: number): string {
     const r = job.result;
     const status = r?.status ?? "cancelled";
-    const title = status === "failed" ? `失败：${r?.error ?? (r?.exit_code !== undefined ? `退出码 ${r.exit_code}` : "未知原因")}` : OUTCOME[status] ?? status;
+    const title = status === "failed" ? msg("tasks.failed_2", r?.error ?? (r?.exit_code !== undefined ? msg("tasks.exit_code", r.exit_code) : msg("tasks.unknown_reason"))) : OUTCOME[status] ?? status;
     const runtime = this.store.runtimes(new Date()).find((x) => x.actor === job.spec.runtime)?.registration.name ?? job.spec.runtime;
-    const engine = r?.engine ? `${r.engine.name} ${r.engine.version} · ${r.engine.sandbox === "os" ? "系统沙箱" : "无沙箱"}` : job.spec.run.kind === "agent" ? job.spec.run.engine : "command";
+    const engine = r?.engine ? `${r.engine.name} ${r.engine.version} · ${r.engine.sandbox === "os" ? msg("jobs.os_sandbox") : msg("jobs.no_sandbox")}` : job.spec.run.kind === "agent" ? job.spec.run.engine : "command";
     const time = (t?: string) => t ? t.slice(0, 16).replace("T", " ") : "—";
-    const lines = [`### 第 ${round} 轮 · ${title}`, "", `（${engine} · ${runtime} · ${time(r?.started)} → ${time(r?.finished)}）`, ""];
+    const lines = [msg("tasks.round_2", round, title), "", msg("(${0})", `${engine} · ${runtime} · ${time(r?.started)} → ${time(r?.finished)}`), ""];
     const report = r?.report ?? "";
     const question = r?.question;
     if (containsSecret(report) || (question && containsSecret(question))) {
-      lines.push("汇报中疑似包含敏感信息（密钥或卡号），未写入笔记。请用 `lumio job show " + job.spec.id + "` 查看。");
+      lines.push(msg("tasks.report_may_contain_sensitive_information_keys_or_card_numbers_it_was") + job.spec.id + msg("tasks.to_view_it"));
     } else {
-      if (report) lines.push(report.length > MAX_SUMMARY ? `${report.slice(0, MAX_SUMMARY)}\n\n……（已截断）` : report, "");
-      if (question) lines.push(`> **问题**：${question}`, "");
+      if (report) lines.push(report.length > MAX_SUMMARY ? msg("tasks.truncated", report.slice(0, MAX_SUMMARY)) : report, "");
+      if (question) lines.push(msg("tasks.question", question), "");
     }
     if (r?.git?.before || r?.git?.after) {
-      lines.push(`git：${r.git.before?.commit.slice(0, 8) ?? "—"} → ${r.git.after?.commit.slice(0, 8) ?? "—"}${r.git.after?.dirty ? "（有未提交的改动）" : ""}`);
+      lines.push(`git${msg(": ")}${r.git.before?.commit.slice(0, 8) ?? "—"} → ${r.git.after?.commit.slice(0, 8) ?? "—"}${r.git.after?.dirty ? msg("jobs.uncommitted_changes") : ""}`);
     }
-    lines.push(`完整汇报：\`lumio job show ${job.spec.id}\``);
+    lines.push(msg("tasks.full_report_lumio_job_show", job.spec.id));
     const block = lines.join("\n");
     // error、版本等元数据同样来自执行器，检查最终区块而不是只检查 report/question。
-    if (containsSecret(block)) return `### 结果未写入\n\n汇报中疑似包含敏感信息（密钥或卡号），未写入笔记。请用 \`lumio job show ${job.spec.id}\` 查看。`;
+    if (containsSecret(block)) return msg("tasks.result_not_written_report_may_contain_sensitive_information_keys_or", job.spec.id);
     return block;
   }
 
   private async edit(path: string, change: (bytes: Buffer) => Buffer, commit?: { message: string; trailers: GitTrailers }): Promise<void> {
-    await editNote(this.config.vault, path, change, commit, () => this.issue(path, `跳过  ${path}  Hub 的写入已完成，但未能单独提交，将由自动保存提交`));
+    await editNote(this.config.vault, path, change, commit, () => this.issue(path, serviceText("tasks.skip_hub_wrote_changes_but_could_not_commit_them_separately_autosave", path)));
   }
 }

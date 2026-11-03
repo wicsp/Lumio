@@ -44,5 +44,5 @@ test("Hub without Web options returns 404 at root; malformed origins fail config
   const state = await mkdtemp(join(tmpdir(), "lumio-no-web-")); roots.push(state);
   const hub = await startHub({ ...readConfig({ LUMIO_STATE_DIR: state }), port: 0 }, { log() {} });
   try { expect((await fetch(`http://127.0.0.1:${hub.server.port}/`)).status).toBe(404); } finally { await hub.stop(); }
-  for (const origin of ["null", "file:///tmp", "https://user:secret@synthetic", "https://synthetic/path"]) expect(() => readConfig({ LUMIO_WEB_ORIGINS: origin })).toThrow("LUMIO_WEB_ORIGINS");
+  for (const origin of ["null", "file:///tmp", "https://user:secret@synthetic", "https://synthetic/path"]) expect(() => readConfig({ LUMIO_WEB_ORIGINS: origin })).toThrow("INVALID");
 });

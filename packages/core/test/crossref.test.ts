@@ -21,5 +21,5 @@ test("collapses whitespace and omits empty optional fields", () => {
 });
 
 test.each([null, {}, { message: {} }, { message: { title: ["Title"], author: [] } }, { message: { title: ["Title"], author: [{ family: "He" }] } }])("incomplete Crossref response is rejected", (value) => {
-  expect(() => parseCrossrefMetadata(value)).toThrow("Crossref 元数据不完整");
+  expect(() => parseCrossrefMetadata(value)).toThrow("INVALID_CROSSREF_METADATA");
 });

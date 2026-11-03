@@ -23,7 +23,7 @@ export function parseFrontmatter(source: string | Uint8Array): Frontmatter {
   if (opening) {
     newline = opening[1]!;
     const end = /^---[ \t]*(?:\r?\n|$)/m.exec(raw.slice(opening[0].length));
-    if (!end) throw new CoreError("INVALID_FRONTMATTER", "frontmatter 缺少结束分隔符");
+    if (!end) throw new CoreError("INVALID_FRONTMATTER", { key: "frontmatter.frontmatter_is_missing_its_closing_delimiter", args: [] });
     const start = opening[0].length;
     const closeStart = start + end.index;
     before = bytes.subarray(0, start);
@@ -34,10 +34,10 @@ export function parseFrontmatter(source: string | Uint8Array): Frontmatter {
   try {
     const doc = parseDocument(header, { keepSourceTokens: true, strict: true });
     if (doc.errors.length || (doc.contents !== null && !isMap(doc.contents))) {
-      throw new Error(doc.errors.map((e) => e.message).join("; ") || "frontmatter 必须是键值映射");
+      throw new Error(doc.errors.map((e) => e.message).join("; ") || "INVALID_METADATA");
     }
     if (isMap(doc.contents) && doc.contents.items.some(({ key }) => !isScalar(key) || typeof key.value !== "string")) {
-      throw new Error("frontmatter 的键必须是字符串");
+      throw new Error("INVALID_METADATA");
     }
     const data = (doc.toJS({ maxAliasCount: 100 }) ?? {}) as Record<string, unknown>;
     return {
@@ -51,10 +51,10 @@ export function parseFrontmatter(source: string | Uint8Array): Frontmatter {
           for (const [key, value] of Object.entries(patch)) {
             if (Object.hasOwn(data, key)) {
               if (data[key] !== null) {
-                throw new CoreError("EXISTING_METADATA", `不能覆盖已有字段 ${key}`);
+                throw new CoreError("EXISTING_METADATA", { key: "frontmatter.cannot_overwrite_existing_field", args: [key] });
               }
               const node = doc.get(key, true);
-              if (!isScalar(node) || !node.range) throw new CoreError("INVALID_FRONTMATTER", `无法定位空字段 ${key}`);
+              if (!isScalar(node) || !node.range) throw new CoreError("INVALID_FRONTMATTER", { key: "frontmatter.could_not_locate_empty_field", args: [key] });
               const [start, end] = node.range;
               const replacement = new Document(value).toString().trimEnd();
               const text = start === end ? ` ${replacement} ` : replacement;
@@ -93,7 +93,7 @@ export function parseFrontmatter(source: string | Uint8Array): Frontmatter {
           const check = parseDocument(updated);
           if (check.errors.length || check.warnings.length > doc.warnings.length
             || !isDeepStrictEqual(check.toJS({ maxAliasCount: 100 }), { ...data, ...patch })) {
-            throw new CoreError("UNSAFE_FRONTMATTER_EDIT", "无法在保留已有字段的前提下补全 frontmatter");
+            throw new CoreError("UNSAFE_FRONTMATTER_EDIT", { key: "frontmatter.could_not_fill_frontmatter_while_preserving_existing_fields", args: [] });
           }
           if (!opening) {
             return Buffer.concat([Buffer.from(`---${newline}${updated}---${newline}`), body]);
@@ -101,12 +101,12 @@ export function parseFrontmatter(source: string | Uint8Array): Frontmatter {
           return Buffer.concat([before, Buffer.from(updated), closing, body]);
         } catch (cause) {
           if (cause instanceof CoreError) throw cause;
-          throw new CoreError("FRONTMATTER_WRITE_FAILED", "无法生成 frontmatter", { cause });
+          throw new CoreError("FRONTMATTER_WRITE_FAILED", { key: "frontmatter.could_not_generate_frontmatter", args: [] }, { cause });
         }
       },
     };
   } catch (cause) {
     if (cause instanceof CoreError) throw cause;
-    throw new CoreError("INVALID_FRONTMATTER", "frontmatter 不是合法 YAML", { cause });
+    throw new CoreError("INVALID_FRONTMATTER", { key: "frontmatter.frontmatter_is_not_valid_yaml", args: [] }, { cause });
   }
 }
