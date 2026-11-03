@@ -19,6 +19,8 @@ export interface Session {
   /** 中止本会话全部未完成请求（包括助手流）。 */
   close(): void;
   readonly signal: AbortSignal;
+  /** Hub 的 /health：设置页用来显示版本。 */
+  health(): Promise<{ ok: boolean; version?: string }>;
 }
 
 /** 返回绑定当前页面 API 地址（见 apiBase）的会话；任何 401 都调用 onUnauthorized。 */
@@ -38,7 +40,13 @@ export function createSession(token: string | undefined, onUnauthorized: () => v
   }) as typeof fetch;
   // api-client 用 new URL(base + path) 组装地址，需要绝对地址。
   const client = createClient({ url: `${window.location.origin}${apiBase()}`, ...(token ? { token } : {}), fetch: fetcher });
-  return { client, signal: controller.signal, close: () => {closed=true;controller.abort();} };
+  const health = async () => {
+    const response = await fetcher(`${apiBase()}/health`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const body = await response.json() as { ok?: unknown; version?: unknown };
+    return { ok: body.ok === true, ...(typeof body.version === "string" ? { version: body.version } : {}) };
+  };
+  return { client, health, signal: controller.signal, close: () => {closed=true;controller.abort();} };
 }
 
 const CODE_TEXT: Record<string, string> = {

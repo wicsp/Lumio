@@ -9,16 +9,15 @@ import { ApprovalsPane } from "../panes/approvals.ts";
 import { CommandPalette } from "./palette.ts";
 import type { Navigate, Pane, Section } from "../navigation.ts";
 import { t } from "../i18n.ts";
-import { onTheme } from "../theme.ts";
-import { LANGS, pickLang, pickTheme, themeIcon, pickAccount } from "../settings.ts";
-import { lang } from "../i18n.ts";
+import { SettingsPane } from "../panes/settings-page.ts";
 
-export const SECTIONS: Array<{ key: Section; label: string; icon: string; key2: string }> = [
-  { key: "overview", label: "Today", icon: "home", key2: "1" },
-  { key: "work", label: "Projects & tasks", icon: "work", key2: "2" },
-  { key: "knowledge", label: "Knowledge", icon: "knowledge", key2: "3" },
+/** short：窄屏底栏的短名；没有 short 的模块不进底栏，从今日页和提醒进入（ADR 0028）。 */
+export const SECTIONS: Array<{ key: Exclude<Section, "settings">; label: string; short?: string; icon: string; key2: string }> = [
+  { key: "overview", label: "Today", short: "Today", icon: "home", key2: "1" },
+  { key: "work", label: "Projects & tasks", short: "Tasks", icon: "work", key2: "2" },
+  { key: "knowledge", label: "Knowledge", short: "Knowledge", icon: "knowledge", key2: "3" },
   { key: "execution", label: "Execution", icon: "execution", key2: "4" },
-  { key: "assistant", label: "Assistant", icon: "assistant", key2: "5" },
+  { key: "assistant", label: "Assistant", short: "Assistant", icon: "assistant", key2: "5" },
   { key: "approvals", label: "Approvals", icon: "approvals", key2: "6" },
 ];
 
@@ -54,7 +53,10 @@ export class WorkbenchView {
     if (this.pane?.dirty || document.querySelector("dialog[data-dirty=true]")) { event.preventDefault(); event.returnValue = ""; }
   };
 
-  private unbindTheme: () => void;
+  private name: string;
+  private account: HTMLButtonElement;
+  /** 进入设置页之前所在的位置，设置页的返回键回到这里。 */
+  private beforeSettings = "#overview";
   /** 语言切换被推迟时，App 在下一次切换模块前重建界面；返回 true 表示已接管。 */
   constructor(root: HTMLElement, private session: Session, humans: string[], private logout: () => void, private beforeShow: () => boolean = () => false) {
     this.palette = new CommandPalette(session.client, (section, id, intent) => this.go(section, id, intent));
@@ -62,27 +64,21 @@ export class WorkbenchView {
     for (const s of SECTIONS) {
       if (s.key === "execution") nav.append(h("p", { class: "nav-group-label" }, t("Automation")));
       const count = h("span", { class: "nav-count" });
-      const button = h("button", { type: "button", class: "nav-item", title: t("{0} ({1})", t(s.label), s.key2), onclick: () => this.go(s.key) }, icon(s.icon), h("span", {}, t(s.label)), count);
+      const button = h("button", { type: "button", class: `nav-item${s.short ? "" : " desktop-nav"}`, title: t("{0} ({1})", t(s.label), s.key2), onclick: () => this.go(s.key) },
+        icon(s.icon), h("span", { class: "nav-label" }, t(s.label)), s.short && h("span", { class: "nav-short" }, t(s.short)), count);
       this.nav.set(s.key, button); this.counts.set(s.key, count); nav.append(button);
     }
-    const name = humans[0] ?? t("Me");
-    const leave = () => { if (this.canLeave()) this.logout(); };
-    nav.append(h("button", { type: "button", class: "nav-item nav-me", title: t("Me"), onclick: (event: Event) => pickAccount(event.currentTarget as HTMLElement, leave) },
-      h("span", { class: "who-avatar", "aria-hidden": "true" }, name.slice(0, 1).toUpperCase()), h("span", {}, t("Me"))));
-    const themeButton = h("button", { type: "button", class: "icon-btn", title: t("Theme"), "aria-label": t("Theme"), onclick: (event: Event) => pickTheme(event.currentTarget as HTMLElement) }, themeIcon());
-    this.unbindTheme = onTheme(() => themeButton.replaceChildren(themeIcon()));
+    this.name = humans[0] ?? t("Me");
+    this.account = h("button", { type: "button", class: "account", title: t("Settings"), onclick: () => this.go("settings") },
+      h("span", { class: "who-avatar", "aria-hidden": "true" }, this.name.slice(0, 1).toUpperCase()),
+      h("span", { class: "account-text" }, h("span", { class: "who-name" }, this.name),
+        h("span", { class: "account-sub" }, h("span", { class: "connection-dot" }), t("Connected to Hub"))),
+      icon("settings"));
     const sidebar = h("aside", { class: "sidebar" },
       h("div", { class: "brand" }, h("span", { class: "brand-mark", "aria-hidden": "true" }), h("span", {}, "Lumio")),
       h("button", { type: "button", class: "quick-find", onclick: () => this.palette.open() }, icon("search"), h("span", {}, t("Search or jump to")), h("kbd", {}, "⌘K")),
       nav,
-      h("div", { class: "sidebar-foot" },
-        h("div", { class: "connection" }, h("span", { class: "connection-dot" }), t("Connected to Hub"),
-          h("span", { class: "foot-tools" },
-            themeButton,
-            h("button", { type: "button", class: "icon-btn lang-btn", title: t("Language"), "aria-label": t("Language"), onclick: (event: Event) => pickLang(event.currentTarget as HTMLElement) },
-              LANGS.find(([key]) => key === lang())![0] === "zh" ? "中" : "EN"))),
-        h("div", { class: "who" }, h("span", { class: "who-avatar" }, name.slice(0, 1).toUpperCase()), h("span", { class: "who-name" }, name),
-          h("button", { type: "button", class: "icon-btn", title: t("Sign out"), "aria-label": t("Sign out"), onclick: leave }, icon("logout")))));
+      h("div", { class: "sidebar-foot" }, this.account));
     root.append(
       h("a", { class: "skip-link", href: "#content", onclick: (event: Event) => { event.preventDefault(); this.main.focus(); } }, t("Skip to content")),
       h("div", { class: "shell" }, sidebar, this.main));
@@ -97,7 +93,7 @@ export class WorkbenchView {
 
   private readRoute(): { section: Section; id?: string } {
     const [section, raw] = location.hash.slice(1).split(/\/(.*)/s);
-    const known = SECTIONS.find(s => s.key === section)?.key ?? "overview";
+    const known: Section = section === "settings" ? "settings" : SECTIONS.find(s => s.key === section)?.key ?? "overview";
     try { return { section: known, ...(raw ? { id: decodeURIComponent(raw) } : {}) }; } catch { return { section: known }; }
   }
 
@@ -123,16 +119,19 @@ export class WorkbenchView {
     document.querySelector(".menu")?.remove();
     this.section = section;
     this.currentHash = `#${section}${id ? `/${encodeURIComponent(id)}` : ""}`;
-    const label = t(SECTIONS.find(s => s.key === section)?.label ?? "Today");
+    if (section === "settings" && this.section !== "settings" && this.currentHash) this.beforeSettings = this.currentHash;
+    const label = section === "settings" ? t("Settings") : t(SECTIONS.find(s => s.key === section)?.label ?? "Today");
     document.title = t(t("{0} · Lumio"), label);
     for (const [key, button] of this.nav) button.setAttribute("aria-current", key === section ? "page" : "false");
+    this.account.setAttribute("aria-current", section === "settings" ? "page" : "false");
     const target = h("div", { class: `pane pane-${section}` });
     this.main.replaceChildren(target);
     const client = this.session.client;
     const navigate: Navigate = (s, i, n) => this.go(s, i, n);
     const changed = () => void this.refreshCounts();
     let pane: Pane;
-    if (section === "overview") pane = new OverviewPane(target, client, navigate);
+    if (section === "overview") pane = new OverviewPane(target, client, navigate, this.name);
+    else if (section === "settings") pane = new SettingsPane(target, this.session, this.name, () => { if (this.canLeave()) this.logout(); }, () => this.leaveSettings());
     else if (section === "knowledge") pane = new KnowledgePane(target, client, id);
     else if (section === "work") pane = new WorkPane(target, client, id, navigate, changed);
     else if (section === "execution") pane = new ExecutionPane(target, client, id, navigate);
@@ -155,6 +154,14 @@ export class WorkbenchView {
     set("execution", jobs.status === "fulfilled" ? jobs.value.filter(j => ["queued", "assigned", "running", "waiting_for_human"].includes(j.status)).length : undefined);
   }
 
+  private leaveSettings(): void {
+    const [section, raw] = this.beforeSettings.slice(1).split(/\/(.*)/s);
+    const known = SECTIONS.find(s => s.key === section)?.key ?? "overview";
+    let id: string | undefined;
+    try { id = raw ? decodeURIComponent(raw) : undefined; } catch { id = undefined; }
+    this.go(known, id);
+  }
+
   get dirty(): boolean { return !!this.pane?.dirty || !!document.querySelector("dialog[data-dirty=true]"); }
 
   canLeave(): boolean {
@@ -165,7 +172,6 @@ export class WorkbenchView {
   dispose(): void {
     this.pane?.dispose?.();
     this.palette.dispose();
-    this.unbindTheme();
     clearInterval(this.countTimer);
     window.removeEventListener("hashchange", this.onRoute);
     window.removeEventListener("keydown", this.onKey);

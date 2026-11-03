@@ -1,4 +1,7 @@
-/** 今日：一句话说清现状，左侧是要推进的任务，右侧是需要你处理的事和运行动态。各区块独立失败。 */
+/**
+ * 今日：先是需要你处理的事，再是今天要推进的任务，旁边是 agent 动态与项目进度。
+ * 各区块独立加载失败；不在这里放统计大字。
+ */
 import type { Job, Proposal, WorkProject, WorkTask } from "@lumio/schema";
 import { errorText, type Client } from "../api.ts";
 import { formatTime } from "../commands.ts";
@@ -6,22 +9,37 @@ import { clear, failure, h, icon, loading, statusIcon } from "../dom.ts";
 import { ago, dueLabel, jobTitle } from "../format.ts";
 import { JOB_LABELS } from "../labels.ts";
 import type { Navigate } from "../navigation.ts";
-import { t, tParts, locale } from "../i18n.ts";
+import { locale, t } from "../i18n.ts";
 
 const LIVE = ["queued", "assigned", "running"];
 const ATTENTION = ["waiting_for_human", "failed", "unknown"];
+const DAY = 86_400_000;
 
 export class OverviewPane {
   private body = h("div", { class: "today-inner" });
   private generation = 0;
   private active = true;
 
-  constructor(owner: HTMLElement, private client: Client, private navigate: Navigate) {
+  constructor(owner: HTMLElement, private client: Client, private navigate: Navigate, private name: string) {
     owner.append(h("div", { class: "today" }, this.body));
-    clear(this.body, loading(t("Gathering today's work…")));
+    clear(this.body, this.header(), loading(t("Gathering today's work…")));
     void this.load();
   }
   dispose(): void { this.active = false; this.generation++; }
+
+  private header(summary?: string): HTMLElement {
+    const now = new Date();
+    const hour = now.getHours();
+    const greeting = hour < 5 ? t("Good evening, {0}", this.name) : hour < 12 ? t("Good morning, {0}", this.name) : hour < 18 ? t("Good afternoon, {0}", this.name) : t("Good evening, {0}", this.name);
+    const date = new Intl.DateTimeFormat(locale(), { month: "long", day: "numeric", weekday: "long" }).format(now);
+    return h("header", { class: "today-head" },
+      h("div", { class: "today-head-text" },
+        h("p", { class: "today-date" }, date),
+        h("h1", { class: "today-greeting" }, greeting),
+        summary && h("p", { class: "today-summary" }, summary)),
+      h("button", { type: "button", class: "avatar-btn mobile-flex", title: t("Settings"), "aria-label": t("Settings"), onclick: () => this.navigate("settings") },
+        this.name.slice(0, 1).toUpperCase()));
+  }
 
   private async load(): Promise<void> {
     const generation = ++this.generation;
@@ -32,108 +50,125 @@ export class OverviewPane {
     const jobData = jobs.status === "fulfilled" ? jobs.value : undefined;
     const approvalData = approvals.status === "fulfilled" ? approvals.value : undefined;
 
-    const active = taskData?.filter(t => t.status === "active") ?? [];
-    const todo = (taskData?.filter(t => t.status === "todo") ?? []).sort(byDue);
-    const waiting = taskData?.filter(t => t.status === "waiting") ?? [];
-    const running = jobData?.filter(j => LIVE.includes(j.status)) ?? [];
-    const attentionJobs = jobData?.filter(j => ATTENTION.includes(j.status)) ?? [];
+    const now = new Date();
+    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() + DAY;
+    const open = taskData?.filter(task => task.status === "active" || task.status === "todo") ?? [];
+    const dueSoon = (task: WorkTask) => !!task.due && new Date(task.due).getTime() < endOfToday;
+    const focus = open.filter(task => task.status === "active" || dueSoon(task)).sort(byFocus);
+    const next = open.filter(task => !focus.includes(task)).sort(byDue);
+    const waiting = taskData?.filter(task => task.status === "waiting") ?? [];
+    const running = jobData?.filter(job => LIVE.includes(job.status)) ?? [];
+    const attentionJobs = jobData?.filter(job => ATTENTION.includes(job.status)) ?? [];
 
-    const date = new Intl.DateTimeFormat(locale(), { month: "long", day: "numeric", weekday: "long" }).format(new Date());
-    const num = (n: number) => h("span", { class: `num${n ? "" : " zero"}` }, n);
-    const decide = (approvalData?.length ?? 0) + attentionJobs.length;
-    const headline = h("h1", { class: "today-headline" });
-    if (taskData) {
-      headline.append(...tParts("{0} in progress, {1} to do. ", num(active.length), num(todo.length)));
-      if (running.length) headline.append(...tParts(running.length === 1 ? "Agents are running {0} round. " : "Agents are running {0} rounds. ", num(running.length)));
-      if (decide) headline.append(...tParts(decide === 1 ? "{0} item needs your decision." : "{0} items need your decision.", num(decide)));
-      else headline.append(running.length ? t("Nothing needs your decision.") : t("Nothing needs your decision right now."));
-    } else headline.append(t("Today"));
+    const parts = taskData ? [
+      t(focus.length === 1 ? "{0} task for today" : "{0} tasks for today", focus.length),
+      running.length ? t(running.length === 1 ? "{0} agent running" : "{0} agents running", running.length) : "",
+    ].filter(Boolean) : [];
 
     clear(this.body,
-      h("p", { class: "today-date" }, date),
-      headline,
+      this.header(parts.join(t(" · "))),
+      this.ask(),
       h("div", { class: "today-grid" },
         h("div", { class: "today-col" },
-          this.block(t("In progress"), active.length, "work", tasks.status === "rejected" ? failure(errorText(tasks.reason)) : this.taskList(active, projectData, t("Nothing in progress. Pick something from your to-do list."))),
-          this.block(t("To do"), todo.length, "work", tasks.status === "rejected" ? null : this.taskList(todo.slice(0, 8), projectData, t("Your to-do list is clear."))),
-          waiting.length ? this.block(t("Waiting"), waiting.length, "work", this.taskList(waiting, projectData, "")) : null),
-        h("div", { class: "today-col" },
-          this.attention(approvalData, attentionJobs, approvals.status === "rejected" ? approvals.reason : undefined, taskData ?? []),
-          this.block(t("Recent runs"), running.length, "execution", jobs.status === "rejected" ? failure(errorText(jobs.reason)) : this.runs(jobData ?? [], taskData ?? [])),
-          this.block(t("Projects"), projectData.filter(p => p.status !== "done").length, "work", projects.status === "rejected" ? failure(errorText(projects.reason)) : this.projects(projectData, taskData ?? [])),
-          this.ask())));
+          this.needsYou(approvalData, attentionJobs, approvals.status === "rejected" ? approvals.reason : undefined, taskData ?? []),
+          this.section(t("Today"), focus.length, () => this.navigate("work"),
+            tasks.status === "rejected" ? failure(errorText(tasks.reason)) : this.taskList(focus, projectData, t("Nothing due today. Pick something from Up next."))),
+          tasks.status === "fulfilled" && (next.length || !focus.length) ? this.section(t("Up next"), next.length, () => this.navigate("work"), this.taskList(next.slice(0, 6), projectData, t("Your to-do list is clear."))) : null,
+          waiting.length ? this.section(t("Waiting on others"), waiting.length, () => this.navigate("work"), this.taskList(waiting, projectData, "")) : null),
+        h("div", { class: "today-col today-side" },
+          this.section(t("Agent activity"), running.length, () => this.navigate("execution"),
+            jobs.status === "rejected" ? failure(errorText(jobs.reason)) : this.runs(jobData ?? [], taskData ?? [])),
+          this.section(t("Projects"), projectData.filter(p => p.status !== "done").length, () => this.navigate("work"),
+            projects.status === "rejected" ? failure(errorText(projects.reason)) : this.projects(projectData, taskData ?? [])))));
   }
 
-  private block(title: string, count: number, section: "work" | "execution" | "approvals", body: Node | null): HTMLElement {
-    return h("section", {},
-      h("header", { class: "block-head" }, h("h2", {}, title), h("span", { class: "count" }, count || ""),
-        h("button", { type: "button", class: "text-btn", onclick: () => this.navigate(section) }, t("All"))),
-      body);
+  private section(title: string, count: number, all: (() => void) | undefined, body: Node | null): HTMLElement {
+    return h("section", { class: "today-section" },
+      h("header", { class: "today-section-head" }, h("h2", {}, title), count ? h("span", { class: "count" }, count) : null,
+        all && h("button", { type: "button", class: "text-btn", onclick: all }, t("All"))),
+      h("div", { class: "today-card" }, body));
   }
 
   private taskList(tasks: WorkTask[], projects: WorkProject[], emptyText: string): HTMLElement {
-    if (!tasks.length) return h("p", { class: "muted state" }, emptyText);
-    return h("div", {}, ...tasks.map(task => {
+    if (!tasks.length) return h("p", { class: "today-empty" }, emptyText);
+    return h("div", { class: "today-rows" }, ...tasks.map(task => {
       const due = dueLabel(task.due);
       const project = projects.find(p => p.id === task.project)?.title;
-      return h("button", { type: "button", class: "row", onclick: () => this.navigate("work", task.id) },
+      return h("button", { type: "button", class: "today-row", onclick: () => this.navigate("work", task.id) },
         statusIcon(task.status),
-        h("span", { class: "row-main" }, h("span", { class: "row-title" }, task.title)),
-        h("span", { class: "row-meta" },
-          project && h("span", { class: "project-chip hide-narrow" }, project),
-          task.assignee !== "human" && h("span", { class: "who-chip" }, icon("bot"), task.assignee),
-          due && h("span", { class: `due${due.overdue ? " overdue" : due.soon ? " soon" : ""}` }, due.text)));
+        h("span", { class: "row-main" }, h("span", { class: "row-title" }, task.title),
+          (project || task.assignee !== "human") && h("span", { class: "row-sub" },
+            project && h("span", { class: "project-chip" }, icon("folder"), project),
+            task.assignee !== "human" && h("span", { class: "who-chip" }, icon("bot"), task.assignee))),
+        due && h("span", { class: `due-tag${due.overdue ? " overdue" : due.soon ? " soon" : ""}` }, due.overdue ? t("Overdue · {0}", due.text) : due.text));
     }));
   }
 
-  private attention(approvals: Proposal[] | undefined, jobs: Job[], error: unknown, tasks: WorkTask[]): HTMLElement | null {
-    if (error) return this.block(t("Needs your decision"), 0, "approvals", failure(errorText(error)));
-    const items = [
-      ...(approvals ?? []).map(p => h("button", { type: "button", class: "row", onclick: () => this.navigate("approvals") },
-        icon("approvals"), h("span", { class: "row-main" }, h("span", { class: "row-title" }, p.operation.op === "exec.privileged" ? p.operation.args.argv.join(" ") : p.operation.op),
-          h("span", { class: "row-sub" }, p.reason)), h("span", { class: "pill pill-ochre" }, t("Pending")))),
-      ...jobs.map(j => h("button", { type: "button", class: "row", onclick: () => this.navigate("execution", j.spec.id) },
-        statusIcon(j.status), h("span", { class: "row-main" }, h("span", { class: "row-title" }, jobTitle(j, tasks)), h("span", { class: "row-sub" }, j.result?.question ?? j.result?.error ?? "")),
-        h("span", { class: `pill ${j.status === "waiting_for_human" ? "pill-ochre" : "pill-red"}` }, JOB_LABELS[j.status]))),
+  private needsYou(approvals: Proposal[] | undefined, jobs: Job[], error: unknown, tasks: WorkTask[]): HTMLElement | null {
+    if (error) return this.section(t("Needs you"), 0, undefined, failure(errorText(error)));
+    const cards = [
+      ...(approvals ?? []).map(p => this.needCard("approvals", "ochre",
+        p.operation.op === "exec.privileged" ? p.operation.args.argv.join(" ") : p.operation.op, p.reason, t("Approval"), t("Review"), () => this.navigate("approvals"))),
+      ...jobs.map(j => j.status === "waiting_for_human"
+        ? this.needCard("help", "ochre", jobTitle(j, tasks), j.result?.question ?? "", JOB_LABELS[j.status] ?? j.status, t("Answer"), () => this.navigate("execution", j.spec.id))
+        : this.needCard("alert", "red", jobTitle(j, tasks), j.result?.error ?? "", JOB_LABELS[j.status] ?? j.status, t("View"), () => this.navigate("execution", j.spec.id))),
     ];
-    if (!items.length) return null;
-    return h("section", {}, h("header", { class: "block-head" }, h("h2", {}, t("Needs your decision")), h("span", { class: "count" }, items.length)), ...items);
+    if (!cards.length) return null;
+    return h("section", { class: "today-section" },
+      h("header", { class: "today-section-head" }, h("h2", {}, t("Needs you")), h("span", { class: "count attention" }, cards.length)),
+      h("div", { class: "needs" }, ...cards));
+  }
+
+  private needCard(glyph: string, tone: "ochre" | "red", title: string, detail: string, kind: string, action: string, go: () => void): HTMLElement {
+    return h("article", { class: `need need-${tone}` },
+      h("span", { class: "need-icon" }, icon(glyph)),
+      h("div", { class: "need-main" },
+        h("p", { class: "need-kind" }, kind),
+        h("button", { type: "button", class: "need-title", onclick: go }, title),
+        detail && h("p", { class: "need-detail" }, detail)),
+      h("button", { type: "button", class: "btn btn-small need-action", onclick: go }, action));
   }
 
   private runs(jobs: Job[], tasks: WorkTask[]): HTMLElement {
-    const recent = jobs.slice().sort((a, b) => b.spec.created.localeCompare(a.spec.created)).slice(0, 5);
-    if (!recent.length) return h("p", { class: "muted state" }, t("No runs yet. Click Dispatch on a task and each agent round shows up here."));
-    return h("div", {}, ...recent.map(job => h("button", { type: "button", class: "row", onclick: () => this.navigate("execution", job.spec.id) },
+    const live = jobs.filter(job => LIVE.includes(job.status));
+    const recent = jobs.filter(job => !LIVE.includes(job.status)).sort((a, b) => b.spec.created.localeCompare(a.spec.created));
+    const shown = [...live, ...recent].slice(0, 5);
+    if (!shown.length) return h("p", { class: "today-empty" }, t("No agent runs yet. Dispatch a task and each round shows up here."));
+    return h("div", { class: "today-rows" }, ...shown.map(job => h("button", { type: "button", class: "today-row", onclick: () => this.navigate("execution", job.spec.id) },
       statusIcon(job.status),
-      h("span", { class: "row-main" }, h("span", { class: "row-title" }, jobTitle(job, tasks))),
-      h("span", { class: "row-meta", title: formatTime(job.spec.created) }, ago(job.spec.created)))));
+      h("span", { class: "row-main" }, h("span", { class: "row-title" }, jobTitle(job, tasks)),
+        h("span", { class: "row-sub" }, `${job.spec.run.kind === "agent" ? job.spec.run.engine : t("Command")}${t(" · ")}${JOB_LABELS[job.status] ?? job.status}`)),
+      h("span", { class: "row-time", title: formatTime(job.spec.created) }, ago(job.spec.created)))));
   }
 
   private projects(projects: WorkProject[], tasks: WorkTask[]): HTMLElement {
     const open = projects.filter(p => p.status !== "done").slice(0, 5);
-    if (!open.length) return h("p", { class: "muted state" }, t("No active projects."));
-    return h("div", {}, ...open.map(project => {
-      const related = tasks.filter(t => t.project === project.id && t.status !== "cancelled");
-      const done = related.filter(t => t.status === "done").length;
+    if (!open.length) return h("p", { class: "today-empty" }, t("No active projects."));
+    return h("div", { class: "today-rows" }, ...open.map(project => {
+      const related = tasks.filter(task => task.project === project.id && task.status !== "cancelled");
+      const done = related.filter(task => task.status === "done").length;
       const fill = h("span", { class: "progress-fill" });
       fill.style.width = `${related.length ? Math.round((done / related.length) * 100) : 0}%`;
-      return h("button", { type: "button", class: "project-line", onclick: () => this.navigate("work", project.id) },
-        h("span", { class: "row-main" }, h("span", { class: "row-title" }, project.title), project.goal && h("span", { class: "row-sub" }, project.goal)),
-        h("span", { class: "progress" }, fill), h("span", { class: "ratio" }, related.length ? `${done}/${related.length}` : "—"));
+      return h("button", { type: "button", class: "today-row project-row", onclick: () => this.navigate("work", project.id) },
+        h("span", { class: "row-main" }, h("span", { class: "row-title" }, project.title),
+          h("span", { class: "project-progress" }, h("span", { class: "progress" }, fill), h("span", { class: "ratio" }, related.length ? `${done}/${related.length}` : t("No tasks")))));
     }));
   }
 
+  /** 一行输入框：问题直接带到助手页。 */
   private ask(): HTMLElement {
-    const input = h("input", { type: "text", placeholder: t("For example: list the experiments still missing for the rebuttal"), "aria-label": t("Ask the assistant"), autocomplete: "off" });
-    const form = h("form", {}, input, h("button", { type: "submit", class: "btn" }, t("Ask")));
+    const input = h("input", { type: "text", placeholder: t("Ask the assistant anything…"), "aria-label": t("Ask the assistant"), autocomplete: "off", enterkeyhint: "send" });
+    const form = h("form", { class: "today-ask" }, icon("assistant"), input, h("button", { type: "submit", class: "icon-btn", title: t("Ask"), "aria-label": t("Ask") }, icon("send")));
     form.addEventListener("submit", event => { event.preventDefault(); const text = input.value.trim(); if (text) this.navigate("assistant", undefined, `ask:${text}`); });
-    return h("section", { class: "ask-card" }, h("h2", {}, t("Ask the assistant")), h("p", {}, t("The assistant only uses the model configured on your Hub. Chatting doesn't give it access to your tasks or private notes.")), form);
+    return form;
   }
 }
 
-function byDue(a: WorkTask, b: WorkTask): number {
+/** 逾期在前，其次是今天到期，最后是进行中但没有期限的。 */
+function byFocus(a: WorkTask, b: WorkTask): number {
   if (a.due && b.due) return a.due.localeCompare(b.due);
   if (a.due) return -1;
   if (b.due) return 1;
   return b.updated.localeCompare(a.updated);
 }
+const byDue = byFocus;

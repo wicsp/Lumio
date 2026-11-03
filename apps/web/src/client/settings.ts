@@ -16,17 +16,3 @@ export function pickLang(anchor: HTMLElement): void {
   openMenu(anchor, LANGS.map(([value, label]) => ({ value, label, selected: lang() === value })), value => setLang(value as Lang));
 }
 
-/** 窄屏底栏没有侧栏底部，主题、语言与退出登录收在「我」菜单里。 */
-export function pickAccount(anchor: HTMLElement, logout: () => void): void {
-  const theme = THEMES.find(([key]) => key === themeChoice())!;
-  const language = LANGS.find(([key]) => key === lang())!;
-  openMenu(anchor, [
-    { value: "theme", label: t("Theme"), icon: icon(theme[2]), hint: t(theme[1]) },
-    { value: "lang", label: t("Language"), icon: icon("globe"), hint: language[1] },
-    { value: "logout", label: t("Sign out"), icon: icon("logout") },
-  ], value => {
-    if (value === "theme") pickTheme(anchor);
-    else if (value === "lang") pickLang(anchor);
-    else logout();
-  });
-}

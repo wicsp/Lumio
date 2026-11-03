@@ -64,6 +64,7 @@ export class CommandPalette {
       { group: t("Go to"), label: t("Execution"), hint: "4", icon: icon("execution"), run: go("execution") },
       { group: t("Go to"), label: t("Assistant"), hint: "5", icon: icon("assistant"), run: go("assistant") },
       { group: t("Go to"), label: t("Approvals"), hint: "6", icon: icon("approvals"), run: go("approvals") },
+      { group: t("Go to"), label: t("Settings"), icon: icon("settings"), run: go("settings") },
     ];
   }
 
