@@ -61,7 +61,7 @@ export async function doctor(options: DoctorOptions = {}): Promise<Check[]> {
     const response = await io.fetch(`${base}/assets/app.js`);
     if (!response.ok || !response.headers.get("content-type")?.includes("javascript") || !(await response.text()).trim()) throw new Error();
   });
-  await check("本机程序与兼容链接", "运行 install.sh 或 lumio upgrade 修复兼容链接与版本", async () => {
+  await check("本机程序与兼容链接", "再运行一次 lumio upgrade 修复兼容链接与版本", async () => {
     const bin = join(io.home, ".local/bin"), resolve = options.realpath ?? realpath;
     const program = await resolve(join(bin, "lumio"));
     for (const name of ["lumio", "lumio-hub", "lumio-runtime"]) {
@@ -82,7 +82,7 @@ export async function doctor(options: DoctorOptions = {}): Promise<Check[]> {
     let assistant: Record<string, string> = {};
     try { assistant = environment(await io.read(join(io.home, ".config/lumio/hub.env"))); } catch { /* unmanaged Hub */ }
     const configured = Boolean(assistant.LUMIO_ASSISTANT_BASE_URL && assistant.LUMIO_ASSISTANT_MODEL);
-    checks.push({ name: "助手模型", ok: true, problem: configured ? "已配置" : "未配置", ...(!configured ? { fix: "运行 lumio hub assistant setup" } : {}) });
+    checks.push({ name: "助手模型", ok: true, warning: !configured, problem: configured ? "已配置" : "未配置", ...(!configured ? { fix: "运行 lumio hub assistant setup" } : {}) });
     checks.push(...await extraServices(io));
     for (const service of ["hub", "runtime"] as const) await check(`本机 ${service} 后台服务`, `运行 lumio-hub setup（${service} 服务未启动）`, async () => {
       if ((await io.run(serviceCommand(io.platform, io.uid, service, "status"))).code !== 0) throw new Error();
@@ -95,7 +95,7 @@ export async function doctor(options: DoctorOptions = {}): Promise<Check[]> {
   if (publicUrl) {
     try {
       const u = httpURL(publicUrl);
-      if (u.protocol === "http:" && !localAddress(u)) checks.push({ name: "对外地址警告", ok: true, problem: "非本机地址使用 HTTP", fix: "建议配置 HTTPS 反向代理或使用可信私网" });
+      if (u.protocol === "http:" && !localAddress(u)) checks.push({ name: "对外地址警告", ok: true, warning: true, problem: "非本机地址使用 HTTP", fix: "建议配置 HTTPS 反向代理或使用可信私网" });
       checks.push(...await publicHubChecks(io, publicUrl, hubVersion, base ? Number(new URL(base).port || (new URL(base).protocol === "https:" ? 443 : 80)) : 7420));
     } catch { checks.push({ name: "对外地址 /health", ok: false, problem: "地址不合法", fix: "检查 LUMIO_PUBLIC_URL" }); }
   }
@@ -116,7 +116,7 @@ export async function doctor(options: DoctorOptions = {}): Promise<Check[]> {
   });
   await check("待批准提议", "运行 lumio proposals", async () => {
     if (!base) throw new Error(); const pending = await client.proposals();
-    if (pending.length) checks.push({ name: "提议提醒", ok: true, problem: `${pending.length} 项待批准`, fix: "运行 lumio proposals" });
+    if (pending.length) checks.push({ name: "提议提醒", ok: true, warning: true, problem: `${pending.length} 项待批准`, fix: "运行 lumio proposals" });
   });
   return checks;
 }

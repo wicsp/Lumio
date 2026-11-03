@@ -18,11 +18,12 @@ test("POSIX installer verifies synthetic HTTP releases, forwards setup/join argu
   const archive = join(root, "lumio-linux-x64.tar.gz");
   const tar = Bun.spawnSync(["tar", "-czf", archive, "-C", archiveDir, "lumio", "lumio-hub", "lumio-runtime"]); expect(tar.exitCode).toBe(0);
   let content = await readFile(archive), hash = createHash("sha256").update(content).digest("hex");
-  const requests: string[] = []; let corrupt = false;
+  const requests: string[] = []; let corrupt = false, head: "size" | "unknown" | "reject" = "size";
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(request) {
     const path = new URL(request.url).pathname; requests.push(path);
     if (path.endsWith("/SHA256SUMS")) return new Response(`${corrupt ? "0".repeat(64) : hash}  lumio-linux-x64.tar.gz\n`);
-    return new Response(content);
+    if (request.method === "HEAD" && head !== "size") return new Response(null, { status: head === "reject" ? 405 : 200 });
+    return new Response(request.method === "HEAD" ? null : content, { headers: { "Content-Length": String(content.length) } });
   } });
   const installEnv = { ...process.env, HOME: home, PATH: tools + ":" + process.env.PATH, TEST_REAL_CURL: Bun.which("curl")!, TEST_OS: "Linux", TEST_ARCH: "x86_64", LUMIO_RELEASE_BASE_URL: server.url.href.replace(/\/$/, "") };
   async function install(args: string[], extra: Record<string, string> = {}) {
@@ -33,8 +34,9 @@ test("POSIX installer verifies synthetic HTTP releases, forwards setup/join argu
   try {
     let result = await install(["--no-setup", "--version", "v1.2.3"]); expect(result.code).toBe(0); expect(requests).toContain("/download/v1.2.3/lumio-linux-x64.tar.gz");
     expect(result.out).toContain("v1.2.3（linux-x64）");
+    expect(result.out).toMatch(/（linux-x64） \d+\.\d (B|KB|MB|GB)…/);
     const quietArgs = (await readFile(join(home, "curl-args"), "utf8")).split("END\n");
-    for (const args of quietArgs.slice(0, 2)) { expect(args).toContain("-fsSL\n"); expect(args).not.toContain("--progress-bar"); expect(args).toContain("--connect-timeout\n20\n--speed-limit\n1024\n--speed-time\n60\n"); }
+    for (const args of quietArgs.slice(1, 3)) { expect(args).toContain("-fsSL\n"); expect(args).not.toContain("--progress-bar"); expect(args).toContain("--connect-timeout\n20\n--speed-limit\n1024\n--speed-time\n60\n"); }
     for (const name of ["lumio", "lumio-hub", "lumio-runtime"]) expect((await stat(join(home, ".local/bin", name))).mode & 0o777).toBe(0o755);
     for (const name of ["lumio-hub", "lumio-runtime"]) expect(await readlink(join(home, ".local/bin", name))).toBe("lumio");
     result = await install([]); expect(result.code).toBe(0); expect(await readFile(join(home, "called-lumio"), "utf8")).toBe("hub\nsetup\n");
@@ -55,8 +57,8 @@ test("POSIX installer verifies synthetic HTTP releases, forwards setup/join argu
       const [code] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
       expect(code).toBe(0);
       const ttyArgs = (await readFile(join(home, "curl-args"), "utf8")).split("END\n");
-      expect(ttyArgs[0]).toContain("-fL\n--progress-bar\n");
-      expect(ttyArgs[1]).toContain("-fsSL\n"); expect(ttyArgs[1]).not.toContain("--progress-bar");
+      expect(ttyArgs[1]).toContain("-fL\n--progress-bar\n");
+      expect(ttyArgs[2]).toContain("-fsSL\n"); expect(ttyArgs[2]).not.toContain("--progress-bar");
       expect(await readFile(join(home, "stdin-lumio"), "utf8")).toBe("tty");
       expect(await readFile(join(home, "called-lumio"), "utf8")).toBe(`hub\nsetup\n--vault\n${vault}\n`);
     }
@@ -75,6 +77,12 @@ test("POSIX installer verifies synthetic HTTP releases, forwards setup/join argu
       result = await install(["--no-setup"]); expect(result.code).toBe(1); expect(result.error).toContain("垫片内容不匹配");
       expect(await readFile(join(home, ".local/bin/lumio"), "utf8")).toBe("existing-program");
       for (const name of ["lumio-hub", "lumio-runtime"]) expect(await readlink(join(home, ".local/bin", name))).toBe("lumio");
+    }
+    for (const mode of ["unknown", "reject"] as const) {
+      head = mode;
+      result = await install(["--no-setup"]);
+      expect(result.out).toContain("下载 Lumio 最新版本（linux-x64）…");
+      expect(result.out).not.toMatch(/（linux-x64） \d/);
     }
     result = await install([], { TEST_OS: "Darwin", TEST_ARCH: "x86_64" }); expect(result.code).toBe(1); expect(result.error).toContain("不支持的平台");
   } finally { await server.stop(true); }

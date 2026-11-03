@@ -14,26 +14,28 @@ async function fixture(platform = "linux") {
   };
   for (const service of ["hub", "runtime"]) files[platform === "darwin" ? `Library/LaunchAgents/io.lumio.${service}.plist` : `.config/systemd/user/lumio-${service}.service`] = "synthetic managed service";
   for (const [name, content] of Object.entries(files)) { await mkdir(join(home, name, ".."), { recursive: true }); await writeFile(join(home, name), content); }
-  const commands: string[][] = [], steps: string[] = [];
+  const commands: string[][] = [], steps: string[] = [], stdout: string[] = [], stderr: string[] = [];
   const options: SwitchOptions = { home, platform, binary: join(home, "bin/lumio-hub"), uid: 123, env: {}, log: line => steps.push(line),
+    stdout: chunk => stdout.push(chunk), stderr: chunk => stderr.push(chunk),
     ready: async () => {},
     run: async argv => { commands.push(argv); return { code: 0, stdout: "synthetic-never-print", stderr: "synthetic-never-print" }; },
     retire: async (vault, state) => { commands.push(["retire", vault, state]); },
   };
-  return { home, options, commands, steps };
+  return { home, options, commands, steps, stdout, stderr };
 }
 test("switch uses saved state paths and managed services in the specified order", async () => {
   for (const platform of ["darwin", "linux"]) {
-    const f = await fixture(platform); await switchLegacy(["--retire-legacy"], f.options);
+    const f = await fixture(platform); expect(await switchLegacy(["--retire-legacy"], f.options)).toBe(0);
     expect(f.commands).toHaveLength(7);
     expect(f.commands[2]).toEqual([join(f.home, "bin/lumio-runtime"), "prepare-migration", "--state-dir", join(f.home, "custom-runtime-state")]);
     expect(f.commands[3]).toEqual(["retire", join(f.home, "synthetic-vault"), join(f.home, "hub-state")]);
     expect(f.commands[6]).toEqual([join(f.home, "bin/lumio"), "doctor"]);
     expect(f.steps.join("\n")).not.toContain("synthetic-never-print");
+    expect(f.stdout).toEqual(["synthetic-never-print"]); expect(f.stderr).toEqual(["synthetic-never-print"]);
   }
 });
 test("each failing switch step stops immediately and explains completed steps and recovery; unmanaged installs do nothing", async () => {
-  for (let failure = 0; failure < 7; failure++) {
+  for (let failure = 0; failure < 6; failure++) {
     const f = await fixture(); let count = 0;
     const fail = () => count++ === failure;
     await expect(switchLegacy(["--retire-legacy"], { ...f.options,
@@ -73,4 +75,20 @@ test("macOS switch does not ignore a failed stop while the service is still load
     expect(f.commands[1]).toEqual(["launchctl", "print", "gui/123/io.lumio.hub"]);
     expect(f.steps).toEqual(["切换：停止 Hub"]);
   }
+});
+
+
+test("doctor failures after retirement preserve stdout/stderr and report a completed switch", async () => {
+  const f = await fixture();
+  const stdout = "✓ Hub\n! 助手模型：未配置\n✗ 执行器 server：离线 → 检查服务\n1 项通过，1 项提醒，1 项失败\n";
+  const code = await switchLegacy(["--retire-legacy"], { ...f.options, run: async argv => {
+    f.commands.push(argv);
+    return { code: argv.at(-1) === "doctor" ? 1 : 0, stdout: argv.at(-1) === "doctor" ? stdout : "", stderr: argv.at(-1) === "doctor" ? "synthetic diagnostic stderr\n" : "" };
+  } });
+  expect(code).toBe(1);
+  expect(f.steps.at(-1)).toBe("切换已完成；以下检查未通过：✗ 执行器 server：离线 → 检查服务");
+  expect(f.stdout).toEqual([stdout]); expect(f.stderr).toEqual(["synthetic diagnostic stderr\n"]);
+  expect(f.commands.at(-1)?.at(-1)).toBe("doctor");
+  expect(f.commands.filter(argv => argv[0] === "retire")).toHaveLength(1);
+  expect(f.steps.join("\n")).not.toMatch(/切换已停止|恢复：/);
 });

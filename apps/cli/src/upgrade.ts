@@ -8,7 +8,7 @@ export { UpgradeError } from "@lumio/platform";
 export type { UpgradeOptions } from "@lumio/platform";
 
 export async function upgrade(options: UpgradeOptions = {}): Promise<void> {
-  await sharedUpgrade({ ...options, tty: options.tty ?? process.stderr.isTTY, progress: options.progress ?? ((line) => { process.stderr.write(line + "\n"); }), log: options.log ?? console.log });
+  await sharedUpgrade({ ...options, tty: options.tty ?? process.stderr.isTTY, columns: options.columns ?? (() => process.stderr.columns), progress: options.progress ?? ((line) => { process.stderr.write(line); }), log: options.log ?? console.log });
   await legacyUpgradeHint(options);
 }
 export async function runUpgrade(args: string[], runtimeOnly: boolean, log = console.log): Promise<number> {

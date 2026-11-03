@@ -94,10 +94,10 @@ test("doctor diagnoses another Hub, extra services, public health mismatch and T
 
 test("doctor treats a missing assistant model as a reminder and never prints the private key", async () => {
   const f = fixture();
-  expect((await doctor(f.options)).find(c => c.name === "助手模型")).toMatchObject({ ok: true, problem: "未配置" });
+  expect((await doctor(f.options)).find(c => c.name === "助手模型")).toMatchObject({ ok: true, warning: true, problem: "未配置" });
   f.files["/synthetic/.config/lumio/hub.env"] += '\nLUMIO_ASSISTANT_BASE_URL="http://127.0.0.1:8080/v1"\nLUMIO_ASSISTANT_MODEL="synthetic"\nLUMIO_ASSISTANT_API_KEY="synthetic-private-key"';
   const checks = await doctor(f.options);
-  expect(checks.find(c => c.name === "助手模型")).toMatchObject({ ok: true, problem: "已配置" });
+  expect(checks.find(c => c.name === "助手模型")).toMatchObject({ ok: true, warning: false, problem: "已配置" });
   expect(JSON.stringify(checks)).not.toContain("synthetic-private-key");
 });
 
@@ -107,4 +107,17 @@ test("doctor independently detects broken compatibility targets and mismatched l
   f.options.realpath = async () => "/synthetic/.local/bin/lumio";
   f.options.run = async argv => ({ code: 0, stdout: argv.includes("--version") ? "0.1.6" : "", stderr: token });
   const checks = await doctor(f.options); expect(checks.find(check => check.name === "本机程序与兼容链接")?.ok).toBe(false); expect(JSON.stringify(checks)).not.toContain(token);
+});
+
+
+test("doctor shows reminders with ! and failure count/exit code separately, including shim repair", async () => {
+  const f = fixture();
+  const output: string[] = [];
+  expect(printChecks(await doctor(f.options), false, line => output.push(line), { output: { isTTY: false }, env: {} })).toBe(0);
+  expect(output).toContain("! 助手模型：未配置 → 运行 lumio hub assistant setup");
+  expect(output.at(-1)).toMatch(/\d+ 项通过，2 项提醒，0 项失败/);
+  f.options.realpath = async path => path;
+  const checks = await doctor(f.options);
+  expect(checks.find(check => check.name === "本机程序与兼容链接")?.fix).toContain("再运行一次 lumio upgrade");
+  expect(printChecks(checks, false, () => {})).toBe(1);
 });

@@ -19,10 +19,13 @@ async function fixture() {
   const file = join(home, "release.tar.gz");
   async function pack() { const child = Bun.spawn(["tar", "-czf", file, "-C", archiveDir, ...names]); expect(await child.exited).toBe(0); }
   await pack();
+  let latest: string | undefined = "v2.3.4";
   let corrupt = false, duplicate = false, health = "0.1.6", restarts = 0;
   const requests: string[] = [], commands: string[][] = [], logs: string[] = [];
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(req) {
     const path = new URL(req.url).pathname; requests.push(path);
+    if (path === "/latest") return latest ? new Response(null, { status: 302, headers: { Location: `/tag/${latest}` } }) : new Response("synthetic mirror without redirect");
+    if (path.startsWith("/tag/")) throw new Error("latest must not be followed");
     if (path === "/health") return Response.json({ ok: true, version: health });
     const bytes = await readFile(file), hash = createHash("sha256").update(bytes).digest("hex");
     if (path.endsWith("SHA256SUMS")) return new Response(`${corrupt ? "0".repeat(64) : hash}  lumio-linux-x64.tar.gz\n`.repeat(duplicate ? 2 : 1));
@@ -41,7 +44,7 @@ async function fixture() {
       const [stdout, stderr, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
       return { code, stdout, stderr };
     } };
-  return { home, bin, archiveDir, pack, server, options, commands, logs, requests, setCorrupt: () => { corrupt = true; }, setDuplicate: () => { duplicate = true; }, restarts: () => restarts };
+  return { home, bin, archiveDir, pack, server, options, commands, logs, requests, setLatest: (value: string | undefined) => { latest = value; }, setCorrupt: () => { corrupt = true; }, setDuplicate: () => { duplicate = true; }, restarts: () => restarts };
 }
 test("upgrade verifies a local HTTP Release, replaces old binaries with one program and links, restarts local services and waits for the new health version", async () => {
   const f = await fixture();
@@ -122,4 +125,42 @@ test("a second upgrade converts the v0.1.x-installed current-version shims into 
     expect(f.logs.some(line => line.includes("已是最新版本"))).toBe(false);
     expect(f.logs).toContain("运行 lumio login-code --name web 获取配对码");
   } finally { await f.server.stop(true); }
+});
+
+
+test("latest is resolved without following redirects; current installs make no asset requests", async () => {
+  const f = await fixture();
+  try {
+    const progress: string[] = [];
+    await upgrade({ ...f.options, progress: chunk => progress.push(chunk), tty: false });
+    expect(f.requests).toContain("/latest"); expect(f.requests).not.toContain("/tag/v2.3.4");
+    expect(f.requests).toContain("/download/v2.3.4/lumio-linux-x64.tar.gz");
+    expect(f.requests.some(path => path.includes("latest/download"))).toBe(false);
+    expect(progress).toHaveLength(2); expect(progress[0]).toContain("2.3.4（linux-x64）");
+    f.requests.length = 0; const before = f.restarts();
+    await upgrade(f.options);
+    expect(f.requests).toEqual(["/latest"]); expect(f.restarts()).toBe(before);
+    expect(f.logs.at(-1)).toBe("已是最新版本 2.3.4");
+    f.requests.length = 0;
+    await upgrade({ ...f.options, version: "v2.3.4" }); expect(f.requests).toEqual([]);
+    // Services need repair even when the executable and links already match.
+    await writeFile(join(f.home, ".config/systemd/user/lumio-runtime.service"), `[Service]\nExecStart="${f.bin}/lumio-runtime"\n`);
+    await upgrade(f.options); expect(f.requests).toContain("/download/v2.3.4/lumio-linux-x64.tar.gz");
+  } finally { await f.server.stop(true); }
+});
+test("an unreadable latest version falls back to verified downloads and compares afterwards", async () => {
+  for (const mode of ["no redirect", "bad tag", "network"] as const) {
+    const f = await fixture();
+    try {
+      await upgrade(f.options); f.requests.length = 0;
+      f.setLatest(mode === "bad tag" ? "unparseable" : undefined);
+      await upgrade({ ...f.options, ...(mode === "network" ? { fetch: (async (input, init) => {
+        if (String(input).endsWith("/latest")) throw new Error("synthetic network failure");
+        return fetch(input, init);
+      }) as typeof fetch } : {}) });
+      expect(f.requests).toContain("/latest/download/lumio-linux-x64.tar.gz");
+      expect(f.requests).toContain("/latest/download/SHA256SUMS");
+      expect(f.logs.at(-1)).toBe("已是最新版本 2.3.4");
+    } finally { await f.server.stop(true); }
+  }
 });

@@ -48,7 +48,20 @@ umask 077
 tmp=$(mktemp -d) || fail '无法创建临时目录'
 trap 'rm -rf "$tmp"' EXIT
 trap 'exit 1' HUP INT TERM
-printf '下载 Lumio %s（%s）…\n' "${version:-最新版本}" "$platform"
+# HEAD is optional: mirrors may omit Content-Length or reject HEAD entirely.
+size=$(curl -fsSLI --connect-timeout 20 --max-time 20 "$base/$archive" 2>/dev/null | awk '
+  /^HTTP\// { size="" }
+  tolower($1) == "content-length:" { gsub("\r", "", $2); size=$2 }
+  END { if (size ~ /^[0-9]+$/ && size > 0) {
+    split("B KB MB GB", units, " "); unit=1;
+    while (size >= 1024 && unit < 4) { size/=1024; unit++ }
+    printf "%.1f %s", size, units[unit]
+  } }') || size=
+if [ -n "$size" ]; then
+  printf '下载 Lumio %s（%s） %s…\n' "${version:-最新版本}" "$platform" "$size"
+else
+  printf '下载 Lumio %s（%s）…\n' "${version:-最新版本}" "$platform"
+fi
 # Progress belongs on stderr; redirected installation logs stay quiet.
 if [ -t 2 ]; then set -- -fL --progress-bar; else set -- -fsSL; fi
 curl "$@" --connect-timeout 20 --speed-limit 1024 --speed-time 60 "$base/$archive" -o "$tmp/$archive" || fail '下载太慢或卡住，请检查网络或代理（https_proxy）后重试；也请确认版本存在'

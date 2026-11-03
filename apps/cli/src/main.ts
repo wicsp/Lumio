@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { basename } from "node:path";
+import { runUpgrade } from "./upgrade.ts";
 import { runCli } from "./cli.ts";
 import { run as runHub } from "../../hub/src/entry.ts";
 import { run as runRuntime } from "../../runtime/src/entry.ts";
@@ -21,11 +22,14 @@ export async function main(assets?: WebAssets, args = process.argv.slice(2), nam
     if (call.role === "hub") {
       const serving = !call.args.length || (call.args.length === 1 && call.args[0] === "serve");
       await runHub(call.args, serving ? { web: { files: webFiles(assets ?? await buildWebAssets(), { apiBase: "" }), csp: WEB_CSP } } : {});
+    } else if (call.role === "runtime" && call.args[0] === "upgrade") {
+      // Both installed invocations share the CLI's terminal display and upgrade flow.
+      process.exitCode = await runUpgrade(call.args.slice(1), true);
     } else if (call.role === "runtime") await runRuntime(call.args);
     else process.exitCode = await runCli(call.args);
   } catch (cause) {
     // Never echo arguments or exceptions: management commands may be reading credentials.
-    console.error(call.role === "cli" && cause instanceof Error ? cause.message : "无法执行 Lumio 命令，请检查参数、配置与服务日志"); process.exitCode = 1;
+    console.error((call.role === "cli" || call.args[0] === "upgrade") && cause instanceof Error ? cause.message : "无法执行 Lumio 命令，请检查参数、配置与服务日志"); process.exitCode = 1;
   }
 }
 if (import.meta.main) await main();
