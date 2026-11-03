@@ -9,7 +9,7 @@ test("pairing uses each caller's version and injected display without shared app
     ? Response.json({ ok: true, version: "3.0.0" }) : Response.json(join), { preconnect: fetch.preconnect });
   for (const [index, version] of ["1.0.0", "2.0.0"].entries()) {
     expect(await createPairer(version)("http://synthetic", "synthetic-code", "client", ClientJoin, fetcher, (line) => warnings[index]!.push(line))).toEqual(join);
-    expect(warnings[index]![0]).toContain(`本程序是 ${version}`);
+    expect(warnings[index]![0]).toContain(`this program is ${version}`);
   }
   const absent = Object.assign(async (input: Parameters<typeof fetch>[0]) => String(input).endsWith("/health")
     ? Response.json({ ok: true, version: "3.0.0" }) : new Response("not a token", { status: 404 }), { preconnect: fetch.preconnect });

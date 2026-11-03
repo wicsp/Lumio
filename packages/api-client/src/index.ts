@@ -27,7 +27,7 @@ export interface SubmitJobInput {
 export interface QueryOptions { includePrivate?: boolean }
 export interface SearchOptions extends QueryOptions { type?: NoteRef["type"]; limit?: number }
 
-export function createClient(options: { url: string; token?: string; fetch?: typeof globalThis.fetch }) {
+export function createClient(options: { url: string; token?: string; language?: string; fetch?: typeof globalThis.fetch }) {
   const fetcher = options.fetch ?? globalThis.fetch;
   const base = options.url.replace(/\/+$/, "");
   async function request<T>(path: string, params: Record<string, string>, schema: { parse(value: unknown): T }, body?: unknown, method?: string): Promise<T> {
@@ -37,7 +37,7 @@ export function createClient(options: { url: string; token?: string; fetch?: typ
       for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
       const response = await fetcher(url, {
         method: method ?? (body === undefined ? "GET" : "POST"),
-        headers: { ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}), ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+        headers: { ...(options.language ? { "Accept-Language": options.language } : {}), ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}), ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }), redirect: "error",
       });
       status = response.status;
@@ -75,7 +75,7 @@ export function createClient(options: { url: string; token?: string; fetch?: typ
       const path = `/v2/execution/artifacts/${validate(idOf("art"), id)}/content`; let status: number | undefined;
       try {
         const url = new URL(`${base}${path}`); for (const [key, value] of Object.entries(queryParams(query))) url.searchParams.set(key, value);
-        const response = await fetcher(url, { headers: options.token ? { Authorization: `Bearer ${options.token}` } : {}, redirect: "error" });
+        const response = await fetcher(url, { headers: { ...(options.language ? { "Accept-Language": options.language } : {}), ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}) }, redirect: "error" });
         status = response.status;
         if (!response.ok) throw new ApiClientError(ApiError.parse(await response.json()).error, status);
         return response;
@@ -94,7 +94,7 @@ export function createClient(options: { url: string; token?: string; fetch?: typ
       let release: (() => Promise<void>) | undefined;
       try {
         const response = await fetcher(`${base}/v2/assistant/chat`, { method: "POST", redirect: "error", signal,
-          headers: { ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}), "Content-Type": "application/json", Accept: "application/x-ndjson" }, body: JSON.stringify(payload) });
+          headers: { ...(options.language ? { "Accept-Language": options.language } : {}), ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}), "Content-Type": "application/json", Accept: "application/x-ndjson" }, body: JSON.stringify(payload) });
         if (!response.ok) throw new ApiClientError(ApiError.parse(await response.json()).error, response.status);
         if (!response.body) throw new Error("missing stream");
         const reader = response.body.getReader();

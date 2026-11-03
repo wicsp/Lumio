@@ -1,3 +1,4 @@
+import { text as msg } from "./messages.ts";
 import { createHash } from "node:crypto";
 import { chmod, chown, copyFile, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -13,7 +14,7 @@ const paths: SudoPaths = { binary: "/usr/local/libexec/lumio-sudo-helper", confi
 interface Account { name: string; uid: number; gid: number; home: string }
 async function confirmFingerprint(): Promise<boolean> {
   const terminal = openTerminal();
-  return terminal ? (askTerminal(terminal, "确认与 Hub 上 lumio-hub signing-key 显示的指纹一致？输入 yes：") ?? "").trim() === "yes" : false;
+  return terminal ? (askTerminal(terminal, msg("sudo-install.does_this_match_the_fingerprint_from_lumio_hub_signing_key_on_hub_ty")) ?? "").trim() === "yes" : false;
 }
 /** Runs as the runtime user, including when requested by the root installer. */
 export async function configureSudoEnvironment(home: string, command?: string) {
@@ -30,36 +31,36 @@ export async function installSudoHelper(args: string[], options: {
   /** Synthetic filesystem ownership only; never exposed as a command-line option. */
   owner?: number; group?: number;
 } = {}) {
-  if ((options.platform ?? process.platform) !== "linux") throw new RuntimeError("提权助手仅支持 Linux");
-  if ((options.uid ?? process.getuid?.()) !== 0) throw new RuntimeError("请用 sudo lumio-runtime install-sudo-helper 以 root 运行");
+  if ((options.platform ?? process.platform) !== "linux") throw new RuntimeError(msg("sudo-install.privileged_helper_supports_linux_only"));
+  if ((options.uid ?? process.getuid?.()) !== 0) throw new RuntimeError(msg("sudo-install.run_as_root_using_sudo_lumio_runtime_install_sudo_helper"));
   const env = options.env ?? process.env, user = env.SUDO_USER;
-  if (!user || user === "root" || !/^[a-z_][a-z0-9_-]*\$?$/.test(user)) throw new RuntimeError("需要有效的 SUDO_USER，请从执行器账号通过 sudo 运行");
-  if (args.length && !(args.length === 1 && args[0] === "--uninstall")) throw new RuntimeError("用法：lumio-runtime install-sudo-helper [--uninstall]");
+  if (!user || user === "root" || !/^[a-z_][a-z0-9_-]*\$?$/.test(user)) throw new RuntimeError(msg("sudo-install.a_valid_sudo_user_is_required_run_sudo_from_the_runtime_account"));
+  if (args.length && !(args.length === 1 && args[0] === "--uninstall")) throw new RuntimeError(msg("sudo-install.usage_lumio_runtime_install_sudo_helper_uninstall"));
   const uninstall = args[0] === "--uninstall", run = options.run ?? runCommand, log = options.log ?? console.log;
   const entry = await run(["/usr/bin/getent", "passwd", user]);
   const fields = entry.stdout.trim().split(":");
   const account: Account = { name: user, uid: Number(fields[2]), gid: Number(fields[3]), home: fields[5] ?? "" };
-  if (entry.code || fields.length !== 7 || fields[0] !== user || !Number.isSafeInteger(account.uid) || account.uid <= 0 || !Number.isSafeInteger(account.gid) || account.gid < 0 || !isAbsolute(account.home)) throw new RuntimeError("无法找到执行器账号的主目录与 UID");
+  if (entry.code || fields.length !== 7 || fields[0] !== user || !Number.isSafeInteger(account.uid) || account.uid <= 0 || !Number.isSafeInteger(account.gid) || account.gid < 0 || !isAbsolute(account.home)) throw new RuntimeError(msg("sudo-install.could_not_find_runtime_account_home_directory_and_uid"));
   const target = options.paths ?? paths, owner = options.owner ?? 0, group = options.group ?? 0;
   const envFile = join(account.home, ".config/lumio-runtime/runtime.env");
   const runtimeEnv = parseEnvironment(await readFile(envFile, "utf8"));
   const source = options.binary ?? process.execPath;
-  if (!uninstall && source === process.execPath && !Bun.main.startsWith("/$bunfs/")) throw new RuntimeError("请用 install.sh 安装的程序运行 install-sudo-helper");
+  if (!uninstall && source === process.execPath && !Bun.main.startsWith("/$bunfs/")) throw new RuntimeError(msg("sudo-install.run_install_sudo_helper_using_the_program_installed_by_install_sh"));
   // Root never writes into a user-controlled directory. The helper updates runtime.env after dropping privileges.
   async function configure(command?: string) {
     const argv = ["/usr/sbin/runuser", "-u", user!, "--", "/usr/bin/env", "-i", `HOME=${account.home}`, `USER=${user}`, "PATH=/usr/bin:/bin", `XDG_RUNTIME_DIR=/run/user/${account.uid}`, (uninstall ? source : target.binary), "--configure-sudo-helper", ...(command ? [command] : [])];
-    if ((await run(argv)).code) throw new RuntimeError("无法更新 runtime.env，请检查执行器账号的配置权限");
+    if ((await run(argv)).code) throw new RuntimeError(msg("sudo-install.could_not_update_runtime_env_check_runtime_account_configuration_per"));
   }
   async function restart() {
     try {
       if ((await run(["/usr/sbin/runuser", "-u", user!, "--", "/usr/bin/env", `XDG_RUNTIME_DIR=/run/user/${account.uid}`, "systemctl", "--user", "restart", "lumio-runtime.service"])).code === 0) return;
     } catch { /* tell the human how to recover */ }
-    log("请以执行器账号运行 systemctl --user restart lumio-runtime.service");
+    log(msg("sudo-install.run_systemctl_user_restart_lumio_runtime_service_as_the_runtime_acco"));
   }
   async function safeDirectory(path: string, mode = 0o755) {
     try {
       const st = await lstat(path);
-      if (!st.isDirectory() || st.isSymbolicLink() || st.uid !== owner || (st.mode & 0o022)) throw new RuntimeError("提权助手安装目录权限不安全");
+      if (!st.isDirectory() || st.isSymbolicLink() || st.uid !== owner || (st.mode & 0o022)) throw new RuntimeError(msg("sudo-install.unsafe_privileged_helper_installation_directory_permissions"));
     } catch (cause) {
       if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause;
       await mkdir(path, { mode }); await chown(path, owner, group); await chmod(path, mode);
@@ -75,9 +76,9 @@ export async function installSudoHelper(args: string[], options: {
     for (const file of [target.binary, target.config, target.sudoers]) await safeParents(file);
     await configure();
     for (const file of [target.sudoers, target.config, target.binary]) await rm(file, { force: true });
-    await restart(); log("提权助手已卸载；已用凭据记录保留"); return;
+    await restart(); log(msg("sudo-install.privileged_helper_uninstalled_used_credential_records_retained")); return;
   }
-  if (!(options.interactive ?? Boolean(openTerminal()))) throw new RuntimeError("需要交互终端核对 Hub 公钥指纹；未安装提权助手");
+  if (!(options.interactive ?? Boolean(openTerminal()))) throw new RuntimeError(msg("sudo-install.an_interactive_terminal_is_required_to_verify_hub_public_key_fingerp"));
   const config = readConfig({ ...runtimeEnv, LUMIO_RUNTIME_STATE_DIR: runtimeEnv.LUMIO_RUNTIME_STATE_DIR ?? join(account.home, ".local/share/lumio-runtime") }), fetcher = options.fetch ?? globalThis.fetch;
   async function request<T>(path: string, schema: { parse(value: unknown): T }, body?: unknown): Promise<T> {
     try {
@@ -86,24 +87,24 @@ export async function installSudoHelper(args: string[], options: {
       }, ...(body === undefined ? {} : { body: JSON.stringify(body) }), redirect: "error", signal: AbortSignal.timeout(10_000) });
       if (!response.ok) throw new Error();
       return schema.parse(await response.json());
-    } catch { throw new RuntimeError("无法向 Hub 验证执行器身份与签名公钥；未安装提权助手"); }
+    } catch { throw new RuntimeError(msg("sudo-install.could_not_verify_runtime_identity_and_signing_key_with_hub_helper_wa")); }
   }
   const key = await request("/v1/runtime/signing-key", HubSigningKey);
   const fingerprint = signingKeyFingerprint(createHash("sha256").update(Buffer.from(key.public_key, "base64url")).digest("hex"));
-  if (fingerprint !== key.fingerprint) throw new RuntimeError("Hub 公钥指纹不匹配；未安装提权助手");
-  log(`Hub 公钥指纹：${fingerprint}`);
-  if (!await (options.confirm ?? confirmFingerprint)()) throw new RuntimeError("指纹未确认；未安装提权助手");
+  if (fingerprint !== key.fingerprint) throw new RuntimeError(msg("sudo-install.hub_public_key_fingerprint_mismatch_helper_was_not_installed"));
+  log(msg("sudo-install.hub_public_key_fingerprint", fingerprint));
+  if (!await (options.confirm ?? confirmFingerprint)()) throw new RuntimeError(msg("sudo-install.fingerprint_not_confirmed_helper_was_not_installed"));
   const receipt = await optionalFile(join(config.stateDir, "registered.json"));
   const registration = receipt ? RuntimeInfo.parse(JSON.parse(receipt)).registration : config.registration;
-  if (registration.name !== config.registration.name) throw new RuntimeError("执行器登记名称不匹配");
+  if (registration.name !== config.registration.name) throw new RuntimeError(msg("sudo-install.runtime_registration_name_does_not_match"));
   const info = await request("/v1/runtime/register", RuntimeInfo, registration);
-  if (info.registration.name !== config.registration.name) throw new RuntimeError("执行器登记名称不匹配");
+  if (info.registration.name !== config.registration.name) throw new RuntimeError(msg("sudo-install.runtime_registration_name_does_not_match"));
   // Validate sudoers before installing any files. All paths are fixed in production.
   const stage = await mkdtemp(join(tmpdir(), "lumio-sudo-install-"));
   const sudoers = `${user} ALL=(root) NOPASSWD: ${target.binary} --sudo-helper\n`;
   try {
     const staged = join(stage, "sudoers"); await writeFile(staged, sudoers, { mode: 0o440 });
-    if ((await run(["/usr/sbin/visudo", "-cf", staged])).code) throw new RuntimeError("visudo 校验失败；未安装提权助手");
+    if ((await run(["/usr/sbin/visudo", "-cf", staged])).code) throw new RuntimeError(msg("sudo-install.visudo_validation_failed_helper_was_not_installed"));
     for (const file of [target.binary, target.config, target.sudoers, join(target.state, "used")]) await safeParents(file);
     await chmod(target.state, 0o700);
     async function installFile(path: string, mode: number, content?: string) {
@@ -123,6 +124,6 @@ export async function installSudoHelper(args: string[], options: {
       await rename(temp, target.sudoers);
     } finally { await rm(temp, { force: true }); }
     await configure(`/usr/bin/sudo -n ${target.binary} --sudo-helper`);
-    await restart(); log("提权助手已安装");
+    await restart(); log(msg("sudo-install.privileged_helper_installed"));
   } finally { await rm(stage, { recursive: true, force: true }); }
 }

@@ -1,3 +1,7 @@
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { chmod, copyFile, cp, lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -13,7 +17,7 @@ beforeAll(async () => {
 afterAll(async () => { if (root) await rm(root, { recursive: true, force: true }); });
 test("all names and role forms report one compiled version; internal helpers and existing runtime commands dispatch correctly", async () => {
   for (const [name, args] of [["lumio", ["--version"]], ["lumio", ["hub", "--version"]], ["lumio", ["runtime", "--version"]], ["lumio-hub", ["--version"]], ["lumio-runtime", ["--version"]]] as const) {
-    const child = Bun.spawn([join(root, name), ...args], { cwd: root, env: { HOME: root, PATH: "" }, stdout: "pipe", stderr: "pipe" });
+    const child = Bun.spawn([join(root, name), ...args], { cwd: root, env: { LUMIO_LANG: "zh", HOME: root, PATH: "" }, stdout: "pipe", stderr: "pipe" });
     expect((await new Response(child.stdout).text()).trim()).toBe("9.8.7"); expect(await child.exited).toBe(0);
   }
   expect(invocation(["actor", "list"], "lumio-hub").role).toBe("hub");
@@ -23,7 +27,7 @@ test("all names and role forms report one compiled version; internal helpers and
   for (const helper of ["--job-worker", "--sudo-helper", "--configure-sudo-helper"]) expect(invocation([helper], "lumio").role).toBe("runtime");
 });
 async function start(name: string, args: string[]) {
-  const child = Bun.spawn([join(root, name), ...args], { cwd: root, env: { HOME: root, PATH: process.env.PATH, LUMIO_STATE_DIR: join(root, "state"), LUMIO_HUB_LISTEN: "127.0.0.1:0" }, stdout: "pipe", stderr: "pipe", timeout: 20_000 });
+  const child = Bun.spawn([join(root, name), ...args], { cwd: root, env: { LUMIO_LANG: "zh", HOME: root, PATH: process.env.PATH, LUMIO_STATE_DIR: join(root, "state"), LUMIO_HUB_LISTEN: "127.0.0.1:0" }, stdout: "pipe", stderr: "pipe", timeout: 20_000 });
   const reader = child.stdout.getReader(), decoder = new TextDecoder(); let text = "";
   try {
     for (;;) { const part = await reader.read(); if (part.done) break; text += decoder.decode(part.value); const url = /http:\/\/127\.0\.0\.1:\d+/.exec(text)?.[0]; if (url) return { child, url }; }
@@ -49,7 +53,7 @@ test("compiled program serves embedded Web/PWA from an empty directory through b
 
 test("compiled runtime uses the same program for its worker and delivers a synthetic command result", async () => {
   const { createClient } = await import("@lumio/api-client");
-  const env = { HOME: root, PATH: "", LUMIO_STATE_DIR: join(root, "state") };
+  const env = { LUMIO_LANG: "zh", HOME: root, PATH: "", LUMIO_STATE_DIR: join(root, "state") };
   async function manage(args: string[]) {
     const child = Bun.spawn([binary, "hub", ...args], { cwd: root, env, stdout: "pipe", stderr: "pipe" });
     const [code, output, error] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
@@ -60,7 +64,7 @@ test("compiled runtime uses the same program for its worker and delivers a synth
   const token = await manage(["token", "create", "binary-owner", "--actor", "binary-owner"]);
   const runtimeToken = await manage(["token", "create", "binary-runtime", "--actor", "binary-runtime"]);
   const { child: hub, url } = await start("lumio", ["hub", "serve"]);
-  const runtime = Bun.spawn([binary, "runtime", "serve"], { cwd: root, env: { HOME: root, PATH: "", LUMIO_HUB_URL: url,
+  const runtime = Bun.spawn([binary, "runtime", "serve"], { cwd: root, env: { LUMIO_LANG: "zh", HOME: root, PATH: "", LUMIO_HUB_URL: url,
     LUMIO_TOKEN: runtimeToken, LUMIO_RUNTIME_NAME: "binary-runtime", LUMIO_RUNTIME_STATE_DIR: join(root, "runtime"), LUMIO_RUNTIME_POLL_SECONDS: "0.05", LUMIO_RUNTIME_ALLOWED_COMMANDS: "/usr/bin/true" }, stdout: "ignore", stderr: "pipe" });
   try {
     const client = createClient({ url, token });
@@ -77,7 +81,7 @@ test("compiled runtime uses the same program for its worker and delivers a synth
 
 test("source invocation builds Web assets on demand in a synthetic state directory", async () => {
   const child = Bun.spawn([process.execPath, new URL("../src/main.ts", import.meta.url).pathname, "hub", "serve"], { cwd: root,
-    env: { HOME: root, PATH: "", LUMIO_STATE_DIR: join(root, "source-state"), LUMIO_HUB_LISTEN: "127.0.0.1:0" }, stdout: "pipe", stderr: "pipe", timeout: 15_000 });
+    env: { LUMIO_LANG: "zh", HOME: root, PATH: "", LUMIO_STATE_DIR: join(root, "source-state"), LUMIO_HUB_LISTEN: "127.0.0.1:0" }, stdout: "pipe", stderr: "pipe", timeout: 15_000 });
   const reader = child.stdout.getReader(); let text = "", url: string | undefined;
   try {
     while (!url) { const part = await reader.read(); if (part.done) break; text += new TextDecoder().decode(part.value); url = /http:\/\/127\.0\.0\.1:\d+/.exec(text)?.[0]; }
@@ -90,7 +94,7 @@ test("release archive passes v0.1.6 archive, regular-file and executable-version
   const directory = join(root, "release with spaces"), extracted = join(root, "old upgrader extraction"), archive = join(root, "release.tar.gz");
   await mkdir(directory); await mkdir(extracted); await copyFile(binary, join(directory, "lumio")); await writeReleaseShims(directory);
   async function command(argv: string[]) {
-    const child = Bun.spawn(argv, { cwd: root, env: { HOME: root, PATH: process.env.PATH }, stdout: "pipe", stderr: "pipe" });
+    const child = Bun.spawn(argv, { cwd: root, env: { LUMIO_LANG: "zh", HOME: root, PATH: process.env.PATH }, stdout: "pipe", stderr: "pipe" });
     const [code, output, error] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
     if (code) throw new Error(error); return output;
   }
@@ -127,12 +131,12 @@ test("both compiled runtime upgrade invocations share the terminal flow and skip
   } });
   try {
     for (const [name, args] of [["lumio", ["runtime", "upgrade"]], ["lumio-runtime", ["upgrade"]]] as const) {
-      const child = Bun.spawn([join(root, name), ...args], { env: { HOME: root, PATH: "", LUMIO_RELEASE_BASE_URL: server.url.href.replace(/\/$/, "") }, stdout: "pipe", stderr: "pipe" });
+      const child = Bun.spawn([join(root, name), ...args], { env: { LUMIO_LANG: "zh", HOME: root, PATH: "", LUMIO_RELEASE_BASE_URL: server.url.href.replace(/\/$/, "") }, stdout: "pipe", stderr: "pipe" });
       const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
       expect(code).toBe(0); expect(out.trim()).toBe("已是最新版本 9.8.7"); expect(err).toBe("");
     }
     expect(requests).toEqual(["/latest", "/latest"]);
-    const child = Bun.spawn([binary, "doctor"], { env: { HOME: root, PATH: "", FORCE_COLOR: "1" }, stdout: "pipe", stderr: "pipe" });
+    const child = Bun.spawn([binary, "doctor"], { env: { LUMIO_LANG: "zh", HOME: root, PATH: "", FORCE_COLOR: "1" }, stdout: "pipe", stderr: "pipe" });
     const [code, out] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
     expect(code).toBe(1); expect(out).toContain("\x1b[31m✗\x1b[0m"); expect(out).toMatch(/\d+ 项通过，\d+ 项提醒，\d+ 项失败/);
   } finally { await server.stop(true); }
@@ -159,7 +163,7 @@ test("compiled switch returns nonzero for doctor failures after completing retir
     if (path === "/assets/app.js") return new Response("synthetic();", { headers: { "Content-Type": "text/javascript" } });
     return Response.json(path === "/v1/runtimes" ? [runtime] : path === "/v1/status" ? { watching: true, issues: [] } : []);
   } });
-  const env = { HOME: home, PATH: tools, LUMIO_STATE_DIR: state };
+  const env = { LUMIO_LANG: "zh", HOME: home, PATH: tools, LUMIO_STATE_DIR: state };
   const invoke = async (args: string[]) => {
     const child = Bun.spawn([binary, "hub", ...args], { env, stdout: "pipe", stderr: "pipe" });
     const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);

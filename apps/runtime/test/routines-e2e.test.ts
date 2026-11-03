@@ -1,3 +1,7 @@
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { chmod, cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -88,33 +92,33 @@ test("routines fire on the runtime's clock, survive Hub and runtime outages, and
   await eventually(() => local<{ routine: string }>("SELECT routine FROM routines").length === 1);
 
   now = Date.parse("2026-10-26T10:10:30Z");
-  await eventually(async () => (await note()).includes("### 2026-10-26 10:10 的结果"));
+  await eventually(async () => (await note()).includes("### Result for 2026-10-26 10:10"));
   expect(await note()).toContain("日报：GPU 一切正常");
   // context: previous —— 执行器拿到带上这一次摘要的新计划。
-  await eventually(() => local<{ spec: string }>("SELECT spec FROM routines")[0]!.spec.includes("上一次的结果（2026-10-26 10:10）"));
+  await eventually(() => local<{ spec: string }>("SELECT spec FROM routines")[0]!.spec.includes("Previous result (2026-10-26 10:10)"));
 
   // Hub 离线：执行器照常触发并执行，结果留在待交回队列；Hub 恢复后补写。
   await stopHub();
   now = Date.parse("2026-10-26T10:20:30Z");
   await eventually(() => local<{ id: string }>("SELECT id FROM outbox").length === 1);
   await startHub();
-  await eventually(async () => (await note()).includes("### 2026-10-26 10:20 的结果"));
+  await eventually(async () => (await note()).includes("### Result for 2026-10-26 10:20"));
 
   // 执行器离线错过 10:30、10:40、10:50、11:00：恢复后只补跑最近的 11:00。
   await stopRuntime();
   now = Date.parse("2026-10-26T11:05:30Z");
   startRuntime();
-  await eventually(async () => (await note()).includes("### 2026-10-26 11:00 的结果"));
+  await eventually(async () => (await note()).includes("### Result for 2026-10-26 11:00"));
   const text = await note();
-  expect(text).toContain("上一次之后有 3 次计划触发没有执行");
-  expect(text.indexOf("10:10 的结果")).toBeLessThan(text.indexOf("10:20 的结果"));
-  expect(text.indexOf("10:20 的结果")).toBeLessThan(text.indexOf("11:00 的结果"));
+  expect(text).toContain("3 scheduled runs since the previous run were skipped");
+  expect(text.indexOf("Result for 2026-10-26 10:10")).toBeLessThan(text.indexOf("Result for 2026-10-26 10:20"));
+  expect(text.indexOf("Result for 2026-10-26 10:20")).toBeLessThan(text.indexOf("Result for 2026-10-26 11:00"));
   const jobs = Job.array().parse(await api(`/v1/jobs?routine=${R}`));
   expect(jobs.map((j) => j.spec.source?.fired_at)).toEqual(["2026-10-26T10:10:00.000Z", "2026-10-26T10:20:00.000Z", "2026-10-26T11:00:00.000Z"]);
   expect(jobs.every((j) => j.status === "done")).toBe(true);
   const prompts = (await readFile(log, "utf8")).trim().split("\n").map((l) => JSON.parse(l) as { args: string[]; prompt: string });
   expect(prompts).toHaveLength(3);
-  expect(prompts[0]!.prompt).not.toContain("上一次的结果");
-  expect(prompts[1]!.prompt).toContain("上一次的结果（2026-10-26 10:10）");
+  expect(prompts[0]!.prompt).not.toContain("Previous result");
+  expect(prompts[1]!.prompt).toContain("Previous result (2026-10-26 10:10)");
   expect(prompts.every((p) => !p.args.includes("--session-id"))).toBe(true); // 每次都是新会话
 }, 90_000);

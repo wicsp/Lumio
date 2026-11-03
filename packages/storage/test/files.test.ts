@@ -42,11 +42,11 @@ test("JSONL distinguishes active UTF-8 tail truncation from archived truncation,
   const event = RunLogEvent.parse({ schema_version: 1, id: "evt_00000000000000000000000001", run, sequence: 1, time: "2026-11-01T00:00:00Z", type: "status", payload: { status: "running" } });
   const line = JSON.stringify(event) + "\n", partial = Buffer.concat([Buffer.from(line), Buffer.from([0x7b, 0xe4, 0xb8])]);
   expect(parseLogSegment(partial, { run, active: true })).toMatchObject({ events: [event], next: 2, incomplete: true });
-  expect(() => parseLogSegment(partial, { run, active: false })).toThrow("末行");
-  expect(() => parseLogSegment(Buffer.from(line + "{bad}\n"), { run, active: true })).toThrow("中间");
-  expect(() => parseLogSegment(Buffer.from(line + line), { run, active: false })).toThrow("顺序");
-  expect(() => parseLogSegment(Buffer.from(line.replace('"sequence":1', '"sequence":2')), { run, active: false })).toThrow("顺序");
-  expect(() => parseLogSegment(Buffer.from([0xff, 10]), { run, active: true })).toThrow("UTF-8");
+  expect(() => parseLogSegment(partial, { run, active: false })).toThrow("CORRUPT");
+  expect(() => parseLogSegment(Buffer.from(line + "{bad}\n"), { run, active: true })).toThrow("CORRUPT");
+  expect(() => parseLogSegment(Buffer.from(line + line), { run, active: false })).toThrow("CORRUPT");
+  expect(() => parseLogSegment(Buffer.from(line.replace('"sequence":1', '"sequence":2')), { run, active: false })).toThrow("CORRUPT");
+  expect(() => parseLogSegment(Buffer.from([0xff, 10]), { run, active: true })).toThrow("CORRUPT");
 });
 
 test("interrupted traces seal only their complete prefix and record recovery without treating logs as execution state", async () => temporary(async (root) => {
@@ -84,8 +84,8 @@ test("artifact registration and byte confirmation are distinct; bad uploads stay
     expect(await files.recover()).toEqual({ recovered: [id], missing: [] });
     expect((await files.publish(id, chunks(bytes))).status).toBe("ready");
     expect(files.stage(artifact()).status).toBe("ready"); expect(files.list()).toHaveLength(1);
-    expect(() => files.stage(artifact({ size: bytes.length + 1 }))).toThrow("不同");
-    expect(() => files.stage({ ...artifact(), key: "../escape" })).toThrow("格式");
+    expect(() => files.stage(artifact({ size: bytes.length + 1 }))).toThrow("CONFLICT");
+    expect(() => files.stage({ ...artifact(), key: "../escape" })).toThrow("INVALID");
     await writeFile(await files.path(id), "tampered"); await expect(files.path(id)).rejects.toMatchObject({ code: "CORRUPT" });
   } finally { db.close(); }
 }));

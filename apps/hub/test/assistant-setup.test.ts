@@ -1,3 +1,9 @@
+import { errorMessage } from "../src/messages.ts";
+async function displayFailure(action: Promise<unknown>) { try { return await action; } catch (cause) { throw new Error(errorMessage(cause)); } }
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { afterEach, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -60,14 +66,14 @@ test("401/403, 404, other 4xx, 5xx, invalid success and timeout never write or r
     const f = await fixture(), before = await readFile(f.path, "utf8");
     const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response(f.secret, { status }) });
     try {
-      await expect(assistantConfiguration(["setup", "--base-url", server.url.href, "--model", "synthetic-model", "--api-key-stdin"], { ...f.options, stdin: async () => f.secret })).rejects.toThrow(message);
+      await expect(displayFailure(assistantConfiguration(["setup", "--base-url", server.url.href, "--model", "synthetic-model", "--api-key-stdin"], { ...f.options, stdin: async () => f.secret }))).rejects.toThrow(message);
       expect(await readFile(f.path, "utf8")).toBe(before); expect(f.commands).toHaveLength(0); expect(f.logs.join("\n")).not.toContain(f.secret);
     } finally { await server.stop(true); }
   }
   const f = await fixture();
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: async () => { await Bun.sleep(100); return Response.json({}); } });
   try {
-    await expect(assistantConfiguration(["setup", "--base-url", server.url.href, "--model", "synthetic", "--api-key-stdin"], { ...f.options, stdin: async () => f.secret, timeoutMs: 10 })).rejects.toThrow("超时");
+    await expect(displayFailure(assistantConfiguration(["setup", "--base-url", server.url.href, "--model", "synthetic", "--api-key-stdin"], { ...f.options, stdin: async () => f.secret, timeoutMs: 10 }))).rejects.toThrow("超时");
     expect(parseEnvironment(await readFile(f.path, "utf8"))).toEqual(f.env);
   } finally { await server.stop(true); }
 });
@@ -77,11 +83,11 @@ test("skip-check, Linux restart, unmanaged instructions, invalid inputs and fail
   const options = { ...f.options, stdin: async () => f.secret, fetch: (async () => { throw new Error("must not fetch"); }) as unknown as typeof fetch };
   await assistantConfiguration([...args, "--skip-check"], options);
   expect(f.commands).toEqual([["systemctl", "--user", "restart", "lumio-hub.service"]]);
-  await expect(assistantConfiguration(["clear"], { ...f.options, run: async () => ({ code: 1, stdout: f.secret, stderr: f.secret }) })).rejects.toThrow("重启失败");
+  await expect(assistantConfiguration(["clear"], { ...f.options, run: async () => ({ code: 1, stdout: f.secret, stderr: f.secret }) })).rejects.toThrow("INVALID");
   const unmanaged = await fixture(); await assistantConfiguration([...args, "--skip-check"], { ...unmanaged.options, stdin: async () => "" });
   expect(unmanaged.logs.join("\n")).toContain("手动重启");
   for (const invalid of [["setup", "--api-key", f.secret], ["status", "--model", "x"], ["setup", "--base-url", "http://user:secret@invalid", "--model", "m", "--skip-check"]]) {
-    await expect(assistantConfiguration(invalid, f.options)).rejects.toThrow();
+    await expect(displayFailure(assistantConfiguration(invalid, f.options))).rejects.toThrow();
   }
-  await expect(assistantConfiguration(args, { ...f.options, stdin: async () => "synthetic\nextra" })).rejects.toThrow("换行");
+  await expect(assistantConfiguration(args, { ...f.options, stdin: async () => "synthetic\nextra" })).rejects.toThrow("INVALID");
 });

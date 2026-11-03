@@ -1,3 +1,4 @@
+import { text as msg } from "./messages.ts";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -9,7 +10,7 @@ import { installService, parseEnvironment, privateFile, type ServiceOptions } fr
 
 export function environmentText(env: Record<string, string>): string {
   return Object.entries(env).map(([key, value]) => {
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) || /[\r\n\0]/.test(value)) throw new RuntimeError("环境配置不能包含换行或 NUL");
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) || /[\r\n\0]/.test(value)) throw new RuntimeError(msg("pairing.environment_configuration_must_not_contain_newlines_or_nul"));
     return `${key}="${value.replace(/[\\"$`]/g, "\\$&")}"\n`;
   }).join("");
 }
@@ -22,11 +23,11 @@ export function hubAddress(raw: string): string {
     const url = new URL(raw);
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error();
     return url.href.replace(/\/+$/, "");
-  } catch { throw new RuntimeError("Hub 地址必须是无凭据、查询或片段的 HTTP(S) 地址"); }
+  } catch { throw new RuntimeError(msg("pairing.hub_url_must_be_http_s_without_credentials_query_or_fragment")); }
 }
 export function warnHttp(url: string, log: (line: string) => void) {
   const parsed = new URL(url);
-  if (parsed.protocol === "http:" && !/^(localhost|\[::1\]|127\.\d+\.\d+\.\d+)$/.test(parsed.hostname)) log("警告：Hub 使用 HTTP，令牌会以明文传输");
+  if (parsed.protocol === "http:" && !/^(localhost|\[::1\]|127\.\d+\.\d+\.\d+)$/.test(parsed.hostname)) log(msg("pairing.warning_hub_uses_http_tokens_will_travel_in_plain_text"));
 }
 export async function joinRuntime(args: string[], options: ServiceOptions & {
   env?: NodeJS.ProcessEnv; fetch?: typeof globalThis.fetch;
@@ -36,8 +37,8 @@ export async function joinRuntime(args: string[], options: ServiceOptions & {
   let values: { hub?: string; code?: string };
   try {
     const parsed = parseArgs({ args, options: { hub: { type: "string" }, code: { type: "string" } } }); values = parsed.values;
-  } catch { throw new RuntimeError("用法：lumio-runtime join --hub <地址> --code <配对码>"); }
-  if (!values.hub || !RuntimeJoinRequest.safeParse({ code: values.code }).success) throw new RuntimeError("用法：lumio-runtime join --hub <地址> --code <配对码>");
+  } catch { throw new RuntimeError(msg("pairing.usage_lumio_runtime_join_hub_url_code_pairing_code")); }
+  if (!values.hub || !RuntimeJoinRequest.safeParse({ code: values.code }).success) throw new RuntimeError(msg("pairing.usage_lumio_runtime_join_hub_url_code_pairing_code"));
   const env = options.env ?? process.env, home = resolve(options.home ?? env.HOME ?? homedir());
   const url = hubAddress(values.hub), log = options.log ?? console.log;
   warnHttp(url, log);

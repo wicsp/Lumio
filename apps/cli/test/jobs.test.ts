@@ -1,3 +1,7 @@
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { isolatedHome } from "./test-home.ts";
 import { expect, test } from "bun:test";
 import { Job } from "@lumio/schema";

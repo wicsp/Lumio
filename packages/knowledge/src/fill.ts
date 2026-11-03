@@ -11,7 +11,7 @@ export interface FillInput {
   birthtime: Date;
   mtime: Date;
 }
-export interface FillContext { now: Date; newId: (prefix: IdPrefix) => string; tz: string }
+export interface FillContext { text?: (key: string, ...args: unknown[]) => string; now: Date; newId: (prefix: IdPrefix) => string; tz: string }
 
 function timestamp(date: Date, tz: string): string {
   try {
@@ -24,12 +24,13 @@ function timestamp(date: Date, tz: string): string {
     const offset = p.timeZoneName === "GMT" ? "+00:00" : p.timeZoneName!.replace("GMT", "");
     return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}${offset}`;
   } catch (cause) {
-    throw new CoreError("INVALID_TIMESTAMP", "无法格式化文件时间或本机时区", { cause });
+    throw new CoreError("INVALID_TIMESTAMP", { key: "fill.could_not_format_file_time_or_local_time_zone", args: [] }, { cause });
   }
 }
 
 /** Fill absent/null metadata only; leave non-null values for schema validation. */
 export function fillMetadata(input: FillInput, ctx: FillContext): { patch: Record<string, unknown>; issues: Issue[] } {
+  const msg = ctx.text ?? ((key: string, ...args: unknown[]) => key.replace(/\$\{(\d+)\}/g, (_, index: string) => String(args[Number(index)])));
   const { frontmatter: fm, type } = input;
   const patch: Record<string, unknown> = {};
   const missing = (key: string) => !Object.hasOwn(fm, key) || fm[key] === null;
@@ -52,7 +53,7 @@ export function fillMetadata(input: FillInput, ctx: FillContext): { patch: Recor
   const issues: Issue[] = result.success ? [] : result.error.issues.map((issue) => ({
     path: issue.path.map(String).join("."),
     message: issue.path[0] === "citekey" && missing("citekey")
-      ? "缺失，且文件名不是合法 citekey" : issue.message,
+      ? msg("Missing, and filename is not a valid citekey") : msg("Invalid value (${0})", issue.code),
   }));
   return { patch, issues };
 }

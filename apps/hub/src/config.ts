@@ -1,3 +1,4 @@
+import { text as msg } from "./messages.ts";
 import { browserOrigins } from "./web.ts";
 import { isIP } from "node:net";
 import { randomUUID } from "node:crypto";
@@ -15,12 +16,12 @@ export function stateDirectory(env: NodeJS.ProcessEnv = process.env): string {
 export function readConfig(env: NodeJS.ProcessEnv = process.env) {
   const listen = env.LUMIO_HUB_LISTEN ?? "127.0.0.1:7420";
   const match = /^(\[[^\]]+\]|[^:/\s]+):(\d+)$/.exec(listen);
-  if (!match || Number(match[2]) > 65535) throw new HubError("INVALID", "LUMIO_HUB_LISTEN 必须是 host:port");
+  if (!match || Number(match[2]) > 65535) throw new HubError("INVALID", { key: "config.lumio_hub_listen_must_be_host_port", args: [] });
   const trustedProxy = env.LUMIO_TRUSTED_PROXY || undefined;
-  if (trustedProxy && !isIP(trustedProxy)) throw new HubError("INVALID", "LUMIO_TRUSTED_PROXY 必须是 IP 地址");
+  if (trustedProxy && !isIP(trustedProxy)) throw new HubError("INVALID", { key: "config.lumio_trusted_proxy_must_be_an_ip_address", args: [] });
   const autosaveIdle = Number(env.LUMIO_AUTOSAVE_IDLE ?? 300);
   if (!Number.isFinite(autosaveIdle) || autosaveIdle <= 0 || autosaveIdle * 1000 > 2_147_483_647) {
-    throw new HubError("INVALID", "LUMIO_AUTOSAVE_IDLE 必须是有效的正秒数");
+    throw new HubError("INVALID", { key: "config.lumio_autosave_idle_must_be_a_valid_positive_number_of_seconds", args: [] });
   }
   let publicUrl: string | undefined;
   if (env.LUMIO_PUBLIC_URL) {
@@ -28,7 +29,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env) {
       const url = new URL(env.LUMIO_PUBLIC_URL);
       if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error();
       publicUrl = url.href.replace(/\/+$/, "");
-    } catch { throw new HubError("INVALID", "LUMIO_PUBLIC_URL 必须是无凭据、查询或片段的 HTTP(S) 地址"); }
+    } catch { throw new HubError("INVALID", { key: "config.lumio_public_url_must_be_an_http_s_url_without_credentials_query_or", args: [] }); }
   }
   return {
     assistantModel: modelConfiguration(env),
@@ -49,7 +50,7 @@ export function isLoopback(host: string): boolean {
 
 export function networkWarning(config: Pick<HubConfig, "hostname" | "publicUrl">): string | undefined {
   if (!isLoopback(config.hostname) && (!config.publicUrl || config.publicUrl.startsWith("http://"))) {
-    return "警告：Hub 正在非本机地址监听，且未配置 HTTPS 对外地址；令牌可能以明文传输。请配置反向代理与 LUMIO_PUBLIC_URL。";
+    return msg("config.warning_hub_listens_on_a_non_local_address_without_an_https_public_u");
   }
 }
 
@@ -61,8 +62,8 @@ export async function rememberLocalRuntime(stateDir: string, name?: string): Pro
   const path = join(stateDir, "config.json");
   let config: Record<string, unknown> = {};
   try { config = JSON.parse(await readFile(path, "utf8")); }
-  catch (cause) { if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw new HubError("INVALID", "Hub 配置无法读取"); }
-  if (!config || Array.isArray(config) || typeof config !== "object") throw new HubError("INVALID", "Hub 配置必须是对象");
+  catch (cause) { if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw new HubError("INVALID", { key: "config.could_not_read_hub_configuration", args: [] }); }
+  if (!config || Array.isArray(config) || typeof config !== "object") throw new HubError("INVALID", { key: "config.hub_configuration_must_be_an_object", args: [] });
   const localRuntime = RuntimeName.parse(name ?? config.localRuntime ?? runtimeName(hostname()));
   if (config.localRuntime !== localRuntime) {
     await mkdir(stateDir, { recursive: true });

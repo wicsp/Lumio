@@ -15,11 +15,11 @@ function field(text: string, min: number, max: number): { values: number[]; any:
   const values = new Set<number>();
   for (const part of text.split(",")) {
     const match = /^(\*|(\d+)(?:-(\d+))?)(?:\/(\d+))?$/.exec(part);
-    if (!match) throw new CoreError("INVALID_CRON", `cron 字段不合法：${text}`);
+    if (!match) throw new CoreError("INVALID_CRON", { key: "cron.invalid_cron_field", args: [text] });
     const step = match[4] === undefined ? 1 : Number(match[4]);
     const start = match[1] === "*" ? min : Number(match[2]);
     const end = match[1] === "*" ? max : match[3] !== undefined ? Number(match[3]) : match[4] !== undefined ? max : start;
-    if (step < 1 || start < min || end > max || start > end) throw new CoreError("INVALID_CRON", `cron 字段超出范围：${text}`);
+    if (step < 1 || start < min || end > max || start > end) throw new CoreError("INVALID_CRON", { key: "cron.cron_field_out_of_range", args: [text] });
     for (let v = start; v <= end; v += step) values.add(v);
   }
   return { values: [...values].sort((a, b) => a - b), any: text === "*" };
@@ -27,7 +27,7 @@ function field(text: string, min: number, max: number): { values: number[]; any:
 
 export function parseCron(expression: string): Cron {
   const parts = expression.trim().split(/\s+/);
-  if (parts.length !== 5) throw new CoreError("INVALID_CRON", "schedule 必须是 5 段 cron 表达式，例如 0 9 * * 1");
+  if (parts.length !== 5) throw new CoreError("INVALID_CRON", { key: "cron.schedule_must_be_a_five_field_cron_expression_e_g_0_9_1", args: [] });
   const [minute, hour, day, month, weekday] = parts as [string, string, string, string, string];
   const days = field(day, 1, 31), weekdays = field(weekday, 0, 7);
   return {
@@ -43,7 +43,7 @@ function formatter(timeZone: string) {
   if (!f) {
     try {
       f = new Intl.DateTimeFormat("en-US", { timeZone, hourCycle: "h23", year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric" });
-    } catch { throw new CoreError("INVALID_CRON", `未知时区：${timeZone}`); }
+    } catch { throw new CoreError("INVALID_CRON", { key: "routines.unknown_time_zone", args: [timeZone] }); }
     formatters.set(timeZone, f);
   }
   return f;

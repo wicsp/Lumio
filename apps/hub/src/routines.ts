@@ -1,3 +1,4 @@
+import { serviceText, serviceErrorMessage, errorMessage, text as msg } from "./messages.ts";
 import { parseAssignee } from "@lumio/schema";
 import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readFile } from "node:fs/promises";
@@ -34,15 +35,7 @@ interface PlanRow {
 const MAX_SUMMARY = 3000;
 const ROUTINE_ID = /^rtn_[0-9A-HJKMNP-TV-Z]{26}$/;
 
-export const ROUTINE_INSTRUCTIONS = (fields: { title: string; id: string; workdir: string }) => `你正在执行用户的一个例行任务（按计划自动触发，这是独立的一次，没有之前的对话）。
-例行任务：${fields.title}（${fields.id}）
-工作目录：${fields.workdir}
-
-要求：
-- 只在工作目录内工作。不要读写用户的 Lumio 笔记库，需要 root 时运行 \`lumio-runtime sudo -- <命令>\` 并等待用户批准（可能要等很久，也可能被拒绝）；不要直接使用 sudo。
-- 完成后，用中文简要汇报结果；有需要用户注意的地方写在最前面。
-- 如果需要用户做决定，在最后的回复里用 <lumio-question>你的问题</lumio-question> 写出问题，然后结束。
-`;
+export const ROUTINE_INSTRUCTIONS = (fields: { title: string; id: string; workdir: string }) => msg("routines.you_are_running_an_independent_scheduled_routine_without_prior_conve", fields.title, fields.id, fields.workdir);
 
 /** 时区里的本地日期时间，`2026-10-26 09:00`。 */
 export function localTime(iso: string, timeZone: string): string {
@@ -88,7 +81,7 @@ export class Routines {
   }
   /** 定时：没有执行器的计划重新挑一次；写回还没写回的结果。 */
   async tick(): Promise<void> {
-    for (const row of this.rows()) if (row.status === "active" && !row.spec && row.problem?.startsWith("没有可用的执行器")) await this.noteChanged(row.path);
+    for (const row of this.rows()) if (row.status === "active" && !row.spec && row.problem?.startsWith(msg("routines.no_runtime_available"))) await this.noteChanged(row.path);
     await this.writeResults();
   }
 
@@ -124,27 +117,27 @@ export class Routines {
       runtime: null, lease: null, spec: null, problem: null,
     };
     const refuse = (problem: string) => {
-      if (previous?.problem !== problem) this.issue(path, `跳过  ${path}  ${problem}`);
+      if (previous?.problem !== problem) this.issue(path, serviceText("tasks.skip", path, problem));
       this.saveRow({ ...row, problem });
     };
     const parsed = Routine.safeParse(data);
-    if (!parsed.success) { refuse(`例行任务格式不对：${parsed.error.issues.map((i) => `${i.path.join(".")} ${i.message}`).join("；")}`); return; }
+    if (!parsed.success) { refuse(msg("routines.invalid_routine_format", parsed.error.issues.map((i) => msg("validation.invalid_field", i.path.join("."), i.code)).join("；"))); return; }
     const routine = parsed.data;
-    try { parseCron(routine.schedule); } catch { refuse(`schedule 不合法：${routine.schedule}`); return; }
-    if (!validTimeZone(row.timezone)) { refuse(`未知时区：${row.timezone}`); return; }
+    try { parseCron(routine.schedule); } catch { refuse(msg("routines.invalid_schedule", routine.schedule)); return; }
+    if (!validTimeZone(row.timezone)) { refuse(msg("routines.unknown_time_zone", row.timezone)); return; }
     if (row.status === "paused") { this.saveRow(row); return; }
     const workdir = routine.workdir ?? "~";
     const assignee = parseAssignee(routine.assignee);
     if (assignee === "human") return;
-    if (workdirInVault(this.config.vault, workdir)) { refuse("工作目录不能在笔记库里（ADR 0019）"); return; }
+    if (workdirInVault(this.config.vault, workdir)) { refuse(msg("tasks.working_directory_must_be_outside_the_vault_adr_0019")); return; }
     let runtime;
     try { runtime = pickRuntime(this.store, new Date(this.clock.now()), assignee.agent, assignee.device, this.config.localRuntime); }
-    catch (cause) { refuse(cause instanceof HubError ? cause.message : "没有可用的执行器"); return; }
+    catch (cause) { refuse(cause instanceof HubError ? errorMessage(cause) : msg("routines.no_runtime_available")); return; }
 
     let prompt = `${ROUTINE_INSTRUCTIONS({ title, id, workdir })}\n# ${title}\n\n${humanPart(body)}\n`;
     if (routine.context === "previous") {
       const last = this.runs(id).filter((r) => r.job.result?.report).at(-1);
-      if (last) prompt += `\n## 上一次的结果（${localTime(last.fired_at, row.timezone)}）\n\n${last.job.result!.report!.slice(0, MAX_SUMMARY)}\n`;
+      if (last) prompt += msg("routines.previous_result", localTime(last.fired_at, row.timezone), last.job.result!.report!.slice(0, MAX_SUMMARY));
     }
     const run: AgentRun = { kind: "agent", engine: assignee.agent, prompt, ...(routine.model ? { model: routine.model } : {}) };
     const template = { run, workdir, ...(routine.gpus ? { gpus: routine.gpus } : {}), timeout_seconds: (routine.timeout_minutes ?? 120) * 60 };
@@ -203,10 +196,10 @@ export class Routines {
       const name = `run-${localTime(run.fired_at, row.timezone).replace(/[-: ]/g, "").replace(/^(\d{8})/, "$1-")}`;
       try {
         await editNote(this.config.vault, row.path, (b) => upsertBlock(b, name, `job=${job.spec.id}`, block),
-          { message: `lumio: ${row.title} ${localTime(run.fired_at, row.timezone)} 的结果 ${job.status}`, trailers: { "Lumio-Actor": job.spec.runtime, "Lumio-Job": job.spec.id } },
-          () => this.issue(row.path, `跳过  ${row.path}  Hub 的写入已完成，但未能单独提交，将由自动保存提交`));
+          { message: msg("routines.lumio_result_at", row.title, localTime(run.fired_at, row.timezone), job.status), trailers: { "Lumio-Actor": job.spec.runtime, "Lumio-Job": job.spec.id } },
+          () => this.issue(row.path, serviceText("tasks.skip_hub_wrote_changes_but_could_not_commit_them_separately_autosave", row.path)));
       } catch {
-        this.issue(row.path, `跳过  ${row.path}  无法写回 ${localTime(run.fired_at, row.timezone)} 的结果`);
+        this.issue(row.path, serviceText("routines.skip_could_not_write_back_result_for", row.path, localTime(run.fired_at, row.timezone)));
         continue;
       }
       this.markWritten(run.job);
@@ -219,30 +212,30 @@ export class Routines {
   private render(row: PlanRow, firedAt: string, job: Job): string {
     const r = job.result;
     const status = r?.status ?? "cancelled";
-    const outcome = status === "done" ? "" : ` · ${status === "failed" ? `失败：${r?.error ?? (r?.exit_code !== undefined ? `退出码 ${r.exit_code}` : "未知原因")}` : OUTCOME[status] ?? status}`;
+    const outcome = status === "done" ? "" : ` · ${status === "failed" ? msg("tasks.failed_2", r?.error ?? (r?.exit_code !== undefined ? msg("tasks.exit_code", r.exit_code) : msg("tasks.unknown_reason"))) : OUTCOME[status] ?? status}`;
     const runtime = this.store.runtimes(new Date(this.clock.now())).find((x) => x.actor === job.spec.runtime)?.registration.name ?? job.spec.runtime;
-    const engine = r?.engine ? `${r.engine.name} ${r.engine.version} · ${r.engine.sandbox === "os" ? "系统沙箱" : "无沙箱"}` : job.spec.run.kind === "agent" ? job.spec.run.engine : "command";
-    const lines = [`### ${localTime(firedAt, row.timezone)} 的结果${outcome}`, "", `（${engine} · ${runtime}）`, ""];
+    const engine = r?.engine ? `${r.engine.name} ${r.engine.version} · ${r.engine.sandbox === "os" ? msg("jobs.os_sandbox") : msg("jobs.no_sandbox")}` : job.spec.run.kind === "agent" ? job.spec.run.engine : "command";
+    const lines = [msg("routines.result_for", localTime(firedAt, row.timezone), outcome), "", `（${engine} · ${runtime}）`, ""];
     // 执行器离线期间错过的触发：只补跑了最近一次，其余记为跳过（P2-5）。
     const earlier = this.store.db.query<{ fired_at: string }, [string, string]>(
       "SELECT max(fired_at) AS fired_at FROM routine_runs WHERE routine=? AND fired_at<?").get(row.routine, firedAt)?.fired_at;
     if (earlier) {
       try {
         const skipped = dueFires(parseCron(row.schedule), row.timezone, new Date(earlier), new Date(Date.parse(firedAt) - 1)).count;
-        if (skipped > 0) lines.push(`> 上一次之后有 ${skipped} 次计划触发没有执行（执行器离线或例行任务暂停），已跳过。`, "");
+        if (skipped > 0) lines.push(msg("routines.scheduled_runs_since_the_previous_run_were_skipped_runtime_offline_o", skipped), "");
       } catch { /* schedule 已改得无法解析：不统计 */ }
     }
     const report = r?.report ?? "", question = r?.question;
     if (containsSecret(report) || (question && containsSecret(question))) {
-      lines.push(`汇报中疑似包含敏感信息（密钥或卡号），未写入笔记。请用 \`lumio job show ${job.spec.id}\` 查看。`);
+      lines.push(msg("routines.report_may_contain_sensitive_information_keys_or_card_numbers_it_was", job.spec.id));
     } else {
-      if (report) lines.push(report.length > MAX_SUMMARY ? `${report.slice(0, MAX_SUMMARY)}\n\n……（已截断）` : report, "");
-      if (question) lines.push(`> **问题**：${question}`, "");
+      if (report) lines.push(report.length > MAX_SUMMARY ? msg("tasks.truncated", report.slice(0, MAX_SUMMARY)) : report, "");
+      if (question) lines.push(msg("tasks.question", question), "");
     }
-    lines.push(`完整汇报：\`lumio job show ${job.spec.id}\``);
+    lines.push(msg("tasks.full_report_lumio_job_show", job.spec.id));
     const block = lines.join("\n");
     // error、版本等元数据同样来自执行器，检查最终区块而不是只检查 report/question。
-    if (containsSecret(block)) return `### 结果未写入\n\n汇报中疑似包含敏感信息（密钥或卡号），未写入笔记。请用 \`lumio job show ${job.spec.id}\` 查看。`;
+    if (containsSecret(block)) return msg("tasks.result_not_written_report_may_contain_sensitive_information_keys_or", job.spec.id);
     return block;
   }
 
@@ -269,22 +262,22 @@ export class Routines {
    */
   async followup(routineId: string, jobId: string, identity: Identity): Promise<NoteRef> {
     let job: Job;
-    try { job = this.jobs.get(jobId); } catch { throw new HubError("NOT_FOUND", "找不到这一次的记录"); }
-    if (job.spec.source?.routine !== routineId || !job.spec.source.fired_at) throw new HubError("INVALID", "这个 Job 不是该例行任务的某一次");
+    try { job = this.jobs.get(jobId); } catch { throw new HubError("NOT_FOUND", { key: "routines.run_record_not_found", args: [] }); }
+    if (job.spec.source?.routine !== routineId || !job.spec.source.fired_at) throw new HubError("INVALID", { key: "routines.this_job_does_not_belong_to_this_routine", args: [] });
     let path = this.row(routineId)?.path;
     if (!path) {
       try { path = (await showNote(this.config.vault, routineId, { stateDir: this.config.stateDir })).note.path; }
-      catch { throw new HubError("NOT_FOUND", "找不到这个例行任务"); }
+      catch { throw new HubError("NOT_FOUND", { key: "routines.routine_not_found", args: [] }); }
     }
-    if (this.isManaged(path, routineId)) throw new HubError("CONFLICT", "这个来源已由数据库管理，请使用新版 routine followup");
+    if (this.isManaged(path, routineId)) throw new HubError("CONFLICT", { key: "routines.this_source_is_managed_by_the_database_use_the_new_routine_followup", args: [] });
     const parsed = Routine.safeParse(parseFrontmatter(await readFile(join(this.config.vault, path))).data);
-    if (!parsed.success) throw new HubError("INVALID", "例行任务格式不对，无法照抄负责人与执行配置");
+    if (!parsed.success) throw new HubError("INVALID", { key: "routines.invalid_routine_format_cannot_copy_assignee_and_execution_configurat", args: [] });
     const routine = parsed.data;
     const zone = routine.timezone ?? this.defaultZone;
     const when = localTime(job.spec.source.fired_at, zone);
     const now = new Date(this.clock.now());
     const id = newId("task", now, randomBytes);
-    const title = `${routine.title} · ${when} 追问`;
+    const title = msg("execution-routines.followup", routine.title, when);
     const fields: Record<string, unknown> = {
       id, type: "task", title, created: now.toISOString(), updated: now.toISOString(), status: "todo",
       assignee: "human",
@@ -295,11 +288,11 @@ export class Routines {
     // JSON 的字符串、数组与对象都是合法的 YAML 流式写法，不必引入 YAML 序列化的细节。
     const header = Object.entries(fields).map(([k, v]) => `${k}: ${typeof v === "string" && /^[A-Za-z0-9_.:+-]+$/.test(v) ? v : JSON.stringify(v)}`).join("\n");
     const report = job.result?.report ?? "";
-    const shown = containsSecret(report) ? `汇报中疑似包含敏感信息，未写入笔记。请用 \`lumio job show ${job.spec.id}\` 查看。`
-      : report ? (report.length > 20_000 ? `${report.slice(0, 20_000)}\n\n……（已截断）` : report) : "（这一次没有汇报）";
-    const body = `来自例行任务 [[${basename(path, ".md")}]] 在 ${when} 的结果。在这里写下你的追问，然后把 \`assignee\` 改成 \`${assigneeKey(routine.assignee)}\`。\n\n`;
+    const shown = containsSecret(report) ? msg("routines.report_may_contain_sensitive_information_it_was_not_written_to_the_n", job.spec.id)
+      : report ? (report.length > 20_000 ? msg("tasks.truncated", report.slice(0, 20_000)) : report) : msg("routines.no_report_for_this_run");
+    const body = msg("routines.from_routine_result_at_write_your_followup_here_then_set_assignee_to", basename(path, ".md"), when, assigneeKey(routine.assignee));
     let bytes: Buffer = Buffer.from(`---\n${header}\n---\n${body}`, "utf8");
-    bytes = upsertBlock(bytes, "routine-run", `job=${job.spec.id}`, `### ${when} 的结果\n\n${shown}`);
+    bytes = upsertBlock(bytes, "routine-run", `job=${job.spec.id}`, msg("routines.result_for_2", when, shown));
     const dir = entityDirectory("task");
     const safe = title.replace(/[\\/:*?"<>|#^[\]]/g, "-");
     let relativePath = `${dir}/${safe}.md`;
@@ -307,7 +300,7 @@ export class Routines {
     const committed = await writeAndCommit(this.config.vault, relativePath, Buffer.alloc(0),
       async () => { await mkdir(join(this.config.vault, dir), { recursive: true }); await writeFileAtomic(join(this.config.vault, relativePath), bytes, { overwrite: false }); },
       `lumio: routine.followup ${title}`, { "Lumio-Actor": identity.actor.id, "Lumio-Job": job.spec.id });
-    if (!committed) this.issue(relativePath, `跳过  ${relativePath}  Hub 的写入已完成，但未能单独提交，将由自动保存提交`);
+    if (!committed) this.issue(relativePath, serviceText("tasks.skip_hub_wrote_changes_but_could_not_commit_them_separately_autosave", relativePath));
     return NoteRef.parse({ id, type: "task", title, path: relativePath });
   }
 }

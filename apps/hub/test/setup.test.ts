@@ -1,3 +1,9 @@
+import { errorMessage } from "../src/messages.ts";
+async function displayFailure(action: Promise<unknown>) { try { return await action; } catch (cause) { throw new Error(errorMessage(cause)); } }
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { afterEach, expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -14,7 +20,7 @@ async function fixture(platform = "darwin") {
   const commands: string[][] = [], logs: string[] = [];
   const options: SetupOptions = {
     home, platform, host: "My Mac.local", binary: `${home}/bin/lumio`, yes: true,
-    env: { HOME: home, USER: "synthetic", PATH: `${home}/agents:/usr/bin:/bin` }, uid: 123,
+    env: { LUMIO_LANG: "zh", HOME: home, USER: "synthetic", PATH: `${home}/agents:/usr/bin:/bin` }, uid: 123,
     find: (name) => name === "git" ? "/opt/git/bin/git" : null,
     run: async (argv) => { commands.push(argv); return { code: 0, stdout: argv.includes("install-service") ? "已连上 Hub；检测到：codex 0.163.0" : "Linger=yes", stderr: "" }; },
     fetch: (async () => Response.json({ ok: true, version: "0.0.0-dev" })), log: (line) => logs.push(line),
@@ -53,7 +59,7 @@ test("first setup creates default vault, private config, launchd services and lo
   for (const secret of [config.token, updated.token, runtime.LUMIO_TOKEN!]) expect(f.logs.join("\n")).not.toContain(secret);
 });
 test("explicit vault must exist; existing configuration supplies the vault on subsequent runs", async () => {
-  const f = await fixture(); await expect(setup({ ...f.options, vault: join(f.home, "missing") })).rejects.toThrow("vault");
+  const f = await fixture(); await expect(displayFailure(setup({ ...f.options, vault: join(f.home, "missing") }))).rejects.toThrow("vault");
   const vault = join(f.home, "existing vault & notes"); await mkdir(vault);
   await setup({ ...f.options, vault }); await setup(f.options); expect((await f.config()).vault).toBe(vault);
   expect(await readFile(join(f.home, "Library/LaunchAgents/io.lumio.hub.plist"), "utf8")).toContain("&amp;");
@@ -76,7 +82,7 @@ test("startup timeouts diagnose protected vaults, occupied ports and log locatio
   for (const [error, expected] of [["EPERM secret-do-not-echo", "完全磁盘访问权限"], ["EADDRINUSE", "端口 7420 被占用"], ["other", "hub.err.log"]]) {
     const f = await fixture(); const state = join(f.home, ".local/share/lumio"); await mkdir(state, { recursive: true }); await writeFile(join(state, "hub.err.log"), error!);
     let time = 0;
-    await expect(setup({ ...f.options, fetch: (async () => { throw new Error(); }), now: () => time, sleep: async (ms) => { time += ms; } })).rejects.toThrow(expected!);
+    await expect(displayFailure(setup({ ...f.options, fetch: (async () => { throw new Error(); }), now: () => time, sleep: async (ms) => { time += ms; } }))).rejects.toThrow(expected!);
     expect(f.logs.join("\n")).not.toContain("secret-do-not-echo");
   }
 });
@@ -95,7 +101,7 @@ test("Tailscale is offered only when found, serve and IP choices configure the r
   await setup({ ...f.options, yes: false, ask: async (question, fallback) => { if (question.includes("Tailscale")) offered = true; return fallback; } }); expect(offered).toBe(false);
 });
 test("public URL parsing and network warnings follow the actual binding", () => {
-  for (const value of ["file:///tmp", "https://user:secret@example.org", "http://example.org/?token=secret"]) expect(() => readConfig({ LUMIO_VAULT: "/synthetic", LUMIO_PUBLIC_URL: value })).toThrow("LUMIO_PUBLIC_URL");
+  for (const value of ["file:///tmp", "https://user:secret@example.org", "http://example.org/?token=secret"]) expect(() => readConfig({ LUMIO_VAULT: "/synthetic", LUMIO_PUBLIC_URL: value })).toThrow("INVALID");
   expect(networkWarning({ hostname: "0.0.0.0", publicUrl: "http://example.org" })).toContain("警告");
   expect(networkWarning({ hostname: "0.0.0.0", publicUrl: undefined })).toContain("警告");
   expect(networkWarning({ hostname: "127.0.0.1", publicUrl: "http://example.org" })).toBeUndefined();
@@ -119,7 +125,7 @@ test("setup connects a real synthetic Hub and local runtime through HTTP without
         }
         if (argv.includes("install-service")) {
           child = Bun.spawn([process.execPath, new URL("../../runtime/src/main.ts", import.meta.url).pathname], {
-            env: { HOME: f.home, PATH: join(f.home, "no-agents") }, stdout: "pipe", stderr: "pipe",
+            env: { LUMIO_LANG: "zh", HOME: f.home, PATH: join(f.home, "no-agents") }, stdout: "pipe", stderr: "pipe",
           });
           for (let i = 0; i < 100; i++) {
             try {
@@ -134,7 +140,7 @@ test("setup connects a real synthetic Hub and local runtime through HTTP without
       },
     });
     const config = await f.config();
-    const response = await fetch(`${config.hub_url}/v1/runtimes`, { headers: { Authorization: `Bearer ${config.token}` } });
+    const response = await fetch(`${config.hub_url}/v1/runtimes`, { headers: { "Accept-Language": "zh", Authorization: `Bearer ${config.token}` } });
     const runtimes = await response.json() as { online: boolean; registration: { name: string } }[];
     expect(runtimes).toHaveLength(1); expect(runtimes[0]).toMatchObject({ online: true, registration: { name: "my-mac.local" } });
   } finally { if (child) { child.kill(); await child.exited; } await hub?.stop(); }
@@ -171,7 +177,7 @@ test("source setup and install-service reject the Bun interpreter before writing
   for (const [entry, command] of [["../src/main.ts", "setup"], ["../../runtime/src/main.ts", "install-service"]]) {
     const f = await fixture();
     const child = Bun.spawn([process.execPath, new URL(entry!, import.meta.url).pathname, command!], {
-      env: { HOME: f.home, PATH: "" }, stdin: "ignore", stdout: "pipe", stderr: "pipe",
+      env: { LUMIO_LANG: "zh", HOME: f.home, PATH: "" }, stdin: "ignore", stdout: "pipe", stderr: "pipe",
     });
     const [code, output, error] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
     expect(code).toBe(1); expect(output).toBe(""); expect(error).toContain("请用 install.sh 安装的程序运行");
@@ -199,18 +205,18 @@ test("single-machine setup never asks about Tailscale; --public-url sets the add
 test("the Hub's systemd unit writes EnvironmentFile without quotes (systemd ignores a quoted path)", async () => {
   const { hubUnit } = await import("../src/setup.ts");
   expect(hubUnit("/opt/lumio-hub", "/home/x/.config/lumio/hub.env")).toContain("EnvironmentFile=/home/x/.config/lumio/hub.env\n");
-  expect(() => hubUnit("/opt/lumio-hub", "/home/a b/hub.env")).toThrow("空白");
+  expect(() => hubUnit("/opt/lumio-hub", "/home/a b/hub.env")).toThrow("INVALID");
 });
 
 test("setup rejects another Hub on the port before installing runtime and reports extra services", async () => {
   const f = await fixture();
-  await expect(setup({ ...f.options,
+  await expect(displayFailure(setup({ ...f.options,
     fetch: async () => Response.json({ ok: true, version: "0.1.0" }),
     run: async (argv) => {
       f.commands.push(argv);
       return { code: 0, stdout: argv.join(" ") === "launchctl list" ? "123\t0\tio.lumio.hub.p2-1\n456\t0\tio.lumio.hub\n" : "", stderr: "" };
     },
-  })).rejects.toThrow("端口 7420 上是另一个 Hub");
+  }))).rejects.toThrow("端口 7420 上是另一个 Hub");
   expect(f.commands.some((argv) => argv.includes("install-service"))).toBe(false);
   expect(f.logs.join("\n")).toContain("launchctl bootout gui/123/io.lumio.hub.p2-1");
   expect(f.commands.some((argv) => argv.includes("gui/123/io.lumio.hub.p2-1"))).toBe(false);

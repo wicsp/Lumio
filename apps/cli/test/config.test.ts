@@ -1,3 +1,7 @@
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { afterEach, expect, test } from "bun:test";
 import { chmod, cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -26,9 +30,9 @@ test("configuration uses strict CliConfig, environment overrides individual fiel
     expect(() => readCliConfig({ home, env: {} })).toThrow("配置格式不合法");
     try { readCliConfig({ home, env: {} }); } catch (cause) { expect(String(cause)).not.toContain("secret-broken"); }
   }
-  await writeFile(path, "{broken"); expect(() => readCliConfig({ home, env: {} })).toThrow("配置无法解析");
+  await writeFile(path, "{broken"); expect(() => readCliConfig({ home, env: {} })).toThrow("CLI 配置无法解析");
   await rm(path); expect(readCliConfig({ home, env: {} })).toEqual({ url: undefined, token: undefined, vault: undefined });
-  expect(() => hubCredentials({})).toThrow(setupHint); expect(() => localVault(undefined, {})).toThrow(setupHint);
+  expect(() => hubCredentials({})).toThrow(setupHint()); expect(() => localVault(undefined, {})).toThrow(setupHint());
   expect(localVault("/explicit", { vault: "/file" })).toBe("/explicit");
 });
 test("new, sync, export bib and authenticated queries work with only the configuration file", async () => {

@@ -1,3 +1,7 @@
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -18,7 +22,7 @@ const fakeFetch = (handler: () => Promise<Response>): typeof fetch => Object.ass
 test("runtime lease excludes a second daemon and offline preparation; prepare refuses pending effects and only clears derived plans", async () => {
   const root = await mkdtemp(join(tmpdir(), "lumio-prepare-runtime-")), controller = new AbortController();
   let ready!: () => void; const registered = new Promise<void>((resolve) => { ready = resolve; });
-  const first = runRuntime(config(root), { signal: controller.signal, env: { HOME: root, PATH: root }, log() {}, fetch: fakeFetch(async () => {
+  const first = runRuntime(config(root), { signal: controller.signal, env: { LUMIO_LANG: "zh", HOME: root, PATH: root }, log() {}, fetch: fakeFetch(async () => {
     ready(); return response(RuntimeInfo.parse({ actor, registration: config(root).registration, last_seen: "2026-10-31T00:00:00Z", online: true }));
   }) });
   try {
@@ -39,7 +43,7 @@ test("runtime lease excludes a second daemon and offline preparation; prepare re
       await mkdir(join(root, "logs")); await writeFile(join(root, "logs/original.log"), "原始文件");
       const before = queue.jobs(); await prepareMigration(root);
       expect(plans.list()).toEqual([]); expect(queue.jobs()).toEqual(before); expect(await readFile(join(root, "logs/original.log"), "utf8")).toBe("原始文件");
-      const child = Bun.spawn([process.execPath, new URL("../src/main.ts", import.meta.url).pathname, "prepare-migration", "--state-dir", root], { env: { HOME: root, PATH: root }, stdout: "pipe", stderr: "pipe" });
+      const child = Bun.spawn([process.execPath, new URL("../src/main.ts", import.meta.url).pathname, "prepare-migration", "--state-dir", root], { env: { LUMIO_LANG: "zh", HOME: root, PATH: root }, stdout: "pipe", stderr: "pipe" });
       const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
       expect(code).toBe(0); expect(stderr).toBe(""); expect(stdout).toContain("历史和日志保留");
     } finally { queue.close(); }
@@ -49,11 +53,11 @@ test("runtime lease excludes a second daemon and offline preparation; prepare re
 test("an unexpected archive worker failure retries in the same runtime and never exposes the exception content", async () => {
   const root = await mkdtemp(join(tmpdir(), "lumio-archive-worker-")), controller = new AbortController(), logs: string[] = []; let attempts = 0;
   try {
-    await runRuntime(config(root), { signal: controller.signal, env: { HOME: root, PATH: root }, log: (line) => logs.push(line),
+    await runRuntime(config(root), { signal: controller.signal, env: { LUMIO_LANG: "zh", HOME: root, PATH: root }, log: (line) => logs.push(line),
       archive: { retryNow() {}, async flush() { if (++attempts === 1) throw new Error("synthetic-token-not-a-secret"); controller.abort(); return 1; } },
       fetch: fakeFetch(async () => response(RuntimeInfo.parse({ actor, registration: config(root).registration, last_seen: "2026-10-31T00:00:00Z", online: true }))),
     });
-    expect(attempts).toBe(2); expect(logs.some((line) => line.includes("稍后重试"))).toBe(true); expect(logs.join("\n")).not.toContain("synthetic-token-not-a-secret");
+    expect(attempts).toBe(2); expect(logs.some((line) => line.includes("retrying later"))).toBe(true); expect(logs.join("\n")).not.toContain("synthetic-token-not-a-secret");
   } finally { controller.abort(); await rm(root, { recursive: true, force: true }); }
 });
 

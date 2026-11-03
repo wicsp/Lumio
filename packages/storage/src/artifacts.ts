@@ -9,13 +9,13 @@ import { validateArchivedRunLog } from "./logs.ts";
 
 /** Refuse symlinks in every component before reading a managed or backup file. */
 export async function safeStoredFile(root: string, key: string): Promise<string> {
-  if (!SafeRelativePath.safeParse(key).success) throw new StorageError("INVALID", "文件路径不合法");
+  if (!SafeRelativePath.safeParse(key).success) throw new StorageError("INVALID", { key: "artifacts.invalid_file_path", args: [] });
   const base = await lstat(root);
-  if (!base.isDirectory() || base.isSymbolicLink()) throw new StorageError("CORRUPT", "存储根目录必须是实际目录");
+  if (!base.isDirectory() || base.isSymbolicLink()) throw new StorageError("CORRUPT", { key: "artifacts.storage_root_must_be_a_real_directory", args: [] });
   let path = root;
   for (const [index, part] of key.split("/").entries()) {
     path = join(path, part); const stat = await lstat(path);
-    if (stat.isSymbolicLink() || (index < key.split("/").length - 1 ? !stat.isDirectory() : !stat.isFile())) throw new StorageError("CORRUPT", "托管文件不能通过符号链接或特殊文件访问");
+    if (stat.isSymbolicLink() || (index < key.split("/").length - 1 ? !stat.isDirectory() : !stat.isFile())) throw new StorageError("CORRUPT", { key: "artifacts.managed_files_cannot_be_accessed_through_symbolic_links_or_special_f", args: [] });
   }
   return path;
 }
@@ -33,7 +33,7 @@ export class SqliteArtifacts {
   }
   get(id: string): StoredArtifact {
     const row = this.db.query<{ record: string }, [string]>("SELECT record FROM storage_artifacts WHERE id=?").get(id);
-    if (!row) throw new StorageError("NOT_FOUND", "托管文件不存在");
+    if (!row) throw new StorageError("NOT_FOUND", { key: "artifacts.managed_file_not_found", args: [] });
     return StoredArtifact.parse(JSON.parse(row.record));
   }
   list(owner?: ResourceRef): StoredArtifact[] {
@@ -43,13 +43,13 @@ export class SqliteArtifacts {
   }
   stage(input: unknown): StoredArtifact {
     const parsed = StoredArtifact.safeParse(input);
-    if (!parsed.success || parsed.data.status !== "staged" || parsed.data.key !== `${parsed.data.id}.bin`) throw new StorageError("INVALID", "文件登记格式或存储键不合法");
+    if (!parsed.success || parsed.data.status !== "staged" || parsed.data.key !== `${parsed.data.id}.bin`) throw new StorageError("INVALID", { key: "artifacts.invalid_file_registration_format_or_storage_key", args: [] });
     const value = parsed.data;
     return this.db.transaction(() => {
       const row = this.db.query<{ record: string }, [string]>("SELECT record FROM storage_artifacts WHERE id=?").get(value.id);
       if (row) {
         const prior = StoredArtifact.parse(JSON.parse(row.record));
-        if (JSON.stringify({ ...prior, status: "staged" }) !== JSON.stringify(value)) throw new StorageError("CONFLICT", "文件编号已有不同的登记内容");
+        if (JSON.stringify({ ...prior, status: "staged" }) !== JSON.stringify(value)) throw new StorageError("CONFLICT", { key: "artifacts.file_id_already_has_different_registration_content", args: [] });
         return prior;
       }
       this.db.query("INSERT INTO storage_artifacts(id,owner_module,owner_id,key,status,record) VALUES(?,?,?,?,?,?)").run(value.id, value.owner.module, value.owner.id, value.key, value.status, JSON.stringify(value));
@@ -58,9 +58,9 @@ export class SqliteArtifacts {
   }
   async path(id: string): Promise<string> {
     const value = this.get(id);
-    if (value.status !== "ready") throw new StorageError("CONFLICT", "文件尚未完成归档");
+    if (value.status !== "ready") throw new StorageError("CONFLICT", { key: "artifacts.file_is_not_fully_archived", args: [] });
     const path = await safeStoredFile(this.root, value.key), digest = await fileDigest(path);
-    if (digest.sha256 !== value.sha256 || digest.size !== value.size) throw new StorageError("CORRUPT", "托管文件校验失败");
+    if (digest.sha256 !== value.sha256 || digest.size !== value.size) throw new StorageError("CORRUPT", { key: "artifacts.managed_file_verification_failed", args: [] });
     return path;
   }
   private async validate(path: string, value: StoredArtifact): Promise<void> {
@@ -72,7 +72,7 @@ export class SqliteArtifacts {
     this.db.query("UPDATE storage_artifacts SET status='ready',record=? WHERE id=?").run(JSON.stringify(result), result.id); return result;
   }
   publish(id: string, source: AsyncIterable<Uint8Array>): Promise<StoredArtifact> {
-    if (this.pending.has(id)) return Promise.reject(new StorageError("CONFLICT", "这个文件正在上传，可稍后重试"));
+    if (this.pending.has(id)) return Promise.reject(new StorageError("CONFLICT", { key: "artifacts.this_file_is_uploading_retry_later", args: [] }));
     const pending = this.write(id, source); this.pending.set(id, pending);
     void pending.finally(() => this.pending.delete(id)).catch(() => {}); return pending;
   }
@@ -84,18 +84,18 @@ export class SqliteArtifacts {
     try {
       for await (const chunk of source) {
         size += chunk.length;
-        if (size > value.size) throw new StorageError("INVALID", "上传文件大小与登记不符");
+        if (size > value.size) throw new StorageError("INVALID", { key: "artifacts.uploaded_file_size_does_not_match_registration", args: [] });
         hash.update(chunk); await handle.writeFile(chunk);
       }
-      if (size !== value.size || hash.digest("hex") !== value.sha256) throw new StorageError("INVALID", "上传文件大小或校验和与登记不符");
+      if (size !== value.size || hash.digest("hex") !== value.sha256) throw new StorageError("INVALID", { key: "artifacts.uploaded_file_size_or_checksum_does_not_match_registration", args: [] });
       try { await this.validate(temporary, value); }
-      catch (cause) { if (cause instanceof StorageError && cause.code === "CORRUPT") throw new StorageError("INVALID", "自有日志格式不合法或归档已截断"); throw cause; }
+      catch (cause) { if (cause instanceof StorageError && cause.code === "CORRUPT") throw new StorageError("INVALID", { key: "artifacts.invalid_own_log_format_or_truncated_archive", args: [] }); throw cause; }
       await handle.sync(); await handle.close();
       try { await link(temporary, join(this.root, value.key)); }
       catch (cause) {
         if ((cause as NodeJS.ErrnoException).code !== "EEXIST") throw cause;
         const digest = await fileDigest(await safeStoredFile(this.root, value.key));
-        if (digest.size !== value.size || digest.sha256 !== value.sha256) throw new StorageError("CORRUPT", "存储键已有不同内容");
+        if (digest.size !== value.size || digest.sha256 !== value.sha256) throw new StorageError("CORRUPT", { key: "artifacts.storage_key_already_has_different_content", args: [] });
       }
       const directory = await open(this.root, "r");
       try { await directory.sync(); } finally { await directory.close(); }
@@ -110,7 +110,7 @@ export class SqliteArtifacts {
       try { path = await safeStoredFile(this.root, value.key); }
       catch (cause) { if ((cause as NodeJS.ErrnoException).code === "ENOENT") { missing.push(value.id); continue; } throw cause; }
       const digest = await fileDigest(path);
-      if (digest.sha256 !== value.sha256 || digest.size !== value.size) throw new StorageError("CORRUPT", "中断归档的文件校验失败");
+      if (digest.sha256 !== value.sha256 || digest.size !== value.size) throw new StorageError("CORRUPT", { key: "artifacts.interrupted_archive_file_verification_failed", args: [] });
       await this.validate(path, value);
       this.ready(value); recovered.push(value.id);
     }

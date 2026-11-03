@@ -12,14 +12,14 @@ function resolveReference(db: Database, reference: string, includePrivate = fals
     "SELECT * FROM notes WHERE (id=? OR citekey=? OR filename=?) AND (private=0 OR ?=1) ORDER BY path",
   ).all(reference, reference, reference, Number(includePrivate));
   if (candidates.length === 1) return candidates[0]!;
-  if (!candidates.length) throw new CoreError("NOTE_NOT_FOUND", "找不到笔记；候选：无");
-  throw new CoreError("AMBIGUOUS_REFERENCE", `引用匹配到多个笔记；候选：\n${candidates.map((n) => n.path).join("\n")}`);
+  if (!candidates.length) throw new CoreError("NOTE_NOT_FOUND", { key: "query.note_not_found_candidates_none", args: [] });
+  throw new CoreError("AMBIGUOUS_REFERENCE", { key: "query.reference_matches_multiple_notes_candidates", args: [candidates.map((n) => n.path).join("\n")] });
 }
 
 export async function searchNotes(root: string, query: string, options: SearchOptions = {}): Promise<SearchResult> {
-  if (query && !query.trim()) throw new CoreError("INVALID_QUERY", "查询不能只包含空白");
+  if (query && !query.trim()) throw new CoreError("INVALID_QUERY", { key: "service.query_must_not_contain_only_whitespace", args: [] });
   const limit = options.limit ?? 20;
-  if (!Number.isSafeInteger(limit) || limit < 1) throw new CoreError("INVALID_LIMIT", "limit 必须是正整数");
+  if (!Number.isSafeInteger(limit) || limit < 1) throw new CoreError("INVALID_LIMIT", { key: "query.limit_must_be_a_positive_integer", args: [] });
   return withIndex(root, options, (db) => {
     const fts = Array.from(query).length >= 3;
     const filter = "(n.private=0 OR $private=1) AND ($type IS NULL OR n.type=$type)";
@@ -63,11 +63,12 @@ export async function noteLinks(root: string, reference: string, options: QueryO
 
 /** References used for bibliography exports are always public, including the source note. */
 export async function collectCitations(root: string, reference: string, options: IndexOptions = {}): Promise<{ papers: NoteRef[]; warnings: string[] }> {
+  const msg = options.text ?? ((key: string, ...args: unknown[]) => key.replace(/\$\{(\d+)\}/g, (_, index: string) => String(args[Number(index)])));
   return withIndex(root, options, (db) => {
     const row = resolveReference(db, reference);
     const { citations, ignored } = extractCitations(row.body, row.path);
     const papers = new Map<string, NoteRef>();
-    const warnings: string[] = ignored ? [`AI 区块中有 ${ignored} 处引用未计入`] : [];
+    const warnings: string[] = ignored ? [msg("${0} citations inside AI blocks were excluded", ignored)] : [];
     for (const citation of citations) {
       const column = citation.source === "markdown" ? "path" : citation.source === "cite" ? "citekey" : "filename";
       const target = citation.source === "markdown" ? resolveMarkdownPath(row.path, citation.target) : citation.target;
@@ -76,7 +77,7 @@ export async function collectCitations(root: string, reference: string, options:
       const candidates = citation.source === "cite" ? matches.filter((n) => n.type === "paper") : matches;
       const paper = candidates.length === 1 ? candidates[0] : undefined;
       if (paper?.type === "paper" && !paper.private && paper.citekey) papers.set(paper.citekey, noteRef(paper));
-      else if (citation.source === "cite" && !candidates.some((n) => n.private)) warnings.push(`找不到 citekey：${citation.target}`);
+      else if (citation.source === "cite" && !candidates.some((n) => n.private)) warnings.push(msg("Citekey not found: ${0}", citation.target));
     }
     return { papers: [...papers.values()], warnings };
   });

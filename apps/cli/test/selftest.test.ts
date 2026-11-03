@@ -1,3 +1,7 @@
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { expect, test } from "bun:test";
 import { chmod, cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -21,7 +25,7 @@ test("selftest uses real Hub and runtime with fake codex, claude and pi; databas
   let hub: ReturnType<typeof Bun.spawn> | undefined, runtime: ReturnType<typeof Bun.spawn> | undefined;
   const probe = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() }), port = probe.port!; await probe.stop(true);
   const url = `http://127.0.0.1:${port}`;
-  const env = { HOME: home, PATH: `${bin}:${dirname(git)}:/usr/bin:/bin`, LUMIO_VAULT: vault, LUMIO_STATE_DIR: state, LUMIO_HUB_LISTEN: `127.0.0.1:${port}`, LUMIO_AUTOSAVE_IDLE: "3600" };
+  const env = { LUMIO_LANG: "zh", HOME: home, PATH: `${bin}:${dirname(git)}:/usr/bin:/bin`, LUMIO_VAULT: vault, LUMIO_STATE_DIR: state, LUMIO_HUB_LISTEN: `127.0.0.1:${port}`, LUMIO_AUTOSAVE_IDLE: "3600" };
   function manage(...args: string[]) {
     const p = Bun.spawnSync([process.execPath, hubMain, ...args], { env, stdout: "pipe", stderr: "pipe" });
     if (p.exitCode) throw new Error(p.stderr.toString()); return p.stdout.toString().trim();

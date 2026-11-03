@@ -11,7 +11,7 @@ export async function acquireStateLease(stateDir: string): Promise<{ close(): vo
     db.exec("PRAGMA busy_timeout=0; CREATE TABLE IF NOT EXISTS guard (id INTEGER PRIMARY KEY); BEGIN EXCLUSIVE");
     await chmod(path, 0o600);
   } catch {
-    db.close(); throw new StorageError("CONFLICT", "业务状态正由另一个 Hub 或迁移进程使用");
+    db.close(); throw new StorageError("CONFLICT", { key: "lease.business_state_is_in_use_by_another_hub_or_migration_process", args: [] });
   }
   let closed = false;
   return { close() { if (!closed) { closed = true; db.close(); } } };

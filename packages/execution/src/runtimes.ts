@@ -15,19 +15,19 @@ export class ExecutionRuntimes {
   constructor(private readonly store: RuntimeRegistryStore) {}
   register(actor: string, input: unknown, now: Date): RuntimeInfo {
     const parsed = RuntimeRegistration.safeParse(input);
-    if (!parsed.success || !idOf("act").safeParse(actor).success) throw new ExecutionError("INVALID", "执行器登记内容不合法");
+    if (!parsed.success || !idOf("act").safeParse(actor).success) throw new ExecutionError("INVALID", { key: "runtime.invalid_runtime_registration", args: [] });
     const registration = parsed.data;
     return this.store.transaction(() => {
       const existing = this.store.byActor(actor);
-      if (existing && existing.registration.name !== registration.name) throw new ExecutionError("CONFLICT", "同一执行器身份不能更换名称");
+      if (existing && existing.registration.name !== registration.name) throw new ExecutionError("CONFLICT", { key: "runtimes.the_same_runtime_actor_cannot_change_names", args: [] });
       const named = this.store.byName(registration.name);
-      if (named && named.actor !== actor) throw new ExecutionError("CONFLICT", "执行器名称已被另一身份使用");
+      if (named && named.actor !== actor) throw new ExecutionError("CONFLICT", { key: "runtimes.runtime_name_is_used_by_another_actor", args: [] });
       const value = { actor, registration, last_seen: now.toISOString() }; this.store.save(value);
       return RuntimeInfo.parse({ ...value, online: true });
     });
   }
   sync(actor: string, now: Date): void {
-    if (!this.store.touch(actor, now.toISOString())) throw new ExecutionError("NOT_FOUND", "执行器尚未登记");
+    if (!this.store.touch(actor, now.toISOString())) throw new ExecutionError("NOT_FOUND", { key: "runtimes.runtime_is_not_registered", args: [] });
   }
   list(now: Date): RuntimeInfo[] {
     return this.store.list().sort((a, b) => a.registration.name < b.registration.name ? -1 : a.registration.name > b.registration.name ? 1 : 0)

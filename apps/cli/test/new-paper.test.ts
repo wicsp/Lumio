@@ -1,3 +1,7 @@
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { isolatedHome } from "./test-home.ts";
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
@@ -61,8 +65,8 @@ test("--abbr supplies Spotlighting and changes only the abbreviation", async () 
 });
 
 test.each([
-  ["arxiv", "2002.02126", "2002.02126v3", "--abbr", "Other", "已存在"],
-  ["doi", "10.1145/3397271.3401063", "https://doi.org/10.1145/3397271.3401063", "--abbr", "Other", "已存在"],
+  ["arxiv", "2002.02126", "2002.02126v3", "--abbr", "Other", "DUPLICATE_PAPER"],
+  ["doi", "10.1145/3397271.3401063", "https://doi.org/10.1145/3397271.3401063", "--abbr", "Other", "DUPLICATE_PAPER"],
 ])("duplicate %s is rejected without overwriting any note", async (_kind, first, second, flag, abbreviation, message) => {
   await run(["new", "paper", first]);
   const files = await readdir(join(vault, "library/papers"));
@@ -142,8 +146,8 @@ test("a Chinese author and title can be added automatically without an abbreviat
 });
 
 test("invalid abbreviation and unsupported input are rejected without writes", async () => {
-  await expect(run(["new", "paper", "2002.02126", "--abbr", "!!"])).rejects.toThrow("--abbr 删除非法字符后为空");
-  await expect(run(["new", "paper", "unsupported"])).rejects.toThrow("接受 arXiv");
+  await expect(run(["new", "paper", "2002.02126", "--abbr", "!!"])).rejects.toThrow("INVALID_ABBREVIATION");
+  await expect(run(["new", "paper", "unsupported"])).rejects.toThrow("INVALID_PAPER_INPUT");
   await expect(run(["new", "paper", "2002.02126", "--dry-run"])).rejects.toThrow("用法");
   expect(await readdir(vault)).toEqual([]);
 });

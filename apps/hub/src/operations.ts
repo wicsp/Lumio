@@ -1,3 +1,4 @@
+import { text as msg } from "./messages.ts";
 import type { Privileged } from "./privileged.ts";
 import { CoreError } from "@lumio/foundation";
 import { Actor, OperationRequest, OperationResult, Proposal, ProposalStatus, type NoteRef, type Operation } from "@lumio/schema";
@@ -17,17 +18,17 @@ export interface OperationOptions { tasks?: TaskRounds; routines?: Routines; pri
 /** 执行一个已经获准的操作。直接执行与接受提议共用这一个函数。 */
 async function execute(operation: Operation, identity: Identity, options: OperationOptions): Promise<NoteRef | undefined> {
   if (operation.op === "task.dispatch") {
-    if (options.isManagedTask?.(operation.args.task)) throw new HubError("CONFLICT", "这个任务由数据库管理，请使用新版 work.task.dispatch 接口");
-    if (!options.tasks) throw new HubError("INTERNAL", "Hub 未启用任务派活");
+    if (options.isManagedTask?.(operation.args.task)) throw new HubError("CONFLICT", { key: "operations.this_task_is_managed_by_the_database_use_work_task_dispatch", args: [] });
+    if (!options.tasks) throw new HubError("INTERNAL", { key: "operations.task_dispatch_is_not_enabled_on_hub", args: [] });
     await options.tasks.dispatch(operation.args.task, operation.args.trigger, identity, undefined, operation.args.to);
     return;
   }
   if (operation.op === "routine.followup") {
-    if (options.isManagedRoutine?.(operation.args.routine)) throw new HubError("CONFLICT", "这个例行任务由数据库管理，请使用新版 routine followup 命令");
-    if (!options.routines) throw new HubError("INTERNAL", "Hub 未启用例行任务");
+    if (options.isManagedRoutine?.(operation.args.routine)) throw new HubError("CONFLICT", { key: "operations.this_routine_is_managed_by_the_database_use_the_new_routine_followup", args: [] });
+    if (!options.routines) throw new HubError("INTERNAL", { key: "operations.routines_are_not_enabled_on_hub", args: [] });
     return options.routines.followup(operation.args.routine, operation.args.job, identity);
   }
-  throw new HubError("INVALID", "不支持的操作", { operation });
+  throw new HubError("INVALID", { key: "operations.unsupported_operation", args: [] }, { operation });
 }
 
 export async function handleOperation(request: Request, kind: "operations" | "actors" | "proposals" | "proposal.accept" | "proposal.reject", proposalId: string | undefined,
@@ -43,31 +44,31 @@ export async function handleOperation(request: Request, kind: "operations" | "ac
   const check = (name: Parameters<typeof authorize>[1]["operation"]) => {
     const decision = decide(identity.actor, { operation: name });
     authorization = decision.result;
-    if (decision.result === "deny") throw new HubError("FORBIDDEN", "请求未获授权", { operation, reason: decision.reason, proposal: proposal?.id });
+    if (decision.result === "deny") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { operation, reason: decision.reason, proposal: proposal?.id });
     return decision;
   };
   try {
     if (kind === "actors") {
-      if (check("actors").result !== "allow") throw new HubError("FORBIDDEN", "请求需要批准");
+      if (check("actors").result !== "allow") throw new HubError("FORBIDDEN", { key: "operations.request_requires_approval", args: [] });
       return Response.json(Actor.array().parse(store.actors()));
     }
     if (kind === "proposals") {
-      if (check("proposals").result !== "allow") throw new HubError("FORBIDDEN", "请求需要批准");
+      if (check("proposals").result !== "allow") throw new HubError("FORBIDDEN", { key: "operations.request_requires_approval", args: [] });
       const status = ProposalStatus.safeParse(new URL(request.url).searchParams.get("status") ?? "pending");
-      if (!status.success) throw new HubError("INVALID", "提议状态不合法");
+      if (!status.success) throw new HubError("INVALID", { key: "operations.invalid_proposal_status", args: [] });
       return Response.json(Proposal.array().parse(store.proposals(status.data, identity.actor.role === "agent" ? identity.actor.id : undefined)));
     }
     if (kind === "operations") {
       let body: unknown;
-      try { body = await request.json(); } catch { throw new HubError("INVALID", "请求体必须是 JSON"); }
+      try { body = await request.json(); } catch { throw new HubError("INVALID", { key: "runtime.request_body_must_be_json", args: [] }); }
       const parsed = OperationRequest.safeParse(body);
-      if (!parsed.success) throw new HubError("INVALID", "操作请求不合法");
+      if (!parsed.success) throw new HubError("INVALID", { key: "operations.invalid_operation_request", args: [] });
       operation = parsed.data.operation;
       const decision = check(operation.op);
       if (decision.result === "needs_approval") {
-        if (!parsed.data.reason) throw new HubError("INVALID", "提议必须填写理由", { operation });
+        if (!parsed.data.reason) throw new HubError("INVALID", { key: "operations.a_proposal_reason_is_required", args: [] }, { operation });
         if (operation.op === "exec.privileged") {
-          if (!options.privileged) throw new HubError("INTERNAL", "未启用高权限审批");
+          if (!options.privileged) throw new HubError("INTERNAL", { key: "operations.privileged_approval_is_not_enabled", args: [] });
           options.privileged.validate(operation, identity.actor.id);
         }
         proposal = store.createProposal(operation, parsed.data.reason, identity.actor.id);
@@ -81,15 +82,15 @@ export async function handleOperation(request: Request, kind: "operations" | "ac
     proposal = store.proposal(proposalId!);
     operation = proposal?.operation;
     // Authorize before exposing existence or status to an agent.
-    if (check(kind).result !== "allow") throw new HubError("FORBIDDEN", "请求需要批准", { operation });
-    if (!proposal) throw new HubError("NOT_FOUND", "提议不存在");
-    if (proposal.status !== "pending") throw new HubError("CONFLICT", "只有待批准的提议可以决定", { operation, proposal: proposal.id });
+    if (check(kind).result !== "allow") throw new HubError("FORBIDDEN", { key: "operations.request_requires_approval", args: [] }, { operation });
+    if (!proposal) throw new HubError("NOT_FOUND", { key: "operations.proposal_not_found", args: [] });
+    if (proposal.status !== "pending") throw new HubError("CONFLICT", { key: "operations.only_pending_proposals_can_be_decided", args: [] }, { operation, proposal: proposal.id });
     if (kind === "proposal.accept") {
       // 以提议作者的身份执行：批准者只是放行（审计里同时记录批准者）。
       const author = store.actors().find((a) => a.id === proposal!.author);
-      if (!author) throw new HubError("CONFLICT", "提议的作者已不存在", { operation, proposal: proposal.id });
+      if (!author) throw new HubError("CONFLICT", { key: "operations.the_proposal_s_author_no_longer_exists", args: [] }, { operation, proposal: proposal.id });
       if (operation!.op === "exec.privileged") {
-        if (!options.privileged) throw new HubError("INTERNAL", "未启用高权限审批");
+        if (!options.privileged) throw new HubError("INTERNAL", { key: "operations.privileged_approval_is_not_enabled", args: [] });
         options.privileged.approve(proposal, identity);
       } else await execute(operation!, { actor: author, label: identity.label }, options);
     }
@@ -100,9 +101,9 @@ export async function handleOperation(request: Request, kind: "operations" | "ac
     if ((kind === "actors" || kind === "proposals") && authorization === "deny") store.audit(identity, kind, "deny");
     if (kind !== "actors" && kind !== "proposals" && !audited) audit(cause instanceof CoreError || cause instanceof HubError ? cause.code : "INTERNAL");
     if (cause instanceof CoreError && ["FILE_CHANGED", "WRITE_FAILED", "GIT_FAILED"].includes(cause.code)) {
-      throw new HubError("CONFLICT", `文件已变化或无法安全写入，请重试${proposal ? "；提议保持待批准" : ""}`, { operation, proposal: proposal?.id });
+      throw new HubError("CONFLICT", { key: "operations.file_changed_or_could_not_be_written_safely_retry", args: [proposal ? msg("operations.proposal_remains_pending") : ""] }, { operation, proposal: proposal?.id });
     }
-    if (cause instanceof HubError) throw new HubError(cause.code, cause.message, { operation, proposal: proposal?.id, ...cause.details });
+    if (cause instanceof HubError) throw new HubError(cause.code, cause.params, { operation, proposal: proposal?.id, ...cause.details });
     throw cause;
   }
 }

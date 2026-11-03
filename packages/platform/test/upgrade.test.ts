@@ -55,7 +55,7 @@ test("upgrade verifies a local HTTP Release, replaces old binaries with one prog
     for (const name of names) { expect(await readFile(join(f.bin, name), "utf8")).toContain("2.3.4"); expect((await stat(join(f.bin, name))).mode & 0o777).toBe(0o755); }
     for (const name of ["lumio-hub", "lumio-runtime"]) expect(await readlink(join(f.bin, name))).toBe("lumio");
     for (const role of ["hub", "runtime"]) expect(await readFile(join(f.home, `.config/systemd/user/lumio-${role}.service`), "utf8")).toContain(`ExecStart="${f.bin}/lumio" ${role} serve`);
-    const before = f.restarts(); await upgrade(f.options); expect(f.restarts()).toBe(before); expect(f.logs.at(-1)).toContain("已是最新版本 2.3.4");
+    const before = f.restarts(); await upgrade(f.options); expect(f.restarts()).toBe(before); expect(f.logs.at(-1)).toContain("Already at latest version 2.3.4");
   } finally { await f.server.stop(true); }
 });
 test("upgrade leaves installed programs unchanged on checksum, duplicate sum, archive or version failures", async () => {
@@ -92,12 +92,12 @@ test("runtime-only upgrade restarts only runtime, supports launchd and reminds a
 test("upgrade rejects unsupported platforms and options, and detects a Hub that keeps reporting the old version", async () => {
   const f = await fixture();
   try {
-    await expect(upgrade({ ...f.options, platform: "darwin", arch: "x64" })).rejects.toThrow("不支持的平台");
-    await expect(upgrade({ ...f.options, version: "../../bad" })).rejects.toThrow("版本");
+    await expect(upgrade({ ...f.options, platform: "darwin", arch: "x64" })).rejects.toThrow("UPGRADE_FAILED");
+    await expect(upgrade({ ...f.options, version: "../../bad" })).rejects.toThrow("UPGRADE_FAILED");
     let clock = 0;
     await expect(upgrade({ ...f.options, now: () => clock, sleep: async (ms) => { clock += ms; },
       fetch: (async (input, init) => String(input).endsWith("/health") ? Response.json({ ok: true, version: "0.1.6" }) : fetch(input, init)) as typeof fetch,
-    })).rejects.toThrow("Hub 未在 30 秒");
+    })).rejects.toThrow("UPGRADE_FAILED");
   } finally { await f.server.stop(true); }
 });
 
@@ -106,7 +106,7 @@ test("upgrade checks every shim byte before replacement and refuses mismatched r
     const f = await fixture();
     try {
       await writeFile(join(f.archiveDir, `lumio-${role}`), releaseShim(role) + suffix); await f.pack();
-      await expect(upgrade(f.options)).rejects.toThrow("垫片内容不匹配"); expect(f.restarts()).toBe(0);
+      await expect(upgrade(f.options)).rejects.toThrow("UPGRADE_FAILED"); expect(f.restarts()).toBe(0);
       for (const name of names) expect(await readFile(join(f.bin, name), "utf8")).toContain("0.1.6");
     } finally { await f.server.stop(true); }
   }
@@ -123,7 +123,7 @@ test("a second upgrade converts the v0.1.x-installed current-version shims into 
       expect(await readFile(join(f.home, `.config/systemd/user/lumio-${role}.service`), "utf8")).toContain(`ExecStart="${f.bin}/lumio" ${role} serve`);
     }
     expect(f.logs.some(line => line.includes("已是最新版本"))).toBe(false);
-    expect(f.logs).toContain("运行 lumio login-code --name web 获取配对码");
+    expect(f.logs).toContain("Run lumio login-code --name web to get a pairing code");
   } finally { await f.server.stop(true); }
 });
 
@@ -136,11 +136,11 @@ test("latest is resolved without following redirects; current installs make no a
     expect(f.requests).toContain("/latest"); expect(f.requests).not.toContain("/tag/v2.3.4");
     expect(f.requests).toContain("/download/v2.3.4/lumio-linux-x64.tar.gz");
     expect(f.requests.some(path => path.includes("latest/download"))).toBe(false);
-    expect(progress).toHaveLength(2); expect(progress[0]).toContain("2.3.4（linux-x64）");
+    expect(progress).toHaveLength(2); expect(progress[0]).toContain("2.3.4 (linux-x64)");
     f.requests.length = 0; const before = f.restarts();
     await upgrade(f.options);
     expect(f.requests).toEqual(["/latest"]); expect(f.restarts()).toBe(before);
-    expect(f.logs.at(-1)).toBe("已是最新版本 2.3.4");
+    expect(f.logs.at(-1)).toBe("Already at latest version 2.3.4");
     f.requests.length = 0;
     await upgrade({ ...f.options, version: "v2.3.4" }); expect(f.requests).toEqual([]);
     // Services need repair even when the executable and links already match.
@@ -160,7 +160,7 @@ test("an unreadable latest version falls back to verified downloads and compares
       }) as typeof fetch } : {}) });
       expect(f.requests).toContain("/latest/download/lumio-linux-x64.tar.gz");
       expect(f.requests).toContain("/latest/download/SHA256SUMS");
-      expect(f.logs.at(-1)).toBe("已是最新版本 2.3.4");
+      expect(f.logs.at(-1)).toBe("Already at latest version 2.3.4");
     } finally { await f.server.stop(true); }
   }
 });

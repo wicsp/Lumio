@@ -1,3 +1,7 @@
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { afterEach, expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -33,7 +37,7 @@ test("fresh join uses absolute default state, loopback HTTP is quiet, bad respon
   expect(parseEnvironment(await readFile(path, "utf8")).LUMIO_RUNTIME_STATE_DIR).toBe(join(home, ".local/share/lumio-runtime")); expect(logs).toEqual([]);
   const existing = await readFile(path, "utf8");
   for (const fetcher of [(async () => Response.json({ token: "sensitive-response" })) as unknown as typeof fetch, (async () => { throw new Error("sensitive-response"); }) as unknown as typeof fetch, (async () => Response.json({ private: "sensitive-response" }, { status: 401 })) as unknown as typeof fetch]) {
-    await expect(joinRuntime(["--hub", "https://synthetic.example", "--code", code], { home, fetch: fetcher, install: async () => { throw new Error("must not install"); } })).rejects.toThrow("执行器配对失败");
+    await expect(joinRuntime(["--hub", "https://synthetic.example", "--code", code], { home, fetch: fetcher, install: async () => { throw new Error("must not install"); } })).rejects.toThrow("PAIRING_FAILED");
     expect(await readFile(path, "utf8")).toBe(existing);
   }
   for (const args of [["--hub", "file:///tmp", "--code", code], ["--hub", "https://example.org", "--code", "invalid"], ["--unknown", code]]) await expect(joinRuntime(args, { home })).rejects.toThrow();

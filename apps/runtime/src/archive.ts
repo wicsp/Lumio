@@ -1,3 +1,4 @@
+import { text as msg } from "./messages.ts";
 import { randomBytes, randomUUID } from "node:crypto";
 import { mkdir, open, readdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -39,7 +40,7 @@ export class RuntimeArchives implements ArchiveDelivery {
       if (this.queue.db.query("SELECT 1 FROM archive_scanned WHERE job=?").get(job.spec.id)) continue;
       let eventPath: string | undefined, complete = true;
       try { eventPath = await this.events(job); }
-      catch { healthy = false; complete = false; if (!this.warned) this.log("一份运行日志尚未完成封存，文件已保留；其他日志继续归档"); this.warned = true; }
+      catch { healthy = false; complete = false; if (!this.warned) this.log(msg("archive.one_run_log_could_not_be_sealed_files_retained_and_other_logs_contin")); this.warned = true; }
       try { for (const [path, media_type] of [[join(this.config.stateDir, "logs", `${job.spec.id}.log`), "text/plain"], [eventPath, "application/vnd.lumio.runlog+jsonl"]] as const) {
         if (!path || !await Bun.file(path).exists() || this.queue.db.query("SELECT 1 FROM archive_outbox WHERE path=?").get(path)) continue;
         const digest = await fileDigest(path), now = new Date(), id = newId("art", now, randomBytes);
@@ -48,12 +49,12 @@ export class RuntimeArchives implements ArchiveDelivery {
         this.queue.db.query("INSERT INTO archive_outbox(id,job,path,record,state) VALUES(?,?,?,?,'pending')").run(id, job.spec.id, path, JSON.stringify(metadata));
       }
       if (complete) this.queue.db.query("INSERT OR IGNORE INTO archive_scanned(job) VALUES(?)").run(job.spec.id);
-      } catch { healthy = false; if (!this.warned) this.log("一份文件暂时无法登记，原始日志已保留；其他日志继续归档"); this.warned = true; }
+      } catch { healthy = false; if (!this.warned) this.log(msg("archive.one_file_could_not_be_registered_original_logs_retained_and_other_lo")); this.warned = true; }
     }
     return healthy;
   }
   async flush(signal: AbortSignal): Promise<number> {
-    try { if (await this.scan()) this.warned = false; } catch { if (!this.warned) this.log("运行日志尚未完成封存，文件保留在执行器，归档稍后重试"); this.warned = true; }
+    try { if (await this.scan()) this.warned = false; } catch { if (!this.warned) this.log(msg("archive.run_log_could_not_be_sealed_files_retained_on_runtime_archiving_will")); this.warned = true; }
     let next = 60_000;
     const rows = this.queue.db.query<{ id: string; path: string; record: string }, []>("SELECT id,path,record FROM archive_outbox WHERE state='pending' ORDER BY rowid").all();
     for (const row of rows) {
@@ -69,7 +70,7 @@ export class RuntimeArchives implements ArchiveDelivery {
         const stage = await send("/v2/execution/artifacts", "POST", JSON.stringify(metadata));
         if (stage.status === 409) {
           this.queue.db.query("UPDATE archive_outbox SET state='conflict' WHERE id=?").run(row.id);
-          this.log(`文件 ${row.id} 登记冲突（409），原始日志已保留，等待人工核查`); continue;
+          this.log(msg("archive.file_registration_conflict_409_original_logs_retained_for_manual_rev", row.id)); continue;
         }
         if (!stage.ok) throw new Error("archive registration failed");
         let result = StoredArtifact.parse(await stage.json());

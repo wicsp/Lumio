@@ -1,3 +1,7 @@
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { cp, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -12,7 +16,7 @@ let temp: string, hub: Awaited<ReturnType<typeof startHub>>, human: string, runt
 const task = "task_00000000000000000000000001", routine = "rtn_00000000000000000000000001";
 const sensitive = "sk-" + "synthetic".repeat(5);
 async function api(path: string, token: string, body?: unknown) {
-  return fetch(`http://127.0.0.1:${hub.server.port}${path}`, { method: body === undefined ? "GET" : "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  return fetch(`http://127.0.0.1:${hub.server.port}${path}`, { method: body === undefined ? "GET" : "POST", headers: { "Accept-Language": "zh", Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 }
 async function eventually(check: () => boolean | Promise<boolean>) {
   const end = Date.now() + 3000;

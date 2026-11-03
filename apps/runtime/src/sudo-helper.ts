@@ -1,3 +1,4 @@
+import { errorMessage, text as msg } from "./messages.ts";
 import { createPublicKey, verify } from "node:crypto";
 import { constants } from "node:fs";
 import { open, lstat, mkdir, rmdir } from "node:fs/promises";
@@ -12,11 +13,11 @@ export async function executeApproval(raw: unknown, options: {
   config: string; used: string; now?: () => number; uid?: number; owner?: number;
   timeoutMs?: number; stdout?: (chunk: Buffer) => void; stderr?: (chunk: Buffer) => void;
 }): Promise<number> {
-  if ((options.uid ?? process.getuid?.()) !== 0) throw new RuntimeError("助手程序只能以 root 运行");
+  if ((options.uid ?? process.getuid?.()) !== 0) throw new RuntimeError(msg("sudo-helper.helper_must_run_as_root"));
   const owner = options.owner ?? 0;
   const safe = async (path: string, directory = false) => {
     const st = await lstat(path);
-    if (st.uid !== owner || (st.mode & 0o022) || st.isSymbolicLink() || (directory ? !st.isDirectory() : !st.isFile())) throw new RuntimeError("助手配置或已用列表权限不安全");
+    if (st.uid !== owner || (st.mode & 0o022) || st.isSymbolicLink() || (directory ? !st.isDirectory() : !st.isFile())) throw new RuntimeError(msg("sudo-helper.unsafe_helper_configuration_or_used_credential_list_permissions"));
   };
   // 校验到安装目录为止的父目录，避免攻击者替换 root 所有的叶文件。
   const parents = async (path: string) => {
@@ -30,29 +31,29 @@ export async function executeApproval(raw: unknown, options: {
   let config: { public_key: string; runtime: string };
   try {
     const st = await file.stat();
-    if (st.uid !== owner || (st.mode & 0o022) || !st.isFile()) throw new RuntimeError("配置权限不安全");
+    if (st.uid !== owner || (st.mode & 0o022) || !st.isFile()) throw new RuntimeError(msg("sudo-helper.unsafe_configuration_permissions"));
     config = JSON.parse(await file.readFile("utf8"));
   } finally { await file.close(); }
-  if (!config || typeof config.public_key !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(config.public_key) || typeof config.runtime !== "string") throw new RuntimeError("助手配置不合法");
+  if (!config || typeof config.public_key !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(config.public_key) || typeof config.runtime !== "string") throw new RuntimeError(msg("sudo-helper.invalid_helper_configuration"));
   const parsed = PrivilegedApproval.safeParse(raw);
-  if (!parsed.success) throw new RuntimeError("批准凭据不合法");
+  if (!parsed.success) throw new RuntimeError(msg("sudo-helper.invalid_approval_credential"));
   const approval = parsed.data;
   const key = createPublicKey({ format: "jwk", key: { kty: "OKP", crv: "Ed25519", x: config.public_key } });
-  if (!verify(null, Buffer.from(privilegedSigningPayload(approval)), key, Buffer.from(approval.signature, "base64url"))) throw new RuntimeError("批准签名无效");
-  if (approval.runtime !== config.runtime) throw new RuntimeError("执行器不匹配");
+  if (!verify(null, Buffer.from(privilegedSigningPayload(approval)), key, Buffer.from(approval.signature, "base64url"))) throw new RuntimeError(msg("sudo-helper.invalid_approval_signature"));
+  if (approval.runtime !== config.runtime) throw new RuntimeError(msg("sudo-helper.runtime_does_not_match"));
   const now = (options.now ?? Date.now)();
-  if (Date.parse(approval.expires) <= now || Date.parse(approval.approved_at) > now || Date.parse(approval.expires) > Date.parse(approval.approved_at) + 600_000) throw new RuntimeError("批准已过期或时间不合法");
-  if (!isAbsolute(approval.argv[0]!) || approval.argv.some((a) => a.includes("\0"))) throw new RuntimeError("程序必须是绝对路径且参数不能含 NUL");
+  if (Date.parse(approval.expires) <= now || Date.parse(approval.approved_at) > now || Date.parse(approval.expires) > Date.parse(approval.approved_at) + 600_000) throw new RuntimeError(msg("sudo-helper.approval_expired_or_timestamp_is_invalid"));
+  if (!isAbsolute(approval.argv[0]!) || approval.argv.some((a) => a.includes("\0"))) throw new RuntimeError(msg("privileged.program_must_be_an_absolute_path_and_arguments_must_not_contain_nul"));
   await parents(options.used);
   // mkdir 是跨进程的排他锁；锁残留时拒绝执行，由管理员检查后移除。
   const lock = `${options.used}.lock`;
-  try { await mkdir(lock, { mode: 0o700 }); } catch { throw new RuntimeError("已用列表被锁定"); }
+  try { await mkdir(lock, { mode: 0o700 }); } catch { throw new RuntimeError(msg("sudo-helper.used_credential_list_is_locked")); }
   try {
     const used = await open(options.used, constants.O_RDWR | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW, 0o600);
     try {
       const st = await used.stat();
-      if (st.uid !== owner || (st.mode & 0o022) || !st.isFile() || st.nlink !== 1) throw new RuntimeError("已用列表权限不安全");
-      if ((await used.readFile("utf8")).split("\n").includes(approval.proposal)) throw new RuntimeError("批准已经用过");
+      if (st.uid !== owner || (st.mode & 0o022) || !st.isFile() || st.nlink !== 1) throw new RuntimeError(msg("sudo-helper.unsafe_used_credential_list_permissions"));
+      if ((await used.readFile("utf8")).split("\n").includes(approval.proposal)) throw new RuntimeError(msg("sudo-helper.approval_already_used"));
       await used.write(`${approval.proposal}\n`); await used.sync();
       const directory = await open(dirname(options.used), constants.O_RDONLY); try { await directory.sync(); } finally { await directory.close(); }
     } finally { await used.close(); }
@@ -75,7 +76,7 @@ export async function runSudoHelper() {
     const input = await new Response(Bun.stdin.stream()).text();
     return await executeApproval(JSON.parse(input), { config: "/etc/lumio/sudo.json", used: "/var/lib/lumio-sudo/used" });
   } catch (cause) {
-    console.error(cause instanceof RuntimeError ? cause.message : "助手程序拒绝执行");
+    console.error(cause instanceof RuntimeError ? errorMessage(cause) : msg("sudo-helper.helper_refused_execution"));
     return 126;
   }
 }

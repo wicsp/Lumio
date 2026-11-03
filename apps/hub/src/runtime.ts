@@ -9,31 +9,31 @@ export async function handleRuntime(request: Request, operation: "runtime.regist
   const decision = decide(identity.actor, { operation });
   let execution = "applied";
   try {
-    if (decision.result !== "allow") throw new HubError("FORBIDDEN", "请求未获授权", {
+    if (decision.result !== "allow") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, {
       reason: decision.result === "deny" ? decision.reason : "Approval required",
     });
     if (operation === "runtimes") return Response.json(RuntimeInfo.array().parse(store.runtimes(now)));
     let body: unknown;
-    try { body = await request.json(); } catch { throw new HubError("INVALID", "请求体必须是 JSON"); }
+    try { body = await request.json(); } catch { throw new HubError("INVALID", { key: "runtime.request_body_must_be_json", args: [] }); }
     if (operation === "runtime.register") {
       const registration = RuntimeRegistration.safeParse(body);
-      if (!registration.success) throw new HubError("INVALID", "执行器登记内容不合法");
+      if (!registration.success) throw new HubError("INVALID", { key: "runtime.invalid_runtime_registration", args: [] });
       return Response.json(store.registerRuntime(identity.actor.id, registration.data, now));
     }
     const jobs = new Jobs(store, routines);
     if (operation === "runtime.ack") {
       const ack = RuntimeAck.safeParse(body);
-      if (!ack.success) throw new HubError("INVALID", "Job 确认内容不合法");
+      if (!ack.success) throw new HubError("INVALID", { key: "runtime.invalid_job_acknowledgement", args: [] });
       jobs.ack(identity.actor.id, ack.data.accepted, now);
       return Response.json(ack.data);
     }
     if (operation === "runtime.results") {
       const result = JobResult.safeParse(body);
-      if (!result.success) throw new HubError("INVALID", "Job 结果不合法");
+      if (!result.success) throw new HubError("INVALID", { key: "runtime.invalid_job_result", args: [] });
       jobs.result(identity.actor.id, result.data);
       return Response.json(result.data);
     }
-    if (!RuntimeHeartbeat.safeParse(body).success) throw new HubError("INVALID", "执行器心跳不合法");
+    if (!RuntimeHeartbeat.safeParse(body).success) throw new HubError("INVALID", { key: "runtime.invalid_runtime_heartbeat", args: [] });
     return Response.json(RuntimeSync.parse(jobs.sync(identity.actor.id, RuntimeHeartbeat.parse(body), now)));
   } catch (cause) {
     execution = cause instanceof HubError ? cause.code : "INTERNAL";

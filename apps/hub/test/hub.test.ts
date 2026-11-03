@@ -1,3 +1,7 @@
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { cp, mkdtemp, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
@@ -35,7 +39,7 @@ beforeEach(async () => {
 afterEach(async () => { await hub?.stop(); hub = undefined; await rm(temp, { recursive: true, force: true }); });
 const base = () => `http://127.0.0.1:${hub!.server.port}`;
 function request(path: string, token?: string, headers: Record<string, string> = {}, method = "GET") {
-  return fetch(`${base()}${path}`, { method, headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers } });
+  return fetch(`${base()}${path}`, { method, headers: { "Accept-Language": "zh", ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers } });
 }
 async function error(path: string, token: string | undefined, status: number, code: ApiErrorCode) {
   const response = await request(path, token); expect(response.status).toBe(status);
@@ -52,7 +56,7 @@ test("default binding is loopback; public health and every registered route call
   const existingRoutes = ROUTES.filter((route) => !([...RUNTIME_OPERATIONS, ...JOB_OPERATIONS] as readonly string[]).includes(route.operation));
   for (const route of existingRoutes) {
     const response = route.operation === "operations"
-      ? await fetch(`${base()}/v1/operations`, { method: "POST", headers: { Authorization: `Bearer ${human}`, "Content-Type": "application/json" }, body: JSON.stringify({ operation: { op: "task.dispatch", args: { task: "task_00000000000000000000000012", trigger: "cli" } } }) })
+      ? await fetch(`${base()}/v1/operations`, { method: "POST", headers: { "Accept-Language": "zh", Authorization: `Bearer ${human}`, "Content-Type": "application/json" }, body: JSON.stringify({ operation: { op: "task.dispatch", args: { task: "task_00000000000000000000000012", trigger: "cli" } } }) })
       : await request(paths[route.operation as keyof typeof paths], (route.operation === "health" || route.operation.endsWith(".join")) ? undefined : human, {}, "method" in route ? route.method : "GET");
     // 合成 vault 里的 Task 没有 assignee，派活会在授权之后被拒绝（400）；这里只验证每条路由都先经过 authorize。
     const pairingStatus = { "runtime.invite": 400, "client.invite": 400, "runtime.join": 401, "client.join": 401, "runtime.signing-key": 403, "runtime.remove": 404 };
@@ -67,7 +71,7 @@ test("authentication is required for queries and unknown routes", async () => {
   for (const path of ["/v1/check", "/v1/search?q=index", "/v1/notes/Main", "/v1/notes/Main/links", "/missing"]) {
     for (const token of [undefined, "wrong", `lumio_${"x".repeat(43)}`, revoked]) await error(path, token, 401, "UNAUTHENTICATED");
   }
-  const invalid = await fetch(`${base()}/v1/search?q=index`, { headers: { Authorization: `Basic ${human}` } });
+  const invalid = await fetch(`${base()}/v1/search?q=index`, { headers: { "Accept-Language": "zh", Authorization: `Basic ${human}` } });
   expect(invalid.status).toBe(401); ApiError.parse(await invalid.json());
   await error("/missing", human, 404, "NOT_FOUND");
   const post = await request("/health", undefined, {}, "POST");
@@ -266,7 +270,7 @@ test("autosave idle defaults to 300 seconds and rejects invalid timer values", (
   expect(readConfig({ LUMIO_VAULT: vault }).autosaveIdle).toBe(300);
   expect(readConfig({ LUMIO_VAULT: vault, LUMIO_AUTOSAVE_IDLE: "10" }).autosaveIdle).toBe(10);
   for (const value of ["", "0", "-1", "invalid", "Infinity", "2147484"]) {
-    expect(() => readConfig({ LUMIO_VAULT: vault, LUMIO_AUTOSAVE_IDLE: value })).toThrow("LUMIO_AUTOSAVE_IDLE");
+    expect(() => readConfig({ LUMIO_VAULT: vault, LUMIO_AUTOSAVE_IDLE: value })).toThrow("INVALID");
   }
 });
 

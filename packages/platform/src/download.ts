@@ -1,15 +1,20 @@
+import { type Text, untranslated } from "./language.ts";
 import type { DownloadProgress } from "./terminal.ts";
 
 // Shared release transport; callers own terminal detection and display.
-export class DownloadError extends Error { readonly code = "DOWNLOAD_FAILED"; }
+export class DownloadError extends Error {
+  readonly code = "DOWNLOAD_FAILED";
+  constructor(public readonly params: { key: string; args: readonly unknown[] }) { super("DOWNLOAD_FAILED"); this.name = "DownloadError"; }
+}
 export interface DownloadOptions {
-  fetch?: typeof globalThis.fetch; tty?: boolean;
+  text?: Text; fetch?: typeof globalThis.fetch; tty?: boolean;
   /** Legacy source transport callback. New displays consume onProgress. */
   progress?: (line: string) => void;
   onProgress?: (progress: DownloadProgress) => void;
   connectMs?: number; windowMs?: number; now?: () => number;
 }
 export async function downloadRelease(url: string, options: DownloadOptions = {}): Promise<Buffer> {
+  const msg = options.text ?? untranslated;
   const controller = new AbortController(), now = options.now ?? Date.now;
   let timer: ReturnType<typeof setTimeout> | undefined, interval: ReturnType<typeof setInterval> | undefined;
   let reader: { read(): Promise<{ done: boolean; value?: Uint8Array }>; cancel(): Promise<void>; releaseLock(): void } | undefined;
@@ -19,7 +24,7 @@ export async function downloadRelease(url: string, options: DownloadOptions = {}
   const deadline = new Promise<never>((_, reject) => { rejectTimeout = reject; });
   const expire = () => {
     timeout = true;
-    rejectTimeout(new DownloadError("下载太慢或卡住，请检查网络或代理（https_proxy）后重试"));
+    rejectTimeout(new DownloadError({ key: "download.download_stalled_or_too_slow_check_network_or_proxy_https_proxy_and", args: [] }));
     controller.abort(); void reader?.cancel().catch(() => {});
   };
   const progress = options.progress ?? (() => {});
@@ -30,11 +35,11 @@ export async function downloadRelease(url: string, options: DownloadOptions = {}
     timer = setTimeout(expire, options.connectMs ?? 20_000);
     const response = await Promise.race([(options.fetch ?? globalThis.fetch)(url, { redirect: "follow", signal: controller.signal }), deadline]);
     clearTimeout(timer);
-    if (!response.ok) throw new DownloadError(`下载失败：HTTP ${response.status}，请检查网络与版本`);
-    if (!response.body) throw new DownloadError("下载响应没有内容");
+    if (!response.ok) throw new DownloadError({ key: "download.download_failed_http_check_network_and_version", args: [response.status] });
+    if (!response.body) throw new DownloadError({ key: "download.download_response_has_no_body", args: [] });
     const size = Number(response.headers.get("content-length")); total = Number.isFinite(size) && size > 0 ? size : undefined;
     started = now(); reportProgress(false);
-    const report = () => progress(`已下载 ${downloaded} / ${total ?? "未知"} 字节 / ${total ? `${Math.min(100, downloaded / total * 100).toFixed(1)}%` : "百分比未知"}`);
+    const report = () => progress(msg("Downloaded ${0} / ${1} bytes / ${2}", downloaded, total ?? msg("Unknown"), total ? `${Math.min(100, downloaded / total * 100).toFixed(1)}%` : msg("Unknown percentage")));
     reader = response.body.getReader(); windowStart = now();
     interval = setInterval(() => {
       const elapsed = now() - windowStart;
@@ -59,9 +64,9 @@ export async function downloadRelease(url: string, options: DownloadOptions = {}
     return Buffer.concat(chunks);
   } catch (cause) {
     if (started !== undefined && !finished) reportProgress(true, true);
-    if (timeout) throw new DownloadError("下载太慢或卡住，请检查网络或代理（https_proxy）后重试");
+    if (timeout) throw new DownloadError({ key: "download.download_stalled_or_too_slow_check_network_or_proxy_https_proxy_and", args: [] });
     if (cause instanceof DownloadError) throw cause;
-    throw new DownloadError("下载失败，请检查网络或代理（https_proxy）后重试");
+    throw new DownloadError({ key: "download.download_failed_check_network_or_proxy_https_proxy_and_retry", args: [] });
   } finally {
     clearTimeout(timer); clearInterval(interval);
     await reader?.cancel().catch(() => {});

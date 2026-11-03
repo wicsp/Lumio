@@ -19,43 +19,45 @@ export interface ExecutionRoutineStore {
   transaction<T>(action: () => T): T;
 }
 export interface RoutineEnvironment {
+  text?: (key: string, ...args: unknown[]) => string;
   now(): Date; id(): string; lease(): string; fingerprint(value: string): string;
   runtimes(now: Date): RuntimeInfo[]; localRuntime?: string; timezone: string;
   validateWorkdir?(runtime: RuntimeInfo, workdir: string): void;
 }
 export class ExecutionRoutines {
+  private msg(key: string, ...args: unknown[]): string { return this.context.text?.(key, ...args) ?? key.replace(/\$\{(\d+)\}/g, (_, index: string) => String(args[Number(index)])); }
   constructor(private readonly store: ExecutionRoutineStore, private readonly jobs: Pick<ExecutionJobs, "get" | "list" | "record">,
     private readonly context: RoutineEnvironment) {}
   get(id: string): ExecutionRoutine {
     const routine = this.store.get(id);
-    if (!routine) throw new ExecutionError("NOT_FOUND", "找不到例行任务");
+    if (!routine) throw new ExecutionError("NOT_FOUND", { key: "routines.routine_not_found", args: [] });
     return ExecutionRoutine.parse(routine);
   }
   /** An offline import never sends a plan; schedules must have been explicitly paused before migration. */
   importPaused(input: ExecutionRoutine[]): void {
     const parsed = ExecutionRoutine.array().safeParse(input);
-    if (!parsed.success) throw new ExecutionError("INVALID", "历史例行任务格式不合法");
+    if (!parsed.success) throw new ExecutionError("INVALID", { key: "routines.invalid_legacy_routine_format", args: [] });
     this.store.transaction(() => {
       const seen = new Set<string>();
       for (const routine of parsed.data) {
-        if (routine.status !== "paused") throw new ExecutionError("CONFLICT", "导入前必须先暂停旧例行任务");
-        if (seen.has(routine.id) || this.store.get(routine.id)) throw new ExecutionError("CONFLICT", "例行任务 ID 已存在或重复");
+        if (routine.status !== "paused") throw new ExecutionError("CONFLICT", { key: "routines.pause_legacy_routine_before_importing", args: [] });
+        if (seen.has(routine.id) || this.store.get(routine.id)) throw new ExecutionError("CONFLICT", { key: "routines.routine_id_already_exists_or_is_duplicated", args: [] });
         seen.add(routine.id); this.validate(routine); this.store.save(routine); this.store.setCurrent(routine.id);
       }
     });
   }
   private validate(routine: ExecutionRoutine): void {
     try { if (!validTimeZone(routine.timezone) || !nextFire(parseCron(routine.schedule), routine.timezone, this.context.now())) throw new Error(); }
-    catch { throw new ExecutionError("INVALID", "例行任务的 cron 或时区不合法"); }
+    catch { throw new ExecutionError("INVALID", { key: "routines.invalid_routine_cron_or_time_zone", args: [] }); }
   }
   command(input: unknown, actor: string): ExecutionRoutine {
     const parsed = ExecutionRoutineCommandRequest.safeParse(input);
-    if (!parsed.success) throw new ExecutionError("INVALID", "例行任务操作参数不合法");
+    if (!parsed.success) throw new ExecutionError("INVALID", { key: "routines.invalid_routine_command_parameters", args: [] });
     const request = parsed.data, serialized = JSON.stringify(request.operation);
     return this.store.transaction(() => {
       const receipt = this.store.receipt(actor, request.request_id);
       if (receipt) {
-        if (receipt.operation !== serialized) throw new ExecutionError("CONFLICT", "请求编号已用于不同的操作");
+        if (receipt.operation !== serialized) throw new ExecutionError("CONFLICT", { key: "index.request_id_was_used_for_a_different_operation", args: [] });
         return receipt.routine;
       }
       const operation = request.operation, time = this.context.now().toISOString();
@@ -65,7 +67,7 @@ export class ExecutionRoutines {
         timezone: operation.args.timezone ?? this.context.timezone, context: operation.args.context ?? "none", revision: 1, created: time, updated: time });
       else {
         const current = this.get(operation.args.routine);
-        if (current.revision !== operation.args.expected_revision) throw new ExecutionError("CONFLICT", "例行任务已被修改，请重新读取");
+        if (current.revision !== operation.args.expected_revision) throw new ExecutionError("CONFLICT", { key: "routines.routine_changed_reload", args: [] });
         const fields = { ...current } as Record<string, unknown>;
         for (const [key, value] of Object.entries(operation.args.patch)) { if (value === null) delete fields[key]; else if (value !== undefined) fields[key] = value; }
         routine = ExecutionRoutine.parse({ ...fields, revision: current.revision + 1, updated: time });
@@ -76,21 +78,21 @@ export class ExecutionRoutines {
   }
   private runtime(routine: ExecutionRoutine): RuntimeInfo {
     const assignee = parseAssignee(routine.assignee);
-    if (assignee === "human") throw new ExecutionError("INVALID", "例行任务必须交给 agent");
+    if (assignee === "human") throw new ExecutionError("INVALID", { key: "routines.routine_must_be_assigned_to_an_agent", args: [] });
     const runtime = this.context.runtimes(this.context.now()).find((value) => value.registration.name === (assignee.device ?? this.context.localRuntime));
-    if (!runtime) throw new ExecutionError("INVALID", "没有可用的执行器：请先配对例行任务指定的设备");
-    if (!runtime.registration.engines.some((engine) => engine.name === assignee.agent)) throw new ExecutionError("INVALID", "执行器未登记所选 agent");
+    if (!runtime) throw new ExecutionError("INVALID", { key: "routines.no_runtime_available_pair_the_device_specified_by_the_routine_first", args: [] });
+    if (!runtime.registration.engines.some((engine) => engine.name === assignee.agent)) throw new ExecutionError("INVALID", { key: "modules.selected_agent_is_not_registered_on_runtime", args: [] });
     this.context.validateWorkdir?.(runtime, routine.workdir ?? "~");
     return runtime;
   }
   private plan(routine: ExecutionRoutine): RoutinePlanRecord {
     const runtime = this.runtime(routine), target = parseAssignee(routine.assignee);
-    if (target === "human") throw new ExecutionError("INVALID", "例行任务必须交给 agent");
+    if (target === "human") throw new ExecutionError("INVALID", { key: "routines.routine_must_be_assigned_to_an_agent", args: [] });
     const previous = this.jobs.list(undefined, undefined, routine.id).filter((job) => job.result).at(-1);
     const raw = previous?.result?.report;
     const sensitive = raw && (textContainsCardNumber(raw) || /\b(?:sk-|gh[pousr]_|github_pat_|AKIA|xox[abprs]-|lumio_)[A-Za-z0-9_-]{16,}|-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(raw));
     const report = routine.context === "previous" && !sensitive ? raw?.slice(0, 3000) : undefined;
-    const prompt = `你正在执行一个独立的例行任务。只在工作目录内工作，不访问 Lumio 知识目录。需要高权限时通过 lumio-runtime sudo 请求批准。\n用中文汇报结果；需要用户决定时用 <lumio-question>问题</lumio-question> 然后结束。\n\n# ${routine.title}\n\n${routine.description}${report ? `\n\n## 上一次的汇报\n\n${report}` : ""}`;
+    const prompt = this.msg("You are running an independent routine. Work only in the working directory; do not access the Lumio knowledge directory. Request privileged approval through lumio-runtime sudo.\nReport results clearly; if a user decision is needed, use <lumio-question>Question</lumio-question> and end the round.\n\n# ${0}\n\n${1}${2}", routine.title, routine.description, report ? this.msg("\n\n## Previous report\n\n${0}", report) : "");
     const template: RoutineSpec["template"] = { run: { kind: "agent", engine: target.agent, prompt, ...(routine.model ? { model: routine.model } : {}) },
       workdir: routine.workdir ?? "~", timeout_seconds: (routine.timeout_minutes ?? 120) * 60, ...(routine.gpus ? { gpus: routine.gpus } : {}) };
     const fingerprint = this.context.fingerprint(JSON.stringify({ revision: routine.revision, runtime: runtime.actor, template, schedule: routine.schedule, timezone: routine.timezone }));
@@ -133,7 +135,7 @@ export class ExecutionRoutines {
       const lastJob = this.jobs.list(undefined, undefined, routine.id).at(-1);
       const last = lastJob?.spec.source?.fired_at ? { job: lastJob.spec.id, status: lastJob.status, fired_at: lastJob.spec.source.fired_at } : undefined;
       let runtime: RuntimeInfo | undefined, problem: string | undefined;
-      try { runtime = this.runtime(routine); } catch (cause) { problem = cause instanceof ExecutionError ? cause.message : "无法生成计划"; }
+      try { runtime = this.runtime(routine); } catch (cause) { problem = cause instanceof ExecutionError ? this.msg(cause.params.key, ...cause.params.args) : this.msg("Could not generate plan"); }
       return ExecutionRoutineInfo.parse({ routine, ...(runtime ? { runtime: runtime.registration.name } : {}),
         ...(routine.status === "active" && runtime ? { next: nextFire(parseCron(routine.schedule), routine.timezone, this.context.now())?.toISOString() } : {}),
         ...(last ? { last } : {}), ...(problem ? { problem } : {}) });

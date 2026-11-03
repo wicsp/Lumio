@@ -99,7 +99,7 @@ test("paper filename may supply citekey, but no authors/year are guessed", () =>
 
 test("invalid filename reports missing citekey, non-null existing citekey remains unchanged", () => {
   const input = { ...base, type: "paper" as const };
-  expect(fillMetadata(input, ctx).issues).toContainEqual({ path: "citekey", message: "缺失，且文件名不是合法 citekey" });
+  expect(fillMetadata(input, ctx).issues).toContainEqual({ path: "citekey", message: "Missing, and filename is not a valid citekey" });
   for (const citekey of ["Vaswani_2017_Transformer", ""]) {
     const result = fillMetadata({ ...input, fileName: "He_2020_LightGCN", frontmatter: { citekey } }, ctx);
     expect(result.patch).not.toHaveProperty("citekey");
@@ -126,7 +126,7 @@ test("null paper citekey comes from a valid filename; null authors/year are stil
 test("a null paper citekey with an invalid filename is reported instead of guessed", () => {
   const result = fillMetadata({ ...base, type: "paper", frontmatter: { citekey: null } }, ctx);
   expect(result.patch).not.toHaveProperty("citekey");
-  expect(result.issues).toContainEqual({ path: "citekey", message: "缺失，且文件名不是合法 citekey" });
+  expect(result.issues).toContainEqual({ path: "citekey", message: "Missing, and filename is not a valid citekey" });
 });
 
 test.each(["id", "type", "title", "created", "updated"])("empty string %s is preserved and reported", (key) => {

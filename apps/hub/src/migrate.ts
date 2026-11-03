@@ -1,3 +1,4 @@
+import { text as msg } from "./messages.ts";
 import { Database } from "bun:sqlite";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -19,15 +20,15 @@ export async function runMigration(args: string[], log: (line: string) => void, 
     || positionals.length !== (action === "source" ? 2 : 1)
     || (["plan", "apply", "retire"].includes(action!) && !values.vault)
     || (action === "apply" && (!values.plan || !values.backup || !values["runtimes-prepared"]))
-    || (action === "source" && (!id || !values.output))) throw new HubError("INVALID", "用法：migrate retire --vault <目录>；migrate plan --vault <目录> [--output 新清单文件]；migrate apply --vault <目录> --plan <清单> --backup <完整备份目录> --runtimes-prepared；migrate sources；migrate source <ID> --output <新文件>");
+    || (action === "source" && (!id || !values.output))) throw new HubError("INVALID", { key: "migrate.usage_migrate_retire_vault_directory_migrate_plan_vault_directory_ou", args: [] });
   const state = options.stateDir ?? stateDirectory(); let lease: Awaited<ReturnType<typeof acquireStateLease>> | undefined, db: Database | undefined;
   try {
     if (["apply", "retire"].includes(action!)) lease = await acquireStateLease(state);
     db = new Database(join(state, "hub.sqlite"), { readonly: !["apply", "retire"].includes(action!), strict: true });
-    const migration = new LegacyMigration(db, values.vault ? resolve(values.vault) : "");
+    const migration = new LegacyMigration(db, values.vault ? resolve(values.vault) : "", { text: msg });
     if (action === "sources") { log(JSON.stringify(migration.sources())); return; }
     if (action === "source") {
-      if (!/^(prj|task|rtn)_[0-9A-HJKMNP-TV-Z]{26}$/.test(id!)) throw new HubError("INVALID", "来源 ID 不合法");
+      if (!/^(prj|task|rtn)_[0-9A-HJKMNP-TV-Z]{26}$/.test(id!)) throw new HubError("INVALID", { key: "migrate.invalid_source_id", args: [] });
       const source = migration.source(id!); await writeFile(resolve(values.output!), source.bytes, { flag: "wx", mode: 0o600 });
       log(JSON.stringify(source.entry)); return;
     }
@@ -38,11 +39,11 @@ export async function runMigration(args: string[], log: (line: string) => void, 
     }
     if (action === "retire") { await mkdir(join(state, "backups"), { recursive: true, mode: 0o700 }); log(JSON.stringify(await migration.retire(state, join(state, `backups/retire-${crypto.randomUUID()}`)))); return; }
     let input: unknown;
-    try { input = JSON.parse(await readFile(values.plan!, "utf8")); } catch { throw new HubError("INVALID", "无法读取迁移清单"); }
+    try { input = JSON.parse(await readFile(values.plan!, "utf8")); } catch { throw new HubError("INVALID", { key: "migrate.could_not_read_migration_manifest", args: [] }); }
     log(JSON.stringify(MigrationPlan.parse(await migration.apply(input, resolve(values.backup!), values["runtimes-prepared"] === true))));
   } catch (cause) {
     if (cause instanceof HubError) throw cause;
-    if (cause instanceof StorageError || cause instanceof WorkError || cause instanceof ExecutionError) throw new HubError(cause.code === "CORRUPT" ? "INVALID" : cause.code, cause.message);
-    throw new HubError("INVALID", "迁移未完成，请检查清单、完整备份、状态目录权限和新输出文件路径");
+    if (cause instanceof StorageError || cause instanceof WorkError || cause instanceof ExecutionError) throw new HubError(cause.code === "CORRUPT" ? "INVALID" : cause.code, cause.params);
+    throw new HubError("INVALID", { key: "migrate.migration_did_not_complete_check_manifest_full_backup_state_director", args: [] });
   } finally { db?.close(); lease?.close(); }
 }

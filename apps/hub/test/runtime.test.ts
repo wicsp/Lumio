@@ -1,3 +1,7 @@
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -148,8 +152,8 @@ test("real daemon with fake PATH survives Hub restart, detects agents once and b
   await eventually(() => hub!.store.db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM audit WHERE operation='runtime.register' AND execution_result='applied'").get()!.count >= 2);
   daemon.kill("SIGTERM"); expect(await daemon.exited).toBe(0); daemon = undefined;
   const stdout = await output; expect(await errors).toBe("");
-  expect(stdout.match(/执行器登记成功/g)).toHaveLength(2);
-  expect(stdout.match(/Hub 连接失联/g)).toHaveLength(1); expect(stdout.match(/Hub 连接已恢复/g)).toHaveLength(1);
+  expect(stdout.match(/Runtime registered/g)).toHaveLength(2);
+  expect(stdout.match(/Hub disconnected/g)).toHaveLength(1); expect(stdout.match(/Hub connection restored/g)).toHaveLength(1);
   expect((await readFile(callsFile, "utf8")).trim().split("\n").sort()).toEqual(["claude", "codex"]);
   clock += 180_001; expect((await list())[0]!.online).toBe(false);
   for (const token of [human, agent, runtime, other]) expect(stdout + logs.join("\n")).not.toContain(token);

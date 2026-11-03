@@ -1,3 +1,4 @@
+import { text as msg } from "./messages.ts";
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -26,10 +27,10 @@ export function parseEnvironment(content: string): Record<string, string> {
     const line = raw.trim();
     if (!line || line.startsWith("#")) continue;
     const match = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line);
-    if (!match) throw new RuntimeError("runtime.env 格式不合法");
+    if (!match) throw new RuntimeError(msg("service.invalid_runtime_env_format"));
     let value = match[2]!;
     if (value.startsWith('"')) {
-      if (!value.endsWith('"')) throw new RuntimeError("runtime.env 格式不合法");
+      if (!value.endsWith('"')) throw new RuntimeError(msg("service.invalid_runtime_env_format"));
       value = value.slice(1, -1).replace(/\\([\\"$`])/g, "$1");
     } else if (value.startsWith("'") && value.endsWith("'")) value = value.slice(1, -1);
     env[match[1]!] = value;
@@ -41,7 +42,7 @@ export function xml(value: string): string {
 }
 /** systemd 的 EnvironmentFile= 不认引号（加了引号会被当成相对路径而忽略），只能原样写；因此不允许空白字符。 */
 function unitPath(value: string): string {
-  if (/\s/.test(value)) throw new RuntimeError("服务配置文件的路径不能包含空白字符");
+  if (/\s/.test(value)) throw new RuntimeError(msg("setup.service_configuration_paths_must_not_contain_whitespace"));
   return value.replaceAll("%", "%%");
 }
 function unitString(value: string): string { return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("%", "%%")}"`; }
@@ -69,52 +70,52 @@ export async function installService(options: ServiceOptions = {}): Promise<void
   const platform = options.platform ?? process.platform;
   const run = options.run ?? runCommand, log = options.log ?? console.log;
   const binary = options.binary ?? process.execPath;
-  if (binary === process.execPath && !Bun.main.startsWith("/$bunfs/")) throw new RuntimeError("请用 install.sh 安装的程序运行 install-service；从源码运行不会安装后台服务");
-  if (!isAbsolute(binary) || /[\r\n]/.test(binary)) throw new RuntimeError("执行器程序路径必须是绝对路径");
+  if (binary === process.execPath && !Bun.main.startsWith("/$bunfs/")) throw new RuntimeError(msg("service.run_install_service_using_the_program_installed_by_install_sh_runnin"));
+  if (!isAbsolute(binary) || /[\r\n]/.test(binary)) throw new RuntimeError(msg("service.runtime_program_path_must_be_absolute"));
   const envFile = join(home, ".config/lumio-runtime/runtime.env");
   const env = parseEnvironment(await readFile(envFile, "utf8"));
   const state = env.LUMIO_RUNTIME_STATE_DIR ?? join(home, ".local/share/lumio-runtime");
-  if (!isAbsolute(state)) throw new RuntimeError("执行器状态目录必须是绝对路径");
+  if (!isAbsolute(state)) throw new RuntimeError(msg("service.runtime_state_directory_must_be_absolute"));
   await mkdir(state, { recursive: true, mode: 0o700 }); await chmod(state, 0o700);
   const receipt = join(state, "registered.json");
   await rm(receipt, { force: true });
   if (platform === "darwin") {
     const path = join(home, "Library/LaunchAgents/io.lumio.runtime.plist");
     await atomicFile(path, runtimePlist(binary, env, state), 0o600);
-    if ((await run(["plutil", "-lint", path])).code) throw new RuntimeError("执行器服务配置校验失败");
+    if ((await run(["plutil", "-lint", path])).code) throw new RuntimeError(msg("service.runtime_service_configuration_validation_failed"));
     const domain = `gui/${options.uid ?? process.getuid!()}`;
     await run(["launchctl", "bootout", domain, path]);
-    if ((await run(["launchctl", "bootstrap", domain, path])).code) throw new RuntimeError(`执行器服务无法启动，请查看 ${state}/runtime.err.log`);
+    if ((await run(["launchctl", "bootstrap", domain, path])).code) throw new RuntimeError(msg("service.runtime_service_could_not_start_see_runtime_err_log", state));
   } else if (platform === "linux") {
     const path = join(home, ".config/systemd/user/lumio-runtime.service");
     await atomicFile(path, runtimeUnit(binary, envFile), 0o644);
     let available = false;
     try { available = (await run(["systemctl", "--user", "show-environment"])).code === 0; } catch { /* manual fallback */ }
     if (!available) {
-      log(`没有 systemd 用户服务。手动运行：nohup '${binary.replaceAll("'", "'\\''")}' runtime serve > '${state.replaceAll("'", "'\\''")}/runtime.log' 2>&1 &（程序自动读取 ${envFile}）；也可放入 crontab @reboot。`);
+      log(msg("service.no_systemd_user_service_run_manually_nohup_runtime_serve_runtime_log", binary.replaceAll("'", "'\\''"), state.replaceAll("'", "'\\''"), envFile));
       return;
     }
     const active = (await run(["systemctl", "--user", "is-active", "--quiet", "lumio-runtime.service"])).code === 0;
     for (const argv of [["systemctl", "--user", "daemon-reload"], ["systemctl", "--user", "enable", "--now", "lumio-runtime.service"], ...(active ? [["systemctl", "--user", "restart", "lumio-runtime.service"]] : [])]) {
-      if ((await run(argv)).code) throw new RuntimeError("执行器服务无法启动；请运行 journalctl --user -u lumio-runtime -n 30");
+      if ((await run(argv)).code) throw new RuntimeError(msg("service.runtime_service_could_not_start_run_journalctl_user_u_lumio_runtime"));
     }
     let linger = "";
     try { linger = (await run(["loginctl", "show-user", options.user ?? process.env.USER ?? "", "-p", "Linger"])).stdout; } catch { /* report below */ }
-    if (!linger.includes("Linger=yes")) log(`退出登录后执行器会停止；请管理员运行 loginctl enable-linger ${options.user ?? process.env.USER ?? "<用户名>"}`);
-  } else throw new RuntimeError("只支持 macOS 与 Linux");
+    if (!linger.includes("Linger=yes")) log(msg("service.runtime_will_stop_on_logout_ask_an_administrator_to_run_loginctl_ena", options.user ?? process.env.USER ?? msg("setup.username")));
+  } else throw new RuntimeError(msg("setup.only_macos_and_linux_are_supported"));
   const now = options.now ?? Date.now, sleep = options.sleep ?? Bun.sleep;
   const until = now() + 30_000;
   while (now() < until) {
     try {
       const info = RuntimeInfo.parse(JSON.parse(await readFile(receipt, "utf8")));
       if (info.registration.name === env.LUMIO_RUNTIME_NAME) {
-        log(`已连上 Hub；检测到：${info.registration.engines.map((engine) => `${engine.name} ${engine.version}`).join("、") || "未找到 agent（请检查 PATH）"}`);
+        log(msg("service.connected_to_hub_detected", info.registration.engines.map((engine) => `${engine.name} ${engine.version}`).join("、") || msg("service.no_agent_found_check_path")));
         return;
       }
     } catch { /* wait for a fresh successful registration */ }
     await sleep(500);
   }
-  throw new RuntimeError(platform === "linux" ? "执行器登记超时；请运行 journalctl --user -u lumio-runtime -n 30" : `执行器登记超时；请查看 ${state}/runtime.err.log`);
+  throw new RuntimeError(platform === "linux" ? msg("service.runtime_registration_timed_out_run_journalctl_user_u_lumio_runtime_n") : msg("service.runtime_registration_timed_out_see_runtime_err_log", state));
 }
 
 export async function runtimeEnvironment(home = process.env.HOME ?? homedir(), env = process.env): Promise<NodeJS.ProcessEnv> {

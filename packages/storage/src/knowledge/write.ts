@@ -18,10 +18,10 @@ export async function writeFileAtomic(path: string, content: Uint8Array, options
     try { current = await readFile(path); }
     catch (cause) {
       if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause;
-      throw new CoreError("FILE_CHANGED", "文件在处理中被修改，请重新运行", { cause });
+      throw new CoreError("FILE_CHANGED", { key: "write.file_changed_during_processing_run_again", args: [] }, { cause });
     }
     if (!current.equals(options.expectedContent)) {
-      throw new CoreError("FILE_CHANGED", "文件在处理中被修改，请重新运行");
+      throw new CoreError("FILE_CHANGED", { key: "write.file_changed_during_processing_run_again", args: [] });
     }
   }
   try {
@@ -31,7 +31,7 @@ export async function writeFileAtomic(path: string, content: Uint8Array, options
       if (options.overwrite === false) {
         // link publishes a complete file without replacing another creator's file.
         await stat(path);
-        throw new CoreError("FILE_EXISTS", `文件已存在：${path}`);
+        throw new CoreError("FILE_EXISTS", { key: "write.file_already_exists", args: [path] });
       }
       if ((await readFile(path)).equals(content)) return false;
       mode = (await stat(path)).mode & 0o777;
@@ -55,9 +55,9 @@ export async function writeFileAtomic(path: string, content: Uint8Array, options
   } catch (cause) {
     if (cause instanceof CoreError) throw cause;
     if (options.overwrite === false && (cause as NodeJS.ErrnoException).code === "EEXIST") {
-      throw new CoreError("FILE_EXISTS", `文件已存在：${path}`, { cause });
+      throw new CoreError("FILE_EXISTS", { key: "write.file_already_exists", args: [path] }, { cause });
     }
-    throw new CoreError("WRITE_FAILED", `无法安全写入文件：${path}`, { cause });
+    throw new CoreError("WRITE_FAILED", { key: "write.could_not_write_file_safely", args: [path] }, { cause });
   } finally {
     if (temp) await unlink(temp).catch(() => {});
   }

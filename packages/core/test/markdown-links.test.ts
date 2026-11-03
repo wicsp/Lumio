@@ -103,7 +103,7 @@ test("rebuilds version 2 indexes so unchanged notes gain Markdown links on the f
 test("collects Markdown paper citations, deduplicates sources and warns about ignored AI citations", async () => {
   const result = await collectCitations(vault, "Markdown", { stateDir });
   expect(result.papers.map((p) => p.path)).toEqual([paperPath]);
-  expect(result.warnings).toEqual(["AI 区块中有 3 处引用未计入"]);
+  expect(result.warnings).toEqual(["3 citations inside AI blocks were excluded"]);
   const bib = await buildBib(vault, result.papers);
   expect(bib.count).toBe(1); expect(bib.content).toContain("@article{Alpha_2024_Paper,");
   expect(bib.content).not.toContain("Zeta_2025_Study");
@@ -149,6 +149,6 @@ test("CLI links/check JSON accept source markdown and export bib --from follows 
   const bib = cli(["export", "bib", "--from", "Markdown"]);
   expect(bib.exitCode).toBe(0); expect(bib.stdout.toString()).toContain("@article{Alpha_2024_Paper,");
   expect(bib.stdout.toString()).not.toContain("Zeta_2025_Study");
-  expect(bib.stderr.toString()).toContain("AI 区块中有 3 处引用未计入");
+  expect(bib.stderr.toString()).toContain("3 citations inside AI blocks were excluded");
   expect(await Bun.file(join(vault, "library/refs.bib")).exists()).toBe(false);
 });

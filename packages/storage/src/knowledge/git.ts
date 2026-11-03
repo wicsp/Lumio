@@ -30,11 +30,11 @@ export async function openVaultGit(root: string, executable = "git"): Promise<Va
       const [stdout, , code] = await Promise.all([new Response(proc.stdout).arrayBuffer(), new Response(proc.stderr).text(), proc.exited]);
       if (code !== 0) throw new Error("git failed");
       return Buffer.from(stdout);
-    } catch (cause) { throw new CoreError("GIT_FAILED", "无法执行 vault git 操作", { cause }); }
+    } catch (cause) { throw new CoreError("GIT_FAILED", { key: "git.could_not_perform_vault_git_operation", args: [] }, { cause }); }
   }
   function check(path: string) {
     const rel = relative(vault, resolve(vault, path));
-    if (!rel || isAbsolute(path) || rel.startsWith("../") || rel === "..") throw new CoreError("GIT_FAILED", "git 路径必须在 vault 内");
+    if (!rel || isAbsolute(path) || rel.startsWith("../") || rel === "..") throw new CoreError("GIT_FAILED", { key: "git.git_path_must_be_inside_vault", args: [] });
   }
   try {
     const info = await lstat(join(vault, ".git"));
@@ -54,16 +54,16 @@ export async function openVaultGit(root: string, executable = "git"): Promise<Va
       const match = /^(\d+) ([a-f0-9]+) 0\t/.exec(entry);
       if (expectedContent !== undefined) {
         const matches = expectedContent === null ? !entry : match && (await run(["cat-file", "blob", match[2]!])).equals(expectedContent);
-        if (!matches) throw new CoreError("FILE_CHANGED", "文件在暂存时被修改，请等待下次自动提交");
+        if (!matches) throw new CoreError("FILE_CHANGED", { key: "git.file_changed_while_staging_waiting_for_next_autosave", args: [] });
       }
       // Cache the exact staged object, not a path that commit could re-read later.
       staged.set(path, entry || `0 ${"0".repeat(40)}\t${path}\0`);
     },
     async commit(paths, message, trailers = {}) {
-      if (Object.entries(trailers).some(([key, value]) => !["Lumio-Actor", "Lumio-Proposal", "Lumio-Approved-By", "Lumio-Job"].includes(key) || !value || /[\r\n]/.test(value))) throw new CoreError("GIT_FAILED", "git trailer 不合法");
+      if (Object.entries(trailers).some(([key, value]) => !["Lumio-Actor", "Lumio-Proposal", "Lumio-Approved-By", "Lumio-Job"].includes(key) || !value || /[\r\n]/.test(value))) throw new CoreError("GIT_FAILED", { key: "git.invalid_git_trailer", args: [] });
       if (!paths.length) return;
       paths.forEach(check);
-      if (paths.some((path) => !staged.has(path))) throw new CoreError("GIT_FAILED", "提交路径尚未暂存");
+      if (paths.some((path) => !staged.has(path))) throw new CoreError("GIT_FAILED", { key: "git.commit_path_has_not_been_staged", args: [] });
       const temp = await mkdtemp(join(tmpdir(), "lumio-git-index-"));
       const index = join(temp, "index");
       try {

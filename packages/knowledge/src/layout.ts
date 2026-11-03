@@ -27,7 +27,7 @@ export type LayoutEntry = (typeof VAULT_LAYOUT)[number];
 
 function entryOf(type: EntityType): LayoutEntry {
   const entry = VAULT_LAYOUT.find((e) => e.type === type);
-  if (!entry) throw new CoreError("UNKNOWN_ENTITY_TYPE", `vault 中没有类型 ${type} 的目录`);
+  if (!entry) throw new CoreError("UNKNOWN_ENTITY_TYPE", { key: "layout.vault_has_no_directory_for_type", args: [type] });
   return entry;
 }
 
@@ -51,7 +51,7 @@ export interface VaultFile { path: string; relativePath: string; type: EntityTyp
 
 export function resolveVault(explicit: string | undefined, env: string | undefined): string {
   const path = explicit ?? env;
-  if (!path) throw new CoreError("VAULT_REQUIRED", "请使用 --vault <路径> 或设置 LUMIO_VAULT");
+  if (!path) throw new CoreError("VAULT_REQUIRED", { key: "layout.use_vault_path_or_set_lumio_vault", args: [] });
   return path;
 }
 

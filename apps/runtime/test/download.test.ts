@@ -1,3 +1,7 @@
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { expect, test } from "bun:test";
 import { downloadRelease } from "../src/download.ts";
 
@@ -20,7 +24,7 @@ test("connection and low-speed deadlines abort without exposing URLs or response
         if (phase === "connect") return new Promise<Response>(() => {});
         return new Response(new ReadableStream({ cancel() { cancelled = true; } }));
       }) as unknown as typeof fetch });
-    await expect(result).rejects.toThrow("下载太慢或卡住，请检查网络或代理（https_proxy）后重试");
+    await expect(result).rejects.toThrow("DOWNLOAD_FAILED");
     expect(signal?.aborted).toBe(true); if (phase === "body") expect(cancelled).toBe(true);
   }
 });

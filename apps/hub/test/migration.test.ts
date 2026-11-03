@@ -1,3 +1,7 @@
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { expect, test } from "bun:test";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -19,10 +23,10 @@ test("management migration preserves sources, is repeatable, excludes the runnin
   let hub: Awaited<ReturnType<typeof startHub>> | undefined = await startHub(config, { log() {}, tasks: { quietMs: 0 } });
   const main = new URL("../src/main.ts", import.meta.url).pathname;
   async function manage(args: string[]) {
-    const child = Bun.spawn([process.execPath, main, ...args], { env: { HOME: root, PATH: root, LUMIO_STATE_DIR: state }, stdout: "pipe", stderr: "pipe" });
+    const child = Bun.spawn([process.execPath, main, ...args], { env: { LUMIO_LANG: "zh", HOME: root, PATH: root, LUMIO_STATE_DIR: state }, stdout: "pipe", stderr: "pipe" });
     const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]); return { code, stdout, stderr };
   }
-  function request(path: string, body?: unknown) { return fetch(`http://127.0.0.1:${hub!.server.port}${path}`, { method: body === undefined ? "GET" : "POST", headers: { Authorization: `Bearer ${human}`, "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }); }
+  function request(path: string, body?: unknown) { return fetch(`http://127.0.0.1:${hub!.server.port}${path}`, { method: body === undefined ? "GET" : "POST", headers: { "Accept-Language": "zh", Authorization: `Bearer ${human}`, "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }); }
   try {
     const planFile = join(root, "plan.json"), backup = join(root, "backup");
     const planned = await manage(["migrate", "plan", "--vault", vault, "--output", planFile]); expect(planned.code).toBe(0);
@@ -68,7 +72,7 @@ test("retire is offline, backs up and disables active legacy files while preserv
   const config = { ...readConfig({ LUMIO_STATE_DIR: state, LUMIO_VAULT: vault }), port: 0 };
   let hub: Awaited<ReturnType<typeof startHub>> | undefined;
   const manage = async () => {
-    const child = Bun.spawn([process.execPath, new URL("../src/main.ts", import.meta.url).pathname, "migrate", "retire", "--vault", vault], { env: { HOME: root, PATH: root, LUMIO_STATE_DIR: state }, stdout: "pipe", stderr: "pipe" });
+    const child = Bun.spawn([process.execPath, new URL("../src/main.ts", import.meta.url).pathname, "migrate", "retire", "--vault", vault], { env: { LUMIO_LANG: "zh", HOME: root, PATH: root, LUMIO_STATE_DIR: state }, stdout: "pipe", stderr: "pipe" });
     const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]); return { code, stdout, stderr };
   };
   try {
@@ -88,7 +92,7 @@ test("retire is offline, backs up and disables active legacy files while preserv
     await hub.tasks.noteChanged("plan/tasks/Task.md"); await hub.tasks.tick(); await hub.routines.noteChanged("plan/routines/Active.md"); await hub.routines.tick();
     expect(hub.store.db.query("SELECT * FROM jobs").all()).toEqual([]); expect(hub.modules.workStore.tasks()).toEqual([]);
     const headers = { Authorization: `Bearer ${token}` }, base = `http://127.0.0.1:${hub.server.port}`;
-    const old = await fetch(`${base}/v1/operations`, { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ operation: { op: "task.dispatch", args: { task, trigger: "cli", to: "pi@server" } } }) });
+    const old = await fetch(`${base}/v1/operations`, { method: "POST", headers: { "Accept-Language": "zh", ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ operation: { op: "task.dispatch", args: { task, trigger: "cli", to: "pi@server" } } }) });
     expect(old.status).toBe(409);
     expect((await fetch(`${base}/v1/search?q=`, { headers })).status).toBe(200);
   } finally { await hub?.stop(); await rm(root, { recursive: true, force: true }); }

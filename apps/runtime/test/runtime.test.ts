@@ -1,3 +1,7 @@
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { expect, test } from "bun:test";
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
@@ -84,7 +88,7 @@ test("runtime retries exponentially up to 60 seconds, registers again, sends emp
     });
     expect(delays).toEqual([5000, 10000, 20000, 40000, 60000, 60000, 5000, 5000, 5000, 5000, 5000]);
     expect(paths.slice(6)).toEqual(["/v1/runtime/register", "/v1/runtime/sync", "/v1/runtime/sync", "/v1/runtime/register", "/v1/runtime/sync"]);
-    expect(logs).toEqual(["Hub 连接失联，正在重试", "执行器登记成功", "Hub 连接已恢复", "Hub 连接失联，正在重试", "执行器登记成功", "Hub 连接已恢复"]);
+    expect(logs).toEqual(["Hub disconnected; retrying", "Runtime registered", "Hub connection restored", "Hub disconnected; retrying", "Runtime registered", "Hub connection restored"]);
     expect(logs.join("\n")).not.toContain(env.LUMIO_TOKEN);
   } finally { await rm(temp, { recursive: true, force: true }); }
 });

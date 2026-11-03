@@ -78,7 +78,7 @@ export class SqliteAssistantStore implements AssistantStore {
     this.db.query("INSERT INTO assistant_requests(owner,request,input,turn) VALUES(?,?,?,?)").run(owner, request, input, turn);
   }
   putContext(turn: string, step: number, input: AssistantModelRequest, created: string, toolActor?: string): void {
-    if (!Number.isSafeInteger(step) || step < 0) throw new StorageError("INVALID", "模型请求序号不合法");
+    if (!Number.isSafeInteger(step) || step < 0) throw new StorageError("INVALID", { key: "assistant.invalid_model_request_sequence_number", args: [] });
     this.db.query("INSERT INTO assistant_contexts(turn,step,request,created,tool_actor) VALUES(?,?,?,?,?)")
       .run(idOf("turn").parse(turn), step, JSON.stringify(AssistantModelRequest.parse(input)), Timestamp.parse(created), toolActor === undefined ? null : idOf("act").parse(toolActor));
   }

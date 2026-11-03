@@ -1,3 +1,7 @@
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -16,7 +20,7 @@ async function boot(publicUrl: string | undefined = "https://synthetic.example")
   return startHub({ ...readConfig({ LUMIO_VAULT: vault, LUMIO_STATE_DIR: state }), publicUrl: publicUrl || undefined, port: 0 }, { now: () => new Date(now), log: (line) => logs.push(line) });
 }
 function request(path: string, token?: string, body?: unknown, method?: string) {
-  return fetch(base() + path, { method: method ?? (body === undefined ? "GET" : "POST"), headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: typeof body === "string" ? body : JSON.stringify(body) }) });
+  return fetch(base() + path, { method: method ?? (body === undefined ? "GET" : "POST"), headers: { "Accept-Language": "zh", ...(token ? { Authorization: `Bearer ${token}` } : {}), "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: typeof body === "string" ? body : JSON.stringify(body) }) });
 }
 const invite = async (kind: "runtime" | "client" = "runtime", name = kind === "runtime" ? "server" : "cli@mac") => {
   const response = await request(`/v1/${kind}-invites`, human, { name }); expect(response.status).toBe(200);

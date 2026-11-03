@@ -1,3 +1,7 @@
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import type { FSWatcher, watch } from "node:fs";
@@ -22,7 +26,7 @@ const path = "plan/routines/日报.md";
 const file = () => join(vault, path);
 const base = () => `http://127.0.0.1:${hub!.server.port}`;
 async function request(p: string, token: string, body?: unknown) {
-  return fetch(`${base()}${p}`, { method: body === undefined ? "GET" : "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  return fetch(`${base()}${p}`, { method: body === undefined ? "GET" : "POST", headers: { "Accept-Language": "zh", Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 }
 async function writeRoutine(fields: Record<string, string> = {}, body = "总结今天的 GPU 使用情况。\n") {
   const header = Object.entries({ id: R, type: "routine", title: "日报", created: "2026-10-26T00:00:00Z", updated: "2026-10-26T00:00:00Z",
@@ -74,7 +78,7 @@ test("the plan reaches only the assigned runtime; pausing removes it and edits c
   const [plan] = (await sync()).routines;
   expect(plan).toMatchObject({ routine: R, schedule: "*/10 * * * *", timezone: "UTC", template: { workdir, timeout_seconds: 7200, run: { kind: "agent", engine: "pi" } } });
   expect(plan!.template.run.prompt).toContain("总结今天的 GPU 使用情况。");
-  expect(plan!.template.run.prompt).toContain("没有之前的对话");
+  expect(plan!.template.run.prompt).toContain("without prior conversation");
   expect(plan!.template.run.session).toBeUndefined();
   expect((await sync(undefined, other)).routines).toEqual([]);
   const list = RoutineInfo.array().parse(await (await request("/v1/routines", agent)).json());
@@ -91,7 +95,7 @@ test("the plan reaches only the assigned runtime; pausing removes it and edits c
   expect((await request("/v1/routines", runtime)).status).toBe(403);
 
   await writeRoutine({ workdir: join(vault, "research") });
-  await eventually(async () => RoutineInfo.array().parse(await (await request("/v1/routines", human)).json())[0]?.problem === "工作目录不能在笔记库里（ADR 0019）");
+  await eventually(async () => RoutineInfo.array().parse(await (await request("/v1/routines", human)).json())[0]?.problem === "Working directory must be outside the vault (ADR 0019)");
   expect((await sync()).routines).toEqual([]);
 }, 30_000);
 

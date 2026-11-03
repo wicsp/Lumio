@@ -1,3 +1,7 @@
+import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
+let previousLocale: string | undefined;
+beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
+afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { releaseShim } from "@lumio/platform";
 import { afterEach, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
@@ -23,9 +27,9 @@ test("POSIX installer verifies synthetic HTTP releases, forwards setup/join argu
     const path = new URL(request.url).pathname; requests.push(path);
     if (path.endsWith("/SHA256SUMS")) return new Response(`${corrupt ? "0".repeat(64) : hash}  lumio-linux-x64.tar.gz\n`);
     if (request.method === "HEAD" && head !== "size") return new Response(null, { status: head === "reject" ? 405 : 200 });
-    return new Response(request.method === "HEAD" ? null : content, { headers: { "Content-Length": String(content.length) } });
+    return new Response(request.method === "HEAD" ? null : content, { headers: { "Accept-Language": "zh", "Content-Length": String(content.length) } });
   } });
-  const installEnv = { ...process.env, HOME: home, PATH: tools + ":" + process.env.PATH, TEST_REAL_CURL: Bun.which("curl")!, TEST_OS: "Linux", TEST_ARCH: "x86_64", LUMIO_RELEASE_BASE_URL: server.url.href.replace(/\/$/, "") };
+  const installEnv = { ...process.env, LANG: "zh_CN.UTF-8", LC_ALL: "", HOME: home, PATH: tools + ":" + process.env.PATH, TEST_REAL_CURL: Bun.which("curl")!, TEST_OS: "Linux", TEST_ARCH: "x86_64", LUMIO_RELEASE_BASE_URL: server.url.href.replace(/\/$/, "") };
   async function install(args: string[], extra: Record<string, string> = {}) {
     const child = Bun.spawn(["sh", installer, ...args], { env: { ...installEnv, ...extra }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
     const [out, error, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);

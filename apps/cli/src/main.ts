@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { en, errorMessage, text as msg } from "./messages.ts";
 import { basename } from "node:path";
 import { runUpgrade } from "./upgrade.ts";
 import { runCli } from "./cli.ts";
@@ -29,7 +30,8 @@ export async function main(assets?: WebAssets, args = process.argv.slice(2), nam
     else process.exitCode = await runCli(call.args);
   } catch (cause) {
     // Never echo arguments or exceptions: management commands may be reading credentials.
-    console.error((call.role === "cli" || call.args[0] === "upgrade") && cause instanceof Error ? cause.message : "无法执行 Lumio 命令，请检查参数、配置与服务日志"); process.exitCode = 1;
+    const serving = call.role !== "cli" && (!call.args.length || call.args[0] === "serve");
+    console.error(serving ? en["main.could_not_execute_lumio_command_check_arguments_configuration_and_se"] : (call.role === "cli" || call.args[0] === "upgrade") && cause instanceof Error ? errorMessage(cause) : msg("main.could_not_execute_lumio_command_check_arguments_configuration_and_se")); process.exitCode = 1;
   }
 }
 if (import.meta.main) await main();

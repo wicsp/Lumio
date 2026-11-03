@@ -1,3 +1,5 @@
+import { language } from "@lumio/platform";
+import { text as msg } from "./messages.ts";
 import { randomUUID } from "node:crypto";
 import { parseArgs } from "node:util";
 import { createClient } from "@lumio/api-client";
@@ -8,7 +10,7 @@ export async function runAssistant(args: string[], log: (line: string) => void):
   const { values, positionals } = parseArgs({ args, allowPositionals: true, strict: true, options: {
     sources: { type: "string" }, json: { type: "boolean" }, stream: { type: "boolean" }, conversation: { type: "string" }, model: { type: "string" }, "request-id": { type: "string" },
   } });
-  const client = createClient(hubCredentials());
+  const client = createClient({ ...hubCredentials(), language: language() });
   if (positionals[0] === "memory") {
     const [, action, ...text] = positionals;
     const emit = (value: unknown) => log(values.json ? JSON.stringify(value) : JSON.stringify(value, null, 2));
@@ -19,7 +21,7 @@ export async function runAssistant(args: string[], log: (line: string) => void):
       } });
       emit(await client.memoryCommand(input)); return 0;
     }
-    throw new Error("用法：lumio chat memory list|remember <内容>|forget <记忆ID> [--json] [--request-id ID]；remember 可指定 --sources JSON");
+    throw new Error(msg("assistant.usage_lumio_chat_memory_list_remember_content_forget_memory_id_json"));
   }
   if (positionals[0] === "list" && positionals.length === 1) {
     const conversations = await client.conversations();
@@ -32,7 +34,7 @@ export async function runAssistant(args: string[], log: (line: string) => void):
     return 0;
   }
   const message = positionals.join(" ").trim();
-  if (!message) throw new Error("用法：lumio chat <消息> [--conversation ID] [--model 模型] [--json|--stream]；lumio chat list|show <ID>");
+  if (!message) throw new Error(msg("assistant.usage_lumio_chat_message_conversation_id_model_model_json_stream_lum"));
   const input = { request_id: values["request-id"] ?? randomUUID(), conversation: values.conversation, model: values.model, message };
   if (values.stream) {
     let successful = false;
@@ -42,8 +44,8 @@ export async function runAssistant(args: string[], log: (line: string) => void):
   const result = await client.assistantChat(input);
   if (values.json) log(JSON.stringify(result));
   else {
-    log(result.messages.filter((value) => value.role === "assistant").at(-1)?.content ?? result.turn.error ?? "本轮未产生回复");
-    log(`对话：${result.conversation.id}  轮次：${result.turn.id}  ${result.turn.status}`);
+    log(result.messages.filter((value) => value.role === "assistant").at(-1)?.content ?? result.turn.error ?? msg("assistant.no_reply_produced_in_this_turn"));
+    log(msg("assistant.conversation_turn", result.conversation.id, result.turn.id, result.turn.status));
   }
   return result.turn.status === "done" ? 0 : 1;
 }

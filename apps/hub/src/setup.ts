@@ -1,3 +1,4 @@
+import { text as msg } from "./messages.ts";
 import { extraServices, healthVersion, publicHubChecks } from "./hub-checks.ts";
 import { version } from "./version.ts";
 import * as files from "node:fs/promises";
@@ -19,13 +20,13 @@ export async function runCommand(argv: string[]): Promise<CommandResult> {
 export function xml(value: string): string { return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;"); }
 /** systemd 的 EnvironmentFile= 不认引号（加了引号会被当成相对路径而忽略），只能原样写；因此不允许空白字符。 */
 function unitPath(value: string): string {
-  if (/\s/.test(value)) throw new HubError("INVALID", "服务配置文件的路径不能包含空白字符");
+  if (/\s/.test(value)) throw new HubError("INVALID", { key: "setup.service_configuration_paths_must_not_contain_whitespace", args: [] });
   return value.replaceAll("%", "%%");
 }
 function unitString(value: string): string { return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("%", "%%")}"`; }
 export function environmentText(env: Record<string, string>): string {
   return Object.entries(env).map(([key, value]) => {
-    if (/[\r\n\0]/.test(value)) throw new HubError("INVALID", "服务环境变量不能包含换行或 NUL");
+    if (/[\r\n\0]/.test(value)) throw new HubError("INVALID", { key: "setup.service_environment_variables_must_not_contain_newlines_or_nul", args: [] });
     return `${key}="${value.replace(/[\\"$`]/g, "\\$&")}"`;
   }).join("\n") + "\n";
 }
@@ -34,10 +35,10 @@ export function parseEnvironment(content: string): Record<string, string> {
   for (const line of content.split(/\r?\n/).map((line) => line.trim())) {
     if (!line || line.startsWith("#")) continue;
     const match = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line);
-    if (!match) throw new HubError("INVALID", "已有服务环境文件格式不合法");
+    if (!match) throw new HubError("INVALID", { key: "setup.invalid_existing_service_environment_file", args: [] });
     let value = match[2]!;
     if (value.startsWith('"')) {
-      if (!value.endsWith('"')) throw new HubError("INVALID", "已有服务环境文件格式不合法");
+      if (!value.endsWith('"')) throw new HubError("INVALID", { key: "setup.invalid_existing_service_environment_file", args: [] });
       value = value.slice(1, -1).replace(/\\([\\"$`])/g, "$1");
     } else if (value.startsWith("'") && value.endsWith("'")) value = value.slice(1, -1);
     env[match[1]!] = value;
@@ -83,14 +84,14 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
   const home = resolve(options.home ?? env.HOME ?? homedir());
   const host = options.host ?? hostname(), platform = options.platform ?? process.platform;
   const binary = options.binary ?? process.execPath, runtimeBinary = options.runtimeBinary ?? binary;
-  if (binary === process.execPath && !Bun.main.startsWith("/$bunfs/")) throw new HubError("INVALID", "请用 install.sh 安装的程序运行 setup；从源码运行不会安装后台服务");
-  if (!["darwin", "linux"].includes(platform)) throw new HubError("INVALID", "只支持 macOS 与 Linux");
-  if (![binary, runtimeBinary].every((path) => isAbsolute(path) && !/[\r\n]/.test(path))) throw new HubError("INVALID", "程序路径必须是绝对路径");
+  if (binary === process.execPath && !Bun.main.startsWith("/$bunfs/")) throw new HubError("INVALID", { key: "setup.run_setup_using_the_program_installed_by_install_sh_running_from_sou", args: [] });
+  if (!["darwin", "linux"].includes(platform)) throw new HubError("INVALID", { key: "setup.only_macos_and_linux_are_supported", args: [] });
+  if (![binary, runtimeBinary].every((path) => isAbsolute(path) && !/[\r\n]/.test(path))) throw new HubError("INVALID", { key: "setup.program_path_must_be_absolute", args: [] });
   const run = options.run ?? runCommand, find = options.find ?? ((program) => Bun.which(program));
   const log = options.log ?? console.log, fetcher = options.fetch ?? fetch;
   const terminal = options.ask ? undefined : openTerminal(options.terminalPath);
   const interactive = options.interactive ?? Boolean(options.ask || terminal);
-  if (!interactive) log("当前没有交互终端，将沿用已有配置或采用默认值。更改 vault：lumio-hub setup --vault <路径>；设置对外地址：lumio-hub setup --public-url <地址>；服务器模式与 Tailscale：在交互终端运行 lumio-hub setup --server。");
+  if (!interactive) log(msg("setup.no_interactive_terminal_using_existing_configuration_or_defaults_cha"));
   const ask = async (question: string, fallback: string) => {
     if (options.yes || !interactive) return fallback;
     if (options.ask) return (await options.ask(question, fallback)).trim() || fallback;
@@ -102,17 +103,17 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
   let previous: CliConfig | undefined;
   if (old) {
     try { previous = CliConfig.parse(JSON.parse(old)); }
-    catch { throw new HubError("INVALID", "已有 CLI 配置无法解析，请先修复 config.json"); }
+    catch { throw new HubError("INVALID", { key: "setup.could_not_parse_existing_cli_configuration_repair_config_json_first", args: [] }); }
   }
   const defaultVault = join(home, ".config/lumio/vault");
-  const chosenVault = options.vault ?? await ask("vault 路径", previous?.vault ?? defaultVault);
+  const chosenVault = options.vault ?? await ask(msg("setup.vault_path"), previous?.vault ?? defaultVault);
   const vault = chosenVault === "~" ? home : resolve(chosenVault.startsWith("~/") ? join(home, chosenVault.slice(2)) : chosenVault);
   try {
-    if (!(await fs.stat(vault)).isDirectory()) throw new HubError("INVALID", "vault 必须是目录");
+    if (!(await fs.stat(vault)).isDirectory()) throw new HubError("INVALID", { key: "setup.vault_must_be_a_directory", args: [] });
   } catch (cause) {
-    if ((cause as NodeJS.ErrnoException).code !== "ENOENT" || vault !== defaultVault) throw new HubError("INVALID", "指定的 vault 目录不存在或无法读取");
+    if ((cause as NodeJS.ErrnoException).code !== "ENOENT" || vault !== defaultVault) throw new HubError("INVALID", { key: "setup.the_specified_vault_directory_does_not_exist_or_cannot_be_read", args: [] });
     await fs.mkdir(vault, { recursive: true, mode: 0o700 });
-    await fs.writeFile(join(vault, "README.md"), "# Lumio vault\n\n这里存放 Markdown 笔记。目录结构见 https://github.com/wicsp/Lumio/blob/main/docs/DESIGN.md#31-vault-目录adr-0012 。可用任意编辑器打开。\n", { flag: "wx" });
+    await fs.writeFile(join(vault, "README.md"), msg("setup.lumio_vault_markdown_notes_live_here_see_https_github_com_wicsp_lumi"), { flag: "wx" });
   }
   const state = resolve(env.LUMIO_STATE_DIR ?? join(home, ".local/share/lumio"));
   await fs.mkdir(state, { recursive: true, mode: 0o700 }); await fs.chmod(state, 0o700);
@@ -121,36 +122,36 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
   let listen = env.LUMIO_HUB_LISTEN ?? previousEnv.LUMIO_HUB_LISTEN ?? "127.0.0.1:7420";
   let publicUrl = options.publicUrl ?? env.LUMIO_PUBLIC_URL ?? previousEnv.LUMIO_PUBLIC_URL ?? "";
   if (options.server) {
-    listen = await ask("监听地址", env.LUMIO_HUB_LISTEN ?? (previousEnv.LUMIO_PUBLIC_URL ? listen : "0.0.0.0:7420"));
-    publicUrl = await ask("对外地址（如 https://lumio.example.org）", publicUrl);
+    listen = await ask(msg("setup.listen_address"), env.LUMIO_HUB_LISTEN ?? (previousEnv.LUMIO_PUBLIC_URL ? listen : "0.0.0.0:7420"));
+    publicUrl = await ask(msg("setup.public_url_e_g_https_lumio_example_org"), publicUrl);
   }
   const tailscale = find("tailscale");
   // Tailscale 只是补充（ADR 0022）：只在服务器模式下询问；单机模式用 --public-url 直接设置对外地址。
-  if (options.server && options.publicUrl === undefined && tailscale && (await ask("用 Tailscale 提供对外地址？yes/no", "no")) === "yes") {
-    const mode = await ask("Tailscale 方式：serve / ip", "serve");
+  if (options.server && options.publicUrl === undefined && tailscale && (await ask(msg("setup.use_tailscale_for_the_public_url_yes_no"), "no")) === "yes") {
+    const mode = await ask(msg("setup.tailscale_mode_serve_ip"), "serve");
     const result = await run([tailscale, "status", "--json"]);
     let status: { Self?: { DNSName?: string; TailscaleIPs?: string[] } };
     try { if (result.code) throw new Error(); status = JSON.parse(result.stdout); }
-    catch { throw new HubError("INVALID", "无法读取 Tailscale 状态，请检查是否已登录"); }
+    catch { throw new HubError("INVALID", { key: "setup.could_not_read_tailscale_status_check_that_you_are_signed_in", args: [] }); }
     const port = listen.slice(listen.lastIndexOf(":") + 1);
     if (mode === "serve") {
       const dns = status.Self?.DNSName?.replace(/\.$/, "");
-      if (!dns || (await run([tailscale, "serve", "--bg", port])).code) throw new HubError("INVALID", "Tailscale serve 未能启动");
+      if (!dns || (await run([tailscale, "serve", "--bg", port])).code) throw new HubError("INVALID", { key: "setup.could_not_start_tailscale_serve", args: [] });
       publicUrl = `https://${dns}`;
       listen = `127.0.0.1:${port}`;
     } else if (mode === "ip") {
       const ip = status.Self?.TailscaleIPs?.find((ip) => !ip.includes(":"));
-      if (!ip) throw new HubError("INVALID", "Tailscale 没有可用的 IPv4 地址");
+      if (!ip) throw new HubError("INVALID", { key: "setup.tailscale_has_no_available_ipv4_address", args: [] });
       listen = `${ip}:${port}`; publicUrl = `http://${listen}`;
-    } else throw new HubError("INVALID", "Tailscale 方式必须是 serve 或 ip");
+    } else throw new HubError("INVALID", { key: "setup.tailscale_mode_must_be_serve_or_ip", args: [] });
   }
   const config = readConfig({ ...env, LUMIO_VAULT: vault, LUMIO_STATE_DIR: state, LUMIO_HUB_LISTEN: listen, LUMIO_PUBLIC_URL: publicUrl });
-  if (!interactive) log(`本次采用配置：vault=${vault}；监听=${listen}；对外地址=${config.publicUrl ?? "未设置"}；Tailscale 不自动启用。`);
-  if (!config.port) throw new HubError("INVALID", "setup 需要固定的非零端口");
+  if (!interactive) log(msg("setup.configuration_vault_listen_public_url_tailscale_will_not_be_enabled", vault, listen, config.publicUrl ?? msg("setup.not_set")));
+  if (!config.port) throw new HubError("INVALID", { key: "setup.setup_requires_a_fixed_non_zero_port", args: [] });
   // For a binding to one interface, the local client must use that interface as well.
   const localHost = ["0.0.0.0", "::"].includes(config.hostname) ? "127.0.0.1" : config.hostname;
   const url = `http://${localHost.includes(":") ? `[${localHost}]` : localHost}:${config.port}`;
-  if (publicUrl.startsWith("http://") && !isLoopback(new URL(publicUrl).hostname)) log("警告：对外地址使用 HTTP，令牌将以明文传输；请配置 HTTPS 反向代理。");
+  if (publicUrl.startsWith("http://") && !isLoopback(new URL(publicUrl).hostname)) log(msg("setup.warning_the_public_url_uses_http_tokens_will_travel_in_plain_text_co"));
   const store = await HubStore.open(state);
   let token: string, runtimeToken: string;
   const name = await rememberLocalRuntime(state, runtimeName(host));
@@ -158,7 +159,7 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
     let human = store.actors().find((actor) => actor.role === "human");
     human ??= store.createActor("owner", "human");
     const runtime = store.actors().find((actor) => actor.name === name);
-    if (runtime && runtime.role !== "runtime") throw new HubError("CONFLICT", "本机执行器名称与已有非执行器身份冲突");
+    if (runtime && runtime.role !== "runtime") throw new HubError("CONFLICT", { key: "setup.local_runtime_name_conflicts_with_an_existing_non_runtime_actor", args: [] });
     const localRuntime = runtime ?? store.createActor(name, "runtime");
     for (const old of store.tokens()) if (old.actor_id === localRuntime.id && !old.revoked) store.revokeToken(old.label);
     token = store.replaceToken(`cli@${host}`, human.name);
@@ -179,10 +180,10 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
   if (platform === "darwin") {
     const path = join(home, "Library/LaunchAgents/io.lumio.hub.plist");
     await atomicFile(path, hubPlist(binary, serviceEnv, state), 0o600, false, fs);
-    if ((await run(["plutil", "-lint", path])).code) throw new HubError("INVALID", "Hub 服务配置校验失败");
+    if ((await run(["plutil", "-lint", path])).code) throw new HubError("INVALID", { key: "setup.hub_service_configuration_validation_failed", args: [] });
     const domain = `gui/${options.uid ?? process.getuid!()}`;
     await run(["launchctl", "bootout", domain, path]);
-    if ((await run(["launchctl", "bootstrap", domain, path])).code) throw new HubError("INVALID", `Hub 服务无法启动，请查看 ${state}/hub.err.log`);
+    if ((await run(["launchctl", "bootstrap", domain, path])).code) throw new HubError("INVALID", { key: "setup.hub_service_could_not_start_see_hub_err_log", args: [state] });
   } else {
     const path = join(home, ".config/systemd/user/lumio-hub.service");
     await atomicFile(path, hubUnit(binary, envFile), 0o644, false, fs);
@@ -190,12 +191,12 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
     if (managed) {
       const active = (await run(["systemctl", "--user", "is-active", "--quiet", "lumio-hub.service"])).code === 0;
       for (const argv of [["systemctl", "--user", "daemon-reload"], ["systemctl", "--user", "enable", "--now", "lumio-hub.service"], ...(active ? [["systemctl", "--user", "restart", "lumio-hub.service"]] : [])]) {
-        if ((await run(argv)).code) throw new HubError("INVALID", "Hub 服务无法启动，请运行 journalctl --user -u lumio-hub -n 30");
+        if ((await run(argv)).code) throw new HubError("INVALID", { key: "setup.hub_service_could_not_start_run_journalctl_user_u_lumio_hub_n_30", args: [] });
       }
       let linger = "";
       try { linger = (await run(["loginctl", "show-user", env.USER ?? "", "-p", "Linger"])).stdout; } catch { /* hint below */ }
-      if (!linger.includes("Linger=yes")) log(`退出登录后 Hub 会停止；请管理员运行 loginctl enable-linger ${env.USER ?? "<用户名>"}`);
-    } else log(`没有 systemd 用户服务。手动运行：set -a; . '${envFile.replaceAll("'", "'\\''")}'; set +a; nohup '${binary.replaceAll("'", "'\\''")}' hub serve > '${state.replaceAll("'", "'\\''")}/hub.log' 2>&1 &（也可放入 crontab @reboot）。`);
+      if (!linger.includes("Linger=yes")) log(msg("setup.hub_will_stop_on_logout_ask_an_administrator_to_run_loginctl_enable", env.USER ?? msg("setup.username")));
+    } else log(msg("setup.no_systemd_user_service_run_manually_set_a_set_a_nohup_hub_serve_hub", envFile.replaceAll("'", "'\\''"), binary.replaceAll("'", "'\\''"), state.replaceAll("'", "'\\''")));
   }
   if (managed) {
     const now = options.now ?? Date.now, sleep = options.sleep ?? Bun.sleep, until = now() + 20_000;
@@ -213,14 +214,14 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
       } catch { /* diagnose after the deadline */ }
       await sleep(500);
     }
-    if (otherHub) throw new HubError("INVALID", `端口 ${config.port} 上是另一个 Hub：Hub 是 ${otherHub}，本程序是 ${version}；请检查并停用旧服务后重试`);
+    if (otherHub) throw new HubError("INVALID", { key: "setup.another_hub_is_on_port_hub_this_program_disable_the_old_service_and", args: [config.port, otherHub, version] });
     if (!ready) {
       const logPath = join(state, "hub.err.log");
       let errors = (await optional(logPath, fs) ?? "").slice(-8192);
       if (platform === "linux") { try { errors += (await run(["journalctl", "--user", "-u", "lumio-hub", "-n", "30", "--no-pager"])).stdout; } catch { /* use log path */ } }
-      if (/EPERM|EACCES|Operation not permitted/i.test(errors)) throw new HubError("INVALID", platform === "darwin" ? `系统设置 → 隐私与安全性 → 完全磁盘访问权限，加入 ${binary}，然后重新运行 lumio-hub setup` : `Hub 无法读取 vault；请检查目录权限。日志：${logPath}`);
-      if (/EADDRINUSE|address already in use/i.test(errors)) throw new HubError("INVALID", `端口 ${config.port} 被占用；请停止占用程序或修改 LUMIO_HUB_LISTEN 后重新运行 setup`);
-      throw new HubError("INVALID", `Hub 启动超时；日志：${platform === "linux" ? "journalctl --user -u lumio-hub -n 30" : logPath}`);
+      if (/EPERM|EACCES|Operation not permitted/i.test(errors)) throw new HubError("INVALID", platform === "darwin" ? { key: "setup.in_system_settings_privacy_security_full_disk_access_add_then_run_lu", args: [binary] } : { key: "setup.hub_cannot_read_the_vault_check_directory_permissions_log", args: [logPath] });
+      if (/EADDRINUSE|address already in use/i.test(errors)) throw new HubError("INVALID", { key: "setup.port_is_in_use_stop_the_other_program_or_change_lumio_hub_listen_and", args: [config.port] });
+      throw new HubError("INVALID", { key: "setup.hub_startup_timed_out_log", args: [platform === "linux" ? "journalctl --user -u lumio-hub -n 30" : logPath] });
     }
   }
   if (config.publicUrl) report(await publicHubChecks(diagnostics, config.publicUrl, version, config.port));
@@ -229,9 +230,9 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
     LUMIO_RUNTIME_NAME: name, LUMIO_RUNTIME_STATE_DIR: join(home, ".local/share/lumio-runtime"), PATH: env.PATH ?? "/usr/bin:/bin" };
   await privateFile(runtimeEnvFile, environmentText(runtimeEnv));
   const installed = await run([runtimeBinary, "runtime", "install-service"]);
-  if (installed.code) throw new HubError("INVALID", `本机执行器安装或登记失败；请运行 lumio-runtime install-service。日志：${runtimeEnv.LUMIO_RUNTIME_STATE_DIR}/runtime.err.log（Linux：journalctl --user -u lumio-runtime -n 30）`);
+  if (installed.code) throw new HubError("INVALID", { key: "setup.local_runtime_installation_or_registration_failed_run_lumio_runtime", args: [runtimeEnv.LUMIO_RUNTIME_STATE_DIR] });
   // The installer only prints service status; keep credentials out even on child failure.
   for (const line of installed.stdout.split("\n").filter(Boolean)) if (!line.includes(token) && !line.includes(runtimeToken)) log(line);
-  if (options.server) log("Caddy 示例（按实际域名与监听地址修改）：\nlumio.example.org {\n  reverse_proxy 127.0.0.1:" + config.port + "\n}");
-  log(`vault：${vault}\n网页 / Hub：${url}${config.publicUrl ? `\n对外地址：${config.publicUrl}` : ""}\n日志：${platform === "linux" ? "journalctl --user -u lumio-hub -u lumio-runtime" : state}\n本机执行器：${name}\n加一台执行器：lumio runtime add <名称>\n运行 lumio login-code --name web 获取配对码`);
+  if (options.server) log(msg("setup.caddy_example_adjust_domain_and_listen_address_lumio_example_org_rev") + config.port + "\n}");
+  log(msg("setup.vault_web_hub_logs_local_runtime_add_a_runtime_lumio_runtime_add_nam", vault, url, config.publicUrl ? msg("setup.public_url", config.publicUrl) : "", platform === "linux" ? "journalctl --user -u lumio-hub -u lumio-runtime" : state, name));
 }

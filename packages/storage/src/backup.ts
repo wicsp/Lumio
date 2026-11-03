@@ -17,7 +17,7 @@ async function syncPath(path: string) { const file = await open(path, "r"); try 
 function verifyDatabase(path: string): void {
   const db = new Database(path, { readonly: true, strict: true });
   try { if (db.query<{ quick_check: string }, []>("PRAGMA quick_check").all().some((row) => row.quick_check !== "ok")) throw new Error(); }
-  catch { throw new StorageError("CORRUPT", "备份数据库完整性检查失败"); }
+  catch { throw new StorageError("CORRUPT", { key: "backup.backup_database_integrity_check_failed", args: [] }); }
   finally { db.close(); }
 }
 
@@ -35,7 +35,7 @@ export async function backupBusiness(stateDir: string, destination: string, now 
       const source = await safeStoredFile(join(stateDir, "files"), artifact.key), relative = `files/${artifact.key}`;
       await copyPrivate(source, join(target, relative));
       const digest = await fileDigest(join(target, relative));
-      if (digest.sha256 !== artifact.sha256 || digest.size !== artifact.size) throw new StorageError("CORRUPT", "备份中的托管文件校验失败");
+      if (digest.sha256 !== artifact.sha256 || digest.size !== artifact.size) throw new StorageError("CORRUPT", { key: "backup.managed_file_verification_failed_in_backup", args: [] });
       files.push({ path: relative, ...digest });
     }
     const manifest = BackupManifest.parse({ schema_version: 1, created: now.toISOString(), database: { path: "hub.sqlite", ...await fileDigest(path) }, files });
@@ -47,28 +47,28 @@ export async function backupBusiness(stateDir: string, destination: string, now 
   } catch (cause) {
     if (reserved) await rm(target, { recursive: true, force: true });
     if (cause instanceof StorageError) throw cause;
-    if ((cause as NodeJS.ErrnoException).code === "EEXIST") throw new StorageError("CONFLICT", "备份目标已存在");
-    throw new StorageError("INVALID", "无法完成业务备份；请检查数据库与文件是否齐全");
+    if ((cause as NodeJS.ErrnoException).code === "EEXIST") throw new StorageError("CONFLICT", { key: "backup.backup_destination_already_exists", args: [] });
+    throw new StorageError("INVALID", { key: "backup.could_not_complete_business_backup_check_database_and_file_completen", args: [] });
   } finally { snapshot?.close(); db?.close(); }
 }
 export async function verifyBusinessBackup(source: string): Promise<BackupManifest> {
   let manifest: BackupManifest;
   try { manifest = BackupManifest.parse(JSON.parse(await readFile(await safeStoredFile(source, "manifest.json"), "utf8"))); }
-  catch { throw new StorageError("CORRUPT", "备份清单无法读取或格式不合法"); }
-  if (manifest.database.path !== "hub.sqlite") throw new StorageError("CORRUPT", "备份数据库路径不合法");
+  catch { throw new StorageError("CORRUPT", { key: "backup.backup_manifest_could_not_be_read_or_has_an_invalid_format", args: [] }); }
+  if (manifest.database.path !== "hub.sqlite") throw new StorageError("CORRUPT", { key: "backup.invalid_backup_database_path", args: [] });
   const paths = new Set<string>();
   for (const entry of [manifest.database, ...manifest.files]) {
-    if (paths.has(entry.path) || entry.path === "manifest.json") throw new StorageError("CORRUPT", "备份清单包含重复路径"); paths.add(entry.path);
+    if (paths.has(entry.path) || entry.path === "manifest.json") throw new StorageError("CORRUPT", { key: "backup.backup_manifest_contains_duplicate_paths", args: [] }); paths.add(entry.path);
     try {
       const digest = await fileDigest(await safeStoredFile(source, entry.path));
       if (digest.sha256 !== entry.sha256 || digest.size !== entry.size) throw new Error();
-    } catch { throw new StorageError("CORRUPT", "备份文件缺失或校验失败"); }
+    } catch { throw new StorageError("CORRUPT", { key: "backup.backup_file_missing_or_verification_failed", args: [] }); }
   }
   const path = await safeStoredFile(source, manifest.database.path); verifyDatabase(path);
   const db = new Database(path, { readonly: true, strict: true });
   try {
     const expected = referenced(db).map((artifact) => ({ path: `files/${artifact.key}`, sha256: artifact.sha256, size: artifact.size }));
-    if (expected.length !== manifest.files.length || expected.some((entry) => !manifest.files.some((file) => file.path === entry.path && file.sha256 === entry.sha256 && file.size === entry.size))) throw new StorageError("CORRUPT", "备份清单与数据库引用的文件不一致");
+    if (expected.length !== manifest.files.length || expected.some((entry) => !manifest.files.some((file) => file.path === entry.path && file.sha256 === entry.sha256 && file.size === entry.size))) throw new StorageError("CORRUPT", { key: "backup.backup_manifest_does_not_match_database_file_references", args: [] });
   } finally { db.close(); }
   return manifest;
 }
@@ -81,13 +81,13 @@ export async function restoreBusiness(source: string, destination: string): Prom
     // Check the copied bytes too: the source may have changed since verification.
     for (const entry of [manifest.database, ...manifest.files]) {
       const digest = await fileDigest(join(target, entry.path));
-      if (digest.sha256 !== entry.sha256 || digest.size !== entry.size) throw new StorageError("CORRUPT", "恢复期间备份文件发生变化");
+      if (digest.sha256 !== entry.sha256 || digest.size !== entry.size) throw new StorageError("CORRUPT", { key: "backup.backup_files_changed_during_restore", args: [] });
     }
     verifyDatabase(join(target, "hub.sqlite")); await syncPath(target); await syncPath(dirname(target)); return manifest;
   } catch (cause) {
     if (reserved) await rm(target, { recursive: true, force: true });
     if (cause instanceof StorageError) throw cause;
-    if ((cause as NodeJS.ErrnoException).code === "EEXIST") throw new StorageError("CONFLICT", "恢复目标已存在，不覆盖已有业务数据");
-    throw new StorageError("INVALID", "无法恢复业务备份");
+    if ((cause as NodeJS.ErrnoException).code === "EEXIST") throw new StorageError("CONFLICT", { key: "backup.restore_destination_exists_existing_business_data_will_not_be_overwr", args: [] });
+    throw new StorageError("INVALID", { key: "backup.could_not_restore_business_backup", args: [] });
   }
 }
