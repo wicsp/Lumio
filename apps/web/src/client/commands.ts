@@ -5,6 +5,7 @@
  * - 每个命令都带 expected_revision 和新的 request_id；派活是单独命令，修改负责人不会派活。
  */
 import type { ExecutionRoutine, ExecutionRoutineCommandRequest, WorkCommandRequest, WorkProject, WorkTask } from "@lumio/schema";
+import { t, locale } from "./i18n.ts";
 
 export function newRequestId(prefix = "web"): string {
   const bytes = new Uint8Array(12); crypto.getRandomValues(bytes);
@@ -80,7 +81,7 @@ export function dispatchCommand(task: Pick<WorkTask, "id" | "revision">, target:
 /** 执行器登记的引擎 → 可选目标 engine@device。 */
 export function engineTargets(runtimes: Array<{ online: boolean; registration: { name: string; engines: Array<{ name: string; version: string }> } }>) {
   return runtimes.flatMap((runtime) => runtime.registration.engines.map((engine) => ({
-    target: `${engine.name}@${runtime.registration.name}`, label: `${engine.name} @ ${runtime.registration.name}（${engine.version}${runtime.online ? "" : "，离线"}）`, online: runtime.online,
+    target: `${engine.name}@${runtime.registration.name}`, label: t("{0} @ {1} ({2}{3})", engine.name, runtime.registration.name, engine.version, runtime.online ? "" : t(", offline")), online: runtime.online,
   })));
 }
 
@@ -121,7 +122,7 @@ export function formatTime(iso: string | undefined, timeZone?: string): string {
   if (!iso) return "—";
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
-  return new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZoneName: "short", ...(timeZone ? { timeZone } : {}) }).format(date);
+  return new Intl.DateTimeFormat(locale(), { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZoneName: "short", ...(timeZone ? { timeZone } : {}) }).format(date);
 }
 
 /** 下载文件名只保留安全字符，避免路径与控制字符。 */

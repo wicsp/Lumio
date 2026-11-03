@@ -1,6 +1,8 @@
 /** Pairing is single-use; keep an unverified candidate only in this view's memory. */
 import { createSession, errorText, LoginError } from "../api.ts";
-import { h } from "../dom.ts";
+import { h, icon } from "../dom.ts";
+import { pickLang, pickTheme, themeIcon } from "../settings.ts";
+import { lang, t } from "../i18n.ts";
 
 export class ConnectView {
   constructor(root: HTMLElement, onToken: (token: string, remember: boolean) => Promise<void>, notice?: string, retry?: () => void) {
@@ -8,10 +10,10 @@ export class ConnectView {
     const show = (text: string) => { message.textContent = text; message.hidden = false; };
     const remember = h("input", { type: "checkbox", name: "remember-device" });
     let pending = false, candidate: string | undefined;
-    const retrySaved = retry ? h("button", { type: "button", class: "btn", onclick: () => { if (!pending) retry(); } }, "重试已保存的连接") : undefined;
+    const retrySaved = retry ? h("button", { type: "button", class: "btn", onclick: () => { if (!pending) retry(); } }, t("Retry saved session")) : undefined;
     const retryVerification = h("button", { type: "button", class: "btn", hidden: true, onclick: async () => {
       if (pending || !candidate) return; busy(true); try { await verify(candidate); } finally { busy(false); }
-    } }, "重试验证");
+    } }, t("Retry verification"));
     const busy = (on: boolean) => {
       pending = on;
       for (const form of [codeForm, tokenForm]) form.querySelectorAll("button, input").forEach(el => ((el as HTMLInputElement).disabled = on));
@@ -22,15 +24,15 @@ export class ConnectView {
       catch (error) {
         if (error instanceof LoginError && error.retryable) {
           candidate = value; retryVerification.hidden = false;
-          show(`${error.message}。可点「重试验证」，不用重新获取配对码。`);
+          show(t("{0} Click Retry verification — you don't need a new pairing code.", error.message));
         } else { candidate = undefined; retryVerification.hidden = true; show(error instanceof Error ? error.message : errorText(error)); }
       }
     };
     const start = () => { candidate = undefined; retryVerification.hidden = true; message.hidden = true; busy(true); };
-    const code = h("input", { name: "code", class: "code-input", autocomplete: "one-time-code", required: true, spellcheck: "false", placeholder: "配对码", "aria-label": "配对码" });
+    const code = h("input", { name: "code", class: "code-input", autocomplete: "one-time-code", required: true, spellcheck: "false", placeholder: t("Pairing code"), "aria-label": t("Pairing code") });
     const codeForm = h("form", { class: "connect-form" }, code,
-      h("p", { class: "field-hint" }, "在 Hub 所在的机器上运行 lumio login-code --name web 获取。10 分钟内有效，只能用一次。"),
-      h("button", { type: "submit", class: "btn btn-primary" }, "连接"));
+      h("p", { class: "field-hint" }, t("Run lumio login-code --name web on the Hub machine. Valid for 10 minutes, single use.")),
+      h("button", { type: "submit", class: "btn btn-primary" }, t("Connect")));
     codeForm.addEventListener("submit", async event => {
       event.preventDefault(); if (pending) return; start();
       const session = createSession(undefined, () => {});
@@ -38,25 +40,28 @@ export class ConnectView {
       catch (error) { show(error instanceof Error && !("code" in error) ? error.message : errorText(error)); }
       finally { session.close(); busy(false); }
     });
-    const token = h("input", { name: "token", type: "password", autocomplete: "off", required: true, spellcheck: "false", placeholder: "粘贴人类访问令牌", "aria-label": "访问令牌" });
-    const tokenForm = h("form", { class: "connect-form" }, token, h("button", { type: "submit", class: "btn" }, "用令牌连接"));
+    const token = h("input", { name: "token", type: "password", autocomplete: "off", required: true, spellcheck: "false", placeholder: t("Paste a human access token"), "aria-label": t("Access token") });
+    const tokenForm = h("form", { class: "connect-form" }, token, h("button", { type: "submit", class: "btn" }, t("Connect with token")));
     tokenForm.addEventListener("submit", async event => {
       event.preventDefault(); if (pending) return; start();
       try { const value = token.value.trim(); token.value = ""; await verify(value); } finally { busy(false); }
     });
     root.append(h("main", { class: "connect" },
       h("aside", { class: "connect-art", "aria-hidden": "true" },
-        h("h2", {}, "知识、任务与 agent，放在同一张桌面上。"),
-        h("p", {}, "Lumio 连接你自己的 Hub。数据留在你的机器上，浏览器只是一扇窗。")),
+        h("h2", {}, t("Your knowledge, tasks and agents on one desk.")),
+        h("p", {}, t("Lumio connects to your own Hub. Your data stays on your machine; the browser is just a window."))),
       h("section", { class: "connect-panel" }, h("div", { class: "connect-card", "aria-labelledby": "connect-title" },
-        h("div", { class: "brand" }, h("span", { class: "brand-mark", "aria-hidden": "true" }), h("span", {}, "Lumio")),
-        h("h1", { id: "connect-title" }, "连接到你的 Hub"),
+        h("div", { class: "brand" }, h("span", { class: "brand-mark", "aria-hidden": "true" }), h("span", {}, "Lumio"),
+          h("span", { class: "foot-tools" },
+            h("button", { type: "button", class: "icon-btn", title: t("Theme"), "aria-label": t("Theme"), onclick: (event: Event) => pickTheme(event.currentTarget as HTMLElement) }, themeIcon()),
+            h("button", { type: "button", class: "icon-btn lang-btn", title: t("Language"), "aria-label": t("Language"), onclick: (event: Event) => pickLang(event.currentTarget as HTMLElement) }, icon("globe"), lang() === "zh" ? "中文" : "English"))),
+        h("h1", { id: "connect-title" }, t("Connect to your Hub")),
         message, retrySaved, retryVerification,
         codeForm,
-        h("label", { class: "check" }, remember, "在这台设备上保持登录"),
-        h("p", { class: "field-hint" }, "勾选后关闭浏览器再打开也不用重新配对。只在自己的设备上勾选。"),
-        h("div", { class: "or" }, "或"),
-        h("details", {}, h("summary", {}, "使用已有的访问令牌"), tokenForm)))));
+        h("label", { class: "check" }, remember, t("Stay signed in on this device")),
+        h("p", { class: "field-hint" }, t("You won't need to pair again after closing the browser. Only use this on your own device.")),
+        h("div", { class: "or" }, t("or")),
+        h("details", {}, h("summary", {}, t("Use an existing access token")), tokenForm)))));
     code.focus();
   }
 }

@@ -1,20 +1,21 @@
 import { errorText } from "./api.ts";
 import { h } from "./dom.ts";
 import { TitleEditState, TitleValidationError } from "./title-edit-state.ts";
+import { t } from "./i18n.ts";
 
 /** A heading remains a heading; pointer, keyboard and touch each have an edit entry. */
 export class InlineTitle {
   readonly element = h("div", { class: "inline-title" });
   private state: TitleEditState;
-  private input = h("input", { name: "edit-title", required: true, "aria-label": "标题", autocomplete: "off" });
-  private label = h("button", { type: "button", class: "title-label", title: "双击修改标题，也可按 Enter 或 F2" });
-  private edit = h("button", { type: "button", class: "btn btn-quiet btn-small", "aria-label": "编辑标题", onclick: () => this.begin() }, "编辑");
+  private input = h("input", { name: "edit-title", required: true, "aria-label": t("Title"), autocomplete: "off" });
+  private label = h("button", { type: "button", class: "title-label", title: t("Double-click to rename, or press Enter or F2") });
+  private edit = h("button", { type: "button", class: "btn btn-quiet btn-small", "aria-label": t("Edit title"), onclick: () => this.begin() }, t("Edit"));
   private heading = h("div", { class: "title-display" }, h("h2", {}, this.label), this.edit);
-  private save = h("button", { type: "submit", class: "btn btn-small btn-primary" }, "保存");
-  private cancel = h("button", { type: "button", class: "btn btn-small", onclick: () => this.discard() }, "取消");
+  private save = h("button", { type: "submit", class: "btn btn-small btn-primary" }, t("Save"));
+  private cancel = h("button", { type: "button", class: "btn btn-small", onclick: () => this.discard() }, t("Cancel"));
   private message = h("p", { class: "title-message", role: "alert", hidden: true });
   private form = h("form", { class: "title-form", hidden: true }, this.input,
-    h("div", { class: "button-row" }, this.save, this.cancel, h("span", { class: "field-hint" }, "Enter 保存 · Esc 取消")), this.message);
+    h("div", { class: "button-row" }, this.save, this.cancel, h("span", { class: "field-hint" }, t("Enter to save · Esc to cancel"))), this.message);
   private externalBusy = false;
   constructor(value: string, commit: (title: string) => Promise<string>) {
     this.state = new TitleEditState(value, commit);
@@ -50,6 +51,6 @@ export class InlineTitle {
     this.input.disabled = this.state.saving;
     this.save.disabled = this.cancel.disabled = this.edit.disabled = this.label.disabled = this.externalBusy || this.state.saving;
     this.message.hidden = !this.state.error;
-    this.message.textContent = this.state.error instanceof TitleValidationError ? this.state.error.message : this.state.error ? `${errorText(this.state.error)}。标题草稿已保留。` : "";
+    this.message.textContent = this.state.error instanceof TitleValidationError ? this.state.error.message : this.state.error ? t("{0} Your title draft is kept.", errorText(this.state.error)) : "";
   }
 }

@@ -8,24 +8,25 @@ import { formatTime, newRequestId } from "../commands.ts";
 import { autosize, clear, empty, failure, h, icon, loading, openDialog, toast } from "../dom.ts";
 import { ago } from "../format.ts";
 import { renderMarkdown } from "../utils/markdown.ts";
+import { t, translated } from "../i18n.ts";
 
-const TURN_LABEL: Record<string, string> = { running: "仍在处理", done: "已完成", failed: "没有完成", unknown: "结果不明，请先核查", cancelled: "已取消" };
-const SUGGESTIONS = ["帮我把今天要推进的任务排个优先级", "这周的实验结果应该怎么整理？", "给 rebuttal 列一个提纲"];
+const TURN_LABEL: Record<string, string> = translated({ running: "Still working", done: "Done", failed: "Didn't finish", unknown: "Result unknown — check before retrying", cancelled: "Cancelled" });
+const SUGGESTIONS = ["Help me prioritize what to work on today", "How should I organize this week's experiment results?", "Draft an outline for the rebuttal"];
 
 export class AssistantPane {
   private layout = h("div", { class: "chat" });
   private conversations = h("div", { class: "list-scroll" });
   private scroller = h("div", { class: "chat-scroll" });
-  private messages = h("div", { class: "messages", role: "log", "aria-label": "对话消息" });
-  private text = autosize(h("textarea", { name: "chat-message", rows: "1", placeholder: "问点什么，或一起梳理下一步…", "aria-label": "消息" }));
-  private model = h("input", { name: "chat-model", class: "model-input", placeholder: "默认模型", title: "只对这一轮生效；不改变服务地址或权限", autocomplete: "off" });
-  private send = h("button", { type: "submit", class: "btn btn-primary btn-small", "aria-label": "发送" }, icon("send"), "发送");
-  private stop = h("button", { type: "button", class: "btn btn-small", hidden: true, onclick: () => this.controller?.abort() }, icon("stop"), "停止");
+  private messages = h("div", { class: "messages", role: "log", "aria-label": t("Conversation messages") });
+  private text = autosize(h("textarea", { name: "chat-message", rows: "1", placeholder: t("Ask anything, or think through the next step…"), "aria-label": t("Message") }));
+  private model = h("input", { name: "chat-model", class: "model-input", placeholder: t("Default model"), title: t("Applies to this message only; doesn't change the service or permissions"), autocomplete: "off" });
+  private send = h("button", { type: "submit", class: "btn btn-primary btn-small", "aria-label": t("Send") }, icon("send"), t("Send"));
+  private stop = h("button", { type: "button", class: "btn btn-small", hidden: true, onclick: () => this.controller?.abort() }, icon("stop"), t("Stop"));
   private notice = h("div", { role: "status" });
   private dock: HTMLElement;
   private composer: HTMLFormElement;
-  private segChat = h("button", { type: "button", "aria-pressed": "true", onclick: () => this.switchMode("chat") }, "对话");
-  private segMemory = h("button", { type: "button", "aria-pressed": "false", onclick: () => this.switchMode("memory") }, "记忆");
+  private segChat = h("button", { type: "button", "aria-pressed": "true", onclick: () => this.switchMode("chat") }, t("Chat"));
+  private segMemory = h("button", { type: "button", "aria-pressed": "false", onclick: () => this.switchMode("memory") }, t("Memory"));
   private current?: string;
   private controller?: AbortController;
   private sending = false;
@@ -37,23 +38,23 @@ export class AssistantPane {
 
   constructor(private root: HTMLElement, private client: Client, intent?: string) {
     this.composer = h("form", { class: "composer" }, this.text,
-      h("div", { class: "composer-foot" }, this.model, h("span", { class: "hint hide-narrow" }, "↵ 发送 · ⇧↵ 换行"), this.stop, this.send));
+      h("div", { class: "composer-foot" }, this.model, h("span", { class: "hint hide-narrow" }, t("↵ send · ⇧↵ new line")), this.stop, this.send));
     this.composer.addEventListener("submit", event => { event.preventDefault(); void this.submit(); });
     this.text.addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); this.composer.requestSubmit(); } });
     this.dock = h("div", { class: "chat-dock" }, this.notice, this.composer);
     this.scroller.append(this.messages);
     this.layout.append(
       h("aside", { class: "chat-side" },
-        h("div", { class: "list-tools" }, h("button", { type: "button", class: "btn", onclick: () => this.newConversation() }, icon("plus"), "新对话")),
+        h("div", { class: "list-tools" }, h("button", { type: "button", class: "btn", onclick: () => this.newConversation() }, icon("plus"), t("New chat"))),
         this.conversations),
       h("section", { class: "chat-main" }, this.scroller, this.dock));
     root.append(
       h("header", { class: "bar" },
-        h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": "对话列表", onclick: () => this.layout.classList.toggle("show-side") }, icon("assistant")),
-        h("h1", { class: "bar-title" }, "助手"),
-        h("div", { class: "segmented", role: "group", "aria-label": "视图" }, this.segChat, this.segMemory),
+        h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": t("Conversations"), onclick: () => this.layout.classList.toggle("show-side") }, icon("assistant")),
+        h("h1", { class: "bar-title" }, t("Assistant")),
+        h("div", { class: "segmented", role: "group", "aria-label": t("View") }, this.segChat, this.segMemory),
         h("span", { class: "bar-spacer" }),
-        h("button", { type: "button", class: "icon-btn", title: "刷新", "aria-label": "刷新", onclick: () => void this.refresh() }, icon("refresh"))),
+        h("button", { type: "button", class: "icon-btn", title: t("Refresh"), "aria-label": t("Refresh"), onclick: () => void this.refresh() }, icon("refresh"))),
       this.layout);
     this.showWelcome();
     void this.loadConversations();
@@ -65,8 +66,8 @@ export class AssistantPane {
   intent(name: string): void { if (name === "new") this.newConversation(); }
   get dirty(): boolean { return this.mode === "chat" ? !!this.text.value.trim() : !!this.messages.querySelector<HTMLTextAreaElement>("textarea[name=memory-content]")?.value.trim(); }
   canLeave(): boolean {
-    return this.sending ? confirm("助手仍在回复。离开会停止本页接收，之后可以在历史里查看已保存的内容。确定离开吗？")
-      : !this.dirty || confirm("有尚未发送的草稿，离开会丢弃它。确定继续吗？");
+    return this.sending ? confirm(t("The assistant is still replying. Leaving stops this page from receiving it; you can find what was saved in the history later. Leave anyway?"))
+      : !this.dirty || confirm(t("You have an unsent draft that will be discarded. Continue?"));
   }
 
   private setBusy(busy: boolean): void {
@@ -81,9 +82,9 @@ export class AssistantPane {
   private showWelcome(): void {
     clear(this.messages, h("div", { class: "welcome" },
       h("span", { class: "brand-mark", "aria-hidden": "true" }),
-      h("h2", {}, "想一起理清什么？"),
-      h("p", {}, "助手使用 Hub 上配置的模型。它看不到你的任务和私密笔记，除非之后明确开放相应工具。"),
-      h("div", { class: "suggestions" }, ...SUGGESTIONS.map(text => h("button", { type: "button", class: "suggestion", onclick: () => { this.text.value = text; this.text.dispatchEvent(new Event("input")); this.text.focus(); } }, text)))));
+      h("h2", {}, t("What would you like to think through?")),
+      h("p", {}, t("The assistant uses the model configured on your Hub. It can't see your tasks or private notes unless you explicitly give it those tools.")),
+      h("div", { class: "suggestions" }, ...SUGGESTIONS.map(key => t(key)).map(text => h("button", { type: "button", class: "suggestion", onclick: () => { this.text.value = text; this.text.dispatchEvent(new Event("input")); this.text.focus(); } }, text)))));
   }
 
   private newConversation(): void {
@@ -99,7 +100,7 @@ export class AssistantPane {
 
   private switchMode(mode: "chat" | "memory"): void {
     if (this.sending || mode === this.mode) return;
-    if (this.mode === "memory" && this.dirty && !confirm("有尚未保存的记忆草稿，切换会丢弃它。确定继续吗？")) return;
+    if (this.mode === "memory" && this.dirty && !confirm(t("You have an unsaved memory draft that will be discarded. Continue?"))) return;
     this.mode = mode;
     this.segChat.setAttribute("aria-pressed", String(mode === "chat"));
     this.segMemory.setAttribute("aria-pressed", String(mode === "memory"));
@@ -120,7 +121,7 @@ export class AssistantPane {
       if (!this.active) return [];
       clear(this.conversations, ...conversations.map(c => h("button", { type: "button", class: "convo", "data-id": c.id, disabled: this.sending, onclick: () => void this.openConversation(c.id) },
         h("strong", {}, c.title), h("span", { title: formatTime(c.updated) }, ago(c.updated)))),
-        !conversations.length && h("p", { class: "state" }, "还没有对话"));
+        !conversations.length && h("p", { class: "state" }, t("No conversations yet")));
       this.markCurrent();
       return conversations;
     } catch (cause) {
@@ -157,7 +158,7 @@ export class AssistantPane {
       if (message.role === "user") return this.userBubble(message.content);
       const content = h("div", { class: "markdown" });
       content.innerHTML = renderMarkdown(message.content);
-      return message.role === "assistant" ? this.assistantBlock(content) : h("div", { class: "msg-tool" }, icon("terminal"), " 工具结果", content);
+      return message.role === "assistant" ? this.assistantBlock(content) : h("div", { class: "msg-tool" }, icon("terminal"), t(" Tool result"), content);
     }));
     const turn = detail.turns.at(-1);
     this.serverRunning = turn?.status === "running";
@@ -171,7 +172,7 @@ export class AssistantPane {
   private async refresh(): Promise<void> {
     if (this.sending) return;
     if (this.mode === "memory") {
-      if (this.dirty && !confirm("刷新会丢弃尚未保存的记忆草稿，确定继续吗？")) return;
+      if (this.dirty && !confirm(t("Refreshing discards your unsaved memory draft. Continue?"))) return;
       await this.loadMemories();
     } else { await this.loadConversations(); if (this.current) await this.openConversation(this.current); }
   }
@@ -197,14 +198,14 @@ export class AssistantPane {
       for await (const event of this.client.assistantEvents(request, this.controller.signal)) {
         if (!this.active) return;
         if (event.type === "token") content.textContent = (content.textContent ?? "") + event.delta;
-        else if (event.type === "tool") tools.textContent = `${event.tool.name}：${event.tool.status === "succeeded" ? "已完成" : event.tool.status === "unknown" ? "结果不明" : event.tool.status === "failed" ? "没有完成" : "处理中"}`;
+        else if (event.type === "tool") tools.textContent = t("{0}: {1}", event.tool.name, event.tool.status === "succeeded" ? t("Done") : event.tool.status === "unknown" ? t("Unknown result") : event.tool.status === "failed" ? t("Didn't finish") : t("Working"));
         else if (event.type === "result") { complete = true; this.current = event.messages[0]?.conversation ?? this.current; }
         else clear(this.notice, failure(event.error));
         const nearBottom = this.scroller.scrollHeight - this.scroller.scrollTop - this.scroller.clientHeight < 120;
         if (nearBottom) this.scroller.scrollTop = this.scroller.scrollHeight;
       }
     } catch (cause) {
-      if (this.active) clear(this.notice, h("div", { class: "notice" }, icon("alert"), h("span", {}, this.controller.signal.aborted ? "已停止接收，正在核对已保存的记录…" : `${errorText(cause)}。正在核对已保存的记录…`)));
+      if (this.active) clear(this.notice, h("div", { class: "notice" }, icon("alert"), h("span", {}, this.controller.signal.aborted ? t("Stopped receiving. Checking what was saved…") : t("{0} Checking what was saved…", errorText(cause)))));
     } finally {
       content.classList.remove("streaming");
       if (this.active) {
@@ -233,16 +234,16 @@ export class AssistantPane {
       if (detail && detail.turns.some(turn => turn.request_id === request.request_id)) {
         this.renderDetail(detail);
         const turn = detail.turns.find(value => value.request_id === request.request_id)!;
-        if (turn.status === "running") clear(this.notice, h("div", { class: "notice" }, icon("alert"), h("span", {}, "服务端仍在处理，可以稍后刷新查看。没有重新提交这次请求。")));
+        if (turn.status === "running") clear(this.notice, h("div", { class: "notice" }, icon("alert"), h("span", {}, t("The Hub is still working on it. Refresh later to see the result. The request was not sent again."))));
         else this.uncertain = undefined;
       } else if (!complete) {
         this.text.value = request.message; this.text.dispatchEvent(new Event("input"));
-        clear(this.notice, failure("没有找到这次消息的保存记录。草稿已放回输入框，请先核对对话列表，再决定是否重发。"));
+        clear(this.notice, failure(t("This message wasn't found in the saved history. Your draft is back in the box — check the conversation list before sending again.")));
       }
     } catch {
       if (this.active) {
         this.text.value = request.message; this.text.dispatchEvent(new Event("input"));
-        clear(this.notice, failure("暂时无法核对保存记录。草稿已放回输入框；恢复连接后先查看历史，不会自动重发。"));
+        clear(this.notice, failure(t("Couldn't check the saved history. Your draft is back in the box; once you're reconnected, check the history first. Nothing is resent automatically.")));
       }
     }
   }
@@ -256,10 +257,10 @@ export class AssistantPane {
     try {
       const memories = await this.client.memories();
       if (!this.active || generation !== this.generation || this.mode !== "memory") return;
-      const text = autosize(h("textarea", { name: "memory-content", rows: "2", placeholder: "例如：先给结论，再解释理由；回答用中文。", "aria-label": "新记忆" }));
+      const text = autosize(h("textarea", { name: "memory-content", rows: "2", placeholder: t("For example: lead with the conclusion, then explain; answer in English."), "aria-label": t("New memory") }));
       const message = h("div", { role: "alert" });
-      const save = h("button", { type: "submit", class: "btn btn-primary btn-small" }, "保存记忆");
-      const form = h("form", { class: "composer" }, text, h("div", { class: "composer-foot" }, h("span", { class: "hint" }, "只保存你在这里明确写下的内容"), save));
+      const save = h("button", { type: "submit", class: "btn btn-primary btn-small" }, t("Save memory"));
+      const form = h("form", { class: "composer" }, text, h("div", { class: "composer-foot" }, h("span", { class: "hint" }, t("Only what you write here is saved")), save));
       let requestId = newRequestId("memory"), previous = "";
       form.addEventListener("submit", async event => {
         event.preventDefault();
@@ -269,20 +270,20 @@ export class AssistantPane {
         previous = text.value;
         try {
           await this.client.memoryCommand({ request_id: requestId, operation: { op: "assistant.memory.remember", args: { content: text.value } } });
-          toast("已保存记忆");
+          toast(t("Memory saved"));
           if (this.active) void this.loadMemories();
-        } catch (cause) { clear(message, failure(`${errorText(cause)}。输入已保留，请先核对列表。`)); }
+        } catch (cause) { clear(message, failure(t("{0} Your input is kept; check the list first.", errorText(cause)))); }
         finally { save.disabled = false; }
       });
       clear(this.messages, h("div", { class: "memory-page" },
-        h("h2", {}, "助手会记住的事"),
-        h("p", {}, "不会从对话里自动提取。遗忘后不再使用，已有对话记录仍独立保留。"),
+        h("h2", {}, t("What the assistant remembers")),
+        h("p", {}, t("Nothing is extracted from chats automatically. Forgotten items are no longer used; existing conversations are kept separately.")),
         form, message,
         memories.length
           ? h("div", { class: "memory-list" }, ...memories.map(memory => h("article", { class: "memory-item" }, icon("memory"), h("p", {}, memory.content),
               h("span", { title: formatTime(memory.created) }, ago(memory.created)),
-              h("button", { type: "button", class: "btn btn-quiet btn-small", onclick: () => this.forget(memory) }, "遗忘"))))
-          : empty("还没有记忆。写下你希望助手一直遵循的偏好或事实。")));
+              h("button", { type: "button", class: "btn btn-quiet btn-small", onclick: () => this.forget(memory) }, t("Forget")))))
+          : empty(t("No memories yet. Write down preferences or facts you want the assistant to keep in mind."))));
     } catch (cause) {
       if (this.active && generation === this.generation) clear(this.messages, failure(errorText(cause), () => this.loadMemories()));
     }
@@ -294,10 +295,10 @@ export class AssistantPane {
       button.disabled = true;
       try {
         await this.client.memoryCommand({ request_id: newRequestId("forget"), operation: { op: "assistant.memory.forget", args: { memory: memory.id } } });
-        dialog.close(); toast("已遗忘");
+        dialog.close(); toast(t("Forgotten"));
         if (this.active) void this.loadMemories();
       } catch (cause) { clear(message, failure(errorText(cause))); button.disabled = false; }
-    } }, "遗忘");
-    const dialog = openDialog("遗忘这条记忆？", h("div", { class: "form-stack" }, h("p", {}, memory.content), message), [button]);
+    } }, t("Forget"));
+    const dialog = openDialog(t("Forget this memory?"), h("div", { class: "form-stack" }, h("p", {}, memory.content), message), [button]);
   }
 }

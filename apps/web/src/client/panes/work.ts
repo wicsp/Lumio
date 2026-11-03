@@ -12,6 +12,7 @@ import { PROJECT_LABELS, TASK_LABELS } from "../labels.ts";
 import { listKeys, markSelected } from "../list-keys.ts";
 import type { Navigate } from "../navigation.ts";
 import { WorkEditor } from "./work-editor.ts";
+import { t } from "../i18n.ts";
 
 type Mode = "tasks" | "projects";
 const TASK_ORDER = ["active", "waiting", "todo", "paused", "done", "cancelled"] as const;
@@ -23,13 +24,13 @@ export class WorkPane {
   private split = h("div", { class: "split" });
   private list = h("div", { class: "list-scroll" });
   private detail = h("section", { class: "detail-pane", "aria-live": "polite" });
-  private query = h("input", { type: "search", name: "work-search", placeholder: "搜索任务", autocomplete: "off" });
+  private query = h("input", { type: "search", name: "work-search", placeholder: t("Search tasks"), autocomplete: "off" });
   private statusFilter = "";
   private projectFilter = "";
   private statusButton = h("button", { type: "button", class: "filter-btn" });
   private projectButton = h("button", { type: "button", class: "filter-btn" });
-  private segTasks = h("button", { type: "button", "aria-pressed": "true", onclick: () => this.switchMode("tasks") }, "任务");
-  private segProjects = h("button", { type: "button", "aria-pressed": "false", onclick: () => this.switchMode("projects") }, "项目");
+  private segTasks = h("button", { type: "button", "aria-pressed": "true", onclick: () => this.switchMode("tasks") }, t("Tasks"));
+  private segProjects = h("button", { type: "button", "aria-pressed": "false", onclick: () => this.switchMode("projects") }, t("Projects"));
   private projects: WorkProject[] = [];
   private tasks: WorkTask[] = [];
   private folded = new Set(FOLDED_BY_DEFAULT);
@@ -47,11 +48,11 @@ export class WorkPane {
     this.query.addEventListener("keydown", event => { if (event.key === "Escape" && this.query.value) { this.query.value = ""; void this.load(); } });
     root.append(
       h("header", { class: "bar" },
-        h("h1", { class: "bar-title" }, "项目与任务"),
-        h("div", { class: "segmented", role: "group", "aria-label": "视图" }, this.segTasks, this.segProjects),
+        h("h1", { class: "bar-title" }, t("Projects & tasks")),
+        h("div", { class: "segmented", role: "group", "aria-label": t("View") }, this.segTasks, this.segProjects),
         h("span", { class: "bar-spacer" }),
-        h("button", { type: "button", class: "icon-btn", title: "刷新", "aria-label": "刷新", onclick: (event: Event) => { spin(event); void this.load(); if (this.selected) void this.open(this.selected, true); } }, icon("refresh")),
-        h("button", { type: "button", class: "btn btn-primary", title: "新建（C）", onclick: () => this.create() }, icon("plus"), h("span", { class: "hide-narrow" }, "新建"))),
+        h("button", { type: "button", class: "icon-btn", title: t("Refresh"), "aria-label": t("Refresh"), onclick: (event: Event) => { spin(event); void this.load(); if (this.selected) void this.open(this.selected, true); } }, icon("refresh")),
+        h("button", { type: "button", class: "btn btn-primary", title: t("New (C)"), onclick: () => this.create() }, icon("plus"), h("span", { class: "hide-narrow" }, t("New")))),
       this.split);
     this.split.append(
       h("div", { class: "list-pane" },
@@ -84,33 +85,33 @@ export class WorkPane {
     this.mode = mode; this.statusFilter = ""; this.projectFilter = "";
     this.segTasks.setAttribute("aria-pressed", String(mode === "tasks"));
     this.segProjects.setAttribute("aria-pressed", String(mode === "projects"));
-    this.query.placeholder = mode === "tasks" ? "搜索任务" : "搜索项目";
+    this.query.placeholder = mode === "tasks" ? t("Search tasks") : t("Search projects");
     this.renderFilters(); this.showPlaceholder();
     void this.load().then(() => { if (thenOpen && this.active) void this.open(thenOpen); });
   }
 
   private renderFilters(): void {
     const labels = this.mode === "tasks" ? TASK_LABELS : PROJECT_LABELS;
-    clear(this.statusButton, this.statusFilter ? statusIcon(this.statusFilter) : icon("down"), this.statusFilter ? labels[this.statusFilter]! : "状态");
+    clear(this.statusButton, this.statusFilter ? statusIcon(this.statusFilter) : icon("down"), this.statusFilter ? labels[this.statusFilter]! : t("Status"));
     this.statusButton.classList.toggle("is-set", !!this.statusFilter);
     this.projectButton.hidden = this.mode !== "tasks";
     const project = this.projects.find(p => p.id === this.projectFilter);
-    clear(this.projectButton, icon("folder"), project?.title ?? "项目");
+    clear(this.projectButton, icon("folder"), project?.title ?? t("Projects"));
     this.projectButton.classList.toggle("is-set", !!project);
   }
 
   private pickStatusFilter(): void {
     const statuses = this.mode === "tasks" ? TASK_STATUSES : PROJECT_STATUSES;
     const labels = this.mode === "tasks" ? TASK_LABELS : PROJECT_LABELS;
-    openMenu(this.statusButton, [{ value: "", label: "全部状态", selected: !this.statusFilter },
+    openMenu(this.statusButton, [{ value: "", label: t("All statuses"), selected: !this.statusFilter },
       ...statuses.map(s => ({ value: s, label: labels[s]!, icon: statusIcon(s), selected: this.statusFilter === s }))],
       value => { this.statusFilter = value; this.renderFilters(); void this.load(); });
   }
 
   private pickProjectFilter(): void {
-    openMenu(this.projectButton, [{ value: "", label: "全部项目", selected: !this.projectFilter },
+    openMenu(this.projectButton, [{ value: "", label: t("All projects"), selected: !this.projectFilter },
       ...this.projects.map(p => ({ value: p.id, label: p.title, icon: icon("folder"), selected: this.projectFilter === p.id }))],
-      value => { this.projectFilter = value; this.renderFilters(); void this.load(); }, { filter: this.projects.length > 6, placeholder: "查找项目" });
+      value => { this.projectFilter = value; this.renderFilters(); void this.load(); }, { filter: this.projects.length > 6, placeholder: t("Find a project") });
   }
 
   private async load(): Promise<void> {
@@ -127,21 +128,21 @@ export class WorkPane {
         this.tasks = tasks;
         const visible = projects.filter(p => (!this.statusFilter || p.status === this.statusFilter) && (!q || p.title.toLowerCase().includes(q.toLowerCase())));
         this.renderGroups(PROJECT_ORDER, visible, p => this.projectRow(p), PROJECT_LABELS,
-          q || this.statusFilter ? "没有匹配的项目" : "还没有项目。项目用来收拢一个阶段性目标下的任务。");
+          q || this.statusFilter ? t("No matching projects") : t("No projects yet. A project groups the tasks behind one goal."));
         return;
       }
       const tasks = await this.client.workTasks({ status: this.statusFilter || undefined, project: this.projectFilter || undefined, query: q || undefined });
       if (generation !== this.listGeneration || !this.active) return;
       this.tasks = tasks;
       this.renderGroups(TASK_ORDER, tasks, t => this.taskRow(t), TASK_LABELS,
-        q || this.statusFilter || this.projectFilter ? "没有匹配的任务，换个关键词或清除筛选。" : "还没有任务。按 C 新建第一项。");
+        q || this.statusFilter || this.projectFilter ? t("No matching tasks. Try another search or clear the filters.") : t("No tasks yet. Press C to create the first one."));
     } catch (error) {
       if (generation === this.listGeneration && this.active) clear(this.list, failure(errorText(error), () => this.load()));
     }
   }
 
   private renderGroups<T extends { status: string }>(order: readonly string[], items: T[], row: (item: T) => HTMLElement, labels: Record<string, string>, emptyText: string): void {
-    if (!items.length) { clear(this.list, empty(emptyText, this.mode === "tasks" ? { label: "新建任务", run: () => this.create() } : { label: "新建项目", run: () => this.create() })); return; }
+    if (!items.length) { clear(this.list, empty(emptyText, this.mode === "tasks" ? { label: t("New task"), run: () => this.create() } : { label: t("New project"), run: () => this.create() })); return; }
     const groups = order.map(status => [status, items.filter(i => i.status === status)] as const).filter(([, list]) => list.length);
     clear(this.list, ...groups.map(([status, list]) => {
       const group = h("section", { class: `group${this.folded.has(status) && !this.statusFilter ? " collapsed" : ""}` });
@@ -159,16 +160,16 @@ export class WorkPane {
   private taskRow(task: WorkTask): HTMLElement {
     const due = dueLabel(task.due);
     const project = !this.projectFilter && task.project ? this.projects.find(p => p.id === task.project)?.title : undefined;
-    const statusBtn = h("button", { type: "button", class: "status-btn", title: `状态：${TASK_LABELS[task.status]}`, "aria-label": `修改状态（当前 ${TASK_LABELS[task.status]}）`,
+    const statusBtn = h("button", { type: "button", class: "status-btn", title: t("Status: {0}", TASK_LABELS[task.status]), "aria-label": t("Change status (currently {0})", TASK_LABELS[task.status]),
       onclick: (event: Event) => { event.stopPropagation(); this.quickStatus(task, statusBtn); } }, statusIcon(task.status));
     const sub = [project && h("span", { class: "project-chip" }, icon("folder", "icon"), project),
-      task.assignee !== "human" && h("span", { class: "who-chip", title: `负责人：${task.assignee}` }, icon("bot"), task.assignee)].filter(Boolean) as HTMLElement[];
+      task.assignee !== "human" && h("span", { class: "who-chip", title: t("Assignee: {0}", task.assignee) }, icon("bot"), task.assignee)].filter(Boolean) as HTMLElement[];
     return h("div", { class: `row ${task.status}`, "data-id": task.id, role: "button", tabindex: "0",
       onclick: () => void this.open(task.id), onkeydown: (event: Event) => { if ((event as KeyboardEvent).key === "Enter" && event.target === event.currentTarget) void this.open(task.id); } },
       statusBtn,
       h("span", { class: "row-main" }, h("span", { class: "row-title" }, task.title), sub.length ? h("span", { class: "row-sub" }, ...sub) : null),
       h("span", { class: "row-meta" },
-        due && task.status !== "done" && task.status !== "cancelled" && h("span", { class: `due${due.overdue ? " overdue" : due.soon ? " soon" : ""}`, title: "截止" }, due.text)));
+        due && task.status !== "done" && task.status !== "cancelled" && h("span", { class: `due${due.overdue ? " overdue" : due.soon ? " soon" : ""}`, title: t("Due") }, due.text)));
   }
 
   private projectRow(project: WorkProject): HTMLElement {
@@ -180,7 +181,7 @@ export class WorkPane {
       onkeydown: (event: Event) => { if ((event as KeyboardEvent).key === "Enter") void this.open(project.id); } },
       statusIcon(project.status),
       h("span", { class: "row-main" }, h("span", { class: "row-title" }, project.title), project.goal && h("span", { class: "row-sub" }, project.goal)),
-      h("span", { class: "row-meta" }, related.length ? h("span", { class: "progress", title: `${done} / ${related.length} 项完成` }, fill) : null, related.length ? `${done}/${related.length}` : "暂无任务"));
+      h("span", { class: "row-meta" }, related.length ? h("span", { class: "progress", title: t("{0} of {1} done", done, related.length) }, fill) : null, related.length ? `${done}/${related.length}` : t("No tasks")));
   }
 
   private quickStatus(task: WorkTask, anchor: HTMLElement): void {
@@ -189,12 +190,12 @@ export class WorkPane {
       if (!request) return;
       try {
         await this.client.workCommand(request);
-        toast(`已改为「${TASK_LABELS[value]}」`);
+        toast(t("Changed to “{0}”", TASK_LABELS[value]));
         this.changed();
         await this.load();
         if (this.selected === task.id && !this.editor?.dirty) void this.open(task.id, true);
       } catch (cause) {
-        toast(isConflict(cause) ? "任务已在别处修改，已刷新列表" : errorText(cause), "error");
+        toast(isConflict(cause) ? t("The task changed elsewhere; the list was refreshed") : errorText(cause), "error");
         void this.load();
       }
     });
@@ -204,7 +205,7 @@ export class WorkPane {
 
   private showPlaceholder(): void {
     this.split.classList.remove("has-detail");
-    clear(this.detail, placeholder(this.mode === "tasks" ? "work" : "folder", this.mode === "tasks" ? "选择一项任务查看详情。J / K 可以上下切换。" : "选择一个项目查看目标与进展。"));
+    clear(this.detail, placeholder(this.mode === "tasks" ? "work" : "folder", this.mode === "tasks" ? t("Select a task to see details. Use J / K to move between tasks.") : t("Select a project to see its goal and progress.")));
   }
 
   async open(id: string, quiet = false): Promise<void> {
@@ -238,18 +239,18 @@ export class WorkPane {
 
   private create(): void {
     const isTask = this.mode === "tasks";
-    const title = h("input", { name: "title", required: true, placeholder: isTask ? "下一步要完成什么？" : "项目名称", autocomplete: "off" });
-    const description = autosize(h("textarea", { name: "description", rows: "4", placeholder: isTask ? "背景、做法或完成标准（可选，支持 Markdown）" : "项目背景（可选，支持 Markdown）" }));
-    const goal = h("input", { name: "goal", placeholder: "这一阶段要达成什么？", autocomplete: "off" });
-    const project = select("project", [["", "不归属项目"], ...this.projects.filter(p => p.status !== "done").map(p => [p.id, p.title] as [string, string])], this.projectFilter);
+    const title = h("input", { name: "title", required: true, placeholder: isTask ? t("What needs to get done?") : t("Project name"), autocomplete: "off" });
+    const description = autosize(h("textarea", { name: "description", rows: "4", placeholder: isTask ? t("Background, approach or definition of done (optional, Markdown)") : t("Project background (optional, Markdown)") }));
+    const goal = h("input", { name: "goal", placeholder: t("What should this phase achieve?"), autocomplete: "off" });
+    const project = select("project", [["", t("No project")], ...this.projects.filter(p => p.status !== "done").map(p => [p.id, p.title] as [string, string])], this.projectFilter);
     const error = h("div", { class: "form-message", role: "alert" });
     const formId = `create-${newRequestId()}`;
     const form = h("form", { id: formId, class: "form-stack" },
-      field(isTask ? "标题" : "名称", title),
-      isTask ? field("所属项目", project) : field("目标", goal),
-      field("说明", description), error);
-    const save = h("button", { type: "submit", form: formId, class: "btn btn-primary" }, isTask ? "创建任务" : "创建项目", h("kbd", {}, "⌘↵"));
-    const dialog = openDialog(isTask ? "新建任务" : "新建项目", form, [save]);
+      field(isTask ? t("Title") : t("Name"), title),
+      isTask ? field(t("Project"), project) : field(t("Goal"), goal),
+      field(t("Description"), description), error);
+    const save = h("button", { type: "submit", form: formId, class: "btn btn-primary" }, isTask ? t("Create task") : t("Create project"), h("kbd", {}, "⌘↵"));
+    const dialog = openDialog(isTask ? t("New task") : t("New project"), form, [save]);
     form.addEventListener("keydown", event => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); form.requestSubmit(); } });
     let pending = false, prior = "", requestId = newRequestId();
     form.addEventListener("submit", async event => {
@@ -267,11 +268,11 @@ export class WorkPane {
         const result = await this.client.workCommand(request);
         if (!this.active) return;
         dialog.dataset.dirty = "false"; dialog.close();
-        toast(isTask ? "已创建任务" : "已创建项目");
+        toast(isTask ? t("Task created") : t("Project created"));
         this.changed();
         if (result.kind === "task" || result.kind === "project") { await this.load(); await this.open(result.kind === "task" ? result.task.id : result.project.id); }
       } catch (cause) {
-        clear(error, failure(`${errorText(cause)}。内容已保留；如果是连接中断，请先刷新列表核对是否已创建。`));
+        clear(error, failure(t("{0} Your input is kept; if the connection dropped, refresh the list to check whether it was created.", errorText(cause))));
       } finally { pending = false; save.disabled = false; }
     });
     title.focus();

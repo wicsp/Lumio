@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { WorkCommandRequest, type WorkTask } from "@lumio/schema";
 import { workPatchCommand } from "../src/client/commands.ts";
 import { dueLabel, ago, isoFromDateInput, dateInputValue } from "../src/client/format.ts";
+import { setLang } from "../src/client/i18n.ts";
 
 const task: WorkTask = { schema_version: 2, type: "task", id: "task_01JABCDEFGHJKMNPQRSTVWXYZ0", title: "T", description: "", revision: 4, status: "todo",
   assignee: "human", created: "2026-11-01T00:00:00+08:00", updated: "2026-11-01T00:00:00+08:00", tags: [], dependencies: [], references: [] };
@@ -25,14 +26,24 @@ describe("workPatchCommand", () => {
 describe("format", () => {
   const now = new Date(2026, 10, 2, 12, 0, 0);
   test("due labels", () => {
-    expect(dueLabel(new Date(2026, 10, 2, 18).toISOString(), now)).toMatchObject({ text: "今天", overdue: false, soon: true });
-    expect(dueLabel(new Date(2026, 10, 3, 9).toISOString(), now)?.text).toBe("明天");
-    expect(dueLabel(new Date(2026, 10, 1, 9).toISOString(), now)).toMatchObject({ text: "昨天", overdue: true });
+    setLang("en", false);
+    expect(dueLabel(new Date(2026, 10, 2, 18).toISOString(), now)).toMatchObject({ text: "today", overdue: false, soon: true });
+    expect(dueLabel(new Date(2026, 10, 3, 9).toISOString(), now)?.text).toBe("tomorrow");
+    expect(dueLabel(new Date(2026, 10, 1, 9).toISOString(), now)).toMatchObject({ text: "yesterday", overdue: true });
     expect(dueLabel(undefined, now)).toBeUndefined();
+    setLang("zh", false);
+    expect(dueLabel(new Date(2026, 10, 2, 18).toISOString(), now)?.text).toBe("今天");
+    expect(dueLabel(new Date(2026, 10, 3, 9).toISOString(), now)?.text).toBe("明天");
+    setLang("en", false);
   });
   test("relative time", () => {
+    setLang("en", false);
+    expect(ago(new Date(now.getTime() - 30_000).toISOString(), now)).toBe("just now");
+    expect(ago(new Date(now.getTime() - 5 * 60_000).toISOString(), now)).toBe("5 min ago");
+    setLang("zh", false);
     expect(ago(new Date(now.getTime() - 30_000).toISOString(), now)).toBe("刚刚");
     expect(ago(new Date(now.getTime() - 5 * 60_000).toISOString(), now)).toBe("5 分钟前");
+    setLang("en", false);
   });
   test("date input round trip keeps the local day and an offset", () => {
     const iso = isoFromDateInput("2026-11-09")!;
