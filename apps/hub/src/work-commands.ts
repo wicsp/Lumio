@@ -31,14 +31,14 @@ export class WorkCommands {
         this.store.audit(identity, operation.op, decision.result, proposal.id, "pending_approval");
         return WorkCommandResult.parse({ kind: "proposal", proposal: proposal.id });
       }
-      const value = this.work.command(request, identity.actor.id);
+      const value = this.work.command(request, identity.actor.id, undefined, { role: identity.actor.role, job: identity.job });
       this.store.audit(identity, operation.op, "allow", undefined, "applied");
       return value;
     })();
   }
   /** Only the human proposal-decision route calls this, within the proposal-decision transaction. */
   approved(operation: WorkCommandProposal, author: Identity, proposal: string, approvedBy: string): WorkCommandResult {
-    const value = this.work.command(operation.args, author.actor.id, { by: approvedBy, proposal });
+    const value = this.work.command(operation.args, author.actor.id, { by: approvedBy, proposal }, { role: author.actor.role });
     this.store.audit(author, JSON.stringify({ ...operation, approved_by: approvedBy }), "allow", proposal, "applied");
     return value;
   }

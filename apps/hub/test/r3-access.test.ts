@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AgentInfo, AgentTokenIssued, Job, RuntimeSync, WorkCommandResult } from "@lumio/schema";
+import { AgentInfo, AgentTokenIssued, Job, RuntimeSync, WorkCommandResult, WorkTaskDetail } from "@lumio/schema";
 import { startHub } from "../src/server.ts";
 import { readConfig } from "../src/config.ts";
 import { HubStore } from "../src/store.ts";
@@ -114,4 +114,67 @@ test("synthetic runtime agent queries and comments with only its round credentia
   expect(await readFile(result!.log!, "utf8")).toContain("[REDACTED]");
   const actor = hub.store.actors().find(value => value.name === "pi@server")!;
   expect(hub.store.agents().find(value => value.actor.id === actor.id)?.tokens).toEqual([]);
+});
+
+
+for (const to of ["human", "external"] as const) test(`real JobAccess can hand its running round to ${to} and still deliver its report`, async () => {
+  const { task, job } = await round();
+  const access = (await delivery()).access!.find(value => value.job === job.spec.id)!;
+  await ack(job);
+  await api("/v1/runtime/sync", { ...heartbeat, running: [job.spec.id] }, runtime, true);
+  expect(hub.store.executionStore.get(job.spec.id)!.status).toBe("running");
+  const current = hub.modules.work.task(task.id);
+  const handed = await command("work.task.hand", { task: task.id, expected_revision: current.revision, to,
+    ...(to === "external" ? { note: "Waiting for synthetic CI" } : {}) }, access.token);
+  if (handed.kind !== "task") throw new Error("Expected task");
+  expect(handed.task.turn).toMatchObject({ holder: to, reason: to === "human" ? "todo" : "waiting" });
+  expect(hub.store.executionStore.cancelRequested(job.spec.id)).toBe(false);
+  expect(hub.store.executionStore.get(job.spec.id)!.status).toBe("running");
+  expect(hub.modules.work.detail(task.id).turns.at(-1)!.by).toBe(access.actor);
+  const sync = RuntimeSync.parse(await (await api("/v1/runtime/sync", { ...heartbeat, running: [job.spec.id] }, runtime, true)).json());
+  expect(sync.cancel).not.toContain(job.spec.id);
+  // The executing agent can finish reporting through its own credential after changing turn.
+  await command("work.task.comment", { task: task.id, body: "Synthetic post-handoff progress" }, access.token);
+  expect((await api("/v1/runtime/results", { job: job.spec.id, lease: job.spec.lease, status: "done", finished: now.toISOString(), report: "Synthetic final handoff report" }, runtime)).status).toBe(200);
+  const detail = WorkTaskDetail.parse(hub.modules.work.detail(task.id));
+  expect(detail.task).toEqual(handed.task); expect(detail.turns).toHaveLength(3);
+  expect(detail.executions[0]!.applied).toBe(true);
+  expect(detail.comments.filter(value => value.body.includes("Synthetic final handoff report"))).toHaveLength(1);
+  expect((await api("/v2/work/tasks", undefined, access.token)).status).toBe(401);
+});
+
+test("foreign agents and other JobAccess tokens for the same actor cannot take over an executing round", async () => {
+  const first = await round(), access = (await delivery()).access!.find(value => value.job === first.job.spec.id)!;
+  await ack(first.job);
+  const second = await round(), otherAccess = hub.store.issueJobAccess(second.job.spec, now)!;
+  const sameActorManual = hub.store.issueAgentToken("pi@server");
+  expect(otherAccess.actor).toBe(access.actor); expect(sameActorManual.actor.id).toBe(access.actor);
+  const reject = async () => {
+    const before = hub.modules.work.detail(first.task.id);
+    for (const token of [manual, sameActorManual.token, otherAccess.token]) {
+      expect((await api("/v2/work/tasks", undefined, token)).status).toBe(200);
+      const response = await api("/v2/work/commands", { request_id: `synthetic-other-hand-${++seq}`, operation: { op: "work.task.hand", args: {
+        task: first.task.id, expected_revision: before.task.revision, to: "human" } } }, token);
+      expect(response.status).toBe(409); expect(await response.json()).toMatchObject({ error: { code: "CONFLICT" } });
+      expect(hub.modules.work.detail(first.task.id)).toEqual(before);
+      expect(hub.store.executionStore.cancelRequested(first.job.spec.id)).toBe(false);
+    }
+  };
+  await reject();
+  const current = hub.modules.work.task(first.task.id);
+  await command("work.task.hand", { task: current.id, expected_revision: current.revision, to: "external", note: "Synthetic CI" }, access.token);
+  // The round is still pending even though turn is already external.
+  await reject();
+});
+
+for (const to of ["human", "external", "nobody"] as const) test(`a human hand to ${to} still requests cancellation and invalidates JobAccess`, async () => {
+  const { task, job } = await round(), access = (await delivery()).access!.find(value => value.job === job.spec.id)!;
+  await ack(job);
+  const current = hub.modules.work.task(task.id);
+  const result = await command("work.task.hand", { task: task.id, expected_revision: current.revision, to, ...(to === "external" ? { note: "Synthetic wait" } : {}) });
+  expect(hub.store.executionStore.cancelRequested(job.spec.id)).toBe(true);
+  expect((await delivery()).cancel).toContain(job.spec.id);
+  expect((await api("/v2/work/tasks", undefined, access.token)).status).toBe(401);
+  if (result.kind !== "task") throw new Error("Expected task");
+  expect(hub.modules.work.detail(task.id).turns.at(-1)).toMatchObject({ by: hub.store.authenticate(`Bearer ${human}`)!.actor.id, to: result.task.turn });
 });

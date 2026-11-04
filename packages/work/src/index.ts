@@ -3,7 +3,7 @@ export { nextTurn, migrateTurn, type LegacyTurnFacts, type PlannedDelivery } fro
 import {
   WorkProject, WorkTask, WorkComment, WorkExecution, WorkTaskDetail,
   WorkCommandRequest, WorkCommandResult, TaskTurnChange, textContainsCardNumber,
-  type ID_PREFIXES, type Job,
+  type ActorRole, type ID_PREFIXES, type Job,
 } from "@lumio/schema";
 
 export class WorkError extends Error {
@@ -29,6 +29,9 @@ export interface WorkStore {
   putReceipt(actor: string, request: string, operation: string, result: WorkCommandResult): void;
   transaction<T>(action: () => T): T;
 }
+
+/** Trusted execution identity supplied by the application, never by command arguments. */
+export interface WorkCaller { role: ActorRole; job?: string }
 
 export interface WorkContext {
   systemActor?: string;
@@ -184,7 +187,7 @@ export class WorkService {
     return WorkCommandResult.parse(previous.result);
   }
 
-  command(input: unknown, actor: string, approval?: { by: string; proposal: string }): WorkCommandResult {
+  command(input: unknown, actor: string, approval?: { by: string; proposal: string }, caller: WorkCaller = { role: "human" }): WorkCommandResult {
     const parsed = WorkCommandRequest.safeParse(input);
     if (!parsed.success) throw new WorkError("INVALID", { key: "index.invalid_work_command_parameters", args: [] });
     const request = parsed.data, serialized = JSON.stringify(request.operation);
@@ -233,8 +236,20 @@ export class WorkService {
           if ((operation.op === "work.task.reopen") === (task.outcome === "open")) throw new WorkError("CONFLICT", { key: "work.invalid_outcome_transition", args: [] });
           const action: TurnAction = operation.op === "work.task.hand" ? { kind: "hand", to: operation.args.to, note: operation.args.note }
             : operation.op === "work.task.finish" ? { kind: "finish", outcome: operation.args.outcome } : { kind: "reopen" };
-          // Handing away from an active agent must also stop its round; late results cannot steal the new turn.
-          if (task.turn.reason === "working" || operation.op === "work.task.finish") this.context.cancel?.(task.id);
+          if (operation.op === "work.task.hand") {
+            // A self-handoff leaves the round alive to deliver its final report. Check the pending
+            // execution as well as turn: an earlier handoff may already have moved turn elsewhere.
+            const pending = this.store.executions(task.id).find(execution => {
+              const job = this.context.job?.(execution.job);
+              return !execution.applied && (!job || (!job.result && ["queued", "assigned", "running"].includes(job.status)));
+            });
+            const job = pending?.job ?? (task.turn.reason === "working" ? task.turn.job : undefined);
+            if (job && caller.role !== "human") {
+              const ownRound = caller.role === "agent" ? caller.job === job : this.context.job?.(job)?.spec.runtime === actor;
+              if (!ownRound) throw new WorkError("CONFLICT", { key: "work.hand_other_round", args: [] });
+            }
+            if (job && caller.role === "human") this.context.cancel?.(task.id);
+          } else if (operation.op === "work.task.finish") this.context.cancel?.(task.id);
           const updated = this.transition(task, action, actor, time);
           this.checkTask(updated); result = { kind: "task", task: updated }; break;
         }

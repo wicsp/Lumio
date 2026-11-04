@@ -8,7 +8,7 @@ import { HubError } from "./errors.ts";
 import { ExecutionRuntimes } from "@lumio/execution";
 import { workSystemActor, SqliteRuntimeRegistry, SqliteExecutionStore } from "@lumio/storage";
 
-export interface Identity { actor: Actor; label: string }
+export interface Identity { actor: Actor; label: string; job?: string }
 export class HubStore {
   readonly executionStore: SqliteExecutionStore;
   private readonly runtimeRegistry: ExecutionRuntimes;
@@ -180,7 +180,8 @@ export class HubStore {
     if (!row || !equal || row.revoked !== null || !this.validAgentToken(row.label, now)) return null;
     this.db.query("UPDATE agent_tokens SET last_used=? WHERE label=?").run(now.toISOString(), row.label);
     const actor = Actor.parse(this.db.query("SELECT * FROM actors WHERE id=?").get(row.actor_id));
-    return { actor, label: row.label };
+    const access = this.db.query<{ job: string | null }, [string]>("SELECT job FROM agent_tokens WHERE label=?").get(row.label);
+    return { actor, label: row.label, ...(access?.job ? { job: access.job } : {}) };
   }
 
   auditDenied(identity: Identity, operation: string): void {

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { Job, WorkCommandResult, type WorkProject, type WorkTask, type WorkComment, type TaskTurnChange, type WorkExecution } from "@lumio/schema";
-import { WorkService, type WorkStore } from "../src/index.ts";
+import { WorkService, type WorkCaller, type WorkStore } from "../src/index.ts";
 
 const owner = "act_00000000000000000000000001";
 const timestamp = "2026-10-31T00:00:00Z";
@@ -40,8 +40,8 @@ function fixture() {
       jobs.set(job.spec.id, job); return job;
     }, cancel() { cancellations++; },
   });
-  function command(op: string, args: Record<string, unknown>, request = `synthetic-request-${++requests}`, actor = owner) {
-    return WorkCommandResult.parse(service.command({ request_id: request, operation: { op, args } }, actor));
+  function command(op: string, args: Record<string, unknown>, request = `synthetic-request-${++requests}`, actor = owner, caller?: WorkCaller) {
+    return WorkCommandResult.parse(service.command({ request_id: request, operation: { op, args } }, actor, undefined, caller));
   }
   function create(title: string, args: Record<string, unknown> = {}) {
     const result = command("work.task.create", { title, ...args });
@@ -160,4 +160,47 @@ test("Inline & Spill carries recent comments, bounded summaries and IDs instead 
   const third = f.service.detail(task.id).executions[2]!.input_snapshot;
   expect(third).toContain(first.job.spec.id); expect(third).toContain(second.job.spec.id);
   expect(third).not.toContain("Recent answer");
+});
+
+
+for (const role of ["agent", "runtime"] as const) for (const to of ["human", "external"] as const) {
+  test(`${role} hands its own executing round to ${to} without cancellation; the final report preserves the handoff`, () => {
+    const f = fixture(), task = f.create("Synthetic self-handoff");
+    const started = f.command("work.task.dispatch", { task: task.id, to: "pi@server" });
+    if (started.kind !== "job") throw new Error("job expected");
+    const actor = role === "runtime" ? started.job.spec.runtime : "act_00000000000000000000000003";
+    const changed = f.command("work.task.hand", { task: task.id, expected_revision: 2, to, ...(to === "external" ? { note: "Waiting for synthetic CI" } : {}) },
+      `synthetic-self-hand-${role}-${to}`, actor, { role, job: started.job.spec.id });
+    if (changed.kind !== "task") throw new Error("task expected");
+    expect(changed.task.turn).toMatchObject({ holder: to, reason: to === "human" ? "todo" : "waiting" });
+    expect(f.cancellations()).toBe(0);
+    expect(f.service.detail(task.id).turns.at(-1)).toMatchObject({ by: actor, from: { holder: "pi@server" }, to: changed.task.turn });
+    const result = f.result(started.job, "done", "Synthetic final report after handoff");
+    f.service.applyResult(result);
+    const detail = f.service.detail(task.id);
+    expect(detail.task).toEqual(changed.task); expect(detail.turns).toHaveLength(3);
+    expect(detail.executions[0]!.applied).toBe(true);
+    expect(detail.comments).toHaveLength(1); expect(detail.comments[0]!.body).toContain("Synthetic final report after handoff");
+  });
+}
+
+for (const job of [undefined, "job_00000000000000000000000999"]) test(`another agent cannot hand over a pending round (${job ?? "manual token"})`, () => {
+  const f = fixture(), task = f.create("Synthetic protected round");
+  f.command("work.task.dispatch", { task: task.id, to: "pi@server" });
+  const before = structuredClone(f.store.data);
+  expect(() => f.command("work.task.hand", { task: task.id, expected_revision: 2, to: "human" }, "synthetic-foreign-hand", "act_00000000000000000000000003", { role: "agent", job }))
+    .toThrow("CONFLICT");
+  expect(f.store.data).toEqual(before); expect(f.cancellations()).toBe(0);
+});
+
+for (const to of ["human", "external", "nobody"] as const) test(`a human hand to ${to} still cancels the executing round`, () => {
+  const f = fixture(), task = f.create("Synthetic human takeover");
+  const started = f.command("work.task.dispatch", { task: task.id, to: "pi@server" });
+  if (started.kind !== "job") throw new Error("job expected");
+  const changed = f.command("work.task.hand", { task: task.id, expected_revision: 2, to, ...(to === "external" ? { note: "Synthetic wait" } : {}) });
+  expect(f.cancellations()).toBe(1);
+  if (changed.kind !== "task") throw new Error("task expected");
+  f.result(started.job, "cancelled");
+  expect(f.service.task(task.id)).toEqual(changed.task);
+  expect(f.service.detail(task.id).turns.at(-1)!.by).toBe(owner);
 });
