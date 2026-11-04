@@ -1,6 +1,6 @@
 # Lumio
 
-个人研究工作台：论文笔记、想法、项目/任务、实验结果，以及在多台设备上给 AI 派活。
+个人研究工作台：论文笔记、想法、项目/任务、实验结果，以及在多台设备上给 AI 委派。
 
 - 数据**不在本仓库**：知识正文在独立 vault（Markdown + frontmatter）；项目/任务、执行与助手状态在 SQLite；过程记录与产物用 JSONL/文件。
 - 本仓库只放代码：TypeScript monorepo，运行在 [Bun](https://bun.com) 上。
@@ -13,7 +13,7 @@
 |---|---|
 | `packages/schema` | 契约：用 Zod 定义的实体与 job 协议，唯一事实来源 |
 | `packages/knowledge` | 知识文档、解析、补全、链接与引用用例 |
-| `packages/work` | Project、Task、讨论、关系与显式派活 |
+| `packages/work` | Project、Task、讨论、关系与显式委派 |
 | `packages/execution` | Job、Routine、设备能力与执行规则 |
 | `packages/assistant` | 对话、记忆、模型端口与工具循环 |
 | `packages/storage` | 文件/索引/SQLite 适配、JSONL、产物、备份与显式迁移 |
@@ -81,7 +81,7 @@ Web 工作台随 Hub 提供：安装后打开 `http://127.0.0.1:7420`（或 Hub 
 P0–P2 已完成（v0.1.6），并已合入四模块重构（ADR 0025）：
 
 - **知识（Knowledge）**：笔记仍是外部可编辑的 Markdown。`lumio new paper|idea`、`lumio sync`（自动补全元数据）；`search`/`show`/`links`/`check`/`export bib`。
-- **工作（Work）**：Project/Task 存在 Hub 的数据库里，正文可用 Markdown；修改负责人不会派活，派出是单独的显式操作。旧的任务/例行笔记需按[切换与回退](docs/migration-v2.md)显式迁移，启动时不会自动迁移。
+- **工作（Work）**：Project/Task 存在 Hub 的数据库里，正文可用 Markdown；修改负责人不会委派，派出是单独的显式操作。旧的任务/例行笔记需按[切换与回退](docs/migration-v2.md)显式迁移，启动时不会自动迁移。
 - **执行（Execution）**：每台设备一个执行器；Job 协议 2、离线队列、例行任务、高权限命令的审批门。
 - **助手（Assistant）**：对话与显式记忆，模型由 Hub 配置，见[使用说明](docs/assistant.md)。
 - **Web 工作台**：今日总览、项目与任务、知识阅读、执行与例行任务、助手和审批，见 [apps/web](apps/web/README.md)。

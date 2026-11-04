@@ -10,7 +10,7 @@ export const ProposalStatus = z.enum(["pending", "accepted", "rejected"]);
 
 export const Proposal = z.strictObject({
   id: idOf("prop"),
-  operation: ProposalOperation.describe("v1 操作，或 agent 的 Work 委派与流程（ADR 0031）"),
+  operation: ProposalOperation.describe("v1 操作，或 agent 的 Work 委派与交接计划（ADR 0031、0032）"),
   reason: z.string().min(1).max(2000).describe("提议理由，给人看"),
   author: idOf("act").describe("提交者的身份 ID"),
   status: ProposalStatus,

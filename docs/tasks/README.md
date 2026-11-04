@@ -29,7 +29,7 @@
 | [P1-6](P1-6-skill.md) ✅ | `skills/lumio/SKILL.md`（Claude Code、Codex 自动验收 6 项通过；pi 见待办） | Claude | P1-5 |
 | [P2-0](P2-0-design.md) ✅ | P2 的设计与契约（ADR 0019） | Claude 起草，人类批准 | P1 |
 | [P2-1](P2-1-runtime-register.md) ✅ | 执行器骨架：登记、能力、在线情况 | 后端（Codex） | P2-0 |
-| [P2-2](P2-2-dispatch-core.md) ✅ | 派活的可靠核心（只跑普通命令） | 后端（Codex） | P2-1 |
+| [P2-2](P2-2-dispatch-core.md) ✅ | 委派的可靠核心（只跑普通命令） | 后端（Codex） | P2-1 |
 | [P2-3](P2-3-agent-adapters.md) ✅ | 接上 codex、claude、pi | 后端（Codex） | P2-2 |
 | [P2-4](P2-4-task-rounds.md) ✅ | 任务笔记里的一问一答（做完即可日常使用） | 后端（Codex） | P2-3 |
 | [P2-5](P2-5-routines.md) ✅ | 例行任务 | 后端（Codex） | P2-4 |
@@ -55,12 +55,13 @@
 | [R3-3](R3-0-capabilities-agent-access.md) ✅ | 每轮凭据、`lumio agent`、`lumio skill install`、生成 SKILL.md | 后端（Codex） | R3-2 |
 | [R3-4](R3-0-capabilities-agent-access.md) ✅ | Web：模型配置、已连接的 agent、对话里的变更卡片与撤回；回答框与验收卡片 | Claude | R3-2 |
 | R3-5 | 验收 | 人类 + Claude | R3-1 至 R3-4 |
-| [R4-1](R4-0-workflows-delegation-push.md) ✅ | 契约：流程、委派提议、推送订阅（ADR 0031） | Claude 起草，人类批准 | R3 |
-| [R4-2](R4-0-workflows-delegation-push.md) | Hub：委派需要批准、流程引擎与模板 | 后端（Codex） | R4-1 |
-| [R4-3](R4-0-workflows-delegation-push.md) | Hub：统一通知接口与 Web Push | 后端（Codex） | R4-1 |
-| [R4-4](R4-0-workflows-delegation-push.md) | Web：流程界面、提议卡片、设置页通知、service worker | Claude | R4-2、R4-3 |
-| [R4-5](R4-0-workflows-delegation-push.md) | 术语「派活」→「委派」 | Claude + Codex | — |
-| R4-6 | 验收：用 Lumio 开发 Lumio | 人类 + Claude | R4-1 至 R4-5 |
+| [R4-1](R4-0-workflows-delegation-push.md) ✅ | 契约：委派提议、推送订阅（#85）；任务模型 v3、交接计划（R4-1b，ADR 0032） | Claude 起草，人类批准 | R3 |
+| [R4-2](R4-0-workflows-delegation-push.md) | 任务模型 v3 切换：迁移、轮到谁的规则、委派需要批准、每轮输入、CLI | 后端（Codex） | R4-1 |
+| [R4-3](R4-0-workflows-delegation-push.md) | 交接计划：计划运行、检查点、打回、模板 | 后端（Codex） | R4-2 |
+| [R4-4](R4-0-workflows-delegation-push.md) | 通知：统一接口与 Web Push | 后端（Codex） | R4-2 |
+| [R4-5](R4-0-workflows-delegation-push.md) | Web：按轮到谁重做今日与任务、时间线、计划与检查点、提议卡片、通知设置 | Claude | R4-2 至 R4-4 |
+| [R4-6](R4-0-workflows-delegation-push.md) | 术语「派活」→「委派」 | Claude + Codex | — |
+| R4-7 | 验收：用 Lumio 开发 Lumio | 人类 + Claude | R4-1 至 R4-6 |
 
 P1 的设计决定见 ADR 0014、0016、0017、0018；P2 见 ADR 0019、0020、0021、0022 与修订后的 ADR 0005；契约见 `packages/schema/src/` 中的 `query.ts`、`actor.ts`、`operation.ts`、`proposal.ts`、`api.ts`。
 
@@ -86,7 +87,7 @@ v0.2 起任务、项目、例行任务在数据库里（ADR 0025），旧任务�
 |---|---|---|
 | Web 可用 | R1-2 | 浏览器打开 `http://127.0.0.1:7420`，用 `lumio login-code --name web` 的配对码连接，勾选「在这台设备上保持登录」；关闭浏览器再打开仍是登录状态 |
 | 当 App 用 | R1-1 | Safari 菜单「文件 → 添加到程序坞」，从程序坞打开是独立窗口和 Lumio 图标；iPad/iPhone 经 Tailscale 打开 Hub 地址，「添加到主屏幕」后同样可用 |
-| 在 Web 上派活到服务器 | ADR 0025、0026 | 新建任务「在服务器上运行 nvidia-smi 并汇报」，负责人选 `pi@server`，点「派出」；在「执行」里看到这一轮完成并有报告，任务讨论里出现结果，任务不会自动变成已完成 |
+| 在 Web 上委派到服务器 | ADR 0025、0026 | 新建任务「在服务器上运行 nvidia-smi 并汇报」，负责人选 `pi@server`，点「派出」；在「执行」里看到这一轮完成并有报告，任务讨论里出现结果，任务不会自动变成已完成 |
 | 等你回答 | ADR 0025 | 派一个需要确认的任务（例如「列出要删除的临时文件，先问我再删」），在「今日 / 等你决定」里看到问题，在任务讨论里回答后「继续下一轮」 |
 | 助手对话 | R1-3 | 在 Web 的「助手」里发一句话，看到流式回复；刷新后对话还在；保存一条记忆再遗忘 |
 | 旧笔记已退役 | R1-4 | 打开一条旧任务笔记，把负责人改成 `pi@server` 并保存，确认不会产生新的运行；知识库里仍能搜到它 |

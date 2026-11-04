@@ -17,7 +17,7 @@ lumio hub migrate retire --vault <知识目录>
 ```
 
 退役要求独占 Hub 状态目录；有 queued/assigned/running/waiting_for_human 的旧笔记 Job 时拒绝并列出。
-无需暂停笔记中的 Routine 或关闭派活开关：退役后它们全部失效。远程执行器仍需各自在停止后 prepare-migration，清除离线派生计划。
+无需暂停笔记中的 Routine 或关闭委派开关：退役后它们全部失效。远程执行器仍需各自在停止后 prepare-migration，清除离线派生计划。
 备份默认保存到状态目录 `backups/retire-<随机编号>`，命令输出回执（kind、时间、备份路径、旧笔记数量、路径与路径摘要）。
 不导入任何任务、项目或例行任务，不修改或移动旧文件；旧笔记仍可搜索、阅读。退役与 apply 只能二选一。
 `lumio selftest` 始终创建数据库自检任务，结果写入任务讨论，结束标为 done；`--notes` 只是兼容别名，不再写 vault。
@@ -26,7 +26,7 @@ lumio hub migrate retire --vault <知识目录>
 
 1. 确认使用同一版本的 Hub、CLI、Runtime。Job 协议保持 2；新 Hub 可以先在旧笔记模式运行。
 2. 保留可运行的旧二进制、Hub/Runtime 配置和知识目录的完整备份。知识目录、安装配置不在业务备份中。
-3. 暂停旧 Routine，完成 Task 当前轮次；把待派活的旧任务交回 human 或暂停。检查 Job、审批结果和文件都已交回。
+3. 暂停旧 Routine，完成 Task 当前轮次；把待委派的旧任务交回 human 或暂停。检查 Job、审批结果和文件都已交回。
 4. 停止每台 Runtime 服务，再在对应机器运行 `lumio runtime prepare-migration --state-dir <执行器状态目录>`。
    命令会拒绝执行中、排队中、待交回结果/审批报告/文件的状态，只清空派生计划缓存，保留历史和原始日志。
    运行中的执行器持有独占租约，不能在它仍运行时清缓存。离线机器尚未准备好时不要继续 apply。
@@ -45,7 +45,7 @@ lumio hub migrate plan --vault <知识目录> --output <新的清单.json>
 ```
 
 清单版本为 1，列出旧 Project/Task/Routine 的 ID、类型、标题、路径与原始字节摘要；problems 非空不能 apply。
-ID 冲突、未暂停的计划、仍然打开的旧派活开关、未完成执行、缺失项目或历史记录均须先解决。
+ID 冲突、未暂停的计划、仍然打开的旧委派开关、未完成执行、缺失项目或历史记录均须先解决。
 dry-run 不修改笔记或业务对象，输出文件也不覆盖。
 
 确认所有 Runtime 已完成上述准备后，运行：
@@ -58,13 +58,13 @@ lumio hub migrate apply --vault <知识目录> --plan <清单.json> --backup <�
 apply 要求 Hub 停止，独占状态目录；重新核对源内容、数据库与备份的逻辑内容。
 有变化时重新备份或重新 dry-run，不会猜测合并。数据库来源档案、业务对象、历史关联、切换回执一起提交，失败一起回滚。
 
-**首次完整 apply 后，该工作区关闭全部旧 Task/Routine 文件控制及 v1 任务派活/追问。**
+**首次完整 apply 后，该工作区关闭全部旧 Task/Routine 文件控制及 v1 任务委派/追问。**
 原文件保留为兼容来源；新建、复制、改名、改 ID 或改 frontmatter 都不会再次触发旧执行。
 知识文件和知识查询照常使用；以后通过 `lumio task`、`lumio project`、`lumio routine` 修改结构化对象。
 Task/Project 描述用 `edit` 打开带版本的副本，文件与数据库之间没有双向状态同步。
 
 启动新版 Hub 和 Runtime 后，先核对数据，再按需显式恢复数据库 Routine。
-导入的 Routine 原本必须已暂停，导入和启动不会为它派活；恢复后从设备收到新计划的时刻开始计时。
+导入的 Routine 原本必须已暂停，导入和启动不会为它委派；恢复后从设备收到新计划的时刻开始计时。
 Task 的负责人保持原值，显式 continue 才会创建 Job，Job 成功不自动完成 Task。
 
 ## 保留下来的内容
