@@ -2,7 +2,7 @@ import { z } from "zod";
 import { AgentTarget, ID_PREFIXES, Id, RequestId, Revision, TaskAssignee, Timestamp, idOf } from "./common.ts";
 import { TASK_STATUSES } from "./entities.ts";
 import { Job } from "./job.ts";
-import { Workflow, WorkflowRun, WorkflowStepId, WorkflowTemplate } from "./workflow.ts";
+import { HandoffPlan, PlanRun, PlanStageId, PlanTemplate } from "./plan.ts";
 
 /**
  * Work 模块契约 v2（ADR 0025 第 1、3、4、8 节，R0-1）。
@@ -93,7 +93,6 @@ export const WorkTask = z
     references: z.array(ResourceRef).describe("资料引用；不是输入快照"),
     due: Timestamp.optional(),
     ...RunConfigShape,
-    workflow: WorkflowRun.optional().describe("任务流程（ADR 0031）；缺失表示没有流程，每一轮结束都交给人"),
   })
   .superRefine((task, ctx) => {
     if (task.parent === task.id) ctx.addIssue({ code: "custom", path: ["parent"], message: "任务不能是自己的父任务" });
@@ -133,6 +132,92 @@ export const WorkTaskDetail = z.strictObject({
   task: WorkTask,
   comments: z.array(WorkComment),
   executions: z.array(WorkExecution),
+});
+
+
+// ───────────────────────── 任务模型 v3（ADR 0032）─────────────────────────
+//
+// 任务只回答三个问题：结束了吗（outcome）、现在轮到谁（turn）、发生过什么（事件，只追加）。
+// v3 与上面的 v2 并存，直到 R4-2 一次性切换：届时 WorkTaskV3 改名为 WorkTask、删除 v2 的 status / assignee 与相关命令。
+
+export const TASK_OUTCOMES = ["open", "done", "cancelled"] as const;
+export const TaskOutcome = z.enum(TASK_OUTCOMES);
+
+/** 持有者：人、某个 agent（engine@device）、外部、无人。 */
+export const TurnHolder = z.union([z.literal("human"), z.literal("external"), z.literal("nobody"), AgentTarget]);
+export const TURN_REASONS = ["todo", "answer", "review", "failed", "working", "waiting", "on_hold"] as const;
+export const TurnReason = z.enum(TURN_REASONS);
+/** 需要人回应的原因：出现在「需要你处理」并触发推送。 */
+export const RESPONSE_REASONS = ["answer", "review", "failed"] as const;
+
+const HUMAN_REASONS = ["todo", "answer", "review", "failed"];
+const reasonFits = (holder: string, reason: string) =>
+  holder === "human" ? HUMAN_REASONS.includes(reason)
+    : holder === "external" ? reason === "waiting"
+      : holder === "nobody" ? reason === "on_hold"
+        : reason === "working";
+
+/** 现在轮到谁（ADR 0032 第 2 节）。持有者与原因必须匹配。 */
+export const Turn = z
+  .strictObject({
+    holder: TurnHolder,
+    reason: TurnReason,
+    since: Timestamp,
+    round: z.number().int().positive().optional().describe("相关的一轮：agent 正在执行的，或交回给人时刚结束的"),
+    job: idOf("job").optional(),
+    stage: PlanStageId.optional().describe("有交接计划时所在的阶段"),
+    note: z.string().min(1).max(200).optional().describe("外部等待的说明（如「等导师回复」），或停下的原因（如「达到 8 轮上限」）"),
+  })
+  .refine((turn) => reasonFits(turn.holder, turn.reason), { message: "持有者与原因不匹配", path: ["reason"] });
+
+/** 任务 v3。没有 status 与 assignee；结局只有人能改，轮到谁按 ADR 0032 第 3、4 节变化。 */
+export const WorkTaskV3 = z
+  .strictObject({
+    schema_version: z.literal(3),
+    type: z.literal("task"),
+    id: idOf("task"),
+    title: z.string().min(1),
+    description: z.string().describe("描述正文，可用 Markdown 语法；不是知识笔记"),
+    revision: Revision,
+    outcome: TaskOutcome,
+    turn: Turn,
+    plan: PlanRun.optional().describe("交接计划与进度（ADR 0032 第 5 节）；缺失表示一轮交付后交回给人"),
+    created: Timestamp,
+    updated: Timestamp,
+    created_by: idOf("act").optional(),
+    updated_by: idOf("act").optional(),
+    tags: z.array(z.string()),
+    project: idOf("prj").optional(),
+    parent: idOf("task").optional(),
+    dependencies: z.array(idOf("task")),
+    references: z.array(ResourceRef),
+    due: Timestamp.optional(),
+    ...RunConfigShape,
+  })
+  .superRefine((task, ctx) => {
+    if (task.outcome !== "open" && task.turn.holder !== "nobody") ctx.addIssue({ code: "custom", path: ["turn"], message: "已完成或已取消的任务轮到无人" });
+    if (task.parent === task.id) ctx.addIssue({ code: "custom", path: ["parent"], message: "任务不能是自己的父任务" });
+    if (task.dependencies.includes(task.id) || new Set(task.dependencies).size !== task.dependencies.length) {
+      ctx.addIssue({ code: "custom", path: ["dependencies"], message: "dependencies 不能包含自己或重复" });
+    }
+  });
+
+/** 一次交接（只追加）：谁在何时把「轮到谁」从什么改成什么；结局变化也记在这里。 */
+export const TaskTurnChange = z.strictObject({
+  task: idOf("task"),
+  at: Timestamp,
+  by: idOf("act").describe("操作者；一轮结束与交接计划的自动交接记为 Hub 的系统身份"),
+  from: Turn,
+  to: Turn,
+  outcome: TaskOutcome.optional().describe("这次同时改变了结局时的新结局"),
+});
+
+/** `GET` 单个任务（v3）：任务、讨论、轮次、交接记录。界面按时间合并成时间线。 */
+export const WorkTaskDetailV3 = z.strictObject({
+  task: WorkTaskV3,
+  comments: z.array(WorkComment),
+  executions: z.array(WorkExecution),
+  turns: z.array(TaskTurnChange),
 });
 
 // ───────────────────────── 命令 ─────────────────────────
@@ -235,47 +320,74 @@ export const WorkTaskDispatch = z.strictObject({
 });
 
 /**
- * 设置、替换或清除任务的流程（ADR 0031 第 3 节）。人设置即生效；agent 设置时授权结果为需要批准，生成提议。
- * from：从哪一步开始（缺省第一步）；流程停下后，人用同一个流程加 from 让它继续。workflow 为 null 时清除流程。
+ * 交回（ADR 0032 第 3 节）：轮到人（todo）、外部（waiting，附说明）或无人（on_hold）。
+ * 人都可以；agent 只能交给人或外部（低风险）。不能用它交给 agent，那是委派（work.task.dispatch）。
  */
-export const WorkTaskWorkflowSet = z.strictObject({
-  op: z.literal("work.task.workflow.set"),
-  args: z.strictObject({
-    task: idOf("task"),
-    expected_revision: Revision,
-    workflow: Workflow.nullable(),
-    from: WorkflowStepId.optional(),
-  }),
-});
-
-/**
- * 人在流程里的决定（ADR 0031）：ask 步骤选一个选项（option 是选项下标）；accept 步骤不满意时用 back_to 回到某一步。
- * 验收通过直接把任务标为 done。comment 作为人的评论保存，并交给下一步的 agent。只有人能用。
- */
-export const WorkTaskWorkflowDecide = z.strictObject({
-  op: z.literal("work.task.workflow.decide"),
+export const WorkTaskHand = z.strictObject({
+  op: z.literal("work.task.hand"),
   args: z
     .strictObject({
       task: idOf("task"),
-      step: WorkflowStepId.describe("正在等人的那一步，防止对过时的步骤做决定"),
-      option: z.number().int().nonnegative().optional(),
-      back_to: WorkflowStepId.optional(),
-      comment: z.string().min(1).optional(),
+      expected_revision: Revision,
+      to: z.enum(["human", "external", "nobody"]),
+      note: z.string().min(1).max(200).optional().describe("交给外部时说明在等什么"),
     })
-    .refine((args) => (args.option === undefined) !== (args.back_to === undefined), "option 与 back_to 必须且只能给一个"),
+    .refine((args) => args.to !== "external" || args.note !== undefined, "交给外部时要写明在等什么"),
 });
 
-/** 保存流程模板（新建或按 template 覆盖）。只有人能用。 */
-export const WorkflowTemplateSave = z.strictObject({
-  op: z.literal("work.workflow_template.save"),
-  args: z.strictObject({ template: idOf("wft").optional(), name: z.string().min(1).max(80), workflow: Workflow }),
+/** 完成或取消（只有人）。正在进行的一轮随之取消，轮到无人。 */
+export const WorkTaskFinish = z.strictObject({
+  op: z.literal("work.task.finish"),
+  args: z.strictObject({ task: idOf("task"), expected_revision: Revision, outcome: z.enum(["done", "cancelled"]) }),
 });
-export const WorkflowTemplateDelete = z.strictObject({
-  op: z.literal("work.workflow_template.delete"),
+
+/** 重新打开（只有人）：结局回到 open，轮到人（todo）。 */
+export const WorkTaskReopen = z.strictObject({
+  op: z.literal("work.task.reopen"),
+  args: z.strictObject({ task: idOf("task"), expected_revision: Revision }),
+});
+
+/**
+ * 设置、替换或清除交接计划（ADR 0032 第 5 节）。人设置即生效；agent 设置时需要批准，生成提议。
+ * from：从哪个阶段开始（缺省第一个）；plan 为 null 时清除。设置计划不会自己开始委派，由人委派第一轮或在检查点选择继续。
+ */
+export const WorkTaskPlanSet = z.strictObject({
+  op: z.literal("work.task.plan.set"),
+  args: z.strictObject({ task: idOf("task"), expected_revision: Revision, plan: HandoffPlan.nullable(), from: PlanStageId.optional() }),
+});
+
+/**
+ * 人在检查点（或计划结束后的验收）上的处理（只有人）：
+ * continue 委派下一阶段；send_back 带评论回到 back_to 指定的 agent 阶段；finish 标记完成；hold 搁置。
+ */
+export const WorkTaskCheckpoint = z.strictObject({
+  op: z.literal("work.task.checkpoint"),
+  args: z
+    .strictObject({
+      task: idOf("task"),
+      stage: z.union([PlanStageId, z.literal("end")]).describe("正在等人的阶段，防止对过时的阶段做决定"),
+      action: z.enum(["continue", "send_back", "finish", "hold"]),
+      back_to: PlanStageId.optional(),
+      comment: z.string().min(1).optional(),
+    })
+    .refine((args) => (args.action === "send_back") === (args.back_to !== undefined), "send_back 必须且只能和 back_to 一起给")
+    .refine((args) => args.action !== "send_back" || args.comment !== undefined, "打回时要写明要改什么"),
+});
+
+/** 保存计划模板（新建或按 template 覆盖）；删除模板。只有人。 */
+export const PlanTemplateSave = z.strictObject({
+  op: z.literal("work.plan_template.save"),
+  args: z.strictObject({ template: idOf("wft").optional(), name: z.string().min(1).max(80), plan: HandoffPlan }),
+});
+export const PlanTemplateDelete = z.strictObject({
+  op: z.literal("work.plan_template.delete"),
   args: z.strictObject({ template: idOf("wft") }),
 });
 
-/** 人确认看过某一轮（等你验收、执行失败）而暂不处理（ADR 0030）。只有人能用；agent 一律拒绝。 */
+/**
+ * 人确认看过某一轮（等你验收、执行失败）而暂不处理（ADR 0030）。只有人能用；agent 一律拒绝。
+ * 已被 ADR 0032 取代（改为 work.task.hand to=human，即「我自己来」）；R4-2 切换时删除。
+ */
 export const WorkTaskAcknowledge = z.strictObject({
   op: z.literal("work.task.acknowledge"),
   args: z.strictObject({ task: idOf("task"), round: z.number().int().positive() }),
@@ -283,40 +395,33 @@ export const WorkTaskAcknowledge = z.strictObject({
 
 export const WorkCommand = z.discriminatedUnion("op", [
   WorkProjectCreate, WorkProjectUpdate, WorkTaskCreate, WorkTaskUpdate, WorkTaskComment, WorkTaskDispatch, WorkTaskAcknowledge,
-  WorkTaskWorkflowSet, WorkTaskWorkflowDecide, WorkflowTemplateSave, WorkflowTemplateDelete,
+  WorkTaskHand, WorkTaskFinish, WorkTaskReopen, WorkTaskPlanSet, WorkTaskCheckpoint, PlanTemplateSave, PlanTemplateDelete,
 ]);
 
 // ───────────────────────── 需要你处理（ADR 0030）─────────────────────────
 
-export const ATTENTION_KINDS = ["question", "review", "failed", "decision"] as const;
+export const ATTENTION_KINDS = ["question", "review", "failed"] as const;
 export const AttentionKind = z.enum(ATTENTION_KINDS);
 
 /**
- * `GET /v2/work/attention`：需要人处理的任务，由 Hub 按每个任务**最新一轮**计算，不存储。
- * question：最新一轮在等回答；review：最新一轮正常结束，等人验收；failed：最新一轮失败或结果不明。
- * decision：流程走到人的 ask 步骤（ADR 0031），带 step、question、options，没有 job / round；流程的 accept 步骤以 review 出现并带 step。
- * 以下任一情况发生即不再出现：派出新一轮、任务变为 done / cancelled / paused、这一轮被标为已查看。
- * 仍在运行或排队的轮次不出现；例行任务的轮次不在这里（没有任务）。
+ * `GET /v2/work/attention`：轮到人、且原因需要回应的任务（ADR 0032 第 2 节）。
+ * question ⇔ 轮到人且原因 answer；review ⇔ review（一轮交付或交接计划的检查点）；failed ⇔ failed。轮到人但原因是 todo 时不在这里。
+ * 每一项都对应最近的一轮（job、round）；来自检查点时带 stage 与 prompt。
  */
-export const WorkAttention = z
-  .strictObject({
-    task: idOf("task"),
-    title: z.string().min(1).describe("任务标题"),
-    kind: AttentionKind,
-    job: idOf("job").optional().describe("相关的一轮；decision 没有"),
-    round: z.number().int().positive().optional(),
-    agent: AgentTarget.optional().describe("这一轮由谁执行；回答并继续时默认委派给它"),
-    since: Timestamp.describe("这一轮结束或流程走到这一步的时间"),
-    question: z.string().min(1).optional().describe("question：agent 的问题；decision：流程 ask 步骤的问题"),
-    summary: z.string().optional().describe("汇报或失败原因的开头部分（最多 500 字符）；完整内容见 Job"),
-    step: WorkflowStepId.optional().describe("来自流程时，正在等人的步骤（ADR 0031）"),
-    options: z.array(z.string().min(1)).min(2).max(4).optional().describe("decision 的选项文字，下标即 work.task.workflow.decide 的 option"),
-  })
-  .superRefine((item, ctx) => {
-    if (item.kind === "decision") {
-      if (!item.step || !item.question || !item.options) ctx.addIssue({ code: "custom", message: "decision 必须有 step、question 与 options" });
-    } else if (!item.job || !item.round) ctx.addIssue({ code: "custom", message: "question / review / failed 必须有 job 与 round" });
-  });
+export const WorkAttention = z.strictObject({
+  task: idOf("task"),
+  title: z.string().min(1).describe("任务标题"),
+  kind: AttentionKind,
+  job: idOf("job"),
+  round: z.number().int().positive(),
+  agent: AgentTarget.optional().describe("这一轮由谁执行；回答并继续时默认委派给它"),
+  since: Timestamp.describe("轮到人的时间"),
+  question: z.string().min(1).optional().describe("kind 为 question 时 agent 的问题"),
+  summary: z.string().optional().describe("汇报或失败原因的开头部分（最多 500 字符）；完整内容见 Job"),
+  stage: PlanStageId.optional().describe("来自交接计划的检查点或计划结束时：所在阶段（ADR 0032 第 5 节）"),
+  prompt: z.string().min(1).optional().describe("检查点给人的提示，如「是否合并？」"),
+});
+
 export const WORK_COMMAND_NAMES = WorkCommand.options.map((o) => o.shape.op.value);
 
 export const WorkCommandRequest = z.strictObject({
@@ -325,7 +430,7 @@ export const WorkCommandRequest = z.strictObject({
 });
 
 /**
- * 命令结果：create/update/workflow → project 或 task；comment → comment；dispatch → job；
+ * 命令结果：create/update/hand/finish/reopen/plan/checkpoint → project 或 task；comment → comment；dispatch → job；
  * 模板保存 → template，删除 → removed；agent 发起而需要批准 → proposal（ADR 0031）。
  */
 export const WorkCommandResult = z.discriminatedUnion("kind", [
@@ -333,7 +438,7 @@ export const WorkCommandResult = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("task"), task: WorkTask }),
   z.strictObject({ kind: z.literal("comment"), comment: WorkComment }),
   z.strictObject({ kind: z.literal("job"), job: Job }),
-  z.strictObject({ kind: z.literal("template"), template: WorkflowTemplate }),
+  z.strictObject({ kind: z.literal("template"), template: PlanTemplate }),
   z.strictObject({ kind: z.literal("removed"), id: idOf("wft") }),
   // agent 的委派或流程需要人批准（ADR 0031 第 2 节）：没有执行，生成了这条提议（只给 ID，避免与提议契约互相引用）
   z.strictObject({ kind: z.literal("proposal"), proposal: idOf("prop") }),
@@ -356,3 +461,10 @@ export type WorkCommandRequest = z.infer<typeof WorkCommandRequest>;
 export type WorkCommandResult = z.infer<typeof WorkCommandResult>;
 export type AttentionKind = z.infer<typeof AttentionKind>;
 export type WorkAttention = z.infer<typeof WorkAttention>;
+export type TaskOutcome = z.infer<typeof TaskOutcome>;
+export type TurnHolder = z.infer<typeof TurnHolder>;
+export type TurnReason = z.infer<typeof TurnReason>;
+export type Turn = z.infer<typeof Turn>;
+export type WorkTaskV3 = z.infer<typeof WorkTaskV3>;
+export type TaskTurnChange = z.infer<typeof TaskTurnChange>;
+export type WorkTaskDetailV3 = z.infer<typeof WorkTaskDetailV3>;

@@ -21,7 +21,7 @@ export * from "./assistant.ts";
 export * from "./storage.ts";
 export * from "./capabilities.ts";
 export * from "./access.ts";
-export * from "./workflow.ts";
+export * from "./plan.ts";
 export * from "./notifications.ts";
 
 import { Actor } from "./actor.ts";
@@ -33,12 +33,12 @@ import {
 } from "./assistant.ts";
 import { AgentInfo, AgentRevokeRequest, AgentTokenIssued, AgentTokenRequest, JobAccess } from "./access.ts";
 import { CapabilityChange } from "./capabilities.ts";
-import { Workflow, WorkflowRun, WorkflowTemplate } from "./workflow.ts";
+import { HandoffPlan, PlanRun, PlanTemplate } from "./plan.ts";
 import { NotificationEvent, PushDevice, PushDeviceUpdate, PushPublicKey, PushSubscriptionInput, PushTestResult } from "./notifications.ts";
 import { ExecutionRoutine, ExecutionRoutineCommandRequest, ExecutionRoutineInfo } from "./execution.ts";
 import { BackupManifest, MigrationPlan, RunLogEvent, StoredArtifact } from "./storage.ts";
 import {
-  ResourceRef, WorkAttention, WorkComment, WorkCommandRequest, WorkCommandResult, WorkExecution, WorkProject, WorkTask, WorkTaskDetail,
+  ResourceRef, TaskTurnChange, Turn, WorkAttention, WorkTaskDetailV3, WorkTaskV3, WorkComment, WorkCommandRequest, WorkCommandResult, WorkExecution, WorkProject, WorkTask, WorkTaskDetail,
 } from "./work.ts";
 import { ApiError, OperationRequest, OperationResult } from "./api.ts";
 import { Asset, Experiment, Idea, Paper, Post, Project, Routine, Source, Task } from "./entities.ts";
@@ -131,10 +131,14 @@ export const CONTRACTS = {
   "agent-token-issued": AgentTokenIssued,
   "agent-info": AgentInfo,
   "agent-revoke-request": AgentRevokeRequest,
-  // 任务流程与通知（ADR 0031，R4-1）
-  workflow: Workflow,
-  "workflow-run": WorkflowRun,
-  "workflow-template": WorkflowTemplate,
+  // 任务模型 v3、交接计划与通知（ADR 0031、0032，R4-1、R4-1b）
+  "work-task-v3": WorkTaskV3,
+  "work-task-detail-v3": WorkTaskDetailV3,
+  turn: Turn,
+  "task-turn-change": TaskTurnChange,
+  "handoff-plan": HandoffPlan,
+  "plan-run": PlanRun,
+  "plan-template": PlanTemplate,
   "notification-event": NotificationEvent,
   "push-subscription-input": PushSubscriptionInput,
   "push-device": PushDevice,

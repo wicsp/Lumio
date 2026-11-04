@@ -6,18 +6,18 @@ import { Timestamp, idOf } from "./common.ts";
  * 正文只含标题与事件类型，不含汇报、问题原文或私密内容；点击打开 path 指向的页面。
  */
 
+/** 轮到你且需要回应（ADR 0032 第 2 节；todo 不推送），以及待批准的提议。 */
 export const NOTIFICATION_KINDS = [
-  "attention.question", // agent 在等你回答
-  "attention.review", // 一轮完成，等你验收
-  "attention.failed", // 一轮失败或结果不明
-  "attention.decision", // 流程走到你的 ask 步骤
-  "proposal.pending", // 待批准的提议（含 agent 的委派与流程）
+  "turn.answer", // agent 在等你回答
+  "turn.review", // 一轮交付或交接计划的检查点，等你看
+  "turn.failed", // 一轮失败或结果不明
+  "proposal.pending", // 待批准的提议（含 agent 的委派与交接计划）
 ] as const;
 export const NotificationKind = z.enum(NOTIFICATION_KINDS);
 
 /** 交给各通道的一条通知。同一事件只发一次（id 去重）。 */
 export const NotificationEvent = z.strictObject({
-  id: z.string().min(8).max(128).describe("去重键，如 attention:<task>:<round>:<kind>"),
+  id: z.string().min(8).max(128).describe("去重键，如 turn:<task>:<round>:<reason>"),
   kind: NotificationKind,
   owner: idOf("act").describe("收通知的人"),
   title: z.string().min(1).max(120).describe("任务标题或提议摘要；不含汇报与问题原文"),
