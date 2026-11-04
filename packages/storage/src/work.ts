@@ -33,6 +33,13 @@ export class SqliteWorkStore implements WorkStore {
         result TEXT NOT NULL CHECK(json_valid(result)), PRIMARY KEY(actor,request));
       INSERT OR IGNORE INTO platform_migrations(name,applied) VALUES ('work-1',strftime('%Y-%m-%dT%H:%M:%fZ','now'));
     `))();
+    db.transaction(() => {
+      if (db.query("SELECT 1 FROM platform_migrations WHERE name='work-2'").get()) return;
+      for (const table of ["work_projects", "work_tasks"]) {
+        db.exec(`ALTER TABLE ${table} ADD COLUMN created_by TEXT; ALTER TABLE ${table} ADD COLUMN updated_by TEXT;`);
+      }
+      db.exec("ALTER TABLE work_executions ADD COLUMN acknowledged TEXT CHECK(acknowledged IS NULL OR json_valid(acknowledged)); INSERT INTO platform_migrations(name,applied) VALUES('work-2',strftime('%Y-%m-%dT%H:%M:%fZ','now'));");
+    })();
   }
   transaction<T>(action: () => T): T { return this.db.transaction(action)(); }
   private readProject(row: Record<string, unknown> | null): WorkProject | undefined {
@@ -48,12 +55,12 @@ export class SqliteWorkStore implements WorkStore {
   }
   putProject(input: WorkProject): void {
     const value = WorkProject.parse(input);
-    this.db.query(`INSERT INTO work_projects(id,title,description,revision,status,created,updated,tags,goal,repo,deadline)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?)
+    this.db.query(`INSERT INTO work_projects(id,title,description,revision,status,created,updated,tags,goal,repo,deadline,created_by,updated_by)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(id) DO UPDATE SET title=excluded.title,description=excluded.description,revision=excluded.revision,
-      status=excluded.status,updated=excluded.updated,tags=excluded.tags,goal=excluded.goal,repo=excluded.repo,deadline=excluded.deadline`).run(
+      status=excluded.status,updated=excluded.updated,tags=excluded.tags,goal=excluded.goal,repo=excluded.repo,deadline=excluded.deadline,updated_by=excluded.updated_by`).run(
       value.id, value.title, value.description, value.revision, value.status, value.created, value.updated,
-      JSON.stringify(value.tags), value.goal ?? null, value.repo ?? null, value.deadline ?? null);
+      JSON.stringify(value.tags), value.goal ?? null, value.repo ?? null, value.deadline ?? null, value.created_by ?? null, value.updated_by ?? null);
   }
 
   private readTask(row: Record<string, unknown> | null): WorkTask | undefined {
@@ -68,14 +75,14 @@ export class SqliteWorkStore implements WorkStore {
   putTask(input: WorkTask): void {
     const value = WorkTask.parse(input);
     this.transaction(() => {
-      this.db.query(`INSERT INTO work_tasks(id,title,description,revision,status,assignee,project,parent,due,created,updated,tags,refs,workdir,model,gpus,timeout_minutes)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      this.db.query(`INSERT INTO work_tasks(id,title,description,revision,status,assignee,project,parent,due,created,updated,tags,refs,workdir,model,gpus,timeout_minutes,created_by,updated_by)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(id) DO UPDATE SET title=excluded.title,description=excluded.description,revision=excluded.revision,status=excluded.status,
         assignee=excluded.assignee,project=excluded.project,parent=excluded.parent,due=excluded.due,updated=excluded.updated,tags=excluded.tags,
-        refs=excluded.refs,workdir=excluded.workdir,model=excluded.model,gpus=excluded.gpus,timeout_minutes=excluded.timeout_minutes`).run(
+        refs=excluded.refs,workdir=excluded.workdir,model=excluded.model,gpus=excluded.gpus,timeout_minutes=excluded.timeout_minutes,updated_by=excluded.updated_by`).run(
         value.id, value.title, value.description, value.revision, value.status, value.assignee, value.project ?? null, value.parent ?? null,
         value.due ?? null, value.created, value.updated, JSON.stringify(value.tags), JSON.stringify(value.references),
-        value.workdir ?? null, value.model ?? null, value.gpus === undefined ? null : JSON.stringify(value.gpus), value.timeout_minutes ?? null);
+        value.workdir ?? null, value.model ?? null, value.gpus === undefined ? null : JSON.stringify(value.gpus), value.timeout_minutes ?? null, value.created_by ?? null, value.updated_by ?? null);
       this.db.query("DELETE FROM work_dependencies WHERE task=?").run(value.id);
       const insert = this.db.query("INSERT INTO work_dependencies(task,dependency) VALUES (?,?)");
       for (const dependency of value.dependencies) insert.run(value.id, dependency);
@@ -91,13 +98,13 @@ export class SqliteWorkStore implements WorkStore {
   executions(task?: string): WorkExecution[] {
     const rows = task === undefined ? this.db.query<Record<string, unknown>, []>("SELECT * FROM work_executions ORDER BY rowid").all()
       : this.db.query<Record<string, unknown>, [string]>("SELECT * FROM work_executions WHERE task=? ORDER BY round").all(task);
-    return rows.map((row) => WorkExecution.parse({ ...row, applied: Boolean(row.applied) }));
+    return rows.map((row) => WorkExecution.parse({ ...row, applied: Boolean(row.applied), acknowledged: row.acknowledged === null ? undefined : JSON.parse(String(row.acknowledged)) }));
   }
   putExecution(input: WorkExecution): void {
     const value = WorkExecution.parse(input);
-    this.db.query(`INSERT INTO work_executions(job,task,round,input_revision,input_snapshot,created,applied)
-      VALUES (?,?,?,?,?,?,?)
-      ON CONFLICT(job) DO UPDATE SET applied=excluded.applied`).run(value.job, value.task, value.round, value.input_revision, value.input_snapshot, value.created, Number(value.applied));
+    this.db.query(`INSERT INTO work_executions(job,task,round,input_revision,input_snapshot,created,applied,acknowledged)
+      VALUES (?,?,?,?,?,?,?,?)
+      ON CONFLICT(job) DO UPDATE SET applied=excluded.applied,acknowledged=excluded.acknowledged`).run(value.job, value.task, value.round, value.input_revision, value.input_snapshot, value.created, Number(value.applied), value.acknowledged ? JSON.stringify(value.acknowledged) : null);
   }
   receipt(actor: string, request: string): { operation: string; result: WorkCommandResult } | undefined {
     const row = this.db.query<{ operation: string; result: string }, [string, string]>("SELECT operation,result FROM work_requests WHERE actor=? AND request=?").get(actor, request);

@@ -51,14 +51,14 @@ export function hubPlist(binary: string, env: Record<string, string>, state: str
 <plist version="1.0"><dict>
 <key>Label</key><string>io.lumio.hub</string>
 <key>ProgramArguments</key><array><string>${xml(binary)}</string><string>hub</string><string>serve</string></array>
-<key>EnvironmentVariables</key><dict>${Object.entries(env).map(([key, value]) => `<key>${xml(key)}</key><string>${xml(value)}</string>`).join("")}</dict>
+<key>EnvironmentVariables</key><dict>${Object.entries(env).filter(([key]) => !key.startsWith("LUMIO_ASSISTANT_")).map(([key, value]) => `<key>${xml(key)}</key><string>${xml(value)}</string>`).join("")}</dict>
 <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
 <key>StandardOutPath</key><string>${xml(join(state, "hub.log"))}</string>
 <key>StandardErrorPath</key><string>${xml(join(state, "hub.err.log"))}</string>
 </dict></plist>\n`;
 }
 export function hubUnit(binary: string, envFile: string): string {
-  return `[Unit]\nDescription=Lumio Hub\nAfter=network.target\n\n[Service]\nExecStart=${unitString(binary)} hub serve\nEnvironmentFile=${unitPath(envFile)}\nRestart=always\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n`;
+  return `[Unit]\nDescription=Lumio Hub\nAfter=network.target\n\n[Service]\nExecStart=${unitString(binary)} hub serve\nEnvironmentFile=${unitPath(envFile)}\nEnvironment=LUMIO_ASSISTANT_MANAGED=1\nRestart=always\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n`;
 }
 export { runtimeName } from "./config.ts";
 export interface SetupOptions {

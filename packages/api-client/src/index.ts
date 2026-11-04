@@ -1,5 +1,5 @@
 import { ClientInvite, ClientInviteRequest, ClientJoin, ClientJoinRequest, RuntimeInvite, RuntimeInviteRequest } from "@lumio/schema";
-import { WorkCommandRequest, WorkCommandResult, WorkTask, WorkTaskDetail, WorkProject, ExecutionRoutine, ExecutionRoutineCommandRequest, ExecutionRoutineInfo,
+import { AssistantConfigView, AssistantConfigUpdate, AssistantToolCall, ExecutionJobListArgs, RequestId, WorkAttention, WorkCommandRequest, WorkCommandResult, WorkTask, WorkTaskDetail, WorkProject, ExecutionRoutine, ExecutionRoutineCommandRequest, ExecutionRoutineInfo,
   AssistantMemory, AssistantMemoryCommandRequest, AssistantMemoryCommandResult, AssistantChatRequest, AssistantChatResult, AssistantConversation, AssistantConversationDetail, AssistantEvent, StoredArtifact, idOf } from "@lumio/schema";
 import { JobRun, Job, JobSpec, JobStatus, RoutineInfo, RuntimeName, RuntimeInfo, Actor, OperationRequest, OperationResult, Proposal, ProposalStatus, ApiError, CheckResult, LinksResult, NoteDetail, SearchResult, type ApiErrorCode, type NoteRef } from "@lumio/schema";
 
@@ -58,6 +58,16 @@ export function createClient(options: { url: string; token?: string; language?: 
   }
   const queryParams = (options: QueryOptions): Record<string, string> => options.includePrivate === undefined ? {} : { include_private: String(options.includePrivate) };
   return {
+    executionJobs(filter: ExecutionJobListArgs = {}) {
+      return request("/v2/execution/jobs", Object.fromEntries(Object.entries(validate(ExecutionJobListArgs, filter)).filter(([, value]) => value !== undefined).map(([key, value]) => [key, String(value)])), Job.array());
+    },
+    executionJob(id: string) { return request(`/v2/execution/jobs/${validate(idOf("job"), id)}`, {}, Job); },
+    assistantConfig() { return request("/v2/assistant/config", {}, AssistantConfigView); },
+    updateAssistantConfig(input: AssistantConfigUpdate) { return request("/v2/assistant/config", {}, AssistantConfigView, validate(AssistantConfigUpdate, input), "PUT"); },
+    clearAssistantConfig() { return request("/v2/assistant/config", {}, AssistantConfigView, undefined, "DELETE"); },
+    assistantTools(conversation: string) { return request(`/v2/assistant/conversations/${validate(idOf("conv"), conversation)}/tools`, {}, AssistantToolCall.array()); },
+    undoAssistantTool(tool: string, request_id: string) { return request(`/v2/assistant/tools/${validate(idOf("tool"), tool)}/undo`, {}, WorkCommandResult, { request_id: validate(RequestId, request_id) }); },
+    workAttention() { return request("/v2/work/attention", {}, WorkAttention.array()); },
     workCommand(input: WorkCommandRequest) { return request("/v2/work/commands", {}, WorkCommandResult, validate(WorkCommandRequest, input)); },
     workTasks(filter: { project?: string; status?: string; query?: string } = {}) {
       return request("/v2/work/tasks", { ...(filter.project ? { project: validate(idOf("prj"), filter.project) } : {}),

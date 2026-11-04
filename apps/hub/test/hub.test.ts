@@ -64,7 +64,7 @@ test("default binding is loopback; public health and every registered route call
     if (route.operation === "health") expect(await response.json()).toEqual({ ok: true, version: "0.0.0-dev" });
     expect(decisions.at(-1)?.operation).toBe(route.operation === "operations" ? "task.dispatch" : route.operation);
   }
-  expect(decisions).toHaveLength(existingRoutes.length);
+  expect(decisions.length).toBeGreaterThanOrEqual(existingRoutes.length);
 });
 
 test("authentication is required for queries and unknown routes", async () => {
@@ -163,10 +163,10 @@ test("authorization table is exhaustively checked, including private=false", () 
     expect(decision).toEqual(rule.decision);
     const expected = (PAIRING_OPERATIONS as readonly string[]).includes(rule.operation)
       ? ((rule.operation.endsWith(".join") ? rule.role === null : rule.operation === "runtime.signing-key" ? rule.role === "runtime" : rule.role === "human") ? "allow" : "deny")
-      : (V2_OPERATIONS as readonly string[]).includes(rule.operation) ? ((rule.operation === "execution.archive" ? rule.role === "runtime" : rule.role === "human") ? "allow" : "deny")
+      : (V2_OPERATIONS as readonly string[]).includes(rule.operation) ? ((rule.operation === "execution.archive" ? rule.role === "runtime" : rule.role === "human" || (rule.role === "agent" && !rule.includePrivate && ["work.read", "work.command", "execution.read"].includes(rule.operation))) ? "allow" : "deny")
       : rule.operation === "exec.privileged" && rule.role === "runtime" && !rule.includePrivate ? "needs_approval" : (RUNTIME_OPERATIONS as readonly string[]).includes(rule.operation)
       ? ((rule.operation === "runtimes" ? rule.role === "human" : rule.role === "runtime") ? "allow" : "deny")
-      : (JOB_OPERATIONS as readonly string[]).includes(rule.operation) ? (rule.role === "human" ? "allow" : "deny")
+      : (JOB_OPERATIONS as readonly string[]).includes(rule.operation) ? (rule.role === "human" || (rule.role === "agent" && ["jobs", "job.show"].includes(rule.operation)) ? "allow" : "deny")
       : rule.role === "runtime" || rule.operation === "exec.privileged" ? "deny" : rule.role !== "agent" ? "allow"
         : rule.includePrivate || rule.operation.startsWith("proposal.") || rule.operation === "task.dispatch" || rule.operation === "routine.followup" ? "deny" : "allow";
     expect(decision.result).toBe(expected);

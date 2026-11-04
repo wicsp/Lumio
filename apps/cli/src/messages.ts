@@ -1,6 +1,15 @@
 import { language, renderMessage, type Language } from "@lumio/platform";
 
 export const en = {
+  "work.round_not_found": "Execution round not found",
+  "work.round_not_applied": "The round result has not been applied yet",
+
+  "attention.usage": "Usage: lumio attention [--json]",
+  "attention.empty": "Nothing needs your attention.",
+  "attention.question": "Waiting for your answer",
+  "attention.review": "Awaiting your review",
+  "attention.failed": "Execution failed",
+
   ", ": ", ",
   "(${0})": (v: unknown) => `(${String(v)})`,
   ": ": ": ",
@@ -462,7 +471,7 @@ Outgoing links:`,
   "selftest.configuration_missing_or_could_not_be_parsed": "Configuration missing or could not be parsed",
   "selftest.seconds": (p0: unknown, p1: unknown, p2: unknown, p3: unknown, p4: unknown, p5: unknown) => `${String(p0)} ${String(p1)} (${String(p2)} seconds)${String(p3)}${String(p4)}${String(p5)}`,
   "selftest.checks_passed": (p0: unknown, p1: unknown) => `${String(p0)}/${String(p1)} checks passed`,
-  "work.usage_lumio_task_new_list_show_update_edit_status_assign_comment_con": "Usage: lumio task new|list|show|update|edit|status|assign|comment|continue; lumio project new|list|show|update|edit; --json supported; add --legacy for note commands",
+  "work.usage_lumio_task_new_list_show_update_edit_status_assign_comment_con": "Usage: lumio task new|list|show|update|edit|status|assign|comment|continue|ack; lumio project new|list|show|update|edit; --json supported; add --legacy for note commands",
   "work.quote_titles_containing_spaces": "Quote titles containing spaces",
   "work.dispatched": (p0: unknown) => `Dispatched: ${String(p0)}`,
   "work.submitting_existing_text_with_file_requires_revision_read_the_revisi": "Submitting existing text with --file requires --revision; read the revision with show --json or run edit for a versioned copy",
@@ -715,6 +724,15 @@ ${String(p0)}${String(p1)}`,
   "Run tailscale serve status to check": "Run tailscale serve status to check",
 };
 export const zh: typeof en = {
+  "work.round_not_found": "找不到执行轮次",
+  "work.round_not_applied": "这一轮结果尚未写回",
+
+  "attention.usage": "用法：lumio attention [--json]",
+  "attention.empty": "目前没有需要你处理的事项。",
+  "attention.question": "等你回答",
+  "attention.review": "等你验收",
+  "attention.failed": "执行失败",
+
   ", ": "、",
   "(${0})": (v: unknown) => `（${String(v)}）`,
   ": ": "：",
@@ -1176,7 +1194,7 @@ ${String(p1)}`,
   "selftest.configuration_missing_or_could_not_be_parsed": "配置缺失或无法解析",
   "selftest.seconds": (p0: unknown, p1: unknown, p2: unknown, p3: unknown, p4: unknown, p5: unknown) => `${String(p0)} ${String(p1)}（${String(p2)} 秒）${String(p3)}${String(p4)}${String(p5)}`,
   "selftest.checks_passed": (p0: unknown, p1: unknown) => `${String(p0)}/${String(p1)} 项通过`,
-  "work.usage_lumio_task_new_list_show_update_edit_status_assign_comment_con": "用法：lumio task new|list|show|update|edit|status|assign|comment|continue；lumio project new|list|show|update|edit；支持 --json；旧笔记命令加 --legacy",
+  "work.usage_lumio_task_new_list_show_update_edit_status_assign_comment_con": "用法：lumio task new|list|show|update|edit|status|assign|comment|continue|ack；lumio project new|list|show|update|edit；支持 --json；旧笔记命令加 --legacy",
   "work.quote_titles_containing_spaces": "标题包含空格时请用引号包起来",
   "work.dispatched": (p0: unknown) => `已派出：${String(p0)}`,
   "work.submitting_existing_text_with_file_requires_revision_read_the_revisi": "通过 --file 提交已有正文时必须提供 --revision；先用 show --json 读取版本，或直接运行 edit 打开带版本的编辑副本",

@@ -32,6 +32,7 @@ export interface WorkContext {
   id(prefix: (typeof ID_PREFIXES)[keyof typeof ID_PREFIXES]): string;
   dispatch?(task: WorkTask, input: string, round: number, to?: string): Job;
   cancel?(task: string): void;
+  agentForJob?(job: string): string | undefined;
 }
 
 function patch<T extends object>(value: T, changes: Record<string, unknown>): T {
@@ -139,26 +140,26 @@ export class WorkService {
           const project = WorkProject.parse({ schema_version: 2, type: "project", id: this.context.id("prj"),
             title: operation.args.title, description: operation.args.description ?? "", tags: operation.args.tags ?? [],
             goal: operation.args.goal, repo: operation.args.repo, deadline: operation.args.deadline,
-            revision: 1, status: "planning", created: time, updated: time });
+            revision: 1, status: "planning", created: time, updated: time, created_by: actor, updated_by: actor });
           this.store.putProject(project); result = { kind: "project", project }; break;
         }
         case "work.project.update": {
           const current = this.project(operation.args.project);
           if (current.revision !== operation.args.expected_revision) throw new WorkError("CONFLICT", { key: "index.project_changed_reload_before_saving", args: [] });
-          const project = WorkProject.parse({ ...patch(current, operation.args.patch), revision: current.revision + 1, updated: time });
+          const project = WorkProject.parse({ ...patch(current, operation.args.patch), revision: current.revision + 1, updated: time, updated_by: actor });
           this.store.putProject(project); result = { kind: "project", project }; break;
         }
         case "work.task.create": {
           const task = WorkTask.parse({ ...operation.args, schema_version: 2, type: "task", id: this.context.id("task"),
             description: operation.args.description ?? "", tags: operation.args.tags ?? [], assignee: operation.args.assignee ?? "human",
             status: operation.args.status ?? "todo", dependencies: operation.args.dependencies ?? [], references: operation.args.references ?? [],
-            revision: 1, created: time, updated: time });
+            revision: 1, created: time, updated: time, created_by: actor, updated_by: actor });
           this.checkTask(task); this.store.putTask(task); result = { kind: "task", task }; break;
         }
         case "work.task.update": {
           const current = this.task(operation.args.task);
           if (current.revision !== operation.args.expected_revision) throw new WorkError("CONFLICT", { key: "index.task_changed_reload_before_saving", args: [] });
-          const task = WorkTask.parse({ ...patch(current, operation.args.patch), revision: current.revision + 1, updated: time });
+          const task = WorkTask.parse({ ...patch(current, operation.args.patch), revision: current.revision + 1, updated: time, updated_by: actor });
           this.checkTask(task); this.store.putTask(task);
           if (["paused", "cancelled"].includes(task.status)) this.context.cancel?.(task.id);
           result = { kind: "task", task }; break;
@@ -168,27 +169,35 @@ export class WorkService {
           const comment = WorkComment.parse({ id: this.context.id("wmsg"), task: operation.args.task, author: actor, body: operation.args.body, created: time });
           this.store.putComment(comment); result = { kind: "comment", comment }; break;
         }
-        case "work.task.acknowledge":
-          // Contract from ADR 0030; implemented in R3-2. Until then it is refused rather than silently ignored.
-          throw new WorkError("INVALID", { key: "index.invalid_work_command_parameters", args: [] });
+        case "work.task.acknowledge": {
+          const task = this.task(operation.args.task);
+          const execution = this.store.executions(task.id).find(value => value.round === operation.args.round);
+          if (!execution) throw new WorkError("NOT_FOUND", { key: "work.round_not_found", args: [] });
+          if (!execution.applied) throw new WorkError("CONFLICT", { key: "work.round_not_applied", args: [] });
+          if (!execution.acknowledged) this.store.putExecution({ ...execution, acknowledged: { at: time, by: actor } });
+          result = { kind: "task", task }; break;
+        }
         case "work.task.dispatch": {
-          // ADR 0030 "answer and continue" is implemented in R3-2; refuse rather than drop the comment.
-          if (operation.args.comment !== undefined) throw new WorkError("INVALID", { key: "index.invalid_work_command_parameters", args: [] });
           const task = this.task(operation.args.task);
           if (operation.args.expected_revision !== undefined && task.revision !== operation.args.expected_revision) throw new WorkError("CONFLICT", { key: "index.task_changed_reload_before_dispatching", args: [] });
           if (["done", "cancelled", "paused"].includes(task.status)) throw new WorkError("CONFLICT", { key: "index.task_is_done_cancelled_or_paused", args: [] });
           if (task.dependencies.some((id) => this.task(id).status !== "done")) throw new WorkError("CONFLICT", { key: "index.dependency_tasks_are_not_completed", args: [] });
-          if ((operation.args.to ?? task.assignee) === "human") throw new WorkError("INVALID", { key: "index.specify_an_agent_assignee_e_g_pi_server", args: [] });
           const executions = this.store.executions(task.id);
+          const latest = executions.reduce<WorkExecution | undefined>((prior, value) => !prior || value.round > prior.round ? value : prior, undefined);
+          const to = operation.args.to ?? (operation.args.comment !== undefined && latest ? this.context.agentForJob?.(latest.job) : undefined) ?? task.assignee;
+          if (to === "human") throw new WorkError("INVALID", { key: "index.specify_an_agent_assignee_e_g_pi_server", args: [] });
           if (executions.some((execution) => !execution.applied)) throw new WorkError("CONFLICT", { key: "index.this_task_already_has_a_running_round_or_pending_result", args: [] });
           if (!this.context.dispatch) throw new WorkError("INTERNAL", { key: "index.execution_capability_is_not_configured", args: [] });
+          if (operation.args.comment !== undefined) this.store.putComment(WorkComment.parse({
+            id: this.context.id("wmsg"), task: task.id, author: actor, body: operation.args.comment, created: time,
+          }));
           const comments = this.store.comments(task.id);
           const snapshot = [`# ${task.title}`, "", task.description, ...comments.flatMap((comment) => ["", this.msg("## Discussion ${0} ${1}", comment.author, comment.created), comment.body])].join("\n");
           const round = executions.reduce((maximum, value) => Math.max(maximum, value.round), 0) + 1;
-          const job = this.context.dispatch(task, snapshot, round, operation.args.to);
+          const job = this.context.dispatch(task, snapshot, round, to);
           this.store.putExecution(WorkExecution.parse({ task: task.id, job: job.spec.id, round, input_revision: task.revision,
             input_snapshot: snapshot, created: time, applied: false }));
-          if (task.status === "todo") this.store.putTask(WorkTask.parse({ ...task, status: "active", revision: task.revision + 1, updated: time }));
+          if (task.status === "todo") this.store.putTask(WorkTask.parse({ ...task, status: "active", revision: task.revision + 1, updated: time, updated_by: actor }));
           result = { kind: "job", job }; break;
         }
       }

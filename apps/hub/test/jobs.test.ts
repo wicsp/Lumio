@@ -78,7 +78,9 @@ test("job API validates inputs, authorizes all endpoints, tracks ownership/lease
   expect(job).toMatchObject({ status: "queued", spec: { workdir: "~", timeout_seconds: 7200 } });
   expect(Buffer.from(job.spec.lease, "base64url").length).toBeGreaterThanOrEqual(32);
   for (const token of [agent, runtime]) for (const [path, body] of [["/v1/jobs", {}], [`/v1/jobs/${job.spec.id}/cancel`, {}], ["/v1/jobs", undefined], [`/v1/jobs/${job.spec.id}`, undefined]] as const) {
-    const response = await request(path, token, body); expect(response.status).toBe(403); ApiError.parse(await response.json());
+    const response = await request(path, token, body);
+    const allowed = token === agent && body === undefined;
+    expect(response.status).toBe(allowed ? 200 : 403); if (!allowed) ApiError.parse(await response.json());
   }
   for (const body of [{ runtime: "missing", run: job.spec.run }, { runtime: "server", run: job.spec.run, unknown: true }, { runtime: "server", run: { kind: "agent", engine: "codex", prompt: "no" } }])
     expect((await request("/v1/jobs", human, body)).status).toBe(400);
@@ -162,7 +164,7 @@ test("file archival is independently durable: failed upload does not block resul
   expect(events.map((event) => event.sequence)).toEqual(events.map((_, index) => index + 1));
   expect(events.at(-1)!.payload.status).toBe("done"); expect(events.some((event) => event.type === "output" && event.payload.stream === "stderr")).toBe(true);
   expect((await readFile(calls, "utf8")).match(/start/g)).toHaveLength(1);
-  expect((await request(`/v2/execution/artifacts/${raw.id}/content`, agent)).status).toBe(403);
+  expect((await request(`/v2/execution/artifacts/${raw.id}/content`, agent)).status).toBe(200);
   for (const child of [...daemons]) await stop(child);
   const main = new URL("../src/main.ts", import.meta.url).pathname, backup = join(temp, "business-backup"), restored = join(temp, "restored");
   async function manage(args: string[]) {
