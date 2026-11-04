@@ -1,6 +1,6 @@
 # R4-0 任务流程与 agent 接力、委派需要批准、PWA 推送
 
-- 依据：[ADR 0031](../adr/0031-workflows-delegation-push.md)（Proposed，2026-11-04），以及 ADR 0029、0030
+- 依据：[ADR 0031](../adr/0031-workflows-delegation-push.md)（Accepted，2026-11-04），以及 ADR 0029、0030
 - 契约：新增（R4-1 起草，人类审阅后合并）
 - 前置：R3 完成（R3-3 的每轮凭据与 skill，R3-5 验收）
 
