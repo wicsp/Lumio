@@ -135,7 +135,7 @@ export class WorkbenchView {
     else if (section === "knowledge") pane = new KnowledgePane(target, client, id);
     else if (section === "work") pane = new WorkPane(target, client, this.session.hub, id, navigate, changed);
     else if (section === "execution") pane = new ExecutionPane(target, client, this.session.hub, id, navigate, changed);
-    else if (section === "assistant") pane = new AssistantPane(target, client, intent, navigate);
+    else if (section === "assistant") pane = new AssistantPane(target, client, this.session.hub, intent, navigate);
     else pane = new ApprovalsPane(target, client, changed);
     this.pane = pane;
     if (intent && section !== "assistant") pane.intent?.(intent);

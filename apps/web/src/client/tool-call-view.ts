@@ -5,7 +5,7 @@
 import type { AssistantToolCall } from "@lumio/schema";
 import { capabilityFromTool } from "@lumio/schema";
 import { errorText, isConflict, type Client } from "./api.ts";
-import { undoCommand } from "./commands.ts";
+import { newRequestId } from "./commands.ts";
 import { clear, failure, h, icon } from "./dom.ts";
 import { locale, t } from "./i18n.ts";
 import { TASK_LABELS } from "./labels.ts";
@@ -83,13 +83,14 @@ export function toolCallView(call: AssistantToolCall, client: Client, navigate: 
         h("span", { class: "change-old" }, show(key, before[key])), icon("chevron"), h("span", { class: "change-new" }, show(key, patch[key]))))
     : name === "work.task.comment" && typeof call.args.body === "string" ? [h("li", { class: "change-comment" }, call.args.body.length > 160 ? `${call.args.body.slice(0, 160)}…` : call.args.body)] : [];
   const message = h("div", { role: "status", class: "change-status" });
-  const undo = call.change && !call.change.undone && undoCommand(call.change) ? h("button", { type: "button", class: "btn btn-small" }, icon("back"), t("Undo")) : null;
+  // 只有修改能撤回（按记录的旧值改回去，带写入后的 revision）；新建与评论没有旧值。由 Hub 执行并记下已撤回。
+  const undoable = call.status === "succeeded" && !!call.change?.before && !!call.change.after_revision && !call.change.undone && name.endsWith(".update");
+  const undo = undoable ? h("button", { type: "button", class: "btn btn-small" }, icon("back"), t("Undo")) : null;
+  const requestId = newRequestId("undo");
   undo?.addEventListener("click", async () => {
-    const request = undoCommand(call.change!);
-    if (!request) return;
     undo.disabled = true;
     try {
-      await client.workCommand(request);
+      await client.undoAssistantTool(call.id, requestId);
       undo.remove(); clear(message, h("span", { class: "success" }, t("Undone.")));
     } catch (cause) {
       undo.disabled = false;

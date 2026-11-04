@@ -2,8 +2,8 @@
  * 助手：对话历史、流式回复、停止接收与中断后核查；显式记忆。
  * 中断或结果不明时只核对已保存记录，不自动重发；同样的草稿重发时复用 request_id。
  */
-import type { AssistantConversation, AssistantConversationDetail, AssistantMemory, AssistantChatRequest } from "@lumio/schema";
-import { errorText, type Client } from "../api.ts";
+import type { AssistantConversation, AssistantConversationDetail, AssistantMemory, AssistantChatRequest, AssistantToolCall } from "@lumio/schema";
+import { errorText, type Client, type HubExtras } from "../api.ts";
 import { formatTime, newRequestId } from "../commands.ts";
 import { autosize, clear, empty, failure, h, icon, loading, openDialog, toast } from "../dom.ts";
 import { ago } from "../format.ts";
@@ -38,7 +38,7 @@ export class AssistantPane {
   private mode: "chat" | "memory" = "chat";
   private uncertain?: AssistantChatRequest;
 
-  constructor(private root: HTMLElement, private client: Client, intent?: string, private navigate: Navigate = () => {}) {
+  constructor(private root: HTMLElement, private client: Client, private hub: HubExtras, intent?: string, private navigate: Navigate = () => {}) {
     this.composer = h("form", { class: "composer" }, this.text,
       h("div", { class: "composer-foot" }, this.model, h("span", { class: "hint hide-narrow" }, t("↵ send · ⇧↵ new line")), this.stop, this.send));
     this.composer.addEventListener("submit", event => { event.preventDefault(); void this.submit(); });
@@ -141,9 +141,9 @@ export class AssistantPane {
     this.layout.classList.remove("show-side");
     clear(this.messages, loading()); clear(this.notice);
     try {
-      const detail = await this.client.conversation(id);
+      const [detail, tools] = await Promise.all([this.client.conversation(id), this.hub.assistantTools(id).catch(() => [])]);
       if (!this.active || generation !== this.generation || this.mode !== "chat") return;
-      this.renderDetail(detail);
+      this.renderDetail(detail, tools);
     } catch (cause) {
       if (this.active && generation === this.generation) clear(this.messages, failure(errorText(cause)));
     }
@@ -154,9 +154,9 @@ export class AssistantPane {
     return h("div", { class: "msg-assistant" }, h("span", { class: "brand-mark", "aria-hidden": "true" }), h("div", {}, content));
   }
 
-  private renderDetail(detail: AssistantConversationDetail): void {
+  private renderDetail(detail: AssistantConversationDetail, tools: AssistantToolCall[] = []): void {
     this.current = detail.conversation.id;
-    const calls = new Map((detail.tool_calls ?? []).map(call => [call.id, call]));
+    const calls = new Map(tools.map(call => [call.id, call]));
     let toolGroup: HTMLElement | undefined;
     clear(this.messages, ...detail.messages.flatMap(message => {
       const call = message.tool_call ? calls.get(message.tool_call) : undefined;
@@ -254,7 +254,9 @@ export class AssistantPane {
       }
       if (!this.active) return;
       if (detail && detail.turns.some(turn => turn.request_id === request.request_id)) {
-        this.renderDetail(detail);
+        const tools = await this.hub.assistantTools(detail.conversation.id).catch(() => []);
+        if (!this.active) return;
+        this.renderDetail(detail, tools);
         const turn = detail.turns.find(value => value.request_id === request.request_id)!;
         if (turn.status === "running") clear(this.notice, h("div", { class: "notice" }, icon("alert"), h("span", {}, t("The Hub is still working on it. Refresh later to see the result. The request was not sent again."))));
         else this.uncertain = undefined;

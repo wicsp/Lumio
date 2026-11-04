@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { AssistantConfigUpdate, WorkCommandRequest } from "@lumio/schema";
-import { acknowledgeCommand, answerCommand, undoCommand } from "../src/client/commands.ts";
+import { acknowledgeCommand, answerCommand } from "../src/client/commands.ts";
 import { PROVIDER_PRESETS } from "../src/client/providers.ts";
 
 const TASK = "task_01JABCDEFGHJKMNPQRSTVWXYZ0", PRJ = "prj_01JABCDEFGHJKMNPQRSTVWXYZ0";
@@ -14,20 +14,6 @@ describe("ADR 0030 commands", () => {
   test("acknowledge names the round", () => {
     const request = acknowledgeCommand(TASK, 2);
     expect(WorkCommandRequest.parse(request).operation).toEqual({ op: "work.task.acknowledge", args: { task: TASK, round: 2 } });
-  });
-});
-
-describe("undo (ADR 0029)", () => {
-  test("restores the recorded fields at the revision the assistant wrote", () => {
-    const request = undoCommand({ capability: "work.task.update", target: TASK, before: { status: "todo", due: null }, after_revision: 5 })!;
-    expect(WorkCommandRequest.parse(request).operation).toEqual({ op: "work.task.update", args: { task: TASK, expected_revision: 5, patch: { status: "todo", due: null } } });
-    const project = undoCommand({ capability: "work.project.update", target: PRJ, before: { title: "Old" }, after_revision: 2 })!;
-    expect(WorkCommandRequest.parse(project).operation.op).toBe("work.project.update");
-  });
-  test("creations and comments have nothing to restore", () => {
-    expect(undoCommand({ capability: "work.task.create", target: TASK, after_revision: 1 })).toBeUndefined();
-    expect(undoCommand({ capability: "work.task.comment", target: TASK })).toBeUndefined();
-    expect(undoCommand({ capability: "work.task.update", target: TASK, before: {}, after_revision: 3 })).toBeUndefined();
   });
 });
 
