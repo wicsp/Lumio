@@ -646,6 +646,9 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 .set-danger .icon { color: var(--red); }
 .set-empty { padding: 14px; color: var(--ink-3); font-size: var(--fs-sm); }
 .set-bar { background: var(--paper); }
+.set-howto { align-items: flex-start; }
+.set-howto > .icon { margin-top: 3px; color: var(--ink-3); }
+.set-code { display: inline-block; margin-top: 6px; padding: 3px 8px; border-radius: var(--r-sm); background: var(--sunken); font-family: var(--mono); font-size: var(--fs-sm); }
 .set-form-wrap { padding: 14px; border-top: 1px solid var(--line); }
 .set-form { display: flex; flex-direction: column; gap: 14px; }
 .set-form .bar-spacer { flex: 1; }

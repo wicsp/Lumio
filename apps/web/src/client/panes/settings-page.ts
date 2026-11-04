@@ -10,6 +10,7 @@ import { lang, setLang, t, type Lang } from "../i18n.ts";
 import { onTheme, setTheme, themeChoice, type ThemeChoice } from "../theme.ts";
 import { LANGS, THEMES } from "../settings.ts";
 import { AssistantSettings } from "../assistant-settings.ts";
+import { AgentsSettings } from "../agents-settings.ts";
 
 const SOURCE = "https://github.com/wicsp/Lumio";
 
@@ -20,6 +21,7 @@ export class SettingsPane {
   private hubRows = h("div", { class: "set-rows" });
   private runtimeRows = h("div", { class: "set-rows" });
   private assistant: AssistantSettings;
+  private agents: AgentsSettings;
 
   constructor(owner: HTMLElement, private session: Session, private name: string, private logout: () => void, back: () => void) {
     const bar = h("header", { class: "bar set-bar" },
@@ -32,6 +34,7 @@ export class SettingsPane {
       this.group(t("Assistant model"), t("Any service with a Chat Completions-compatible API. Saving takes effect immediately."), (this.assistant = new AssistantSettings(session.hub)).element),
       this.group(t("Hub"), undefined, this.hubRows),
       this.group(t("Runtimes"), t("Machines that run agents for this Hub."), this.runtimeRows),
+      this.group(t("Connected agents"), t("Agents outside Lumio that can read your tasks and notes and make small changes. They can't mark tasks done, delegate, approve, or read private notes."), (this.agents = new AgentsSettings(session.client)).element),
       this.group(t("About"), undefined, h("div", { class: "set-rows" },
         this.row(t("Keyboard shortcuts"), h("span", { class: "set-value" }, h("kbd", {}, "⌘K"), " ", t("command menu"), " · ", h("kbd", {}, "1"), "–", h("kbd", {}, "6"), " ", t("sections"))),
         h("a", { class: "set-row set-link", href: SOURCE, target: "_blank", rel: "noopener noreferrer" },
@@ -46,7 +49,7 @@ export class SettingsPane {
     void this.loadRuntimes();
   }
 
-  dispose(): void { this.active = false; this.unbindTheme(); this.assistant.dispose(); }
+  dispose(): void { this.active = false; this.unbindTheme(); this.assistant.dispose(); this.agents.dispose(); }
 
   private profile(): HTMLElement {
     return h("section", { class: "set-profile" },
