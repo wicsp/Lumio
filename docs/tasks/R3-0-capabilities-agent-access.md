@@ -9,9 +9,9 @@
 | 编号 | 内容 | 负责 | 涉及 | 依赖 |
 |---|---|---|---|---|
 | R3-1 ✅ | 契约：能力目录、助手配置接口、一轮访问凭据、执行者显示；提问与验收（ADR 0030） | Claude 起草，人类批准 | `packages/schema` | — |
-| R3-2 | Hub：agent 权限规则、能力执行层、内置助手接上工具（含私密读取与撤回）、助手配置接口与热加载；需要你处理、回答并继续、已查看 | 后端（Codex） | `apps/hub`、`packages/assistant`、`packages/work`、`packages/execution`、`packages/knowledge`、`apps/cli`（setup 改用同一实现） | R3-1、R2-2 |
+| R3-2 ✅ | Hub：agent 权限规则、能力执行层、内置助手接上工具（含私密读取与撤回）、助手配置接口与热加载；需要你处理、回答并继续、已查看 | 后端（Codex） | `apps/hub`、`packages/assistant`、`packages/work`、`packages/execution`、`packages/knowledge`、`apps/cli`（setup 改用同一实现） | R3-1、R2-2 |
 | R3-3 | 外部 agent：每轮访问凭据、`lumio agent`、`lumio skill install`、由目录生成 SKILL.md 与 CLI 覆盖测试 | 后端（Codex） | `apps/hub`、`apps/runtime`、`apps/cli`、`packages/execution`、`skills/lumio` | R3-2 |
-| R3-4 | Web：设置页「助手模型」「已连接的 agent」；对话里的工具调用与变更卡片（撤回）；任务里显示执行者；回答框、验收卡片、需要你处理 | Claude | `apps/web` | R3-2（模型配置部分只依赖 R3-1 与 R3-2 的接口） |
+| R3-4（部分）| Web：设置页「助手模型」「已连接的 agent」；对话里的工具调用与变更卡片（撤回）；任务里显示执行者；回答框、验收卡片、需要你处理 | Claude | `apps/web` | R3-2（模型配置部分只依赖 R3-1 与 R3-2 的接口） |
 | R3-5 | 验收（见文末） | 人类 + Claude | — | R3-1 至 R3-4 |
 
 ## R3-1 契约（Claude）✅
@@ -70,6 +70,9 @@
   `skill install` 在临时 HOME 下写入三种 agent 的目录。
 
 ## R3-4 Web（Claude）
+
+已合并（#80）：设置页「助手模型」、对话里的工具步骤与变更卡片（撤回走 `POST /v2/assistant/tools/<id>/undo`）、任务里显示修改者、需要你处理的卡片与回答并继续。
+剩余：「已连接的 agent」，等 R3-3 的接口。
 
 - 设置页「助手模型」：地址（带常见服务预设，不预设默认）、模型、密钥（只写）、测试连接、保存后立即生效。
 - 设置页「已连接的 agent」：身份、最近活动、吊销。
