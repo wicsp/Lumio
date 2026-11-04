@@ -6,7 +6,7 @@ import { Proposal } from "./proposal.ts";
 import { LinksResult, NOTE_TYPES, NoteDetail, SearchResult } from "./query.ts";
 import {
   ProjectStatus, TaskStatus, WorkCommandResult, WorkProject, WorkProjectCreate, WorkProjectUpdate,
-  WorkTask, WorkTaskComment, WorkTaskCreate, WorkTaskDetail, WorkTaskUpdate,
+  WorkAttention, WorkTask, WorkTaskComment, WorkTaskCreate, WorkTaskDetail, WorkTaskUpdate,
 } from "./work.ts";
 
 /**
@@ -53,6 +53,7 @@ export const WorkTaskListArgs = z.strictObject({
   query: z.string().min(1).optional().describe("Substring of title or description"),
 });
 export const WorkTaskShowArgs = z.strictObject({ task: idOf("task") });
+export const WorkAttentionListArgs = z.strictObject({});
 export const WorkProjectListArgs = z.strictObject({ status: ProjectStatus.optional() });
 export const WorkProjectShowArgs = z.strictObject({ project: idOf("prj") });
 
@@ -89,6 +90,8 @@ export const CAPABILITIES = [
     summary: { en: "List the user's tasks, optionally by project, status or text.", zh: "列出用户的任务，可按项目、状态或文字筛选。" } }),
   define({ name: "work.task.show", kind: "read", args: WorkTaskShowArgs, result: WorkTaskDetail,
     summary: { en: "Show a task with its discussion and execution rounds.", zh: "查看一个任务及其讨论和执行轮次。" } }),
+  define({ name: "work.attention.list", kind: "read", args: WorkAttentionListArgs, result: z.array(WorkAttention),
+    summary: { en: "List what needs the user now: questions from agents, finished rounds awaiting review, and failed rounds.", zh: "列出现在需要用户处理的事：agent 的提问、等待验收的结果、失败的轮次。" } }),
   define({ name: "work.project.list", kind: "read", args: WorkProjectListArgs, result: z.array(WorkProject),
     summary: { en: "List projects.", zh: "列出项目。" } }),
   define({ name: "work.project.show", kind: "read", args: WorkProjectShowArgs, result: WorkProject,

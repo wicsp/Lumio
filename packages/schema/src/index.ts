@@ -34,7 +34,7 @@ import { CapabilityChange } from "./capabilities.ts";
 import { ExecutionRoutine, ExecutionRoutineCommandRequest, ExecutionRoutineInfo } from "./execution.ts";
 import { BackupManifest, MigrationPlan, RunLogEvent, StoredArtifact } from "./storage.ts";
 import {
-  ResourceRef, WorkComment, WorkCommandRequest, WorkCommandResult, WorkExecution, WorkProject, WorkTask, WorkTaskDetail,
+  ResourceRef, WorkAttention, WorkComment, WorkCommandRequest, WorkCommandResult, WorkExecution, WorkProject, WorkTask, WorkTaskDetail,
 } from "./work.ts";
 import { ApiError, OperationRequest, OperationResult } from "./api.ts";
 import { Asset, Experiment, Idea, Paper, Post, Project, Routine, Source, Task } from "./entities.ts";
@@ -119,6 +119,7 @@ export const CONTRACTS = {
   "migration-plan": MigrationPlan,
   // 能力目录与 agent 访问（ADR 0029，R3-1）；各能力的参数与结果 schema 由 CAPABILITIES 导出
   "capability-change": CapabilityChange,
+  "work-attention": WorkAttention,
   "assistant-config-view": AssistantConfigView,
   "assistant-config-update": AssistantConfigUpdate,
   "job-access": JobAccess,

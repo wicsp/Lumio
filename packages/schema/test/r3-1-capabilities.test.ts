@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import {
   AGENT_SETTABLE_TASK_STATUSES, AgentInfo, AgentTokenRequest, AssistantConfigUpdate, AssistantConfigView, AssistantToolCall,
-  CAPABILITIES, CAPABILITY_NAMES, CONTRACTS, CapabilityName, JobAccess, JobSpec, RuntimeSync, WorkCommand, WorkTask,
+  CAPABILITIES, CAPABILITY_NAMES, CONTRACTS, CapabilityName, JobAccess, JobSpec, RuntimeSync, WorkAttention, WorkCommand, WorkCommandRequest, WorkExecution, WorkTask,
   assistantConfigReason, capability, capabilityFromTool, toolName,
 } from "../src/index.ts";
 
@@ -103,5 +103,28 @@ describe("compatibility", () => {
   });
   test("every exported contract converts to JSON Schema", () => {
     for (const schema of Object.values(CONTRACTS)) expect(() => z.toJSONSchema(schema, { io: "input" })).not.toThrow();
+  });
+});
+
+describe("rounds that need the user (ADR 0030)", () => {
+  test("attention items describe the latest round of a task", () => {
+    const item = { task: TASK, title: "Interaction test", kind: "question", job: JOB, round: 1, agent: "pi@server", since: NOW, question: "Chinese or English?" };
+    expect(WorkAttention.safeParse(item).success).toBe(true);
+    expect(WorkAttention.safeParse({ ...item, kind: "waiting" }).success).toBe(false);
+    expect(capability("work.attention.list")?.kind).toBe("read");
+  });
+  test("answer-and-continue is a dispatch with a comment; acknowledge names a round; neither is an agent capability", () => {
+    const dispatch = { request_id: "req_answer_continue_01", operation: { op: "work.task.dispatch", args: { task: TASK, to: "pi@server", expected_revision: 3, comment: "中文，确认继续" } } };
+    expect(WorkCommandRequest.safeParse(dispatch).success).toBe(true);
+    expect(WorkCommandRequest.safeParse({ ...dispatch, operation: { ...dispatch.operation, args: { task: TASK, comment: "" } } }).success).toBe(false);
+    const acknowledge = { request_id: "req_acknowledge_0001", operation: { op: "work.task.acknowledge", args: { task: TASK, round: 2 } } };
+    expect(WorkCommandRequest.safeParse(acknowledge).success).toBe(true);
+    expect(capability("work.task.acknowledge")).toBeUndefined();
+    expect(capability("work.task.dispatch")).toBeUndefined();
+  });
+  test("executions stored before ADR 0030 still parse", () => {
+    const execution = { task: TASK, job: JOB, round: 1, input_revision: 1, input_snapshot: "", created: NOW, applied: true };
+    expect(WorkExecution.safeParse(execution).success).toBe(true);
+    expect(WorkExecution.safeParse({ ...execution, acknowledged: { at: NOW, by: ACT } }).success).toBe(true);
   });
 });
