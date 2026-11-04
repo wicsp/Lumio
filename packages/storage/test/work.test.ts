@@ -43,3 +43,23 @@ test("shared transaction rollback restores task, execution and request receipt t
     expect(f.command("work.task.create", { title: "可继续" }).kind).toBe("task");
   } finally { db.close(); }
 });
+
+test("R3 migration preserves old Work rows, is repeatable, and persists actors and acknowledged rounds", () => {
+  const db = new Database(":memory:");
+  try {
+    const f = fixture(db), created = f.command("work.task.create", { title: "Synthetic pre-R3 task" });
+    if (created.kind !== "task") throw new Error("task expected");
+    // Reconstruct the previous column layout with populated Work data.
+    for (const table of ["work_projects", "work_tasks"]) db.exec(`ALTER TABLE ${table} DROP COLUMN created_by; ALTER TABLE ${table} DROP COLUMN updated_by;`);
+    db.exec("ALTER TABLE work_executions DROP COLUMN acknowledged; DELETE FROM platform_migrations WHERE name='work-2'");
+    const store = new SqliteWorkStore(db), old = store.task(created.task.id)!;
+    expect(old.title).toBe("Synthetic pre-R3 task"); expect(old.created_by).toBeUndefined();
+    store.putTask({ ...old, revision: 2, updated_by: actor });
+    const execution = { task: old.id, job: "job_00000000000000000000000001", round: 1, input_revision: 1,
+      input_snapshot: "Synthetic snapshot", created: old.created, applied: true, acknowledged: { at: old.updated, by: actor } };
+    store.putExecution(execution);
+    const reopened = new SqliteWorkStore(db);
+    expect(reopened.task(old.id)?.updated_by).toBe(actor); expect(reopened.executions(old.id)).toEqual([execution]);
+    expect(db.query("SELECT * FROM platform_migrations WHERE name='work-2'").all()).toHaveLength(1);
+  } finally { db.close(); }
+});

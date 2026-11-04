@@ -15,6 +15,7 @@ const options = {
   file: { type: "string" }, status: { type: "string" }, project: { type: "string" }, parent: { type: "string" },
   depends: { type: "string" }, due: { type: "string" }, workdir: { type: "string" }, model: { type: "string" },
   timeout: { type: "string" }, patch: { type: "string" }, revision: { type: "string" }, "request-id": { type: "string" },
+  comment: { type: "string" }, round: { type: "string" },
   goal: { type: "string" }, repo: { type: "string" }, deadline: { type: "string" },
 } as const;
 
@@ -23,7 +24,7 @@ export async function runWork(kind: "task" | "project", args: string[], log: (li
   if (kind === "task" && args.includes("--legacy")) return;
   const { values, positionals } = parseArgs({ args, allowPositionals: true, strict: true, options });
   const [action, reference, ...rest] = positionals;
-  if (!action || !["new", "create", "list", "show", "update", "edit", "status", "assign", "comment", "continue"].includes(action)) {
+  if (!action || !["new", "create", "list", "show", "update", "edit", "status", "assign", "comment", "continue", "ack"].includes(action)) {
     if (kind === "task") return;
     throw new Error(usage());
   }
@@ -66,9 +67,12 @@ export async function runWork(kind: "task" | "project", args: string[], log: (li
       return 0;
     }
     if (action === "continue" && kind === "task") {
-      const result = await send("work.task.dispatch", { task: reference, to: values.to, expected_revision: current.revision });
+      const result = await send("work.task.dispatch", { task: reference, to: values.to, comment: values.comment, expected_revision: current.revision });
       if (values.json) emit(result.kind === "job" ? result.job : result); else if (result.kind === "job") log(msg("work.dispatched", result.job.spec.id));
       return 0;
+    }
+    if (action === "ack" && kind === "task") {
+      emit(await send("work.task.acknowledge", { task: reference, round: Number(values.round) })); return 0;
     }
     if (action === "comment" && kind === "task") {
       const body = values.file ? await readFile(values.file, "utf8") : rest.join(" ");
@@ -108,4 +112,14 @@ export async function runWork(kind: "task" | "project", args: string[], log: (li
     if (!resolved && kind === "task" && cause instanceof ApiClientError && cause.status === 404 && ["list", "show", "continue"].includes(action)) return;
     throw cause;
   }
+}
+
+export async function runAttention(args: string[], log: (line: string) => void): Promise<number> {
+  const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { json: { type: "boolean" } } });
+  if (positionals.length) throw new Error(msg("attention.usage"));
+  const items = await createClient({ ...hubCredentials(), language: language() }).workAttention();
+  if (values.json) log(JSON.stringify(items));
+  else if (!items.length) log(msg("attention.empty"));
+  else for (const item of items) log(`${item.task}  ${msg(`attention.${item.kind}`)}  ${item.title}\n${item.question ?? item.summary ?? ""}`);
+  return 0;
 }

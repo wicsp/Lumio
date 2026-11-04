@@ -23,7 +23,7 @@ async function fixture(platform = "darwin") {
   return { home, path, options, secret, env, commands, logs };
 }
 const args = ["setup", "--base-url", "http://127.0.0.1:8080/v1", "--model", "synthetic-model", "--api-key-stdin"];
-test("minimal HTTP validation, private atomic environment, launchd reload, status and clear preserve unrelated values", async () => {
+test("minimal HTTP validation, private atomic environment, no restart, status and clear preserve unrelated values", async () => {
   const f = await fixture();
   const service = join(f.home, "Library/LaunchAgents/io.lumio.hub.plist"); await mkdir(join(f.home, "Library/LaunchAgents"), { recursive: true });
   await writeFile(service, hubPlist("/synthetic/lumio-hub", f.env, "/synthetic/state"));
@@ -37,8 +37,8 @@ test("minimal HTTP validation, private atomic environment, launchd reload, statu
     expect(parseEnvironment(await readFile(f.path, "utf8"))).toMatchObject({ ...f.env, LUMIO_ASSISTANT_API_KEY: f.secret, LUMIO_ASSISTANT_MODEL: "synthetic-model" });
     expect((await stat(f.path)).mode & 0o777).toBe(0o600);
     expect((await stat(join(f.home, ".config/lumio"))).mode & 0o777).toBe(0o700);
-    expect(await readFile(service, "utf8")).toContain(f.secret);
-    expect(f.commands).toContainEqual(["launchctl", "bootstrap", "gui/123", service]);
+    expect(await readFile(service, "utf8")).not.toContain(f.secret);
+    expect(f.commands).toEqual([]);
     await assistantConfiguration(["status"], f.options); expect(f.logs.join("\n")).toContain("密钥：已设置");
     await assistantConfiguration(["clear"], f.options);
     expect(parseEnvironment(await readFile(f.path, "utf8"))).toEqual(f.env);
@@ -77,15 +77,15 @@ test("401/403, 404, other 4xx, 5xx, invalid success and timeout never write or r
     expect(parseEnvironment(await readFile(f.path, "utf8"))).toEqual(f.env);
   } finally { await server.stop(true); }
 });
-test("skip-check, Linux restart, unmanaged instructions, invalid inputs and failed restart", async () => {
+test("skip-check never restarts services; invalid input is refused", async () => {
   const f = await fixture("linux");
   await mkdir(join(f.home, ".config/systemd/user"), { recursive: true }); await writeFile(join(f.home, ".config/systemd/user/lumio-hub.service"), "synthetic");
   const options = { ...f.options, stdin: async () => f.secret, fetch: (async () => { throw new Error("must not fetch"); }) as unknown as typeof fetch };
   await assistantConfiguration([...args, "--skip-check"], options);
-  expect(f.commands).toEqual([["systemctl", "--user", "restart", "lumio-hub.service"]]);
-  await expect(assistantConfiguration(["clear"], { ...f.options, run: async () => ({ code: 1, stdout: f.secret, stderr: f.secret }) })).rejects.toThrow("INVALID");
+  expect(f.commands).toEqual([]);
+  await assistantConfiguration(["clear"], { ...f.options, run: async () => { throw new Error("must not restart"); } });
   const unmanaged = await fixture(); await assistantConfiguration([...args, "--skip-check"], { ...unmanaged.options, stdin: async () => "" });
-  expect(unmanaged.logs.join("\n")).toContain("手动重启");
+  expect(unmanaged.logs.join("\n")).toContain("立即生效");
   for (const invalid of [["setup", "--api-key", f.secret], ["status", "--model", "x"], ["setup", "--base-url", "http://user:secret@invalid", "--model", "m", "--skip-check"]]) {
     await expect(displayFailure(assistantConfiguration(invalid, f.options))).rejects.toThrow();
   }

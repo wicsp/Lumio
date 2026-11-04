@@ -32,7 +32,8 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env) {
     } catch { throw new HubError("INVALID", { key: "config.lumio_public_url_must_be_an_http_s_url_without_credentials_query_or", args: [] }); }
   }
   return {
-    assistantModel: modelConfiguration(env),
+    assistantModel: env.LUMIO_ASSISTANT_MANAGED === "1" ? undefined : modelConfiguration(env),
+    assistantHome: env.HOME ?? (env === process.env ? homedir() : stateDirectory(env)),
     webOrigins: browserOrigins(env.LUMIO_WEB_ORIGINS),
     localRuntime: undefined as string | undefined,
     publicUrl,

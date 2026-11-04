@@ -1,0 +1,123 @@
+import { capability, CAPABILITIES, toolName, WorkCommandRequest, WorkAttention, type CapabilityChange, type CapabilityNameOf } from "@lumio/schema";
+import type { AssistantTool } from "@lumio/assistant";
+import { KnowledgeService } from "@lumio/knowledge";
+import { FileKnowledgeRepository } from "@lumio/storage";
+import type { WorkService } from "@lumio/work";
+import type { ExecutionRoutines } from "@lumio/execution";
+import type { HubStore, Identity } from "./store.ts";
+import type { HubConfig } from "./config.ts";
+import { authorize } from "./authorize.ts";
+import { Jobs } from "./jobs.ts";
+import { HubError } from "./errors.ts";
+import { text as msg } from "./messages.ts";
+
+interface CapabilityModules { work: WorkService; routines: ExecutionRoutines }
+
+export interface CapabilityResult { result: unknown; change?: CapabilityChange; private_read?: boolean }
+
+/** Hub composition: schemas and authorization precede every module invocation. No HTTP input grants private delegation. */
+export class Capabilities {
+  private readonly knowledge?: KnowledgeService;
+  constructor(private readonly modules: CapabilityModules, private readonly store: HubStore, private readonly config: HubConfig,
+    private readonly decide: typeof authorize = authorize) {
+    this.knowledge = config.vault ? new KnowledgeService(new FileKnowledgeRepository(config.vault, { stateDir: config.stateDir })) : undefined;
+  }
+  async execute(name: string, raw: unknown, identity: Identity, requestId?: string, options: { includePrivate?: boolean; chronologicalJobs?: boolean } = {}): Promise<CapabilityResult> {
+    return this.invoke(name, raw, identity, requestId, options.includePrivate, false, options.chronologicalJobs);
+  }
+  tools(): AssistantTool[] {
+    return CAPABILITIES.map(def => ({
+      spec: { name: toolName(def.name), description: def.summary.en, input_schema: def.args.toJSONSchema() },
+      capability: def.name, effect: def.kind,
+      execute: async (args, context) => {
+        const actor = this.store.assistantActor();
+        if (actor.id !== context.actor) throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] });
+        const humanOwner = this.store.actors().some(value => value.id === context.owner && value.role === "human");
+        // This closure is assembled in process. Owner/delegation never comes from capability arguments or an HTTP token.
+        const outcome = await this.invoke(def.name, args, { actor, label: "assistant-tools" }, context.request, false, humanOwner);
+        context.record?.({ capability: def.name, change: outcome.change, private_read: outcome.private_read });
+        return outcome.result;
+      },
+    }));
+  }
+  private async invoke(name: string, raw: unknown, identity: Identity, requestId?: string, includePrivate = false, humanConversation = false, chronologicalJobs = false): Promise<CapabilityResult> {
+    const def = capability(name);
+    if (!def) throw new HubError("INVALID", { key: "capability.invalid", args: [] });
+    const parsed = def.args.safeParse(raw);
+    if (!parsed.success) throw new HubError("INVALID", { key: "capability.invalid", args: [] });
+    const args = parsed.data as Record<string, unknown>;
+    const operation = def.kind === "write" ? "work.command" : name.startsWith("knowledge.") ? name.split(".")[2]!
+      : name.startsWith("work.") ? "work.read" : name === "execution.job.list" ? "jobs" : name === "execution.job.show" ? "job.show" : name === "approval.proposal.list" ? "proposals" : "execution.read";
+    const decision = this.decide(identity.actor, { operation, ...(def.kind === "write" ? { command: name, args } : {}), includePrivate });
+    if (decision.result !== "allow") {
+      this.store.audit(identity, name, decision.result, undefined, "FORBIDDEN");
+      throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: decision.result === "deny" ? decision.reason : msg("v2.approval_required") });
+    }
+    if (def.kind === "write") {
+      const input = WorkCommandRequest.safeParse({ request_id: requestId, operation: { op: name, args } });
+      if (!input.success) throw new HubError("INVALID", { key: "capability.invalid", args: [] });
+      return this.store.db.transaction(() => {
+        let before: Record<string, unknown> | undefined;
+        if (name.endsWith(".update")) {
+          const current = name === "work.task.update" ? this.modules.work.task(String(args.task)) : this.modules.work.project(String(args.project));
+          before = Object.fromEntries(Object.keys(args.patch as object).map(key => [key, (current as unknown as Record<string, unknown>)[key] ?? null]));
+        }
+        const result = this.modules.work.command(input.data, identity.actor.id);
+        const entity = result.kind === "task" ? result.task : result.kind === "project" ? result.project : undefined;
+        const change: CapabilityChange = { capability: name, target: entity?.id ?? (result.kind === "comment" ? result.comment.task : ""),
+          ...(before ? { before } : {}), ...(entity ? { after_revision: entity.revision } : {}) };
+        this.store.audit(identity, name, "allow", undefined, "applied");
+        return { result: def.result.parse(result), change };
+      })();
+    }
+    let result: unknown, privateRead = false;
+    if (name.startsWith("knowledge.")) {
+      if (!this.knowledge) throw new HubError("INVALID", { key: "server.no_knowledge_directory_configured_work_and_execution_are_available_i", args: [] });
+      const read = async (privateAllowed: boolean) => {
+        const options = { includePrivate: privateAllowed };
+        if (name === "knowledge.note.search") return this.knowledge!.search(String(args.query), { ...options, type: args.type as never, limit: args.limit as number | undefined });
+        if (name === "knowledge.note.show") return this.knowledge!.show(String(args.ref), options);
+        return this.knowledge!.links(String(args.ref), options);
+      };
+      result = await read(includePrivate || humanConversation);
+      // Compare the public projection so private link targets, titles, snippets and counts are audited too.
+      if (humanConversation) {
+        try { privateRead = JSON.stringify(result) !== JSON.stringify(await read(false)); } catch { privateRead = true; }
+        if (privateRead) this.store.audit(identity, name, "allow", undefined, "private-read");
+      }
+    } else {
+      const work = this.modules.work, jobs = new Jobs(this.store);
+      switch (name as CapabilityNameOf) {
+        case "work.task.list": result = work.tasks(args); break;
+        case "work.task.show": result = work.detail(String(args.task)); break;
+        case "work.project.list": result = work.projects().filter(value => !args.status || value.status === args.status); break;
+        case "work.project.show": result = work.project(String(args.project)); break;
+        case "work.attention.list": result = this.attention(); break;
+        case "execution.job.list": {
+          const list = jobs.list(args.status as string | undefined, args.task as string | undefined, args.routine as string | undefined);
+          // The v1 compatibility route keeps its unbounded chronological presentation.
+          result = chronologicalJobs ? list : list.slice().reverse().slice(0, (args.limit as number | undefined) ?? 20); break;
+        }
+        case "execution.job.show": result = jobs.get(String(args.job)); break;
+        case "execution.routine.list": result = this.modules.routines.list(); break;
+        case "approval.proposal.list": result = this.store.proposals("pending"); break;
+      }
+    }
+    return { result: def.result.parse(result), ...(privateRead ? { private_read: true } : {}) };
+  }
+  attention(): WorkAttention[] {
+    const jobs = new Jobs(this.store);
+    return this.modules.work.tasks().flatMap(task => {
+      if (["done", "cancelled", "paused"].includes(task.status)) return [];
+      const latest = this.modules.work.detail(task.id).executions.sort((a, b) => b.round - a.round)[0];
+      if (!latest?.applied || latest.acknowledged) return [];
+      const job = jobs.get(latest.job);
+      const kind = job.status === "waiting_for_human" ? "question" : job.status === "done" ? "review" : ["failed", "unknown"].includes(job.status) ? "failed" : undefined;
+      if (!kind || !job.result) return [];
+      const runtime = this.store.runtimes(new Date()).find(value => value.actor === job.spec.runtime)?.registration.name;
+      return [WorkAttention.parse({ task: task.id, title: task.title, kind, job: latest.job, round: latest.round,
+        ...(job.spec.run.kind === "agent" ? { agent: `${job.spec.run.engine}${runtime ? `@${runtime}` : ""}` } : {}),
+        since: job.result.finished, ...(kind === "question" && job.result.question?.trim() ? { question: job.result.question } : {}), summary: (job.result.report || job.result.error || "").slice(0, 500) })];
+    });
+  }
+}

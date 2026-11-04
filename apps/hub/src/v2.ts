@@ -1,5 +1,5 @@
 import { text as msg } from "./messages.ts";
-import { AssistantChatRequest, WorkTask, WorkProject, WorkTaskDetail, ExecutionRoutine, ExecutionRoutineInfo, TaskStatus, idOf, type AssistantEvent } from "@lumio/schema";
+import { AssistantChatRequest, WorkCommandRequest, ExecutionRoutineCommandRequest, RequestId, AssistantToolCall, capability, ExecutionRoutine, type AssistantEvent } from "@lumio/schema";
 import { AssistantError } from "@lumio/assistant";
 import { WorkError } from "@lumio/work";
 import type { BusinessModules } from "./modules.ts";
@@ -9,6 +9,12 @@ import type { authorize } from "./authorize.ts";
 import { handleArtifacts } from "./artifacts.ts";
 
 export const V2_ROUTES = [
+  { operation: "assistant.config", method: "GET", pattern: /^\/v2\/assistant\/config$/, path: "/v2/assistant/config" },
+  { operation: "assistant.config", method: "PUT", pattern: /^\/v2\/assistant\/config$/, path: "/v2/assistant/config" },
+  { operation: "assistant.config", method: "DELETE", pattern: /^\/v2\/assistant\/config$/, path: "/v2/assistant/config" },
+  { operation: "assistant.read", method: "GET", pattern: /^\/v2\/assistant\/conversations\/(conv_[0-9A-HJKMNP-TV-Z]{26})\/tools$/, path: "/v2/assistant/conversations/<id>/tools" },
+  { operation: "assistant.undo", method: "POST", pattern: /^\/v2\/assistant\/tools\/(tool_[0-9A-HJKMNP-TV-Z]{26})\/undo$/, path: "/v2/assistant/tools/<id>/undo" },
+  { operation: "work.read", method: "GET", pattern: /^\/v2\/work\/attention$/, path: "/v2/work/attention" },
   { operation: "assistant.memory.read", method: "GET", pattern: /^\/v2\/assistant\/memories$/, path: "/v2/assistant/memories" },
   { operation: "assistant.memory.command", method: "POST", pattern: /^\/v2\/assistant\/memory-commands$/, path: "/v2/assistant/memory-commands" },
   { operation: "work.read", method: "GET", pattern: /^\/v2\/work\/tasks$/, path: "/v2/work/tasks" },
@@ -16,6 +22,8 @@ export const V2_ROUTES = [
   { operation: "work.read", method: "GET", pattern: /^\/v2\/work\/projects$/, path: "/v2/work/projects" },
   { operation: "work.read", method: "GET", pattern: /^\/v2\/work\/projects\/(prj_[0-9A-HJKMNP-TV-Z]{26})$/, path: "/v2/work/projects/<id>" },
   { operation: "work.command", method: "POST", pattern: /^\/v2\/work\/commands$/, path: "/v2/work/commands" },
+  { operation: "execution.read", method: "GET", pattern: /^\/v2\/execution\/jobs$/, path: "/v2/execution/jobs" },
+  { operation: "execution.read", method: "GET", pattern: /^\/v2\/execution\/jobs\/(job_[0-9A-HJKMNP-TV-Z]{26})$/, path: "/v2/execution/jobs/<job>" },
   { operation: "execution.read", method: "GET", pattern: /^\/v2\/execution\/routines$/, path: "/v2/execution/routines" },
   { operation: "execution.read", method: "GET", pattern: /^\/v2\/execution\/routines\/(rtn_[0-9A-HJKMNP-TV-Z]{26})$/, path: "/v2/execution/routines/<id>" },
   { operation: "execution.command", method: "POST", pattern: /^\/v2\/execution\/commands$/, path: "/v2/execution/commands" },
@@ -38,7 +46,7 @@ export function moduleError(cause: unknown): HubError | undefined {
 }
 export async function handleV2(request: Request, route: V2Route, identity: Identity, store: HubStore,
   modules: BusinessModules, decide: typeof authorize): Promise<Response> {
-  const decision = decide(identity.actor, { operation: route.operation,
+  let decision = decide(identity.actor, { operation: route.operation,
     includePrivate: route.operation === "execution.read" && new URL(request.url).searchParams.get("include_private") === "true" });
   let execution = "applied";
   let audited = false;
@@ -46,23 +54,46 @@ export async function handleV2(request: Request, route: V2Route, identity: Ident
     if (decision.result !== "allow") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: decision.result === "deny" ? decision.reason : msg("v2.approval_required") });
     const url = new URL(request.url), id = route.pattern.exec(url.pathname)?.[1];
     if (url.pathname.includes("/artifacts")) return await handleArtifacts(request, identity, store, modules);
+    if (route.operation === "assistant.config") {
+      if (request.method === "GET") await modules.assistantConfig.refresh();
+      const value = request.method === "GET" ? modules.assistantConfig.view() : request.method === "DELETE" ? await modules.assistantConfig.clear() : await modules.assistantConfig.update(await json(request));
+      return Response.json(value);
+    }
+    if (route.operation === "assistant.undo") {
+      const body = await json(request);
+      const requestId = RequestId.safeParse(body && typeof body === "object" && "request_id" in body ? body.request_id : undefined);
+      if (!requestId.success) throw new HubError("INVALID", { key: "capability.invalid", args: [] });
+      return Response.json(await modules.undo(id!, identity, requestId.data));
+    }
+    if (route.operation === "assistant.read" && url.pathname.endsWith("/tools")) {
+      const detail = modules.assistant.detail(id!, identity.actor.id);
+      return Response.json(AssistantToolCall.array().parse(detail.turns.flatMap(turn => modules.assistantStore.calls(turn.id))));
+    }
     if (route.operation === "work.command" || route.operation === "execution.command") {
       const body = await json(request);
+      const parsed = (route.operation === "work.command" ? WorkCommandRequest : ExecutionRoutineCommandRequest).safeParse(body);
+      if (!parsed.success) throw new HubError("INVALID", { key: "index.invalid_work_command_parameters", args: [] });
+      const { operation, request_id } = parsed.data;
+      const commandDecision = decision = decide(identity.actor, { operation: route.operation, command: operation.op, args: operation.args });
+      if (commandDecision.result !== "allow") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: commandDecision.result === "deny" ? commandDecision.reason : msg("v2.approval_required") });
+      if (capability(operation.op)) return Response.json((await modules.capabilities.execute(operation.op, operation.args, identity, request_id)).result);
       const result = store.db.transaction(() => {
         const value = route.operation === "work.command" ? modules.work.command(body, identity.actor.id) : modules.routines.command(body, identity.actor.id);
-        store.audit(identity, route.operation, decision.result, undefined, "applied");
-        return value;
+        store.audit(identity, route.operation, decision.result, undefined, "applied"); return value;
       })();
       audited = true; return Response.json(result);
     }
-    if (route.operation === "execution.read") return Response.json(id ? ExecutionRoutine.parse(modules.routines.get(id)) : ExecutionRoutineInfo.array().parse(modules.routines.list()));
+    const read = async (name: string, args: Record<string, unknown>) => Response.json((await modules.capabilities.execute(name, args, identity)).result);
+    if (route.operation === "execution.read" && url.pathname.startsWith("/v2/execution/jobs")) {
+      return await read(id ? "execution.job.show" : "execution.job.list", id ? { job: id } : Object.fromEntries([...url.searchParams].map(([key, value]) => [key, key === "limit" ? Number(value) : value])));
+    }
+    if (route.operation === "execution.read") return id ? Response.json(ExecutionRoutine.parse(modules.routines.get(id))) : await read("execution.routine.list", {});
     if (route.operation === "work.read") {
-      if (url.pathname.startsWith("/v2/work/projects")) return Response.json(id ? WorkProject.parse(modules.work.project(id)) : WorkProject.array().parse(modules.work.projects()));
-      if (id) return Response.json(WorkTaskDetail.parse(modules.work.detail(id)));
-      const status = url.searchParams.get("status"), project = url.searchParams.get("project"), query = url.searchParams.get("q");
-      if (status !== null && !TaskStatus.safeParse(status).success) throw new HubError("INVALID", { key: "v2.invalid_task_status", args: [] });
-      if (project !== null && !idOf("prj").safeParse(project).success) throw new HubError("INVALID", { key: "v2.invalid_project_id", args: [] });
-      return Response.json(WorkTask.array().parse(modules.work.tasks({ status: status ?? undefined, project: project ?? undefined, query: query ?? undefined })));
+      if (url.pathname === "/v2/work/attention") return await read("work.attention.list", {});
+      if (url.pathname.startsWith("/v2/work/projects")) return await read(id ? "work.project.show" : "work.project.list", id ? { project: id } : Object.fromEntries(url.searchParams));
+      if (id) return await read("work.task.show", { task: id });
+      const params = Object.fromEntries(url.searchParams); if (params.q !== undefined) { params.query = params.q; delete params.q; }
+      return await read("work.task.list", params);
     }
     if (route.operation === "assistant.memory.read") return Response.json(await modules.assistant.memories(identity.actor.id));
     if (route.operation === "assistant.memory.command") {
@@ -74,6 +105,7 @@ export async function handleV2(request: Request, route: V2Route, identity: Ident
     if (route.operation === "assistant.read") return Response.json(id ? modules.assistant.detail(id, identity.actor.id) : modules.assistant.conversations(identity.actor.id));
     const parsed = AssistantChatRequest.safeParse(await json(request));
     if (!parsed.success) throw new HubError("INVALID", { key: "v2.invalid_assistant_request_parameters", args: [] });
+    await modules.assistantConfig.refresh();
     const signal = AbortSignal.any([request.signal, modules.signal, AbortSignal.timeout(120_000)]);
     if (request.headers.get("accept")?.includes("application/x-ndjson")) {
       const encoder = new TextEncoder();

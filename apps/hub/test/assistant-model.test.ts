@@ -83,7 +83,7 @@ test("configured Hub uses a local compatible model service without injected mode
     expect(new URL(request.url).pathname).toBe("/v1/chat/completions");
     expect(request.headers.get("authorization")).toBe("Bearer synthetic-provider-key");
     const body = await request.json() as { model: string; messages: { content: string }[]; tools?: unknown };
-    expect(body.model).toBe("synthetic-model"); expect(body.tools).toBeUndefined();
+    expect(body.model).toBe("synthetic-model"); expect(Array.isArray(body.tools)).toBe(true);
     expect(body.messages.at(-1)?.content).toBe("你好"); requests++;
     return streamed(chunk({ content: "本地合成回答" }, "stop") + "data: [DONE]\n\n");
   } });

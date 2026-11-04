@@ -22,6 +22,8 @@ import { TaskRounds, type TaskOptions } from "./tasks.ts";
 import { Routines, type RoutineOptions } from "./routines.ts";
 import type { RoutineHooks } from "./jobs.ts";
 import { BusinessModules } from "./modules.ts";
+import { AssistantConfiguration } from "./assistant-config.ts";
+import { configuredModel } from "./assistant-model.ts";
 import { V2_ROUTES, handleV2 } from "./v2.ts";
 import { WriteCoordinator } from "./coordinator.ts";
 import type { AssistantModel, AssistantTool } from "@lumio/assistant";
@@ -71,6 +73,8 @@ async function startHubInstance(config: HubConfig, options: {
   operations?: OperationOptions;
   tasks?: TaskOptions;
   routines?: RoutineOptions;
+  assistantHome?: string;
+  assistantFetch?: typeof fetch;
   assistantModel?: AssistantModel;
   assistantTools?: AssistantTool[];
 } = {}) {
@@ -94,7 +98,11 @@ async function startHubInstance(config: HubConfig, options: {
     adopt: (actor, id, now, lease) => modules?.routines.adopt(actor, id, now, lease) ?? (legacyControlDisabled(store.db) ? undefined : routines?.adopt(actor, id, now)),
   };
   try {
-    modules = new BusinessModules(config, store, options);
+    const assistantConfig = new AssistantConfiguration({ home: options.assistantHome ?? config.assistantHome, external: config.assistantModel, fetch: options.assistantFetch,
+      reload: model => modules!.assistant.setModel(configuredModel(model)) });
+    const model = await assistantConfig.load();
+    modules = new BusinessModules({ ...config, assistantModel: model }, store, options);
+    modules.assistantConfig = assistantConfig;
     await modules.artifacts.recover();
     const writes = new WriteCoordinator();
     vaultWatch = config.vault ? await startVaultWatch(config, { ...options.watch, log,
@@ -156,7 +164,16 @@ async function startHubInstance(config: HubConfig, options: {
             const response = await handlePrivileged(request, route.operation, route.pattern.exec(url.pathname)?.[1], identity!, store, decide, privileged);
             status = response.status; return response;
           }
-          if (route.operation === "job.submit" || route.operation === "jobs" || route.operation === "job.show" || route.operation === "job.cancel") {
+          if (route.operation === "jobs" || route.operation === "job.show") {
+            // Keep runtime rejection ahead of v1 argument parsing, including malformed references.
+            const decision = decide(identity!.actor, { operation: route.operation });
+            if (decision.result !== "allow") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: decision.result === "deny" ? decision.reason : msg("v2.approval_required") });
+            const reference = route.pattern.exec(url.pathname)?.[1];
+            if (route.operation === "job.show" && !/^job_[0-9A-HJKMNP-TV-Z]{26}$/.test(reference ?? "")) throw new HubError("NOT_FOUND", { key: "jobs.job_not_found", args: [] });
+            const args = route.operation === "job.show" ? { job: reference } : Object.fromEntries([...url.searchParams].map(([key, value]) => [key, key === "limit" ? Number(value) : value]));
+            status = 200; return Response.json((await modules!.capabilities.execute(route.operation === "jobs" ? "execution.job.list" : "execution.job.show", args, identity!, undefined, { chronologicalJobs: true })).result);
+          }
+          if (route.operation === "job.submit" || route.operation === "job.cancel") {
             const response = await handleJobs(request, route.operation, route.pattern.exec(url.pathname)?.[1], identity!, store, decide, (options.now ?? (() => new Date()))());
             status = response.status; return response;
           }
@@ -185,6 +202,9 @@ async function startHubInstance(config: HubConfig, options: {
               store.auditDenied(identity, route.operation);
               throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: decision.result === "deny" ? decision.reason : "Approval required" });
             }
+          }
+          if (route.operation === "proposals" && (!url.searchParams.has("status") || url.searchParams.get("status") === "pending")) {
+            status = 200; return Response.json((await modules!.capabilities.execute("approval.proposal.list", {}, identity!)).result);
           }
           if (route.operation === "operations" || route.operation === "actors" || route.operation === "proposals" || route.operation === "proposal.accept" || route.operation === "proposal.reject") {
             const response = await vaultWatch!.exclusive(() => handleOperation(request,
@@ -217,14 +237,17 @@ async function startHubInstance(config: HubConfig, options: {
             const limit = url.searchParams.get("limit");
             if (type !== null && !NOTE_TYPES.includes(type as SearchOptions["type"] & string)) throw new HubError("INVALID", { key: "query.unknown_note_type", args: [] });
             if (limit !== null && (!/^[1-9]\d*$/.test(limit) || !Number.isSafeInteger(Number(limit)))) throw new HubError("INVALID", { key: "query.limit_must_be_a_positive_integer", args: [] });
-            result = await knowledge!.search(url.searchParams.get("q") ?? "", {
-              ...queryOptions, ...(type !== null ? { type: type as SearchOptions["type"] } : {}), ...(limit !== null ? { limit: Number(limit) } : {}),
-            });
+            const query = url.searchParams.get("q") ?? "";
+            // v1 also supports listing all notes and unbounded limits, outside the catalog's search arguments.
+            result = !query || (limit !== null && Number(limit) > 100) ? await knowledge!.search(query, { ...queryOptions,
+              ...(type !== null ? { type: type as SearchOptions["type"] } : {}), ...(limit !== null ? { limit: Number(limit) } : {}) })
+              : (await modules!.capabilities.execute("knowledge.note.search", { query,
+                ...(type !== null ? { type } : {}), ...(limit !== null ? { limit: Number(limit) } : {}) }, identity!, undefined, { includePrivate })).result;
           } else {
             let reference: string;
             try { reference = decodeURIComponent(route.pattern.exec(url.pathname)![1]!); }
             catch { throw new HubError("INVALID", { key: "server.invalid_url_encoding_in_reference", args: [] }); }
-            result = await (route.operation === "show" ? knowledge!.show(reference, queryOptions) : knowledge!.links(reference, queryOptions));
+            result = (await modules!.capabilities.execute(route.operation === "show" ? "knowledge.note.show" : "knowledge.note.links", { ref: reference }, identity!, undefined, { includePrivate })).result;
           }
           status = 200;
           return Response.json(result);

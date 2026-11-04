@@ -5,6 +5,9 @@ const locale = new AsyncLocalStorage<Language>();
 export const withLanguage = <T>(lang: Language, action: () => T): T => locale.run(lang, action);
 
 export const en = {
+  "work.round_not_found": "Execution round not found",
+  "work.round_not_applied": "The round result has not been applied yet",
+
   ", ": ", ",
   "(${0})": (v: unknown) => `(${String(v)})`,
   ": ": ": ",
@@ -562,6 +565,9 @@ ${String(p0)}${String(p1)}`,
   "Run tailscale serve status to check": "Run tailscale serve status to check",
 };
 export const zh: typeof en = {
+  "work.round_not_found": "找不到执行轮次",
+  "work.round_not_applied": "这一轮结果尚未写回",
+
   ", ": "、",
   "(${0})": (v: unknown) => `（${String(v)}）`,
   ": ": "：",

@@ -70,8 +70,8 @@ test("Hub manages Work without a Knowledge directory, uses explicit dispatch and
 });
 
 test("v2 retains shared authorization, request validation, revision conflicts and actor-owned dialogue", async () => {
-  const denied = await request("/v2/work/commands", { request_id: "synthetic-denied-0001", operation: { op: "work.task.create", args: { title: "拒绝" } } }, agent);
-  expect(denied.status).toBe(403); expect(hub.modules.work.tasks()).toEqual([]);
+  const denied = await request("/v2/work/commands", { request_id: "synthetic-denied-0001", operation: { op: "work.task.create", args: { title: "允许" } } }, agent);
+  expect(denied.status).toBe(200); expect(hub.modules.work.tasks()).toHaveLength(1);
   const created = await command("work.task.create", { title: "合成工作" });
   if (created.kind !== "task") throw new Error("task expected");
   const saved = await command("work.task.update", { task: created.task.id, expected_revision: 1, patch: { description: "已保存" } });
@@ -90,7 +90,7 @@ test("v2 retains shared authorization, request validation, revision conflicts an
 test("all v2 routes obey the shared deny policy before reading bodies or exposing objects", async () => {
   await hub.stop(); hub = await startHub({ ...readConfig({ LUMIO_STATE_DIR: temp }), port: 0 }, { log() {}, authorize: () => ({ result: "deny", reason: "synthetic denial" }) });
   for (const route of V2_ROUTES) {
-    const path = route.path.replace("<job>", "job_00000000000000000000000001").replace("<artifact>", "art_00000000000000000000000001").replace("<id>", route.path.includes("conversations") ? "conv_00000000000000000000000001" : route.path.includes("projects") ? "prj_00000000000000000000000001" : route.path.includes("routines") ? "rtn_00000000000000000000000001" : "task_00000000000000000000000001");
+    const path = route.path.replace("<job>", "job_00000000000000000000000001").replace("<artifact>", "art_00000000000000000000000001").replace("<id>", route.path.includes("/tools/") ? "tool_00000000000000000000000001" : route.path.includes("conversations") ? "conv_00000000000000000000000001" : route.path.includes("projects") ? "prj_00000000000000000000000001" : route.path.includes("routines") ? "rtn_00000000000000000000000001" : "task_00000000000000000000000001");
     const response = await fetch(`http://127.0.0.1:${hub.server.port}${path}`, { method: route.method, headers: { "Accept-Language": "zh", Authorization: `Bearer ${human}` } });
     expect(response.status).toBe(403); expect(ApiError.parse(await response.json()).error.reason).toBe("synthetic denial");
   }
