@@ -396,4 +396,5 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
 | R1 | v0.2 上线：一个程序 `lumio`、Hub 提供 Web 与 PWA、`assistant setup`、旧笔记退役与一条命令切换（ADR 0027，[R1-0](tasks/R1-0-v0.2-release.md)） | v0.2.0 已发布，作者 Mac 已切换（2026-11-03），人工验收进行中 |
 | R2 | v0.2.1：默认英文、中文环境用中文；终端进度与颜色；Web 主题与语言切换；升级不重复下载（ADR 0028，[R2-0](tasks/R2-0-language-terminal-theme.md)） | R2-1、R2-3 已合并，R2-2 进行中 |
 | R3 | 能力目录与 agent 访问：助手能查能改任务、Codex/pi 经 skill 接入、每轮凭据、模型在设置页配置（ADR 0029）；一轮里的提问与验收（ADR 0030）（[R3-0](tasks/R3-0-capabilities-agent-access.md)） | R3-1、R3-2 已合并（#76、#79）；R3-4 Web 已合并（#80，「已连接的 agent」待 R3-3）；R3-3 进行中 |
+| R4 | 任务流程与 agent 接力、agent 委派需要批准、统一推送（先做 PWA）、术语「派活」改为「委派」（ADR 0031，[R4-0](tasks/R4-0-workflows-delegation-push.md)） | 已批准，R4-1 契约起草中 |
 | P4 | Web GUI 提前按用户要求实现（知识只读、项目任务、执行、助手、审批）；知识写入、Docker / Nix、SDK 与原生手机端后续规划 | Web 工作台已合并（#63、#64），其余未排期 |
