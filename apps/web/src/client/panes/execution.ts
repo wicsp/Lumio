@@ -4,7 +4,8 @@
  * 产物下载前核对大小与 SHA-256；取消要确认，不自动重跑。
  */
 import { JOB_STATUSES, type Job, type StoredArtifact, type ExecutionRoutineInfo, type RuntimeInfo } from "@lumio/schema";
-import { errorText, type Client } from "../api.ts";
+import { errorText, type Client, type HubExtras } from "../api.ts";
+import { attentionCard, attentionFor } from "../attention-card.ts";
 import { formatTime, safeFileName, verifyArtifact, routineStatusCommand } from "../commands.ts";
 import { clear, empty, failure, h, icon, loading, openDialog, openMenu, placeholder, statusIcon, toast } from "../dom.ts";
 import { ago, bytes, jobSubtitle, jobTitle } from "../format.ts";
@@ -42,7 +43,7 @@ export class ExecutionPane {
   private cancellationRequested = new Set<string>();
   private unbindKeys: () => void;
 
-  constructor(private root: HTMLElement, private client: Client, initialJob: string | undefined, private navigate: Navigate) {
+  constructor(private root: HTMLElement, private client: Client, private hub: HubExtras, initialJob: string | undefined, private navigate: Navigate, private changed: () => void = () => {}) {
     const seg = h("div", { class: "segmented", role: "group", "aria-label": t("Execution view") });
     for (const [mode, label] of [["jobs", t("Runs")], ["routines", t("Routine")], ["devices", t("Devices")]] as const) {
       const button = h("button", { type: "button", "aria-pressed": String(mode === this.mode), onclick: () => this.switchMode(mode) }, label);
@@ -223,6 +224,14 @@ export class ExecutionPane {
       const live = LIVE.includes(job.status);
       const cancelling = this.cancellationRequested.has(id) && live;
       const task = job.spec.source?.task;
+      // 这一轮还在等你（ADR 0030）：直接在这里回答、验收或标为已查看；旧轮次只显示原来的问题。
+      const attentionSlot = h("div", { class: "attn-slot" },
+        job.result?.question ? h("section", { class: "question" }, h("h3", {}, t("Waiting for you")), h("p", {}, job.result.question)) : null);
+      if (task && !live) void attentionFor(this.hub, task).then(item => {
+        if (!item || item.job !== job.spec.id || !this.active || generation !== this.detailGeneration) return;
+        clear(attentionSlot, attentionCard(item, { client: this.client, hub: this.hub, navigate: this.navigate,
+          changed: () => { this.changed(); void this.load(true); void this.openJob(job.spec.id, true); } }, "job"));
+      }).catch(() => { /* 旧 Hub 或网络问题：保留原来的问题显示 */ });
 
       clear(this.detail, h("div", { class: "detail" },
         h("div", { class: "detail-crumbs" },
@@ -236,7 +245,7 @@ export class ExecutionPane {
         job.status === "unknown" && h("div", { class: "notice" }, icon("alert"), h("span", {}, t("This run's result can't be confirmed. Check the device and files first; it won't be rerun automatically."))),
         job.result?.error && failure(job.result.error),
         cancelling && h("p", { class: "success", role: "status" }, t("Cancellation requested. Waiting for the device to confirm.")),
-        job.result?.question && h("section", { class: "question" }, h("h3", {}, t("Waiting for you")), h("p", {}, job.result.question)),
+        attentionSlot,
         h("dl", { class: "meta-grid" }, ...meta.map(([k, v]) => h("div", {}, h("dt", {}, k), h("dd", {}, v)))),
         job.spec.run.kind === "command" && h("section", { class: "section" }, h("div", { class: "section-head" }, h("h3", {}, t("Command"))),
           h("pre", { class: "code-block" }, job.spec.run.argv.map(arg => JSON.stringify(arg)).join(" "))),

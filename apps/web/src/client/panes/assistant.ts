@@ -8,6 +8,8 @@ import { formatTime, newRequestId } from "../commands.ts";
 import { autosize, clear, empty, failure, h, icon, loading, openDialog, toast } from "../dom.ts";
 import { ago } from "../format.ts";
 import { renderMarkdown } from "../utils/markdown.ts";
+import { toolCallView } from "../tool-call-view.ts";
+import type { Navigate } from "../navigation.ts";
 import { t, translated } from "../i18n.ts";
 
 const TURN_LABEL: Record<string, string> = translated({ running: "Still working", done: "Done", failed: "Didn't finish", unknown: "Result unknown — check before retrying", cancelled: "Cancelled" });
@@ -36,7 +38,7 @@ export class AssistantPane {
   private mode: "chat" | "memory" = "chat";
   private uncertain?: AssistantChatRequest;
 
-  constructor(private root: HTMLElement, private client: Client, intent?: string) {
+  constructor(private root: HTMLElement, private client: Client, intent?: string, private navigate: Navigate = () => {}) {
     this.composer = h("form", { class: "composer" }, this.text,
       h("div", { class: "composer-foot" }, this.model, h("span", { class: "hint hide-narrow" }, t("↵ send · ⇧↵ new line")), this.stop, this.send));
     this.composer.addEventListener("submit", event => { event.preventDefault(); void this.submit(); });
@@ -83,7 +85,7 @@ export class AssistantPane {
     clear(this.messages, h("div", { class: "welcome" },
       h("span", { class: "brand-mark", "aria-hidden": "true" }),
       h("h2", {}, t("What would you like to think through?")),
-      h("p", {}, t("The assistant uses the model configured on your Hub. It can't see your tasks or private notes unless you explicitly give it those tools.")),
+      h("p", {}, t("Ask about your tasks, notes and runs. The assistant can create tasks, comment and change task fields; each change shows here and can be undone. It can't dispatch, approve, or mark tasks done.")),
       h("div", { class: "suggestions" }, ...SUGGESTIONS.map(key => t(key)).map(text => h("button", { type: "button", class: "suggestion", onclick: () => { this.text.value = text; this.text.dispatchEvent(new Event("input")); this.text.focus(); } }, text)))));
   }
 
@@ -154,11 +156,25 @@ export class AssistantPane {
 
   private renderDetail(detail: AssistantConversationDetail): void {
     this.current = detail.conversation.id;
-    clear(this.messages, ...detail.messages.map(message => {
-      if (message.role === "user") return this.userBubble(message.content);
+    const calls = new Map((detail.tool_calls ?? []).map(call => [call.id, call]));
+    let toolGroup: HTMLElement | undefined;
+    clear(this.messages, ...detail.messages.flatMap(message => {
+      const call = message.tool_call ? calls.get(message.tool_call) : undefined;
+      if (call) {
+        // 连续的工具调用放在同一组里，读起来像一串步骤。
+        const view = toolCallView(call, this.client, this.navigate);
+        if (toolGroup) { toolGroup.append(view); return []; }
+        toolGroup = h("div", { class: "msg-tools" }, view);
+        return [toolGroup];
+      }
+      if (message.role === "assistant" && !message.content.trim()) return [];
+      toolGroup = undefined;
+      if (message.role === "user") return [this.userBubble(message.content)];
+      // 工具调用之间的中间回复可以没有文字（ADR 0025）；不显示空气泡。
+      if (message.role === "assistant" && !message.content.trim()) return [];
       const content = h("div", { class: "markdown" });
       content.innerHTML = renderMarkdown(message.content);
-      return message.role === "assistant" ? this.assistantBlock(content) : h("div", { class: "msg-tool" }, icon("terminal"), t(" Tool result"), content);
+      return [message.role === "assistant" ? this.assistantBlock(content) : h("div", { class: "msg-tool" }, icon("terminal"), t(" Tool result"), content)];
     }));
     const turn = detail.turns.at(-1);
     this.serverRunning = turn?.status === "running";
@@ -190,7 +206,8 @@ export class AssistantPane {
     this.text.value = ""; this.text.dispatchEvent(new Event("input"));
     if (!this.current) clear(this.messages);
     const content = h("div", { class: "stream-text streaming" });
-    const tools = h("div", { class: "tool-status", role: "status" });
+    const tools = h("div", { class: "msg-tools", role: "status" });
+    const shown = new Map<string, HTMLElement>();
     this.messages.append(this.userBubble(request.message), this.assistantBlock(h("div", {}, content, tools)));
     this.scroller.scrollTop = this.scroller.scrollHeight;
     let complete = false;
@@ -198,7 +215,12 @@ export class AssistantPane {
       for await (const event of this.client.assistantEvents(request, this.controller.signal)) {
         if (!this.active) return;
         if (event.type === "token") content.textContent = (content.textContent ?? "") + event.delta;
-        else if (event.type === "tool") tools.textContent = t("{0}: {1}", event.tool.name, event.tool.status === "succeeded" ? t("Done") : event.tool.status === "unknown" ? t("Unknown result") : event.tool.status === "failed" ? t("Didn't finish") : t("Working"));
+        else if (event.type === "tool") {
+          const view = toolCallView(event.tool, this.client, this.navigate);
+          const previous = shown.get(event.tool.id);
+          if (previous) previous.replaceWith(view); else tools.append(view);
+          shown.set(event.tool.id, view);
+        }
         else if (event.type === "result") { complete = true; this.current = event.messages[0]?.conversation ?? this.current; }
         else clear(this.notice, failure(event.error));
         const nearBottom = this.scroller.scrollHeight - this.scroller.scrollTop - this.scroller.clientHeight < 120;
