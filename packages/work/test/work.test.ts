@@ -234,7 +234,7 @@ test("approved plan hands implement → review → implement → review → chec
   f.service.applyResult(first);
   expect(f.dispatches()).toBe(2);
   expect(f.service.task(task)).toMatchObject({ plan: { stage: "review", rounds: 2 }, turn: { holder: "claude-code@mac", stage: "review" } });
-  deliver(f, task, "Fix the synthetic edge case. <lumio-outcome>changes</lumio-outcome>");
+  deliver(f, task, "Fix the synthetic edge case.\n<lumio-outcome>changes</lumio-outcome>");
   expect(f.service.task(task)).toMatchObject({ plan: { stage: "implement", rounds: 3 } });
   deliver(f, task); deliver(f, task);
   expect(f.service.task(task)).toMatchObject({ plan: { stage: "approve", rounds: 4 }, turn: { holder: "human", reason: "review", stage: "approve", note: "Merge this synthetic change?" } });
@@ -254,6 +254,40 @@ test("approved plan hands implement → review → implement → review → chec
   expect(() => f.command("work.task.checkpoint", { task, stage: "approve", action: "finish" })).toThrow("CONFLICT");
   f.command("work.task.checkpoint", { task, stage: "end", action: "finish" });
   expect(f.service.task(task).outcome).toBe("done");
+});
+
+test("round input explains send-back immediately after the instruction only when the stage declares back_to", () => {
+  const f = fixture(), task = planned(f);
+  f.command("work.task.dispatch", { task });
+  const guidance = "If changes are needed, explain what must change and put <lumio-outcome>changes</lumio-outcome> on a separate line at the end of your report to send work back.";
+  expect(f.service.detail(task).executions[0]!.input_snapshot).not.toContain(guidance);
+  deliver(f, task);
+  expect(f.service.detail(task).executions[1]!.input_snapshot).toContain(`Review the synthetic change\n${guidance}\n`);
+});
+
+test("quoting the changes marker in a report does not send work back", () => {
+  for (const report of [
+    "The instructions mention <lumio-outcome>changes</lumio-outcome>; no changes are needed.",
+    "The marker is:\n`<lumio-outcome>changes</lumio-outcome>`\nNo changes are needed.",
+    "Quoted instruction:\n> <lumio-outcome>changes</lumio-outcome>\nNo changes are needed.",
+  ]) {
+    const f = fixture(), task = planned(f, handoffPlan, "review");
+    f.command("work.task.dispatch", { task }); deliver(f, task, report);
+    expect(f.service.task(task)).toMatchObject({ plan: { stage: "approve", rounds: 1 }, turn: { holder: "human", reason: "review" } });
+    expect(f.dispatches()).toBe(1);
+  }
+});
+
+test("a standalone changes marker sends work back with LF or CRLF and surrounding whitespace", () => {
+  for (const report of [
+    "Fix the synthetic edge case.\n<lumio-outcome>changes</lumio-outcome>",
+    "Fix the synthetic edge case.\r\n \t<lumio-outcome>changes</lumio-outcome> \t\r\n",
+  ]) {
+    const f = fixture(), task = planned(f, handoffPlan, "review");
+    f.command("work.task.dispatch", { task }); deliver(f, task, report);
+    expect(f.service.task(task)).toMatchObject({ plan: { stage: "implement", rounds: 2 }, turn: { holder: "codex@mac", reason: "working" } });
+    expect(f.service.detail(task).executions[1]!.input_snapshot).toContain("Fix the synthetic edge case.");
+  }
 });
 
 test("send-back carries the human comment to an approved agent; stale, unknown and blank decisions are rejected", () => {

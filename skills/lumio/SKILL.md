@@ -57,7 +57,7 @@ When a round needs clarification, ask one clear question inside `<lumio-question
 
 Use `task plan show <task-id> --json` to inspect the approved handoff stages and progress. To propose a plan, write its HandoffPlan JSON to a local file and run `task plan set <task-id> --file plan.json [--from stage] --json`. As an agent you only create a proposal; the user approves the entire plan before automatic handoffs can run. Saving a plan does not start the first round.
 
-Follow the instruction for your current stage. To request changes during review, include the exact marker `<lumio-outcome>changes</lumio-outcome>` in your final report and explain what must change. When your approved stage declares `back_to`, Lumio delegates to that agent stage; without `back_to`, the report follows the normal next stage. Questions and failures always return to the human, and the round limit also stops delegation for human review. Only the human can continue a checkpoint, send work back with a comment, finish or hold the task.
+Follow the instruction for your current stage. To request changes during review, explain what must change and put the exact marker `<lumio-outcome>changes</lumio-outcome>` on a separate line at the end of your final report. Quoting the marker inline or in a blockquote does not request changes. When your approved stage declares `back_to`, Lumio delegates to that agent stage; without `back_to`, the report follows the normal next stage. Questions and failures always return to the human, and the round limit also stops delegation for human review. Only the human can continue a checkpoint, send work back with a comment, finish or hold the task.
 
 ## Working with notes
 

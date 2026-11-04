@@ -140,7 +140,8 @@ export class WorkService {
     const comments = history.slice(boundary + 1).filter(comment => !returned || comment.created >= returned.at);
     const stage = task.plan?.plan.stages.find(stage => stage.id === task.plan?.stage);
     return [`# ${task.title}`, "", `Task ID: ${task.id}`, "", task.description,
-      ...(stage?.kind === "agent" ? ["", `## Plan stage: ${stage.id}`, stage.instruction] : []),
+      ...(stage?.kind === "agent" ? ["", `## Plan stage: ${stage.id}`, stage.instruction,
+        ...(stage.back_to ? ["If changes are needed, explain what must change and put <lumio-outcome>changes</lumio-outcome> on a separate line at the end of your report to send work back."] : [])] : []),
       "", "Use the Lumio skill to retrieve more context by ID: task show, job show, show (notes). Older discussions and reports are not included in full.",
       "", "## Comments since hand-back", ...comments.map(comment => `${comment.id} (${comment.author}): ${comment.body}`),
       ...(latest ? ["", "## Previous round", `${latest.job}: ${line([previous?.result?.question, previous?.result?.report || previous?.result?.error || "Report available via job show"].filter(Boolean).join(" "))}`] : []),
@@ -247,7 +248,7 @@ export class WorkService {
 
   private plannedDelivery: PlannedDelivery = (task, action, at) => {
     const run = task.plan!, index = run.plan.stages.findIndex(stage => stage.id === run.stage), current = run.plan.stages[index];
-    const back = current?.kind === "agent" && action.report?.includes("<lumio-outcome>changes</lumio-outcome>") ? current.back_to : undefined;
+    const back = current?.kind === "agent" && action.report?.split(/\r?\n/).some(line => line.trim() === "<lumio-outcome>changes</lumio-outcome>") ? current.back_to : undefined;
     return this.planTurn(task, back ?? run.plan.stages[index + 1]?.id ?? "end", this.context.systemActor ?? run.approved.by, at);
   };
 

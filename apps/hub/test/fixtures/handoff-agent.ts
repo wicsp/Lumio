@@ -15,7 +15,7 @@ let report = `Synthetic ${stage} delivered`;
 if (stage === "review") {
   const count = existsSync(counter) ? Number(readFileSync(counter, "utf8")) : 0;
   writeFileSync(counter, String(count + 1));
-  if (!count) report = "Fix the synthetic edge case. <lumio-outcome>changes</lumio-outcome>";
+  if (!count) report = "Fix the synthetic edge case.\n<lumio-outcome>changes</lumio-outcome>";
 }
 if (stage === "question") report = "<lumio-question>Which synthetic option?</lumio-question>";
 if (stage === "loop") report = "<lumio-outcome>changes</lumio-outcome>";
