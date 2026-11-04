@@ -5,6 +5,7 @@ const locale = new AsyncLocalStorage<Language>();
 export const withLanguage = <T>(lang: Language, action: () => T): T => locale.run(lang, action);
 
 export const en = {
+  "queue.invalid_access": "Credential does not belong to a delivered agent round",
   "work.round_not_found": "Execution round not found",
   "work.round_not_applied": "The round result has not been applied yet",
 
@@ -565,6 +566,7 @@ ${String(p0)}${String(p1)}`,
   "Run tailscale serve status to check": "Run tailscale serve status to check",
 };
 export const zh: typeof en = {
+  "queue.invalid_access": "凭据不属于本次交付的 agent 轮次",
   "work.round_not_found": "找不到执行轮次",
   "work.round_not_applied": "这一轮结果尚未写回",
 

@@ -1,3 +1,5 @@
+import { CredentialRedactor } from "./redact.ts";
+import { installSkill, SKILL_TEXT } from "../../../skills/lumio/install.ts";
 import { text as msg } from "./messages.ts";
 import type { SudoGate } from "./sudo.ts";
 import { StringDecoder } from "node:string_decoder";
@@ -93,12 +95,16 @@ export class Executor {
     }
   }
   private async execute(job: LocalJob) {
+    const access = this.queue.access(job.spec.id);
+    const secrets = [this.config.token, this.env.LUMIO_TOKEN ?? "", access?.token ?? ""].filter(Boolean);
+    const redact = (value: string) => secrets.reduce((text, secret) => text.replaceAll(secret, "[REDACTED]"), value);
+    const roundDirectory = join(this.config.stateDir, "agent-config", job.spec.id);
     const spec = job.spec, started = this.queue.jobs().find((j) => j.spec.id === spec.id)!.started!;
     let trace: RunLogWriter | undefined;
     const finish = async (fields: Parameters<Queue["finish"]>[0]) => {
       try { if (trace) { await trace.append("status", { status: fields.status }); await trace.close(); } }
       catch { fields = { ...fields, status: fields.status === "cancelled" || fields.status === "unknown" ? fields.status : "failed", error: msg("executor.could_not_seal_run_log") }; }
-      this.queue.finish(fields);
+      this.queue.finish(JSON.parse(redact(JSON.stringify(fields))));
     };
     const fail = (error: string) => finish({ job: spec.id, lease: spec.lease, started, finished: new Date().toISOString(), status: "failed", error });
     const workdir = spec.workdir === "~" ? homedir() : spec.workdir.startsWith("~/") ? join(homedir(), spec.workdir.slice(2)) : spec.workdir;
@@ -129,6 +135,10 @@ export class Executor {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await mkdir(logs, { recursive: true, mode: 0o700 });
+      if (agent && access && Date.parse(access.expires) > Date.now()) {
+        const skillFile = await installSkill(join(roundDirectory, "skills", "lumio"));
+        argv = [argv[0]!, ...agent.adapter.argv(spec.run as Extract<typeof spec.run, { kind: "agent" }>, { lastMessageFile: agent.lastMessageFile, skillFile, skillText: SKILL_TEXT })];
+      }
       if (this.stopping) return;
       if (placeholder.reason) { await finish({ job: spec.id, lease: spec.lease, started, finished: new Date().toISOString(), status: "cancelled" }); return; }
       trace = await RunLogWriter.create(join(this.config.stateDir, "events"), spec.id);
@@ -141,7 +151,7 @@ export class Executor {
       const decoder = new StringDecoder("utf8");
       output.on("error", () => { outputError = true; this.stop(spec.id, "cancelled"); });
       const workerArgs = process.argv[1]?.endsWith(".ts") ? [process.argv[1], "--job-worker"] : ["--job-worker"];
-      const child = spawn(process.execPath, workerArgs, { detached: true, stdio: ["pipe", "pipe", "pipe"], env: this.env, shell: false });
+      const child = spawn(process.execPath, workerArgs, { detached: true, stdio: ["pipe", "pipe", "pipe"], env: jobEnv(this.env), shell: false });
       placeholder.child = child;
       const exited = new Promise<void>((resolve, reject) => { child.once("error", reject); child.once("close", () => resolve()); });
       child.stdin!.on("error", () => {});
@@ -159,14 +169,17 @@ export class Executor {
           .catch(() => { outputError = true; this.stop(spec.id, "cancelled"); })
           .finally(() => { tracing--; resume(); });
       };
-      child.stdout!.on("data", (chunk: Buffer) => {
+      const stdoutRedactor = new CredentialRedactor(secrets), stderrRedactor = new CredentialRedactor(secrets);
+      const stdout = (chunk: Buffer) => {
         const text = decoder.write(chunk);
         report = (report + text).slice(-4000);
         if (agent && stdoutAll.length < MAX_AGENT_STDOUT) stdoutAll += text;
-        write(chunk, "stdout");
-      });
-      child.stderr!.on("data", (chunk: Buffer) => write(chunk, "stderr"));
-      child.stdin!.end(JSON.stringify({ spec: { ...spec, workdir }, argv, completion, env: { ...jobEnv(this.env), ...this.sudo?.begin(spec), ...(spec.gpus ? { CUDA_VISIBLE_DEVICES: spec.gpus.join(",") } : {}) } }));
+        if (chunk.length) write(chunk, "stdout");
+      };
+      child.stdout!.on("data", (chunk: Buffer) => stdout(stdoutRedactor.push(chunk)));
+      child.stderr!.on("data", (chunk: Buffer) => { const clean = stderrRedactor.push(chunk); if (clean.length) write(clean, "stderr"); });
+      child.stdin!.end(JSON.stringify({ spec: { ...spec, workdir }, argv, completion, env: { ...jobEnv(this.env), ...this.sudo?.begin(spec),
+        ...(run.kind === "agent" && access && Date.parse(access.expires) > Date.now() ? { LUMIO_HUB_URL: this.config.url, LUMIO_TOKEN: access.token } : {}), ...(spec.gpus ? { CUDA_VISIBLE_DEVICES: spec.gpus.join(",") } : {}) } }));
       const deadline = Date.now() + spec.timeout_seconds * 1000;
       const armTimeout = () => {
         const remaining = deadline - Date.now();
@@ -176,6 +189,8 @@ export class Executor {
       armTimeout();
       await exited;
       await placeholder.stop;
+      stdout(stdoutRedactor.push(Buffer.alloc(0), true));
+      const stderrTail = stderrRedactor.push(Buffer.alloc(0), true); if (stderrTail.length) write(stderrTail, "stderr");
       const tail = decoder.end();
       report = (report + tail).slice(-4000);
       if (agent && stdoutAll.length < MAX_AGENT_STDOUT) stdoutAll += tail;
@@ -195,7 +210,7 @@ export class Executor {
       let lastMessage: string | undefined;
       try { lastMessage = await readFile(agent.lastMessageFile, "utf8"); } catch { /* 只有 codex 写这个文件 */ }
       await rm(agent.lastMessageFile, { force: true });
-      const parsed = agent.adapter.parse(stdoutAll, lastMessage, run as Extract<typeof run, { kind: "agent" }>);
+      const parsed = agent.adapter.parse(stdoutAll, lastMessage === undefined ? undefined : redact(lastMessage), run as Extract<typeof run, { kind: "agent" }>);
       const split = splitQuestion(parsed.report ?? report);
       const after = gitState(workdir, this.env);
       await finish({ job: spec.id, lease: spec.lease, started, finished: new Date().toISOString(), ...result, log,
@@ -208,7 +223,7 @@ export class Executor {
         ...problem });
     } catch {
       if (!this.stopping) await finish({ job: spec.id, lease: spec.lease, started, finished: new Date().toISOString(), status: "failed", error: msg("executor.could_not_execute_program"), report, log });
-    } finally { await trace?.close().catch(() => {}); this.sudo?.end(spec.id); if (timer) clearTimeout(timer); this.running.delete(spec.id); }
+    } finally { await rm(roundDirectory, { recursive: true, force: true }); await trace?.close().catch(() => {}); this.sudo?.end(spec.id); if (timer) clearTimeout(timer); this.running.delete(spec.id); }
   }
   async shutdown() {
     this.stopping = true;

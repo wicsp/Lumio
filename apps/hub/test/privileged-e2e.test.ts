@@ -2,6 +2,7 @@ import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
 let previousLocale: string | undefined;
 beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
 afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
+import { createHash } from "node:crypto";
 import { createConnection } from "node:net";
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { cp, mkdtemp, readFile, rm, chmod } from "node:fs/promises";
@@ -34,7 +35,7 @@ async function start(timeout = "5", supported = true) {
     PATH: join(temp, "bin"), HOME: temp, LUMIO_HUB_URL: `http://127.0.0.1:${hub.server.port}`, LUMIO_TOKEN: runtimeToken,
     LUMIO_RUNTIME_NAME: "server", LUMIO_RUNTIME_STATE_DIR: join(temp, "rt"), LUMIO_RUNTIME_POLL_SECONDS: "0.03", LUMIO_RUNTIME_SUDO_TIMEOUT: timeout,
     ...(supported ? { LUMIO_RUNTIME_SUDO_COMMAND: `${process.execPath} ${join(temp, "helper.ts")} ${join(temp, "calls")}` } : {}),
-    FAKE_RUNTIME_MAIN: main, FAKE_BUN: process.execPath,
+    FAKE_RUNTIME_MAIN: main, FAKE_BUN: process.execPath, FAKE_RUNTIME_TOKEN_HASH: createHash("sha256").update(runtimeToken).digest("hex"),
   }, stdout: "ignore", stderr: "pipe" });
   errors = new Response(daemon.stderr as ReadableStream<Uint8Array>).text();
   await eventually(async () => (await (await api("/v1/runtimes")).json() as unknown[]).length === 1);
@@ -48,9 +49,10 @@ beforeEach(async () => {
   temp = await mkdtemp(join(tmpdir(), "lumio-sudo-e2e-"));
   await cp(new URL("../../../fixtures/query-vault", import.meta.url).pathname, join(temp, "vault"), { recursive: true });
   await Bun.write(join(temp, "bin/pi.ts"), `if (process.argv[2] === "--version") { console.log("1.4.0"); process.exit(0); }
+const {createHash} = await import("node:crypto");
 const child = Bun.spawn([process.env.FAKE_BUN!, process.env.FAKE_RUNTIME_MAIN!, "sudo", "--", "/bin/echo", "hello world"], {env:process.env,stdout:"pipe",stderr:"pipe"});
 const [out,err,code] = await Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text(),child.exited]);
-console.log(JSON.stringify({out,err,code,tokenLeaked:!!process.env.LUMIO_TOKEN})); process.exit(code);
+console.log(JSON.stringify({out,err,code,roundTokenReceived:!!process.env.LUMIO_TOKEN,runtimeTokenLeaked:createHash("sha256").update(process.env.LUMIO_TOKEN??"").digest("hex")===process.env.FAKE_RUNTIME_TOKEN_HASH})); process.exit(code);
 `);
   await Bun.write(join(temp, "bin/pi"), `#!/bin/sh\nexec "${process.execPath}" "${join(temp, "bin/pi.ts")}" "$@"\n`); await chmod(join(temp, "bin/pi"), 0o755);
   await Bun.write(join(temp, "helper.ts"), `import {appendFileSync} from "node:fs";
@@ -70,7 +72,7 @@ test("approval reaches fake root helper once and caller receives exact output an
   expect((await api(`/v1/proposals/${p.id}/accept`, {})).status).toBe(200);
   const result = await done(j.spec.id); expect(result.exit_code).toBe(7);
   const report = JSON.parse(result.report!);
-  expect(report).toMatchObject({ out: "hello world\n", code: 7, tokenLeaked: false }); expect(report.err).toContain("helper stderr"); expect(report.err).toContain("waiting for user approval");
+  expect(report).toMatchObject({ out: "hello world\n", code: 7, runtimeTokenLeaked: false, roundTokenReceived: true }); expect(report.err).toContain("helper stderr"); expect(report.err).toContain("waiting for user approval");
   const received = await calls(); expect(received).toHaveLength(1); expect(PrivilegedApproval.parse(JSON.parse(received[0]!)).proposal).toBe(p.id);
   await eventually(() => !!hub.store.db.query("SELECT report FROM privileged_approvals WHERE report IS NOT NULL").get());
   const audits = JSON.stringify(hub.store.db.query("SELECT * FROM audit").all()); expect(audits).not.toContain("helper stderr"); expect(audits).toContain('exit_code');

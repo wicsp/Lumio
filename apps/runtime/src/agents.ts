@@ -15,6 +15,8 @@ export type Sandbox = RuntimeRegistration["engines"][number]["sandbox"];
 export interface AgentContext {
   /** 这一轮的私有文件目录（执行器状态目录下），用于 agent 写出最后的回复。 */
   lastMessageFile: string;
+  skillFile?: string;
+  skillText?: string;
 }
 
 export interface Adapter {
@@ -34,7 +36,9 @@ const codex: Adapter = {
   argv(run, ctx) {
     // exec resume 不接受 --sandbox（0.163.0）；它接受 -c，与首次执行保持相同隔离配置。
     const sandbox = run.session?.resume ? ["-c", 'sandbox_mode="workspace-write"'] : ["--sandbox", "workspace-write"];
-    const common = ["--skip-git-repo-check", ...sandbox, "--json", "--output-last-message", ctx.lastMessageFile,
+    const common = [...(ctx.skillText ? ["-c", `developer_instructions=${JSON.stringify(ctx.skillText)}`,
+      "-c", 'shell_environment_policy.inherit="all"', "-c", "shell_environment_policy.ignore_default_excludes=true",
+      "-c", "sandbox_workspace_write.network_access=true"] : []), "--skip-git-repo-check", ...sandbox, "--json", "--output-last-message", ctx.lastMessageFile,
       ...(run.model ? ["-m", run.model] : [])];
     return run.session?.resume
       ? ["exec", "resume", ...common, run.session.id, run.prompt]
@@ -56,10 +60,10 @@ const codex: Adapter = {
 const claude: Adapter = {
   engine: "claude-code", command: "claude", sandbox: "none",
   versions: { min: "2.0.0", below: "3.0.0" },
-  argv(run) {
+  argv(run, ctx) {
     const session = run.session ? (run.session.resume ? ["--resume", run.session.id] : ["--session-id", run.session.id]) : [];
     // 无人值守：不允许交互式确认，否则一遇到权限询问就卡住。隔离级别如实声明为 none。
-    return ["-p", run.prompt, "--output-format", "json", "--permission-mode", "bypassPermissions",
+    return ["-p", run.prompt, ...(ctx.skillText ? ["--append-system-prompt", ctx.skillText] : []), "--output-format", "json", "--permission-mode", "bypassPermissions",
       ...(run.model ? ["--model", run.model] : []), ...session];
   },
   parse(stdout) {
@@ -80,9 +84,9 @@ const claude: Adapter = {
 const pi: Adapter = {
   engine: "pi", command: "pi", sandbox: "none",
   versions: { min: "1.4.0", below: "2.0.0" },
-  argv(run) {
+  argv(run, ctx) {
     // pi 的 --session-id：不存在则新建，存在则打开，所以新建与继续用同一个参数。
-    return ["-p", run.prompt, ...(run.model ? ["--model", run.model] : []), ...(run.session ? ["--session-id", run.session.id] : [])];
+    return ["-p", run.prompt, ...(ctx.skillFile ? ["--skill", ctx.skillFile] : []), ...(run.model ? ["--model", run.model] : []), ...(run.session ? ["--session-id", run.session.id] : [])];
   },
   parse(stdout, _last, run) {
     return { report: stdout.trim() || undefined, sessionId: run.session?.id };

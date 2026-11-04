@@ -13,7 +13,7 @@ const usage = () => msg("jobs.usage_lumio_job_submit_runtime_name_workdir_path_t
 export async function runJobs(args: string[], log: (line: string) => void) {
   const split = args.indexOf("--");
   const { values, positionals } = parseArgs({ args: split < 0 ? args : args.slice(0, split), allowPositionals: true, strict: true, options: {
-    runtime: { type: "string" }, workdir: { type: "string" }, timeout: { type: "string" }, gpus: { type: "string" }, status: { type: "string" }, json: { type: "boolean" },
+    task: { type: "string" }, routine: { type: "string" }, limit: { type: "string" }, runtime: { type: "string" }, workdir: { type: "string" }, timeout: { type: "string" }, gpus: { type: "string" }, status: { type: "string" }, json: { type: "boolean" },
     agent: { type: "string" }, model: { type: "string" }, session: { type: "string" }, resume: { type: "boolean" },
     output: { type: "string" }, "include-private": { type: "boolean" },
   } });
@@ -53,7 +53,7 @@ export async function runJobs(args: string[], log: (line: string) => void) {
   } else if (action === "submit") {
     if (positionals.length !== 1 || split < 0 || !args[split + 1] || !values.runtime || keys.some((k) => !["runtime", "workdir", "timeout", "gpus", "json"].includes(k))) throw new Error(usage());
   } else if (action === "list") {
-    if (positionals.length !== 1 || split >= 0 || keys.some((k) => !["status", "json"].includes(k))) throw new Error(usage());
+    if (positionals.length !== 1 || split >= 0 || keys.some((k) => !["status", "task", "routine", "limit", "json"].includes(k))) throw new Error(usage());
   } else if (action === "show" || action === "cancel") {
     if (positionals.length !== 2 || split >= 0 || keys.some((k) => k !== "json")) throw new Error(usage());
   } else throw new Error(usage());
@@ -81,7 +81,7 @@ export async function runJobs(args: string[], log: (line: string) => void) {
       ...(values.workdir !== undefined ? { workdir: values.workdir } : {}), ...(timeout !== undefined ? { timeout_seconds: timeout } : {}), ...(gpus ? { gpus } : {}) });
   } else if (action === "list") {
     const status = values.status === undefined ? undefined : JobStatus.parse(values.status);
-    result = await client.jobs(status);
+    result = await client.executionJobs({ status, task: values.task, routine: values.routine, ...(values.limit === undefined ? {} : { limit: Number(values.limit) }) });
   } else result = await (action === "cancel" ? client.cancelJob : client.job)(id!);
   if (values.json) log(JSON.stringify(result));
   else {

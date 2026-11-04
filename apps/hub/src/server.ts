@@ -146,14 +146,14 @@ async function startHubInstance(config: HubConfig, options: {
             return new Response(request.method === "HEAD" ? null : typeof file.body === "string" ? file.body : Buffer.from(file.body), { headers: { "Content-Type": file.type } });
           }
           if (url.pathname === "/" && !options.web) { status = 404; return Response.json(ApiError.parse({ error: { code: "NOT_FOUND", message: msg("server.endpoint_not_found") } }), { status }); }
-          if (route?.operation === "health") identity = store.authenticate(request.headers.get("authorization"));
+          if (route?.operation === "health") identity = store.authenticate(request.headers.get("authorization"), (options.now ?? (() => new Date()))());
           if (route?.operation !== "health" && route?.operation !== "runtime.join" && route?.operation !== "client.join") {
-            identity = store.authenticate(request.headers.get("authorization"));
+            identity = store.authenticate(request.headers.get("authorization"), (options.now ?? (() => new Date()))());
             if (!identity) throw new HubError("UNAUTHENTICATED", { key: "server.a_valid_bearer_token_is_required", args: [] });
           }
           if (!route) throw new HubError("NOT_FOUND", { key: "server.endpoint_not_found", args: [] });
           if (v2) {
-            const response = await handleV2(request, v2, identity!, store, modules!, decide);
+            const response = await handleV2(request, v2, identity!, store, modules!, decide, (options.now ?? (() => new Date()))());
             status = response.status; return response;
           }
           if ((PAIRING_OPERATIONS as readonly string[]).includes(route.operation)) {
@@ -262,6 +262,7 @@ async function startHubInstance(config: HubConfig, options: {
           status = STATUS[code];
           return Response.json(ApiError.parse({ error: { code, message, ...details } }), { status });
         } finally {
+          if (identity && status < 400) store.activity(identity);
           log(JSON.stringify({ time, actor_id: identity?.actor.id ?? null, token_label: identity?.label ?? null,
             method: request.method, path, status, duration_ms: performance.now() - start, client_ip: clientIp }));
         }

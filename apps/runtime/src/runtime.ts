@@ -56,7 +56,7 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
   let backoff = Math.min(config.pollSeconds, 60);
   async function send(path: string, body: unknown) {
     return fetcher(`${config.url}${path}`, {
-      method: "POST", headers: { Authorization: `Bearer ${config.token}`, "Content-Type": "application/json" },
+      method: "POST", headers: { Authorization: `Bearer ${config.token}`, "Content-Type": "application/json", ...(path === "/v1/runtime/sync" ? { "X-Lumio-Features": "job-access" } : {}) },
       body: JSON.stringify(body), redirect: "error", signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
     });
   }
@@ -120,7 +120,7 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
           archives.retryNow(); archiveWake.notify();
         } else {
           const sync = await post("/v1/runtime/sync", queue.heartbeat(), RuntimeSync);
-          queue.receive(sync.jobs);
+          queue.receive(sync.jobs, sync.access);
           const accepted = queue.jobs().filter((j) => !j.acked).map((j) => j.spec.id);
           if (accepted.length) {
             await post("/v1/runtime/ack", RuntimeAck.parse({ accepted }), RuntimeAck);

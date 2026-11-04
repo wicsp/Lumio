@@ -1,6 +1,12 @@
 import { language, renderMessage, type Language } from "@lumio/platform";
 
 export const en = {
+  "agents.usage": "Usage: lumio agent add <name> [--label <label>] | list [--json] | revoke <name> [--label <label>]",
+  "agents.token_once": (name: unknown, label: unknown) => `Agent ${String(name)} (${String(label)}). Save this token; it is shown only once:`,
+  "agents.revoked": "Agent credentials revoked.",
+  "skill.usage": "Usage: lumio skill install [--for codex|claude|pi]",
+  "skill.invalid_connection": "Invalid agent connection file; check it before reinstalling",
+  "skill.installed": (path: unknown) => `Skill installed: ${String(path)}`,
   "work.round_not_found": "Execution round not found",
   "work.round_not_applied": "The round result has not been applied yet",
 
@@ -724,6 +730,12 @@ ${String(p0)}${String(p1)}`,
   "Run tailscale serve status to check": "Run tailscale serve status to check",
 };
 export const zh: typeof en = {
+  "agents.usage": "用法：lumio agent add <名称> [--label <标签>] | list [--json] | revoke <名称> [--label <标签>]",
+  "agents.token_once": (name: unknown, label: unknown) => `Agent ${String(name)}（${String(label)}）。请保存令牌，它只显示一次：`,
+  "agents.revoked": "已吊销 agent 凭据。",
+  "skill.usage": "用法：lumio skill install [--for codex|claude|pi]",
+  "skill.invalid_connection": "agent 连接配置不合法，请检查后再安装",
+  "skill.installed": (path: unknown) => `已安装 skill：${String(path)}`,
   "work.round_not_found": "找不到执行轮次",
   "work.round_not_applied": "这一轮结果尚未写回",
 

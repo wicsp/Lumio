@@ -11,7 +11,7 @@ import { hubCredentials } from "./config.ts";
 
 const usage = () => msg("work.usage_lumio_task_new_list_show_update_edit_status_assign_comment_con");
 const options = {
-  json: { type: "boolean" }, legacy: { type: "boolean" }, to: { type: "string" }, description: { type: "string" },
+  query: { type: "string" }, json: { type: "boolean" }, legacy: { type: "boolean" }, to: { type: "string" }, description: { type: "string" },
   file: { type: "string" }, status: { type: "string" }, project: { type: "string" }, parent: { type: "string" },
   depends: { type: "string" }, due: { type: "string" }, workdir: { type: "string" }, model: { type: "string" },
   timeout: { type: "string" }, patch: { type: "string" }, revision: { type: "string" }, "request-id": { type: "string" },
@@ -38,10 +38,10 @@ export async function runWork(kind: "task" | "project", args: string[], log: (li
     if (action === "list") {
       if (reference) throw new Error(usage());
       if (kind === "project") {
-        const projects = await client.workProjects();
+        const projects = await client.workProjects({ status: values.status });
         if (values.json) emit(projects); else for (const project of projects) log(`${project.id}  ${project.status}  ${project.title}`);
       } else {
-        const tasks = await client.workTasks({ project: values.project, status: values.status });
+        const tasks = await client.workTasks({ project: values.project, status: values.status, query: values.query });
         if (values.json) emit(tasks); else for (const task of tasks) log(`${task.id}  ${task.status}  ${task.assignee}  ${task.title}`);
       }
       return 0;

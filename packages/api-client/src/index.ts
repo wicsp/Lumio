@@ -1,6 +1,6 @@
-import { ClientInvite, ClientInviteRequest, ClientJoin, ClientJoinRequest, RuntimeInvite, RuntimeInviteRequest } from "@lumio/schema";
+import { AgentInfo, AgentTokenIssued, AgentTokenRequest, AgentRevokeRequest, ClientInvite, ClientInviteRequest, ClientJoin, ClientJoinRequest, RuntimeInvite, RuntimeInviteRequest } from "@lumio/schema";
 import { AssistantConfigView, AssistantConfigUpdate, AssistantToolCall, ExecutionJobListArgs, RequestId, WorkAttention, WorkCommandRequest, WorkCommandResult, WorkTask, WorkTaskDetail, WorkProject, ExecutionRoutine, ExecutionRoutineCommandRequest, ExecutionRoutineInfo,
-  AssistantMemory, AssistantMemoryCommandRequest, AssistantMemoryCommandResult, AssistantChatRequest, AssistantChatResult, AssistantConversation, AssistantConversationDetail, AssistantEvent, StoredArtifact, idOf } from "@lumio/schema";
+  ProjectStatus, AssistantMemory, AssistantMemoryCommandRequest, AssistantMemoryCommandResult, AssistantChatRequest, AssistantChatResult, AssistantConversation, AssistantConversationDetail, AssistantEvent, StoredArtifact, idOf } from "@lumio/schema";
 import { JobRun, Job, JobSpec, JobStatus, RoutineInfo, RuntimeName, RuntimeInfo, Actor, OperationRequest, OperationResult, Proposal, ProposalStatus, ApiError, CheckResult, LinksResult, NoteDetail, SearchResult, type ApiErrorCode, type NoteRef } from "@lumio/schema";
 
 export class ApiClientError extends Error {
@@ -58,6 +58,9 @@ export function createClient(options: { url: string; token?: string; language?: 
   }
   const queryParams = (options: QueryOptions): Record<string, string> => options.includePrivate === undefined ? {} : { include_private: String(options.includePrivate) };
   return {
+    agents() { return request("/v2/agents", {}, AgentInfo.array()); },
+    issueAgentToken(input: AgentTokenRequest) { return request("/v2/agents/tokens", {}, AgentTokenIssued, validate(AgentTokenRequest, input)); },
+    revokeAgent(input: AgentRevokeRequest) { return request("/v2/agents/revoke", {}, { parse: () => undefined }, validate(AgentRevokeRequest, input)); },
     executionJobs(filter: ExecutionJobListArgs = {}) {
       return request("/v2/execution/jobs", Object.fromEntries(Object.entries(validate(ExecutionJobListArgs, filter)).filter(([, value]) => value !== undefined).map(([key, value]) => [key, String(value)])), Job.array());
     },
@@ -74,7 +77,7 @@ export function createClient(options: { url: string; token?: string; language?: 
         ...(filter.status ? { status: filter.status } : {}), ...(filter.query ? { q: filter.query } : {}) }, WorkTask.array());
     },
     workTask(id: string) { return request(`/v2/work/tasks/${validate(idOf("task"), id)}`, {}, WorkTaskDetail); },
-    workProjects() { return request("/v2/work/projects", {}, WorkProject.array()); },
+    workProjects(filter: { status?: string } = {}) { return request("/v2/work/projects", filter.status ? { status: validate(ProjectStatus, filter.status) } : {}, WorkProject.array()); },
     workProject(id: string) { return request(`/v2/work/projects/${validate(idOf("prj"), id)}`, {}, WorkProject); },
     executionCommand(input: ExecutionRoutineCommandRequest) { return request("/v2/execution/commands", {}, ExecutionRoutine, validate(ExecutionRoutineCommandRequest, input)); },
     executionRoutines() { return request("/v2/execution/routines", {}, ExecutionRoutineInfo.array()); },

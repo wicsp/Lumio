@@ -79,9 +79,13 @@ test("registers fake agents; three engines run non-interactively and return repo
   const recorded = await calls();
   expect(recorded.map((c) => c.stdin)).toEqual(["", "", ""]); // stdin 是 /dev/null
   expect(recorded.every((c) => c.cwd.endsWith("/repo"))).toBe(true);
-  expect(recorded[0].args.slice(0, 5)).toEqual(["exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--json"]);
+  expect(recorded[0].args[0]).toBe("exec");
+  expect(recorded[0].args).toContain("sandbox_workspace_write.network_access=true");
+  expect(recorded[0].args).toContain("--sandbox");
   expect(recorded[1].args).toContain("bypassPermissions");
-  expect(recorded[2].args).toEqual(["-p", "你好 pi", "--session-id", "s-1"]);
+  expect(recorded[2].args.slice(0, 2)).toEqual(["-p", "你好 pi"]);
+  expect(recorded[2].args).toContain("--skill");
+  expect(recorded[2].args.slice(-2)).toEqual(["--session-id", "s-1"]);
 });
 
 test("question marker ends the round as waiting_for_human; resume passes the session; failures and git state are recorded", async () => {

@@ -1,5 +1,5 @@
 import { text as msg } from "./messages.ts";
-import { AssistantChatRequest, WorkCommandRequest, ExecutionRoutineCommandRequest, RequestId, AssistantToolCall, capability, ExecutionRoutine, type AssistantEvent } from "@lumio/schema";
+import { AgentInfo, AgentTokenRequest, AgentRevokeRequest, AssistantChatRequest, WorkCommandRequest, ExecutionRoutineCommandRequest, RequestId, AssistantToolCall, capability, ExecutionRoutine, type AssistantEvent } from "@lumio/schema";
 import { AssistantError } from "@lumio/assistant";
 import { WorkError } from "@lumio/work";
 import type { BusinessModules } from "./modules.ts";
@@ -9,6 +9,9 @@ import type { authorize } from "./authorize.ts";
 import { handleArtifacts } from "./artifacts.ts";
 
 export const V2_ROUTES = [
+  { operation: "agents.manage", method: "GET", pattern: /^\/v2\/agents$/, path: "/v2/agents" },
+  { operation: "agents.manage", method: "POST", pattern: /^\/v2\/agents\/tokens$/, path: "/v2/agents/tokens" },
+  { operation: "agents.manage", method: "POST", pattern: /^\/v2\/agents\/revoke$/, path: "/v2/agents/revoke" },
   { operation: "assistant.config", method: "GET", pattern: /^\/v2\/assistant\/config$/, path: "/v2/assistant/config" },
   { operation: "assistant.config", method: "PUT", pattern: /^\/v2\/assistant\/config$/, path: "/v2/assistant/config" },
   { operation: "assistant.config", method: "DELETE", pattern: /^\/v2\/assistant\/config$/, path: "/v2/assistant/config" },
@@ -45,7 +48,7 @@ export function moduleError(cause: unknown): HubError | undefined {
   if (cause instanceof WorkError || cause instanceof AssistantError) return new HubError(cause.code, cause.params);
 }
 export async function handleV2(request: Request, route: V2Route, identity: Identity, store: HubStore,
-  modules: BusinessModules, decide: typeof authorize): Promise<Response> {
+  modules: BusinessModules, decide: typeof authorize, now = new Date()): Promise<Response> {
   let decision = decide(identity.actor, { operation: route.operation,
     includePrivate: route.operation === "execution.read" && new URL(request.url).searchParams.get("include_private") === "true" });
   let execution = "applied";
@@ -53,6 +56,19 @@ export async function handleV2(request: Request, route: V2Route, identity: Ident
   try {
     if (decision.result !== "allow") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: decision.result === "deny" ? decision.reason : msg("v2.approval_required") });
     const url = new URL(request.url), id = route.pattern.exec(url.pathname)?.[1];
+    if (route.operation === "agents.manage") {
+      if (request.method === "GET") return Response.json(AgentInfo.array().parse(store.agents(now)));
+      const body = await json(request);
+      const parsed = (url.pathname.endsWith("/tokens") ? AgentTokenRequest : AgentRevokeRequest).safeParse(body);
+      if (!parsed.success) throw new HubError("INVALID", { key: "agents.invalid_request", args: [] });
+      const result = store.db.transaction(() => {
+        const value = url.pathname.endsWith("/tokens") ? store.issueAgentToken(parsed.data.name, parsed.data.label)
+          : (store.revokeAgent(parsed.data.name, parsed.data.label), undefined);
+        store.audit(identity, route.operation, "allow", undefined, "applied"); return value;
+      })();
+      audited = true;
+      return result ? Response.json(result, { headers: { "Cache-Control": "no-store" } }) : new Response(null, { status: 204 });
+    }
     if (url.pathname.includes("/artifacts")) return await handleArtifacts(request, identity, store, modules);
     if (route.operation === "assistant.config") {
       if (request.method === "GET") await modules.assistantConfig.refresh();

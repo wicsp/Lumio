@@ -12,6 +12,7 @@ import { generateCitekey, parseArxivMetadata, parseCrossrefMetadata, parsePaperI
 import { newId } from "@lumio/foundation";
 import { ApiClientError, createClient } from "@lumio/api-client";
 import { ApiError } from "@lumio/schema";
+import { runAgents, runSkillInstall } from "./agent-access.ts";
 import { runJobs } from "./jobs.ts";
 import { runTasks } from "./tasks.ts";
 import { runWork, runAttention } from "./work.ts";
@@ -34,7 +35,7 @@ export interface CliOptions {
 export async function runCli(args: string[], options: CliOptions = {}): Promise<number> {
   try { return await executeCli(args, options); }
   catch (cause) {
-    if (!["job", "task", "project", "attention", "chat", "routine", "proposals", "runtime"].includes(args[0] ?? "") || !args.includes("--json")) throw cause;
+    if (!["agent", "job", "task", "project", "attention", "chat", "routine", "proposals", "runtime"].includes(args[0] ?? "") || !args.includes("--json")) throw cause;
     const error = cause instanceof ApiClientError ? {
       code: cause.code, message: errorMessage(cause), operation: cause.operation, reason: cause.reason, proposal: cause.proposal,
     } : { code: "INVALID", message: cause instanceof Error ? errorMessage(cause) : msg("cli.could_not_execute_command") };
@@ -54,6 +55,8 @@ async function executeCli(args: string[], options: CliOptions): Promise<number> 
   if (args[0] === "upgrade") return runUpgrade(args.slice(1), false, log);
   if (args.length === 1 && args[0] === "--version") { log(version); return 0; }
   if (["login", "login-code", "logout"].includes(args[0] ?? "") || (args[0] === "runtime" && ["add", "remove"].includes(args[1] ?? ""))) return runPairing(args, { log, warn: options.warn });
+  if (args[0] === "agent") return runAgents(args.slice(1), log);
+  if (args[0] === "skill") return runSkillInstall(args.slice(1), log);
   if (args[0] === "job") return runJobs(args.slice(1), log);
   if (args[0] === "attention") return runAttention(args.slice(1), log);
   if (args[0] === "task") return (await runWork("task", args.slice(1), log)) ?? runTasks(args.slice(1).filter((arg) => arg !== "--legacy"), log);
