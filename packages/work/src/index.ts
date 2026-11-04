@@ -177,6 +177,12 @@ export class WorkService {
           if (!execution.acknowledged) this.store.putExecution({ ...execution, acknowledged: { at: time, by: actor } });
           result = { kind: "task", task }; break;
         }
+        case "work.task.workflow.set":
+        case "work.task.workflow.decide":
+        case "work.workflow_template.save":
+        case "work.workflow_template.delete":
+          // Contract from ADR 0031; implemented in R4-2. Refused until then rather than silently ignored.
+          throw new WorkError("INVALID", { key: "index.invalid_work_command_parameters", args: [] });
         case "work.task.dispatch": {
           const task = this.task(operation.args.task);
           if (operation.args.expected_revision !== undefined && task.revision !== operation.args.expected_revision) throw new WorkError("CONFLICT", { key: "index.task_changed_reload_before_dispatching", args: [] });

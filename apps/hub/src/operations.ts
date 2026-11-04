@@ -80,6 +80,8 @@ export async function handleOperation(request: Request, kind: "operations" | "ac
       return Response.json(OperationResult.parse({ status: "applied", operation, ...(note ? { note } : {}) }));
     }
     proposal = store.proposal(proposalId!);
+    // Work delegation proposals (ADR 0031) are created and executed by R4-2; v1 decisions here never see them yet.
+    if (proposal?.operation.op === "work.command") throw new HubError("INVALID", { key: "operations.invalid_operation_request", args: [] });
     operation = proposal?.operation;
     // Authorize before exposing existence or status to an agent.
     if (check(kind).result !== "allow") throw new HubError("FORBIDDEN", { key: "operations.request_requires_approval", args: [] }, { operation });

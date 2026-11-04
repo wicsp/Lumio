@@ -21,6 +21,8 @@ export * from "./assistant.ts";
 export * from "./storage.ts";
 export * from "./capabilities.ts";
 export * from "./access.ts";
+export * from "./workflow.ts";
+export * from "./notifications.ts";
 
 import { Actor } from "./actor.ts";
 import {
@@ -31,6 +33,8 @@ import {
 } from "./assistant.ts";
 import { AgentInfo, AgentRevokeRequest, AgentTokenIssued, AgentTokenRequest, JobAccess } from "./access.ts";
 import { CapabilityChange } from "./capabilities.ts";
+import { Workflow, WorkflowRun, WorkflowTemplate } from "./workflow.ts";
+import { NotificationEvent, PushDevice, PushDeviceUpdate, PushPublicKey, PushSubscriptionInput, PushTestResult } from "./notifications.ts";
 import { ExecutionRoutine, ExecutionRoutineCommandRequest, ExecutionRoutineInfo } from "./execution.ts";
 import { BackupManifest, MigrationPlan, RunLogEvent, StoredArtifact } from "./storage.ts";
 import {
@@ -127,4 +131,14 @@ export const CONTRACTS = {
   "agent-token-issued": AgentTokenIssued,
   "agent-info": AgentInfo,
   "agent-revoke-request": AgentRevokeRequest,
+  // 任务流程与通知（ADR 0031，R4-1）
+  workflow: Workflow,
+  "workflow-run": WorkflowRun,
+  "workflow-template": WorkflowTemplate,
+  "notification-event": NotificationEvent,
+  "push-subscription-input": PushSubscriptionInput,
+  "push-device": PushDevice,
+  "push-device-update": PushDeviceUpdate,
+  "push-public-key": PushPublicKey,
+  "push-test-result": PushTestResult,
 } as const;

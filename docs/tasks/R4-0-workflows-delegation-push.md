@@ -8,12 +8,36 @@
 
 | 编号 | 内容 | 负责 | 涉及 | 依赖 |
 |---|---|---|---|---|
-| R4-1 | 契约：流程（步骤、走向、轮数上限、批准）、委派提议、推送订阅与通知偏好、通知事件 | Claude 起草，人类批准 | `packages/schema` | R3 |
+| R4-1 ✅ | 契约：流程（步骤、走向、轮数上限、批准）、委派提议、推送订阅与通知偏好、通知事件 | Claude 起草，人类批准 | `packages/schema` | R3 |
 | R4-2 | Hub：agent 委派改为需要批准；流程引擎（自动接力、打回、人的步骤、上限、暂停）；流程模板 | 后端（Codex） | `apps/hub`、`packages/work`、`packages/execution`、`apps/cli` | R4-1 |
 | R4-3 | Hub：统一通知接口与 Web Push 通道（VAPID 密钥、订阅、发送、测试通知）；事件接入 | 后端（Codex） | `apps/hub`、`packages/platform`（如需要） | R4-1 |
 | R4-4 | Web：流程的建立 / 查看 / 进度、委派与流程提议卡片；设置页「通知」；service worker 与 CSP | Claude | `apps/web` | R4-2、R4-3 |
 | R4-5 | 术语「派活」→「委派」：DESIGN、任务说明、Web 文字（Claude）；CLI 与 Hub 输出（Codex） | Claude + Codex | 文档、`apps/web`、`apps/cli`、`apps/hub` | — |
 | R4-6 | 验收：用 Lumio 跑一次 Lumio 自己的开发流程（见文末） | 人类 + Claude | — | R4-1 至 R4-5 |
+
+## R4-1 契约（Claude）
+
+`packages/schema`：`workflow.ts`、`notifications.ts`，以及 `work.ts`、`operation.ts`、`proposal.ts`、`common.ts` 的增量。
+
+- **流程** `Workflow`：1–20 个步骤，`max_rounds` 1–30（缺省 8）。
+  - 三种步骤：`agent`（`agent`、`instruction`、`next`、`on_changes`）；`ask`（`question`、2–4 个 `options`，各带 `next`）；`accept`。
+  - 规则：步骤 ID 唯一，`end` 是保留字，引用的步骤必须存在，至少一个人的步骤。
+  - 运行状态 `WorkflowRun` 存在 `WorkTask.workflow`：`approved`、`current`、`rounds`、`stopped`（原因：max_rounds / failed / unknown / paused / cancelled / by_human）。
+  - 模板 `WorkflowTemplate`（ID 前缀 `wft`）。
+- **命令**：
+  - `work.task.workflow.set`：设置、替换或清除（`null`），`from` 指定起点或继续。
+  - `work.task.workflow.decide`：ask 步骤用 `option`，accept 步骤用 `back_to`，可带 `comment`。
+  - `work.workflow_template.save` / `delete`。
+  - 结果新增 `template`、`removed`、`proposal`（agent 发起而需要批准时，只给提议 ID）。都不是 agent 能力。
+- **委派提议**：`WorkCommandProposal`（`op: "work.command"`，内含 `work.task.dispatch` 或 `work.task.workflow.set` 与 request_id）。
+  它只进入 `Proposal.operation`（新的 `ProposalOperation`），**不加入** v1 的 `Operation`，`POST /v1/operations` 不接受它。
+- **需要你处理**：`WorkAttention` 新增 `decision`（流程的 ask 步骤：`step`、`question`、`options`，没有 job / round）；accept 步骤以 `review` 出现并带 `step`。
+- **通知**：
+  - `NotificationKind`（attention.question / review / failed / decision、proposal.pending）。
+  - `NotificationEvent`：去重 `id`、标题、站内 `path`，不含正文。
+  - `PushSubscriptionInput`：只接受 https 推送地址。
+  - `PushDevice`（ID 前缀 `pdev`，不返回推送地址与密钥）、`PushDeviceUpdate`、`PushPublicKey`、`PushTestResult`。
+- 在 R4-2 实现之前，Hub 与 Work 对新命令、新提议一律返回 INVALID，不静默忽略。Web 已能显示 `decision` 卡片（选项按钮）。
 
 ## 要点
 

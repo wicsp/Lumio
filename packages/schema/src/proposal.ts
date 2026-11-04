@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { Timestamp, idOf } from "./common.ts";
-import { Operation } from "./operation.ts";
+import { ProposalOperation } from "./operation.ts";
 
 /**
  * 提议（ADR 0014 第 1 节，ADR 0016 第 3 节）：一个"需要批准"的操作，等人决定。
@@ -10,7 +10,7 @@ export const ProposalStatus = z.enum(["pending", "accepted", "rejected"]);
 
 export const Proposal = z.strictObject({
   id: idOf("prop"),
-  operation: Operation,
+  operation: ProposalOperation.describe("v1 操作，或 agent 的 Work 委派与流程（ADR 0031）"),
   reason: z.string().min(1).max(2000).describe("提议理由，给人看"),
   author: idOf("act").describe("提交者的身份 ID"),
   status: ProposalStatus,
