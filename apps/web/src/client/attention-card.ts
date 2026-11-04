@@ -22,6 +22,7 @@ const KIND: Record<WorkAttention["kind"], { label: string; glyph: string; tone: 
   question: { label: "Waiting for your answer", glyph: "help", tone: "ochre" },
   review: { label: "Ready for your review", glyph: "check", tone: "green" },
   failed: { label: "Run failed", glyph: "alert", tone: "red" },
+  decision: { label: "Your decision", glyph: "help", tone: "ochre" },
 };
 
 /** where：today 显示任务标题；task 在任务页里，不重复标题；job 在执行详情里。 */
@@ -84,12 +85,23 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
 
   const seen = h("button", { type: "button", class: "btn btn-quiet btn-small", title: t("Clear this reminder without changing the task") }, t("Seen"));
   seen.addEventListener("click", () => void run(async () => {
-    await ctx.client.workCommand(acknowledgeCommand(item.task, item.round));
+    await ctx.client.workCommand(acknowledgeCommand(item.task, item.round!));
     return t("Marked as seen.");
   }));
 
   let body: Node | null = null;
-  if (item.kind === "question") {
+  if (item.kind === "decision") {
+    // 流程里人的 ask 步骤（ADR 0031）：选一个选项，流程按选项继续。
+    const choices = (item.options ?? []).map((label, option) => {
+      const button = h("button", { type: "button", class: option === 0 ? "btn btn-primary btn-small" : "btn btn-small" }, label);
+      button.addEventListener("click", () => void run(async () => {
+        await ctx.client.workCommand({ request_id: newRequestId(), operation: { op: "work.task.workflow.decide", args: { task: item.task, step: item.step!, option } } });
+        return t("Chosen: {0}", label);
+      }));
+      return button;
+    });
+    body = h("div", { class: "attn-body" }, h("p", { class: "attn-question" }, item.question ?? ""), h("div", { class: "button-row" }, ...choices));
+  } else if (item.kind === "question") {
     const answer = composer(t("Answer and continue"), true, t("Your answer…"));
     body = h("div", { class: "attn-body" }, h("p", { class: "attn-question" }, item.question ?? t("The agent is waiting for your input.")), answer.form);
   } else {
@@ -118,7 +130,7 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
     }
   }
 
-  const meta = [t("Round {0}", item.round), item.agent, ago(item.since)].filter(Boolean).join(t(" · "));
+  const meta = [item.round ? t("Round {0}", item.round) : item.step ? t("Workflow step {0}", item.step) : "", item.agent, ago(item.since)].filter(Boolean).join(t(" · "));
   card.append(
     h("header", { class: "attn-head" },
       h("span", { class: "attn-icon" }, icon(kind.glyph)),
@@ -126,8 +138,8 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
         h("p", { class: "attn-kind" }, t(kind.label)),
         where === "today" ? h("button", { type: "button", class: "attn-title", onclick: () => ctx.navigate("work", item.task) }, item.title) : null,
         h("p", { class: "attn-meta", title: formatTime(item.since) }, meta)),
-      where !== "job" ? h("button", { type: "button", class: "text-btn attn-report", onclick: () => ctx.navigate("execution", item.job) }, t("View run")) : null),
-    ...[body, item.kind === "question" ? null : actions, status, error].filter((node): node is Node => node !== null));
+      where !== "job" && item.job ? h("button", { type: "button", class: "text-btn attn-report", onclick: () => ctx.navigate("execution", item.job) }, t("View run")) : null),
+    ...[body, item.kind === "question" || item.kind === "decision" ? null : actions, status, error].filter((node): node is Node => node !== null));
   return card;
 }
 

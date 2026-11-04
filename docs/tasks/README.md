@@ -55,7 +55,7 @@
 | [R3-3](R3-0-capabilities-agent-access.md) ✅ | 每轮凭据、`lumio agent`、`lumio skill install`、生成 SKILL.md | 后端（Codex） | R3-2 |
 | [R3-4](R3-0-capabilities-agent-access.md) ✅ | Web：模型配置、已连接的 agent、对话里的变更卡片与撤回；回答框与验收卡片 | Claude | R3-2 |
 | R3-5 | 验收 | 人类 + Claude | R3-1 至 R3-4 |
-| [R4-1](R4-0-workflows-delegation-push.md) | 契约：流程、委派提议、推送订阅（ADR 0031） | Claude 起草，人类批准 | R3 |
+| [R4-1](R4-0-workflows-delegation-push.md) ✅ | 契约：流程、委派提议、推送订阅（ADR 0031） | Claude 起草，人类批准 | R3 |
 | [R4-2](R4-0-workflows-delegation-push.md) | Hub：委派需要批准、流程引擎与模板 | 后端（Codex） | R4-1 |
 | [R4-3](R4-0-workflows-delegation-push.md) | Hub：统一通知接口与 Web Push | 后端（Codex） | R4-1 |
 | [R4-4](R4-0-workflows-delegation-push.md) | Web：流程界面、提议卡片、设置页通知、service worker | Claude | R4-2、R4-3 |

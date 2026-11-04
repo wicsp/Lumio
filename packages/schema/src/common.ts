@@ -25,6 +25,9 @@ export const ID_PREFIXES = {
   log_event: "evt",
   artifact: "art",
   migration: "mig",
+  // ADR 0031（R4-1）：流程模板、推送设备
+  workflow_template: "wft",
+  push_device: "pdev",
 } as const;
 
 const ULID = "[0-9A-HJKMNP-TV-Z]{26}";

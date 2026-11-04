@@ -2,6 +2,7 @@ import { z } from "zod";
 import { AgentTarget, ID_PREFIXES, Id, RequestId, Revision, TaskAssignee, Timestamp, idOf } from "./common.ts";
 import { TASK_STATUSES } from "./entities.ts";
 import { Job } from "./job.ts";
+import { Workflow, WorkflowRun, WorkflowStepId, WorkflowTemplate } from "./workflow.ts";
 
 /**
  * Work 模块契约 v2（ADR 0025 第 1、3、4、8 节，R0-1）。
@@ -92,6 +93,7 @@ export const WorkTask = z
     references: z.array(ResourceRef).describe("资料引用；不是输入快照"),
     due: Timestamp.optional(),
     ...RunConfigShape,
+    workflow: WorkflowRun.optional().describe("任务流程（ADR 0031）；缺失表示没有流程，每一轮结束都交给人"),
   })
   .superRefine((task, ctx) => {
     if (task.parent === task.id) ctx.addIssue({ code: "custom", path: ["parent"], message: "任务不能是自己的父任务" });
@@ -232,6 +234,47 @@ export const WorkTaskDispatch = z.strictObject({
   }),
 });
 
+/**
+ * 设置、替换或清除任务的流程（ADR 0031 第 3 节）。人设置即生效；agent 设置时授权结果为需要批准，生成提议。
+ * from：从哪一步开始（缺省第一步）；流程停下后，人用同一个流程加 from 让它继续。workflow 为 null 时清除流程。
+ */
+export const WorkTaskWorkflowSet = z.strictObject({
+  op: z.literal("work.task.workflow.set"),
+  args: z.strictObject({
+    task: idOf("task"),
+    expected_revision: Revision,
+    workflow: Workflow.nullable(),
+    from: WorkflowStepId.optional(),
+  }),
+});
+
+/**
+ * 人在流程里的决定（ADR 0031）：ask 步骤选一个选项（option 是选项下标）；accept 步骤不满意时用 back_to 回到某一步。
+ * 验收通过直接把任务标为 done。comment 作为人的评论保存，并交给下一步的 agent。只有人能用。
+ */
+export const WorkTaskWorkflowDecide = z.strictObject({
+  op: z.literal("work.task.workflow.decide"),
+  args: z
+    .strictObject({
+      task: idOf("task"),
+      step: WorkflowStepId.describe("正在等人的那一步，防止对过时的步骤做决定"),
+      option: z.number().int().nonnegative().optional(),
+      back_to: WorkflowStepId.optional(),
+      comment: z.string().min(1).optional(),
+    })
+    .refine((args) => (args.option === undefined) !== (args.back_to === undefined), "option 与 back_to 必须且只能给一个"),
+});
+
+/** 保存流程模板（新建或按 template 覆盖）。只有人能用。 */
+export const WorkflowTemplateSave = z.strictObject({
+  op: z.literal("work.workflow_template.save"),
+  args: z.strictObject({ template: idOf("wft").optional(), name: z.string().min(1).max(80), workflow: Workflow }),
+});
+export const WorkflowTemplateDelete = z.strictObject({
+  op: z.literal("work.workflow_template.delete"),
+  args: z.strictObject({ template: idOf("wft") }),
+});
+
 /** 人确认看过某一轮（等你验收、执行失败）而暂不处理（ADR 0030）。只有人能用；agent 一律拒绝。 */
 export const WorkTaskAcknowledge = z.strictObject({
   op: z.literal("work.task.acknowledge"),
@@ -240,30 +283,40 @@ export const WorkTaskAcknowledge = z.strictObject({
 
 export const WorkCommand = z.discriminatedUnion("op", [
   WorkProjectCreate, WorkProjectUpdate, WorkTaskCreate, WorkTaskUpdate, WorkTaskComment, WorkTaskDispatch, WorkTaskAcknowledge,
+  WorkTaskWorkflowSet, WorkTaskWorkflowDecide, WorkflowTemplateSave, WorkflowTemplateDelete,
 ]);
 
 // ───────────────────────── 需要你处理（ADR 0030）─────────────────────────
 
-export const ATTENTION_KINDS = ["question", "review", "failed"] as const;
+export const ATTENTION_KINDS = ["question", "review", "failed", "decision"] as const;
 export const AttentionKind = z.enum(ATTENTION_KINDS);
 
 /**
  * `GET /v2/work/attention`：需要人处理的任务，由 Hub 按每个任务**最新一轮**计算，不存储。
  * question：最新一轮在等回答；review：最新一轮正常结束，等人验收；failed：最新一轮失败或结果不明。
+ * decision：流程走到人的 ask 步骤（ADR 0031），带 step、question、options，没有 job / round；流程的 accept 步骤以 review 出现并带 step。
  * 以下任一情况发生即不再出现：派出新一轮、任务变为 done / cancelled / paused、这一轮被标为已查看。
  * 仍在运行或排队的轮次不出现；例行任务的轮次不在这里（没有任务）。
  */
-export const WorkAttention = z.strictObject({
-  task: idOf("task"),
-  title: z.string().min(1).describe("任务标题"),
-  kind: AttentionKind,
-  job: idOf("job"),
-  round: z.number().int().positive(),
-  agent: AgentTarget.optional().describe("这一轮由谁执行；回答并继续时默认派给它"),
-  since: Timestamp.describe("这一轮结束的时间"),
-  question: z.string().min(1).optional().describe("kind 为 question 时 agent 的问题"),
-  summary: z.string().optional().describe("汇报或失败原因的开头部分（最多 500 字符）；完整内容见 Job"),
-});
+export const WorkAttention = z
+  .strictObject({
+    task: idOf("task"),
+    title: z.string().min(1).describe("任务标题"),
+    kind: AttentionKind,
+    job: idOf("job").optional().describe("相关的一轮；decision 没有"),
+    round: z.number().int().positive().optional(),
+    agent: AgentTarget.optional().describe("这一轮由谁执行；回答并继续时默认委派给它"),
+    since: Timestamp.describe("这一轮结束或流程走到这一步的时间"),
+    question: z.string().min(1).optional().describe("question：agent 的问题；decision：流程 ask 步骤的问题"),
+    summary: z.string().optional().describe("汇报或失败原因的开头部分（最多 500 字符）；完整内容见 Job"),
+    step: WorkflowStepId.optional().describe("来自流程时，正在等人的步骤（ADR 0031）"),
+    options: z.array(z.string().min(1)).min(2).max(4).optional().describe("decision 的选项文字，下标即 work.task.workflow.decide 的 option"),
+  })
+  .superRefine((item, ctx) => {
+    if (item.kind === "decision") {
+      if (!item.step || !item.question || !item.options) ctx.addIssue({ code: "custom", message: "decision 必须有 step、question 与 options" });
+    } else if (!item.job || !item.round) ctx.addIssue({ code: "custom", message: "question / review / failed 必须有 job 与 round" });
+  });
 export const WORK_COMMAND_NAMES = WorkCommand.options.map((o) => o.shape.op.value);
 
 export const WorkCommandRequest = z.strictObject({
@@ -271,12 +324,19 @@ export const WorkCommandRequest = z.strictObject({
   operation: WorkCommand,
 });
 
-/** 命令结果：create/update → project 或 task；comment → comment；dispatch → job。 */
+/**
+ * 命令结果：create/update/workflow → project 或 task；comment → comment；dispatch → job；
+ * 模板保存 → template，删除 → removed；agent 发起而需要批准 → proposal（ADR 0031）。
+ */
 export const WorkCommandResult = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("project"), project: WorkProject }),
   z.strictObject({ kind: z.literal("task"), task: WorkTask }),
   z.strictObject({ kind: z.literal("comment"), comment: WorkComment }),
   z.strictObject({ kind: z.literal("job"), job: Job }),
+  z.strictObject({ kind: z.literal("template"), template: WorkflowTemplate }),
+  z.strictObject({ kind: z.literal("removed"), id: idOf("wft") }),
+  // agent 的委派或流程需要人批准（ADR 0031 第 2 节）：没有执行，生成了这条提议（只给 ID，避免与提议契约互相引用）
+  z.strictObject({ kind: z.literal("proposal"), proposal: idOf("prop") }),
 ]);
 
 export type Module = z.infer<typeof Module>;

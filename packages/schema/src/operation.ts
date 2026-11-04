@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { AgentAssignee, idOf } from "./common.ts";
+import { AgentAssignee, RequestId, idOf } from "./common.ts";
+import { WorkTaskDispatch, WorkTaskWorkflowSet } from "./work.ts";
 
 /**
  * 操作（ADR 0016 第 2 节）：程序对 vault 的每一次修改都表示为一个有名字的操作。
@@ -41,6 +42,19 @@ export const ExecPrivileged = z.strictObject({
 });
 
 /**
+ * agent 发起、需要人批准的 Work 命令（ADR 0031 第 2、3 节）：委派一轮，或设置流程。
+ * 提议里存完整的命令；人批准后 Hub 以原 request_id 执行，任务 revision 已变或命令已不适用时失败并说明。
+ * 它只出现在提议里（ProposalOperation），不加入 v1 的 Operation，`POST /v1/operations` 不接受它。
+ */
+export const WorkCommandProposal = z.strictObject({
+  op: z.literal("work.command"),
+  args: z.strictObject({
+    request_id: RequestId,
+    operation: z.discriminatedUnion("op", [WorkTaskDispatch, WorkTaskWorkflowSet]),
+  }),
+});
+
+/**
  * 全部操作。TaskDispatch（P2-4）、RoutineFollowup（P2-5）已实现；ExecPrivileged 的格式已批准（ADR 0019、0020），
  * 由 P2-6 实现——在此之前 Hub 的授权表里没有它的规则，一律拒绝。
  */
@@ -50,3 +64,8 @@ export const OPERATION_NAMES = Operation.options.map((o) => o.shape.op.value);
 
 export type Operation = z.infer<typeof Operation>;
 export type OperationName = Operation["op"];
+
+/** 提议里可以存的操作：v1 操作加上 agent 的 Work 委派与流程（ADR 0031）。 */
+export const ProposalOperation = z.discriminatedUnion("op", [TaskDispatch, RoutineFollowup, ExecPrivileged, WorkCommandProposal]);
+export type ProposalOperation = z.infer<typeof ProposalOperation>;
+export type WorkCommandProposal = z.infer<typeof WorkCommandProposal>;
