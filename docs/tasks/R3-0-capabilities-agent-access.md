@@ -8,21 +8,28 @@
 
 | 编号 | 内容 | 负责 | 涉及 | 依赖 |
 |---|---|---|---|---|
-| R3-1 | 契约：能力目录、助手配置接口、一轮访问凭据、执行者显示 | Claude 起草，人类批准 | `packages/schema` | — |
+| R3-1 ✅ | 契约：能力目录、助手配置接口、一轮访问凭据、执行者显示 | Claude 起草，人类批准 | `packages/schema` | — |
 | R3-2 | Hub：agent 权限规则、能力执行层、内置助手接上工具（含私密读取与撤回）、助手配置接口与热加载 | 后端（Codex） | `apps/hub`、`packages/assistant`、`packages/work`、`packages/execution`、`packages/knowledge`、`apps/cli`（setup 改用同一实现） | R3-1、R2-2 |
 | R3-3 | 外部 agent：每轮访问凭据、`lumio agent`、`lumio skill install`、由目录生成 SKILL.md 与 CLI 覆盖测试 | 后端（Codex） | `apps/hub`、`apps/runtime`、`apps/cli`、`packages/execution`、`skills/lumio` | R3-2 |
 | R3-4 | Web：设置页「助手模型」「已连接的 agent」；对话里的工具调用与变更卡片（撤回）；任务里显示执行者 | Claude | `apps/web` | R3-2（模型配置部分只依赖 R3-1 与 R3-2 的接口） |
 | R3-5 | 验收（见文末） | 人类 + Claude | — | R3-1 至 R3-4 |
 
-## R3-1 契约（Claude）
+## R3-1 契约（Claude）✅
 
-- `Capability`：`name`（如 `work.task.list`）、`kind`（`read` / `write`）、参数与结果的 schema（复用 `WorkCommandRequest` 各操作、查询与 Job 契约）、
-  `summary`（`en` / `zh`）。导出 `CAPABILITIES` 列表与按名称查找；附契约测试：名称唯一、每项的参数 schema 能导出为 JSON Schema（给模型的工具定义用）。
-- 助手配置：`AssistantConfigView`（`base_url`、`model`、`api_key_set`）、`AssistantConfigUpdate`（地址、模型、可选密钥、`check` 是否验证），
-  以及验证失败的错误码（地址、鉴权、模型名三类）。
-- 一轮访问凭据：Job 交付响应增加可选的 `access`（`hub_url`、`token`、`expires`），只出现在交付给执行器的响应里，不进 Job 记录的 schema。
-- 执行者：Work 讨论与变更记录里的 `actor` 已有身份 ID；补充给界面显示用的身份名称（如有缺失）。
-- 生成的 JSON Schema 随契约更新（生成物，不手改）。
+已在 `packages/schema` 落地（`capabilities.ts`、`access.ts`，以及 `assistant.ts`、`job.ts`、`work.ts` 的增量字段）：
+
+- **能力目录** `CAPABILITIES`：16 项，每项有 `name`、`kind`（read / write）、`summary`（en / zh）、`args`、`result`。
+  - 读：`knowledge.note.search|show|links`、`work.task.list|show`、`work.project.list|show`、`execution.job.list|show`、`execution.routine.list`、`approval.proposal.list`。
+  - 写：`work.task.create|update|comment`、`work.project.create|update`。参数就是对应 Work 命令的 `args`，结果是 `WorkCommandResult`；`request_id` 由调用方生成。
+  - 工具名：`toolName()` 把点换成 `__`（兼容接口的函数名不允许点），`capabilityFromTool()` 反查。
+  - `AGENT_SETTABLE_TASK_STATUSES`：agent 能设置的任务状态（todo、active、waiting、paused）。
+- **变更记录** `CapabilityChange`，挂在 `AssistantToolCall.change`；`AssistantToolCall` 还增加 `capability`、`private_read`。
+- **模型配置** `AssistantConfigView`（不含密钥，带 `managed`）、`AssistantConfigUpdate`（地址规则、`api_key` 只写、`clear_api_key`、`check`），
+  验证失败用 ApiError `INVALID`，reason 为 `assistant-config-{address|auth|model|response|timeout}`。
+- **每轮凭据** `JobAccess`，放在 `RuntimeSync.access`。只在执行器的同步请求带 `X-Lumio-Features: job-access` 时返回，旧执行器不受影响；不进 `JobSpec`。
+- **agent 管理** `AgentTokenRequest`、`AgentTokenIssued`、`AgentInfo`（不含令牌原文）、`AgentRevokeRequest`。
+- **执行者** `WorkTask` / `WorkProject` 增加可选的 `created_by`、`updated_by`（身份 ID；名称经 `/v1/actors` 查）。
+- `bun run schema:export` 同时导出每项能力的 `capability.<名称>.args|result.json`。
 
 ## R3-2 Hub 与内置助手（Codex）
 

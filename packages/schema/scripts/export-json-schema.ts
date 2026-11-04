@@ -7,7 +7,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import { CONTRACTS } from "../src/index.ts";
+import { CAPABILITIES, CONTRACTS } from "../src/index.ts";
 
 const outDir = join(import.meta.dir, "..", "json");
 await mkdir(outDir, { recursive: true });
@@ -18,4 +18,14 @@ for (const [name, schema] of Object.entries(CONTRACTS)) {
   const file = join(outDir, `${name}.json`);
   await writeFile(file, `${JSON.stringify({ title: name, ...json }, null, 2)}\n`);
   console.log(`wrote ${file}`);
+}
+
+// 能力目录（ADR 0029）：每项能力的参数与结果各一份，文件名 capability.<名称>.args|result.json
+for (const item of CAPABILITIES) {
+  for (const [part, schema] of [["args", item.args], ["result", item.result]] as const) {
+    const json = z.toJSONSchema(schema, { target: "draft-2020-12", io: part === "args" ? "input" : "output" });
+    const file = join(outDir, `capability.${item.name}.${part}.json`);
+    await writeFile(file, `${JSON.stringify({ title: `${item.name} ${part}`, description: item.summary.en, ...json }, null, 2)}\n`);
+    console.log(`wrote ${file}`);
+  }
 }

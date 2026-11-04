@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CapabilityChange, CapabilityName } from "./capabilities.ts";
 import { RequestId, Revision, Timestamp, idOf } from "./common.ts";
 import { ResourceRef } from "./work.ts";
 
@@ -66,6 +67,9 @@ export const AssistantToolCall = z.strictObject({
   error: z.string().optional().describe("失败原因"),
   created: Timestamp,
   finished: Timestamp.optional(),
+  capability: CapabilityName.optional().describe("对应的能力（ADR 0029）；不是能力目录里的工具时缺失"),
+  change: CapabilityChange.optional().describe("写入类能力成功后的变更记录，界面据此显示变更卡片与撤回"),
+  private_read: z.boolean().optional().describe("这次调用读取了私密内容（只在 human 拥有的对话中可能为 true）"),
 });
 
 /**
@@ -260,3 +264,46 @@ export type AssistantToolSpec = z.infer<typeof AssistantToolSpec>;
 export type AssistantModelRequest = z.infer<typeof AssistantModelRequest>;
 export type AssistantModelResponse = z.infer<typeof AssistantModelResponse>;
 export type AssistantEvent = z.infer<typeof AssistantEvent>;
+
+// ───────────────────────── 模型配置（ADR 0027 第 4 节、0029 第 7 节）─────────────────────────
+
+/**
+ * `GET /v2/assistant/config`（仅 human）。密钥只写不读：只返回是否已设置。
+ * managed 为 false 表示配置由 Hub 服务的外部运行环境注入，界面只读、不能在这里修改。
+ */
+export const AssistantConfigView = z.strictObject({
+  base_url: z.string().url().optional().describe("兼容 Chat Completions 的 API 基础路径；未配置时缺失"),
+  model: z.string().min(1).optional(),
+  api_key_set: z.boolean(),
+  managed: z.boolean().describe("true：保存在 Hub 的私有环境文件，可以在设置页或 lumio hub assistant setup 修改"),
+});
+
+/**
+ * `PUT /v2/assistant/config`（仅 human）：先验证再原子写入，进程内重新加载，不重启 Hub。
+ * api_key 缺失表示保留现有密钥；clear_api_key 删除密钥（服务不需要鉴权时）。两者不能同时给。
+ * 地址只接受 http(s)，不含用户名、密码、查询参数或片段（与现有适配器规则相同）。
+ */
+export const AssistantConfigUpdate = z
+  .strictObject({
+    base_url: z.string().url().refine((value) => {
+      const url = new URL(value);
+      return (url.protocol === "http:" || url.protocol === "https:") && !url.username && !url.password && !url.search && !url.hash;
+    }, "只接受不含凭据、查询参数或片段的 http(s) 地址"),
+    model: z.string().min(1),
+    api_key: z.string().min(1).optional().describe("只写；不出现在任何响应、日志或审计详情中"),
+    clear_api_key: z.boolean().optional(),
+    check: z.boolean().optional().describe("缺省 true：保存前用一次最小请求验证，失败不保存"),
+  })
+  .refine((update) => !(update.api_key && update.clear_api_key), "api_key 与 clear_api_key 不能同时给");
+
+/**
+ * 验证失败的原因，放在 ApiError 的 reason 中（code 为 INVALID）：
+ * address 地址不可达或不是兼容接口；auth 鉴权失败；model 模型名不被接受；response 响应格式不对；timeout 超时。
+ */
+export const ASSISTANT_CONFIG_PROBLEMS = ["address", "auth", "model", "response", "timeout"] as const;
+export const AssistantConfigProblem = z.enum(ASSISTANT_CONFIG_PROBLEMS);
+export const assistantConfigReason = (problem: z.infer<typeof AssistantConfigProblem>) => `assistant-config-${problem}` as const;
+
+export type AssistantConfigView = z.infer<typeof AssistantConfigView>;
+export type AssistantConfigUpdate = z.infer<typeof AssistantConfigUpdate>;
+export type AssistantConfigProblem = z.infer<typeof AssistantConfigProblem>;

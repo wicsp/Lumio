@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { AGENTS, Timestamp, RuntimeName, idOf } from "./common.ts";
 import { NoteRef } from "./query.ts";
+import { JobAccess } from "./access.ts";
 
 /**
  * Hub ↔ 执行器（Runtime）的协议（ADR 0005、ADR 0019）。
@@ -164,6 +165,10 @@ export const RuntimeSync = z.strictObject({
   jobs: z.array(JobSpec),
   cancel: z.array(idOf("job")),
   routines: z.array(RoutineSpec),
+  access: z.array(JobAccess).optional().describe(
+    "本次新指派的各轮的访问凭据（ADR 0029 第 5 节）。只在执行器的同步请求带有 X-Lumio-Features: job-access 头时出现，"
+    + "这样旧执行器不会遇到它不认识的字段。执行器把它与 Job 一起存进本地私有队列，只交给该轮的 agent 进程",
+  ),
 });
 
 /** 执行器确认已把这些 Job 写进本地队列（先写本地，再确认）。 */

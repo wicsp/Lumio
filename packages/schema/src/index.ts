@@ -19,13 +19,18 @@ export * from "./work.ts";
 export * from "./execution.ts";
 export * from "./assistant.ts";
 export * from "./storage.ts";
+export * from "./capabilities.ts";
+export * from "./access.ts";
 
 import { Actor } from "./actor.ts";
 import {
   AssistantChatRequest, AssistantChatResult, AssistantConversation, AssistantConversationDetail, AssistantEvent,
   AssistantMemoryCommandRequest, AssistantMemoryCommandResult,
   AssistantMemory, AssistantMessage, AssistantModelRequest, AssistantModelResponse, AssistantToolCall, AssistantTurn,
+  AssistantConfigUpdate, AssistantConfigView,
 } from "./assistant.ts";
+import { AgentInfo, AgentRevokeRequest, AgentTokenIssued, AgentTokenRequest, JobAccess } from "./access.ts";
+import { CapabilityChange } from "./capabilities.ts";
 import { ExecutionRoutine, ExecutionRoutineCommandRequest, ExecutionRoutineInfo } from "./execution.ts";
 import { BackupManifest, MigrationPlan, RunLogEvent, StoredArtifact } from "./storage.ts";
 import {
@@ -112,4 +117,13 @@ export const CONTRACTS = {
   "stored-artifact": StoredArtifact,
   "backup-manifest": BackupManifest,
   "migration-plan": MigrationPlan,
+  // 能力目录与 agent 访问（ADR 0029，R3-1）；各能力的参数与结果 schema 由 CAPABILITIES 导出
+  "capability-change": CapabilityChange,
+  "assistant-config-view": AssistantConfigView,
+  "assistant-config-update": AssistantConfigUpdate,
+  "job-access": JobAccess,
+  "agent-token-request": AgentTokenRequest,
+  "agent-token-issued": AgentTokenIssued,
+  "agent-info": AgentInfo,
+  "agent-revoke-request": AgentRevokeRequest,
 } as const;
