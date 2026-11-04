@@ -128,3 +128,14 @@ describe("rounds that need the user (ADR 0030)", () => {
     expect(WorkExecution.safeParse({ ...execution, acknowledged: { at: NOW, by: ACT } }).success).toBe(true);
   });
 });
+
+describe("conversation detail carries tool calls (ADR 0029)", () => {
+  test("tool_calls is optional and holds change records", async () => {
+    const { AssistantConversationDetail } = await import("../src/index.ts");
+    const conversation = { id: "conv_01JABCDEFGHJKMNPQRSTVWXYZ0", owner: ACT, title: "T", created: NOW, updated: NOW, revision: 1 };
+    expect(AssistantConversationDetail.safeParse({ conversation, messages: [], turns: [] }).success).toBe(true);
+    const call = { id: "tool_01JABCDEFGHJKMNPQRSTVWXYZ0", turn: "turn_01JABCDEFGHJKMNPQRSTVWXYZ0", name: "work__task__update", args: {}, status: "succeeded", result: {}, created: NOW,
+      capability: "work.task.update", change: { capability: "work.task.update", target: TASK, before: { due: null }, after_revision: 2 } };
+    expect(AssistantConversationDetail.safeParse({ conversation, messages: [], turns: [], tool_calls: [call] }).success).toBe(true);
+  });
+});
