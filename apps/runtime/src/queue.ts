@@ -2,7 +2,7 @@ import { text as msg } from "./messages.ts";
 import { Database } from "bun:sqlite";
 import { chmodSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { JobResult, JobSpec, RuntimeHeartbeat } from "@lumio/schema";
+import { JobAccess, JobResult, JobSpec, RuntimeHeartbeat } from "@lumio/schema";
 import { RuntimeError } from "./config.ts";
 
 export type LocalJob = { spec: JobSpec; state: "queued" | "running" | "finished"; acked: number; pid: number | null; started: string | null };
@@ -13,16 +13,23 @@ export class Queue {
     const path = join(dir, "runtime.sqlite");
     this.db = new Database(path, { create: true, strict: true });
     chmodSync(path, 0o600);
-    this.db.exec(`PRAGMA synchronous=FULL;
+    this.db.exec(`PRAGMA synchronous=FULL; PRAGMA secure_delete=ON;
       CREATE TABLE IF NOT EXISTS queue (id TEXT PRIMARY KEY, spec TEXT NOT NULL, state TEXT NOT NULL, acked INTEGER NOT NULL DEFAULT 0, pid INTEGER, started TEXT);
+      CREATE TABLE IF NOT EXISTS job_access (job TEXT PRIMARY KEY, access TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY REFERENCES queue(id), result TEXT NOT NULL);`);
   }
   jobs(): LocalJob[] {
     return this.db.query<{ spec: string; state: LocalJob["state"]; acked: number; pid: number | null; started: string | null }, []>("SELECT * FROM queue ORDER BY rowid").all()
       .map((r) => ({ ...r, spec: JobSpec.parse(JSON.parse(r.spec)) }));
   }
-  receive(specs: JobSpec[]) {
+  receive(specs: JobSpec[], access: JobAccess[] = []) {
     this.db.transaction(() => {
+      for (const value of access) {
+        const credential = JobAccess.parse(value);
+        if (!specs.some(spec => spec.id === credential.job && spec.run.kind === "agent")) throw new RuntimeError(msg("queue.invalid_access"));
+        const existing = this.jobs().find(job => job.spec.id === credential.job);
+        if (!existing || existing.state === "queued") this.db.query("INSERT OR REPLACE INTO job_access VALUES(?,?)").run(credential.job, JSON.stringify(credential));
+      }
       for (const spec of specs) {
         const existing = this.jobs().find((j) => j.spec.id === spec.id);
         if (existing && JSON.stringify(existing.spec) !== JSON.stringify(spec)) throw new RuntimeError(msg("queue.hub_redelivered_a_different_job"));
@@ -30,6 +37,11 @@ export class Queue {
       }
     })();
   }
+  access(id: string): JobAccess | undefined {
+    const row = this.db.query<{ access: string }, [string]>("SELECT access FROM job_access WHERE job=?").get(id);
+    return row ? JobAccess.parse(JSON.parse(row.access)) : undefined;
+  }
+  clearAccess(id: string) { this.db.query("DELETE FROM job_access WHERE job=?").run(id); }
   ack(ids: string[]) { this.db.transaction(() => { for (const id of ids) this.db.query("UPDATE queue SET acked=1 WHERE id=?").run(id); })(); }
   start(id: string, started: string) { this.db.query("UPDATE queue SET state='running', started=? WHERE id=?").run(started, id); }
   pid(id: string, pid: number) { this.db.query("UPDATE queue SET pid=? WHERE id=?").run(pid, id); }
@@ -38,6 +50,7 @@ export class Queue {
     this.db.transaction(() => {
       this.db.query("INSERT INTO outbox VALUES (?,?)").run(parsed.job, JSON.stringify(parsed));
       this.db.query("UPDATE queue SET state='finished',pid=NULL WHERE id=?").run(parsed.job);
+      this.clearAccess(parsed.job);
     })();
   }
   outbox(): JobResult[] { return this.db.query<{ result: string }, []>("SELECT result FROM outbox ORDER BY rowid").all().map((r) => JobResult.parse(JSON.parse(r.result))); }

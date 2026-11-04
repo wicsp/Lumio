@@ -3,7 +3,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { chmod, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { newId } from "@lumio/foundation";
-import { Actor, Proposal, type Operation, type ProposalStatus, type ActorRole, RuntimeRegistration, RuntimeInfo } from "@lumio/schema";
+import { AgentInfo, AgentTokenIssued, JobAccess, type JobSpec, Actor, Proposal, type Operation, type ProposalStatus, type ActorRole, RuntimeRegistration, RuntimeInfo } from "@lumio/schema";
 import { HubError } from "./errors.ts";
 import { ExecutionRuntimes } from "@lumio/execution";
 import { SqliteRuntimeRegistry, SqliteExecutionStore } from "@lumio/storage";
@@ -29,6 +29,10 @@ export class HubStore {
         CREATE TABLE IF NOT EXISTS actors (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, role TEXT NOT NULL, created TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS tokens (label TEXT PRIMARY KEY, actor_id TEXT NOT NULL REFERENCES actors(id), hash TEXT NOT NULL UNIQUE,
           created TEXT NOT NULL, revoked TEXT);
+        CREATE TABLE IF NOT EXISTS agent_tokens (label TEXT PRIMARY KEY REFERENCES tokens(label), kind TEXT NOT NULL,
+          job TEXT, lease TEXT, expires TEXT, last_used TEXT);
+        CREATE TABLE IF NOT EXISTS agent_activity (actor TEXT PRIMARY KEY REFERENCES actors(id), time TEXT NOT NULL);
+        INSERT OR IGNORE INTO agent_tokens(label,kind) SELECT tokens.label,'manual' FROM tokens JOIN actors ON actors.id=tokens.actor_id WHERE actors.role='agent';
         CREATE TABLE IF NOT EXISTS proposals (id TEXT PRIMARY KEY, operation TEXT NOT NULL, reason TEXT NOT NULL,
           author TEXT NOT NULL REFERENCES actors(id), status TEXT NOT NULL, created TEXT NOT NULL, decided TEXT, decided_by TEXT REFERENCES actors(id));
         CREATE TABLE IF NOT EXISTS audit (time TEXT NOT NULL, actor_id TEXT NOT NULL REFERENCES actors(id), token_label TEXT NOT NULL,
@@ -72,9 +76,74 @@ export class HubStore {
     if (this.db.query("SELECT label FROM tokens WHERE label=?").get(label)) throw new HubError("CONFLICT", { key: "store.token_label_already_exists", args: [] });
     const actor = Actor.parse(row);
     const token = `lumio_${randomBytes(32).toString("base64url")}`;
-    this.db.query("INSERT INTO tokens VALUES (?, ?, ?, ?, NULL)")
+    this.db.query("INSERT INTO tokens(label,actor_id,hash,created,revoked) VALUES (?, ?, ?, ?, NULL)")
       .run(label, actor.id, createHash("sha256").update(token).digest("hex"), new Date().toISOString());
+    if (actor.role === "agent") this.db.query("INSERT INTO agent_tokens(label,kind) VALUES(?,'manual')").run(label);
     return token;
+  }
+
+  private agent(name: string): Actor {
+    const actor = this.actors().find(value => value.name === name) ?? this.createActor(name, "agent");
+    if (actor.role !== "agent") throw new HubError("CONFLICT", { key: "agents.name_not_agent", args: [] });
+    return actor;
+  }
+
+  issueAgentToken(name: string, label = `agent-${randomBytes(12).toString("hex")}`): AgentTokenIssued {
+    return this.db.transaction(() => {
+      const actor = this.agent(name), token = this.createToken(label, actor.name);
+      const created = this.tokens().find(value => value.label === label)!.created;
+      return AgentTokenIssued.parse({ actor, label, token, created });
+    })();
+  }
+
+  issueJobAccess(spec: JobSpec, now: Date): JobAccess | undefined {
+    if (spec.run.kind !== "agent") return;
+    const engine = spec.run.engine;
+    return this.db.transaction(() => {
+      const runtime = this.runtimes(now).find(value => value.actor === spec.runtime);
+      if (!runtime) throw new HubError("NOT_FOUND", { key: "store.actor_not_found", args: [] });
+      const actor = this.agent(`${engine}@${runtime.registration.name}`);
+      // Delivery may be retried before ack; rotate the credential without retaining plaintext.
+      this.db.query("UPDATE tokens SET revoked=? WHERE label IN (SELECT label FROM agent_tokens WHERE job=?) AND revoked IS NULL").run(now.toISOString(), spec.id);
+      const label = `job-${randomBytes(16).toString("hex")}`, token = this.createToken(label, actor.name);
+      const expires = new Date(now.getTime() + spec.timeout_seconds * 1000).toISOString();
+      this.db.query("UPDATE agent_tokens SET kind='job',job=?,lease=?,expires=? WHERE label=?").run(spec.id, spec.lease, expires, label);
+      return JobAccess.parse({ job: spec.id, actor: actor.id, token, expires });
+    })();
+  }
+
+  /** Validate against Execution facts on every use, including immediately after cancellation. */
+  private validAgentToken(label: string, now: Date): boolean {
+    const meta = this.db.query<{ job: string | null; lease: string | null; expires: string | null }, [string]>("SELECT job,lease,expires FROM agent_tokens WHERE label=?").get(label);
+    if (!meta?.job) return true;
+    const job = this.executionStore.get(meta.job);
+    const valid = !!job && !job.result && ["queued", "assigned", "running"].includes(job.status)
+      && job.spec.lease === meta.lease && !this.executionStore.cancelRequested(meta.job) && Date.parse(meta.expires!) > now.getTime();
+    if (!valid) this.revokeToken(label);
+    return valid;
+  }
+
+  agents(now = new Date()): AgentInfo[] {
+    return this.actors().filter(actor => actor.role === "agent").map(actor => {
+      const tokens = this.tokens().filter(token => token.actor_id === actor.id && !token.revoked && this.validAgentToken(token.label, now)).map(token => {
+        const meta = this.db.query<{ kind: "manual" | "job"; job: string | null; last_used: string | null }, [string]>("SELECT kind,job,last_used FROM agent_tokens WHERE label=?").get(token.label);
+        return { label: token.label, created: token.created, kind: meta?.kind ?? "manual", job: meta?.job ?? undefined, last_used: meta?.last_used ?? undefined };
+      });
+      const activity = this.db.query<{ time: string | null }, [string, string]>("SELECT MAX(time) AS time FROM (SELECT time FROM audit WHERE actor_id=? AND authorization='allow' UNION ALL SELECT time FROM agent_activity WHERE actor=?)").get(actor.id, actor.id)?.time;
+      return AgentInfo.parse({ actor, tokens, last_activity: activity ?? undefined });
+    });
+  }
+
+  activity(identity: Identity): void {
+    if (identity.actor.role === "agent") this.db.query("INSERT INTO agent_activity(actor,time) VALUES(?,?) ON CONFLICT(actor) DO UPDATE SET time=excluded.time").run(identity.actor.id, new Date().toISOString());
+  }
+
+  revokeAgent(name: string, label?: string): void {
+    const actor = this.actors().find(value => value.name === name && value.role === "agent");
+    if (!actor) throw new HubError("NOT_FOUND", { key: "store.actor_not_found", args: [] });
+    const tokens = this.tokens().filter(token => token.actor_id === actor.id && (label === undefined || token.label === label));
+    if (label !== undefined && !tokens.length) throw new HubError("NOT_FOUND", { key: "store.token_not_found", args: [] });
+    for (const token of tokens) this.revokeToken(token.label);
   }
 
   /** Preserve old token labels for audit while invalidating their credentials. */
@@ -82,6 +151,7 @@ export class HubStore {
     return this.db.transaction(() => {
       if (this.tokens().some((token) => token.label === label)) {
         this.revokeToken(label);
+        this.db.query("DELETE FROM agent_tokens WHERE label=?").run(label);
         this.db.query("UPDATE tokens SET label=? WHERE label=?").run(`${label}#${newId("act", new Date(), randomBytes)}`, label);
       }
       return this.createToken(label, actorName);
@@ -95,7 +165,7 @@ export class HubStore {
     if (!result.changes) throw new HubError("NOT_FOUND", { key: "store.token_not_found", args: [] });
   }
 
-  authenticate(header: string | null): Identity | null {
+  authenticate(header: string | null, now = new Date()): Identity | null {
     const match = /^Bearer (lumio_[A-Za-z0-9_-]{43})$/.exec(header ?? "");
     if (!match) return null;
     const digest = createHash("sha256").update(match[1]!).digest();
@@ -104,7 +174,8 @@ export class HubStore {
     ).get(digest.toString("hex"));
     const stored = row ? Buffer.from(row.hash, "hex") : Buffer.alloc(32);
     const equal = stored.length === digest.length && timingSafeEqual(digest, stored);
-    if (!row || !equal || row.revoked !== null) return null;
+    if (!row || !equal || row.revoked !== null || !this.validAgentToken(row.label, now)) return null;
+    this.db.query("UPDATE agent_tokens SET last_used=? WHERE label=?").run(now.toISOString(), row.label);
     const actor = Actor.parse(this.db.query("SELECT * FROM actors WHERE id=?").get(row.actor_id));
     return { actor, label: row.label };
   }

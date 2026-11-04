@@ -65,7 +65,7 @@ beforeAll(async () => {
 const args = process.argv.slice(2);
 if (args[0] === "--version") { console.log("1.4.0"); process.exit(0); }
 const prompt = args[args.indexOf("-p") + 1];
-appendFileSync(process.env.FAKE_LOG, JSON.stringify({ args, prompt }) + "\\n");
+appendFileSync(process.env.FAKE_LOG, JSON.stringify({ args, prompt, hasHubCredential: !!process.env.LUMIO_TOKEN || !!process.env.LUMIO_HUB_URL }) + "\\n");
 console.log("日报：GPU 一切正常");
 `);
   await writeFile(join(bin, "pi"), `#!/bin/sh\nexec "${process.execPath}" "${join(bin, "pi.ts")}" "$@"\n`);
@@ -94,6 +94,9 @@ test("routines fire on the runtime's clock, survive Hub and runtime outages, and
   now = Date.parse("2026-10-26T10:10:30Z");
   await eventually(async () => (await note()).includes("### Result for 2026-10-26 10:10"));
   expect(await note()).toContain("日报：GPU 一切正常");
+  const firstCall = JSON.parse((await readFile(log, "utf8")).trim().split("\n")[0]!);
+  expect(firstCall.hasHubCredential).toBe(false);
+  expect(firstCall.args).not.toContain("--skill");
   // context: previous —— 执行器拿到带上这一次摘要的新计划。
   await eventually(() => local<{ spec: string }>("SELECT spec FROM routines")[0]!.spec.includes("Previous result (2026-10-26 10:10)"));
 

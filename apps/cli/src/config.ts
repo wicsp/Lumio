@@ -9,7 +9,7 @@ export const setupHint = () => msg("config.no_configuration_run_install_sh_or_lu
 /** Read once per command; credentials are never included in diagnostics. */
 export function readCliConfig(options: { env?: NodeJS.ProcessEnv; home?: string; warn?: (line: string) => void } = {}) {
   const env = options.env ?? process.env;
-  const path = join(options.home ?? env.HOME ?? homedir(), ".config/lumio/config.json");
+  const path = env.LUMIO_CONFIG_FILE ?? join(options.home ?? env.HOME ?? homedir(), ".config/lumio/config.json");
   let file: { hub_url: string; token?: string; vault?: string } | undefined;
   try {
     const mode = statSync(path).mode & 0o777;

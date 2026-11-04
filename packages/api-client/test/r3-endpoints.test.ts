@@ -36,3 +36,20 @@ test("config validation rejects credential-bearing URLs and malformed views with
   try { await client.assistantConfig(); throw new Error("expected failure"); }
   catch (cause) { expect(cause).toMatchObject({ code: "INTERNAL" }); expect(String(cause)).not.toContain(secret); }
 });
+
+test("agent management validates requests and responses and supports empty revoke responses", async () => {
+  const actor = { id: `act_${U}`, name: "synthetic-agent", role: "agent" as const, created: "2026-11-04T00:00:00Z" };
+  const issued = { actor, token: "lumio_" + "synthetic".repeat(6), label: "synthetic-label", created: actor.created };
+  const seen: string[] = [];
+  const client = createClient({ url: "http://localhost", token: "synthetic-human", fetch: (async (url: URL, init: RequestInit) => {
+    seen.push(`${init.method} ${url.pathname}`);
+    if (url.pathname.endsWith("/tokens")) { expect(JSON.parse(String(init.body))).toEqual({ name: actor.name, label: issued.label }); return Response.json(issued); }
+    if (url.pathname.endsWith("/revoke")) { expect(JSON.parse(String(init.body))).toEqual({ name: actor.name, label: issued.label }); return new Response(null, { status: 204 }); }
+    return Response.json([{ actor, tokens: [{ label: issued.label, created: actor.created, kind: "manual" }] }]);
+  }) as unknown as typeof fetch });
+  expect(await client.issueAgentToken({ name: actor.name, label: issued.label })).toEqual(issued);
+  expect(JSON.stringify(await client.agents())).not.toContain(issued.token);
+  expect(await client.revokeAgent({ name: actor.name, label: issued.label })).toBeUndefined();
+  expect(seen).toEqual(["POST /v2/agents/tokens", "GET /v2/agents", "POST /v2/agents/revoke"]);
+  expect(() => client.issueAgentToken({ name: actor.name, label: "../bad" })).toThrow();
+});

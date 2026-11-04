@@ -4,6 +4,8 @@ const locale = new AsyncLocalStorage<Language>();
 export const withLanguage = <T>(lang: Language, action: () => T): T => locale.run(lang, action);
 
 export const en = {
+  "agents.name_not_agent": "This name belongs to a non-agent identity",
+  "agents.invalid_request": "Invalid agent management request",
   "capability.invalid": "Invalid capability arguments or missing request_id",
   "work.round_not_found": "Execution round not found",
   "work.round_not_applied": "The round result has not been applied yet",
@@ -760,6 +762,8 @@ ${String(p0)}${String(p1)}`,
   "Run tailscale serve status to check": "Run tailscale serve status to check",
 };
 export const zh: typeof en = {
+  "agents.name_not_agent": "此名称属于非 agent 身份",
+  "agents.invalid_request": "agent 管理请求不合法",
   "capability.invalid": "能力参数无效或缺少 request_id",
   "work.round_not_found": "找不到执行轮次",
   "work.round_not_applied": "这一轮结果尚未写回",
