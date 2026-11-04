@@ -1,3 +1,4 @@
+import { taskStatus, taskHolder, workStatus } from "../task-compat.ts";
 /** ⌘K 命令面板：跳转模块、新建、搜索任务/项目/知识。只读查询，不执行写操作。 */
 import type { WorkProject, WorkTask } from "@lumio/schema";
 import type { Client } from "../api.ts";
@@ -83,9 +84,9 @@ export class CommandPalette {
     const match = (text: string) => !q || text.toLowerCase().includes(q);
     const items: Item[] = this.commands().filter(item => match(item.label));
     if (this.cache) {
-      const open = this.cache.tasks.filter(t => (q ? true : t.status === "active") && match(t.title));
+      const open = this.cache.tasks.filter(t => (q ? true : taskStatus(t) === "active") && match(t.title));
       items.push(...open.slice(0, q ? 8 : 5).map(task => ({ group: q ? t("Tasks") : t("In progress"), label: task.title, hint: this.cache!.projects.find(p => p.id === task.project)?.title,
-        icon: statusIcon(task.status), run: () => this.navigate("work", task.id) })));
+        icon: statusIcon(taskStatus(task)), run: () => this.navigate("work", task.id) })));
       if (q) items.push(...this.cache.projects.filter(p => match(p.title)).slice(0, 5).map(project => ({ group: t("Projects"), label: project.title, icon: icon("folder"), run: () => this.navigate("work", project.id) })));
     }
     items.push(...extra);

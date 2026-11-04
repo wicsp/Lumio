@@ -1,3 +1,4 @@
+import { workSystemActor } from "./task-model.ts";
 import type { Database } from "bun:sqlite";
 import { createHash, randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -6,7 +7,7 @@ import { MigrationPlan, MigrationEntry, Project, Task, Routine, WorkProject, Wor
   Job, parseAssignee, textContainsCardNumber } from "@lumio/schema";
 import { newId } from "@lumio/foundation";
 import { parseFrontmatter } from "@lumio/knowledge";
-import { WorkService } from "@lumio/work";
+import { migrateTurn, WorkService } from "@lumio/work";
 import { ExecutionRoutines, parseCron, validTimeZone, nextFire } from "@lumio/execution";
 import { scanVault } from "./knowledge/vault.ts";
 import { SqliteWorkStore } from "./work.ts";
@@ -72,8 +73,8 @@ function convert(entry: MigrationEntry, bytes: Buffer, timezone: string): Input 
   }
   if (entry.type === "task") {
     const value = Task.parse(fields);
-    return { entry, bytes, task: WorkTask.parse({ schema_version: 2, type: "task", id: value.id, title: value.title,
-      description, revision: 1, status: value.status, assignee: owner(value.assignee), created: value.created, updated: value.updated,
+    return { entry, bytes, task: WorkTask.parse({ schema_version: 3, type: "task", id: value.id, title: value.title,
+      description, revision: 1, ...migrateTurn({ status: value.status }, value.updated), created: value.created, updated: value.updated,
       tags: value.tags, dependencies: [], references: value.routine ? [{ module: "execution", id: value.routine }] : [],
       project: value.project, due: value.due, workdir: value.workdir, model: value.model, gpus: value.gpus, timeout_minutes: value.timeout_minutes }) };
   }
@@ -107,7 +108,7 @@ export class LegacyMigration {
         if (textContainsCardNumber(bytes.toString("utf8")) || /\b(?:sk-|gh[pousr]_|github_pat_|AKIA|xox[abprs]-|lumio_)[A-Za-z0-9_-]{16,}|-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(bytes.toString("utf8"))) problems.push(this.msg("${0}: possible sensitive information; resolve first", entry.path));
         const input = convert(entry, bytes, this.zone());
         if (input.routine?.status === "active") problems.push(this.msg("${0}: pause legacy routine and clear runtime plan cache first", entry.path));
-        if (input.task && !["done", "cancelled", "paused"].includes(input.task.status) && (Object.hasOwn(fields, "turn") ? fields.turn === "agent" : input.task.assignee !== "human")) problems.push(this.msg("${0}: legacy file still requests dispatch; return to human or pause first", entry.path));
+        if (input.task && !["done", "cancelled", "paused"].includes(String(fields.status ?? "todo")) && (Object.hasOwn(fields, "turn") ? fields.turn === "agent" : owner(Task.parse(fields).assignee) !== "human")) problems.push(this.msg("${0}: legacy file still requests dispatch; return to human or pause first", entry.path));
         entries.push(entry); inputs.push(input);
       } catch { problems.push(this.msg("${0}: invalid metadata, path or target format; not imported", file.relativePath)); }
     }
@@ -178,7 +179,12 @@ export class LegacyMigration {
       receiptTable(this.db);
       this.db.exec("CREATE TABLE IF NOT EXISTS migration_sources (id TEXT PRIMARY KEY,path TEXT NOT NULL UNIQUE,migration TEXT NOT NULL,entry TEXT NOT NULL,bytes BLOB NOT NULL)");
       for (const record of inputs) this.db.query("INSERT INTO migration_sources(id,path,migration,entry,bytes) VALUES(?,?,?,?,?)").run(record.entry.id, record.entry.path, plan.id, JSON.stringify(record.entry), record.bytes);
-      const work = new WorkService(new SqliteWorkStore(this.db), { now: () => new Date(), id: () => { throw new StorageError("INTERNAL", { key: "migration.historical_import_does_not_generate_business_ids", args: [] }); } });
+      const work = new WorkService(new SqliteWorkStore(this.db), { systemActor: workSystemActor(this.db).id, now: () => new Date(), id: () => { throw new StorageError("INTERNAL", { key: "migration.historical_import_does_not_generate_business_ids", args: [] }); } });
+      for (const record of inputs) if (record.task) {
+        const latest = jobs.filter(job => job.spec.source?.task === record.task!.id).sort((a, b) => b.spec.source!.round - a.spec.source!.round)[0];
+        const status = Task.parse(parseFrontmatter(record.bytes).data).status;
+        record.task = WorkTask.parse({ ...record.task, ...migrateTurn({ status, ...(latest ? { latest: { job: latest.spec.id, round: latest.spec.source!.round, status: latest.status, pending: false } } : {}) }, record.task.updated) });
+      }
       work.importSettled({ projects: inputs.flatMap((record) => record.project ? [record.project] : []), tasks: inputs.flatMap((record) => record.task ? [record.task] : []), executions });
       const routineStore = new SqliteRoutineStore(this.db);
       const routines = new ExecutionRoutines(routineStore, { get: () => { throw new Error(); }, list: () => jobs, record: () => { throw new Error(); } }, {

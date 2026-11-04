@@ -1,6 +1,8 @@
+import { nextTurn, type TurnAction, type PlannedDelivery } from "./turn.ts";
+export { nextTurn, migrateTurn, type LegacyTurnFacts, type PlannedDelivery } from "./turn.ts";
 import {
   WorkProject, WorkTask, WorkComment, WorkExecution, WorkTaskDetail,
-  WorkCommandRequest, WorkCommandResult, textContainsCardNumber,
+  WorkCommandRequest, WorkCommandResult, TaskTurnChange, textContainsCardNumber,
   type ID_PREFIXES, type Job,
 } from "@lumio/schema";
 
@@ -21,12 +23,17 @@ export interface WorkStore {
   putComment(value: WorkComment): void;
   executions(task?: string): WorkExecution[];
   putExecution(value: WorkExecution): void;
+  turns(task: string): TaskTurnChange[];
+  putTurn(value: TaskTurnChange): void;
   receipt(actor: string, request: string): { operation: string; result: WorkCommandResult } | undefined;
   putReceipt(actor: string, request: string, operation: string, result: WorkCommandResult): void;
   transaction<T>(action: () => T): T;
 }
 
 export interface WorkContext {
+  systemActor?: string;
+  plannedDelivery?: PlannedDelivery;
+  job?(id: string): Job | undefined;
   text?: (key: string, ...args: unknown[]) => string;
   now(): Date;
   id(prefix: (typeof ID_PREFIXES)[keyof typeof ID_PREFIXES]): string;
@@ -72,11 +79,11 @@ export class WorkService {
   tasks(filter: { project?: string; status?: string; query?: string } = {}): WorkTask[] {
     const query = filter.query?.trim().toLocaleLowerCase();
     return WorkTask.array().parse(this.store.tasks()).filter((task) =>
-      (!filter.project || task.project === filter.project) && (!filter.status || task.status === filter.status)
+      (!filter.project || task.project === filter.project) && (!filter.status || legacyTaskStatus(task) === filter.status)
       && (!query || `${task.title}\n${task.description}\n${task.tags.join(" ")}`.toLocaleLowerCase().includes(query)));
   }
   detail(id: string): WorkTaskDetail {
-    return WorkTaskDetail.parse({ task: this.task(id), comments: this.store.comments(id), executions: this.store.executions(id) });
+    return WorkTaskDetail.parse({ task: this.task(id), comments: this.store.comments(id), executions: this.store.executions(id), turns: this.store.turns(id) });
   }
 
   /** Import historical facts without transitions, generated IDs or execution side effects. The caller archives provenance. */
@@ -91,10 +98,41 @@ export class WorkService {
       for (const value of projects.data) this.store.putProject(value);
       // Reserve all task IDs first so parent/dependency ordering cannot create a partial import.
       for (const value of tasks.data) this.store.putTask(WorkTask.parse({ ...value, parent: undefined, dependencies: [] }));
-      for (const value of tasks.data) this.store.putTask(value);
+      for (const value of tasks.data) { this.store.putTask(value); this.initialTurn(value, this.context.systemActor ?? value.created_by!); }
       for (const value of tasks.data) this.checkTask(value);
       for (const value of executions.data) this.store.putExecution(value);
     });
+  }
+
+  private initialTurn(task: WorkTask, by: string): void {
+    this.store.putTurn(TaskTurnChange.parse({ task: task.id, at: task.updated, by, from: task.turn, to: task.turn, outcome: task.outcome }));
+  }
+  private transition(task: WorkTask, action: TurnAction, by: string, at: string): WorkTask {
+    const change = nextTurn(action, at, task, this.context.plannedDelivery);
+    const updated = WorkTask.parse({ ...task, ...change, revision: task.revision + 1, updated: at, updated_by: by });
+    this.store.putTask(updated);
+    this.store.putTurn(TaskTurnChange.parse({ task: task.id, at, by, from: task.turn, to: updated.turn,
+      ...(change.outcome !== undefined ? { outcome: change.outcome } : {}) }));
+    return updated;
+  }
+  private snapshot(task: WorkTask, latest?: WorkExecution): string {
+    // IDs and one-line summaries spill older material; only comments since the last hand-back are inline.
+    const turns = this.store.turns(task.id);
+    const returned = turns.filter(change => change.to.reason !== "working").at(-1);
+    const previous = latest ? this.context.job?.(latest.job) : undefined;
+    const line = (value: string) => secret(value) ? "[sensitive content omitted]" : value.replace(/\s+/g, " ").trim().slice(0, 500);
+    const history = this.store.comments(task.id);
+    const runtimes = new Set(this.store.executions(task.id).map(run => this.context.job?.(run.job)?.spec.runtime).filter(Boolean));
+    // Comments and hand-backs may share a millisecond: the appended report is also an ordering boundary.
+    const boundary = history.findLastIndex(comment => runtimes.has(comment.author));
+    const comments = history.slice(boundary + 1).filter(comment => !returned || comment.created >= returned.at);
+    return [`# ${task.title}`, "", `Task ID: ${task.id}`, "", task.description,
+      "", "Use the Lumio skill to retrieve more context by ID: task show, job show, show (notes). Older discussions and reports are not included in full.",
+      "", "## Comments since hand-back", ...comments.map(comment => `${comment.id} (${comment.author}): ${comment.body}`),
+      ...(latest ? ["", "## Previous round", `${latest.job}: ${line([previous?.result?.question, previous?.result?.report || previous?.result?.error || "Report available via job show"].filter(Boolean).join(" "))}`] : []),
+      "", "## Earlier rounds", ...this.store.executions(task.id).filter(run => run.job !== latest?.job).map(run => `${run.job}: ${line(this.context.job?.(run.job)?.result?.report ?? `Round ${run.round}`)}`),
+      "", "## References", ...task.references.map(ref => `${ref.id}: ${line(ref.label ?? ref.module)}`),
+    ].join("\n");
   }
 
   private checkTask(task: WorkTask): void {
@@ -118,21 +156,41 @@ export class WorkService {
       for (const next of this.task(id).dependencies) visit(next, seen);
     };
     for (const id of task.dependencies) visit(id, new Set());
-    if (task.status === "done" && task.dependencies.some((id) => this.task(id).status !== "done")) {
+    if (task.outcome === "done" && task.dependencies.some((id) => this.task(id).outcome !== "done")) {
       throw new WorkError("CONFLICT", { key: "index.dependency_tasks_are_not_completed", args: [] });
     }
   }
 
-  command(input: unknown, actor: string): WorkCommandResult {
+  /** Freeze the observed version and implicit previous agent before presenting a proposal. */
+  proposalRequest(input: WorkCommandRequest): WorkCommandRequest {
+    const request = WorkCommandRequest.parse(input), operation = request.operation;
+    if (operation.op !== "work.task.dispatch" && operation.op !== "work.task.plan.set") throw new WorkError("INVALID", { key: "index.invalid_work_command_parameters", args: [] });
+    const task = this.task(operation.args.task);
+    if (operation.args.expected_revision !== undefined && operation.args.expected_revision !== task.revision) throw new WorkError("CONFLICT", { key: "index.task_changed_reload_before_dispatching", args: [] });
+    return WorkCommandRequest.parse({ ...request, operation: { ...operation, args: { ...operation.args, expected_revision: task.revision,
+      ...(operation.op === "work.task.dispatch" ? { to: this.dispatchTarget(task.id, operation.args.to) } : {}) } } });
+  }
+  private dispatchTarget(task: string, explicit?: string): string {
+    const latest = this.store.executions(task).reduce<WorkExecution | undefined>((prior, value) => !prior || value.round > prior.round ? value : prior, undefined);
+    const to = explicit ?? (latest ? this.context.agentForJob?.(latest.job) : undefined);
+    if (!to || to === "human") throw new WorkError("INVALID", { key: "index.specify_an_agent_assignee_e_g_pi_server", args: [] });
+    return to;
+  }
+
+  replay(request: WorkCommandRequest, actor: string): WorkCommandResult | undefined {
+    const previous = this.store.receipt(actor, request.request_id);
+    if (!previous) return;
+    if (previous.operation !== JSON.stringify(request.operation)) throw new WorkError("CONFLICT", { key: "index.request_id_was_used_for_a_different_operation", args: [] });
+    return WorkCommandResult.parse(previous.result);
+  }
+
+  command(input: unknown, actor: string, approval?: { by: string; proposal: string }): WorkCommandResult {
     const parsed = WorkCommandRequest.safeParse(input);
     if (!parsed.success) throw new WorkError("INVALID", { key: "index.invalid_work_command_parameters", args: [] });
     const request = parsed.data, serialized = JSON.stringify(request.operation);
     return this.store.transaction(() => {
-      const previous = this.store.receipt(actor, request.request_id);
-      if (previous) {
-        if (previous.operation !== serialized) throw new WorkError("CONFLICT", { key: "index.request_id_was_used_for_a_different_operation", args: [] });
-        return WorkCommandResult.parse(previous.result);
-      }
+      const previous = this.replay(request, actor);
+      if (previous) return previous;
       const operation = request.operation, time = this.context.now().toISOString();
       let result: WorkCommandResult;
       switch (operation.op) {
@@ -150,18 +208,16 @@ export class WorkService {
           this.store.putProject(project); result = { kind: "project", project }; break;
         }
         case "work.task.create": {
-          const task = WorkTask.parse({ ...operation.args, schema_version: 2, type: "task", id: this.context.id("task"),
-            description: operation.args.description ?? "", tags: operation.args.tags ?? [], assignee: operation.args.assignee ?? "human",
-            status: operation.args.status ?? "todo", dependencies: operation.args.dependencies ?? [], references: operation.args.references ?? [],
+          const task = WorkTask.parse({ ...operation.args, schema_version: 3, type: "task", id: this.context.id("task"),
+            description: operation.args.description ?? "", tags: operation.args.tags ?? [], ...nextTurn({ kind: "create" }, time), dependencies: operation.args.dependencies ?? [], references: operation.args.references ?? [],
             revision: 1, created: time, updated: time, created_by: actor, updated_by: actor });
-          this.checkTask(task); this.store.putTask(task); result = { kind: "task", task }; break;
+          this.checkTask(task); this.store.putTask(task); this.initialTurn(task, actor); result = { kind: "task", task }; break;
         }
         case "work.task.update": {
           const current = this.task(operation.args.task);
           if (current.revision !== operation.args.expected_revision) throw new WorkError("CONFLICT", { key: "index.task_changed_reload_before_saving", args: [] });
           const task = WorkTask.parse({ ...patch(current, operation.args.patch), revision: current.revision + 1, updated: time, updated_by: actor });
           this.checkTask(task); this.store.putTask(task);
-          if (["paused", "cancelled"].includes(task.status)) this.context.cancel?.(task.id);
           result = { kind: "task", task }; break;
         }
         case "work.task.comment": {
@@ -169,44 +225,53 @@ export class WorkService {
           const comment = WorkComment.parse({ id: this.context.id("wmsg"), task: operation.args.task, author: actor, body: operation.args.body, created: time });
           this.store.putComment(comment); result = { kind: "comment", comment }; break;
         }
-        case "work.task.acknowledge": {
-          const task = this.task(operation.args.task);
-          const execution = this.store.executions(task.id).find(value => value.round === operation.args.round);
-          if (!execution) throw new WorkError("NOT_FOUND", { key: "work.round_not_found", args: [] });
-          if (!execution.applied) throw new WorkError("CONFLICT", { key: "work.round_not_applied", args: [] });
-          if (!execution.acknowledged) this.store.putExecution({ ...execution, acknowledged: { at: time, by: actor } });
-          result = { kind: "task", task }; break;
-        }
         case "work.task.hand":
         case "work.task.finish":
-        case "work.task.reopen":
-        case "work.task.plan.set":
+        case "work.task.reopen": {
+          const task = this.task(operation.args.task);
+          if (task.revision !== operation.args.expected_revision) throw new WorkError("CONFLICT", { key: "index.task_changed_reload_before_saving", args: [] });
+          if ((operation.op === "work.task.reopen") === (task.outcome === "open")) throw new WorkError("CONFLICT", { key: "work.invalid_outcome_transition", args: [] });
+          const action: TurnAction = operation.op === "work.task.hand" ? { kind: "hand", to: operation.args.to, note: operation.args.note }
+            : operation.op === "work.task.finish" ? { kind: "finish", outcome: operation.args.outcome } : { kind: "reopen" };
+          // Handing away from an active agent must also stop its round; late results cannot steal the new turn.
+          if (task.turn.reason === "working" || operation.op === "work.task.finish") this.context.cancel?.(task.id);
+          const updated = this.transition(task, action, actor, time);
+          this.checkTask(updated); result = { kind: "task", task: updated }; break;
+        }
+        case "work.task.plan.set": {
+          const task = this.task(operation.args.task);
+          if (task.revision !== operation.args.expected_revision) throw new WorkError("CONFLICT", { key: "index.task_changed_reload_before_saving", args: [] });
+          const { plan, from } = operation.args;
+          if (from && (!plan || !plan.stages.some(stage => stage.id === from))) throw new WorkError("INVALID", { key: "index.invalid_work_command_parameters", args: [] });
+          if (task.turn.reason === "working" || task.outcome !== "open") throw new WorkError("CONFLICT", { key: "work.invalid_outcome_transition", args: [] });
+          const updated = WorkTask.parse({ ...task, plan: plan ? { plan, approved: { at: time, by: approval?.by ?? actor, ...(approval ? { proposal: approval.proposal } : {}) }, stage: from ?? plan.stages[0]!.id, rounds: 0 } : undefined,
+            revision: task.revision + 1, updated: time, updated_by: actor });
+          this.store.putTask(updated); result = { kind: "task", task: updated }; break;
+        }
         case "work.task.checkpoint":
         case "work.plan_template.save":
         case "work.plan_template.delete":
-          // Contract from ADR 0032 (task model v3); implemented in R4-2. Refused until then rather than silently ignored.
+          // R4-3 owns checkpoint execution and plan templates.
           throw new WorkError("INVALID", { key: "index.invalid_work_command_parameters", args: [] });
         case "work.task.dispatch": {
           const task = this.task(operation.args.task);
           if (operation.args.expected_revision !== undefined && task.revision !== operation.args.expected_revision) throw new WorkError("CONFLICT", { key: "index.task_changed_reload_before_dispatching", args: [] });
-          if (["done", "cancelled", "paused"].includes(task.status)) throw new WorkError("CONFLICT", { key: "index.task_is_done_cancelled_or_paused", args: [] });
-          if (task.dependencies.some((id) => this.task(id).status !== "done")) throw new WorkError("CONFLICT", { key: "index.dependency_tasks_are_not_completed", args: [] });
+          if (task.outcome !== "open" || task.turn.holder === "nobody" || task.turn.reason === "working") throw new WorkError("CONFLICT", { key: "index.task_is_done_cancelled_or_paused", args: [] });
+          if (task.dependencies.some((id) => this.task(id).outcome !== "done")) throw new WorkError("CONFLICT", { key: "index.dependency_tasks_are_not_completed", args: [] });
           const executions = this.store.executions(task.id);
           const latest = executions.reduce<WorkExecution | undefined>((prior, value) => !prior || value.round > prior.round ? value : prior, undefined);
-          const to = operation.args.to ?? (operation.args.comment !== undefined && latest ? this.context.agentForJob?.(latest.job) : undefined) ?? task.assignee;
-          if (to === "human") throw new WorkError("INVALID", { key: "index.specify_an_agent_assignee_e_g_pi_server", args: [] });
+          const to = this.dispatchTarget(task.id, operation.args.to);
           if (executions.some((execution) => !execution.applied)) throw new WorkError("CONFLICT", { key: "index.this_task_already_has_a_running_round_or_pending_result", args: [] });
           if (!this.context.dispatch) throw new WorkError("INTERNAL", { key: "index.execution_capability_is_not_configured", args: [] });
           if (operation.args.comment !== undefined) this.store.putComment(WorkComment.parse({
             id: this.context.id("wmsg"), task: task.id, author: actor, body: operation.args.comment, created: time,
           }));
-          const comments = this.store.comments(task.id);
-          const snapshot = [`# ${task.title}`, "", task.description, ...comments.flatMap((comment) => ["", this.msg("## Discussion ${0} ${1}", comment.author, comment.created), comment.body])].join("\n");
+          const snapshot = this.snapshot(task, latest);
           const round = executions.reduce((maximum, value) => Math.max(maximum, value.round), 0) + 1;
           const job = this.context.dispatch(task, snapshot, round, to);
           this.store.putExecution(WorkExecution.parse({ task: task.id, job: job.spec.id, round, input_revision: task.revision,
             input_snapshot: snapshot, created: time, applied: false }));
-          if (task.status === "todo") this.store.putTask(WorkTask.parse({ ...task, status: "active", revision: task.revision + 1, updated: time, updated_by: actor }));
+          this.transition(task, { kind: "dispatch", to: this.context.agentForJob?.(job.spec.id) ?? to, round, job: job.spec.id }, actor, time);
           result = { kind: "job", job }; break;
         }
       }
@@ -216,9 +281,9 @@ export class WorkService {
     });
   }
 
-  /** A result updates progress once; it never marks the whole task done or changes its owner. */
+  /** A terminal result appends progress and hands back exactly once; it never finishes the task. */
   applyResult(job: Job): void {
-    if (!job.result && job.status !== "cancelled") return;
+    if (!["done", "waiting_for_human", "failed", "unknown", "cancelled"].includes(job.status)) return;
     this.store.transaction(() => {
       const execution = this.store.executions().find((value) => value.job === job.spec.id);
       if (!execution || execution.applied) return;
@@ -228,6 +293,16 @@ export class WorkService {
       this.store.putComment(WorkComment.parse({ id: this.context.id("wmsg"), task: execution.task, author: job.spec.runtime,
         body: shown, created: this.context.now().toISOString() }));
       this.store.putExecution({ ...execution, applied: true });
+      const task = this.task(execution.task);
+      if (task.outcome === "open" && task.turn.reason === "working" && task.turn.job === job.spec.id) {
+        this.transition(task, { kind: "result", status: job.status, round: execution.round, job: job.spec.id },
+          this.context.systemActor ?? job.spec.runtime, this.context.now().toISOString());
+      }
     });
   }
+}
+
+/** Compatibility projection for existing read filters and the R4-5 Web transition. */
+export function legacyTaskStatus(task: WorkTask): string {
+  return task.outcome !== "open" ? task.outcome : task.turn.holder === "nobody" ? "paused" : task.turn.holder === "external" ? "waiting" : task.turn.reason === "todo" ? "todo" : "active";
 }

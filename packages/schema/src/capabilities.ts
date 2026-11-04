@@ -6,7 +6,7 @@ import { Proposal } from "./proposal.ts";
 import { LinksResult, NOTE_TYPES, NoteDetail, SearchResult } from "./query.ts";
 import {
   ProjectStatus, TaskStatus, WorkCommandResult, WorkProject, WorkProjectCreate, WorkProjectUpdate,
-  WorkAttention, WorkTask, WorkTaskComment, WorkTaskCreate, WorkTaskDetail, WorkTaskUpdate,
+  WorkAttention, WorkTask, WorkTaskComment, WorkTaskCreate, WorkTaskDetail, WorkTaskHand, WorkTaskUpdate,
 } from "./work.ts";
 
 /**
@@ -17,7 +17,7 @@ import {
  * - 以后的 MCP 适配层同样从这里生成。
  *
  * 这里只定义"能做什么、参数和结果长什么样"。谁能做由 Hub 的规则表决定（ADR 0016、0029 第 3 节），
- * 不在目录里写权限；写入类能力对 agent 的额外限制见 AGENT_SETTABLE_TASK_STATUSES。
+ * 不在目录里写权限；agent 的参数限制由 Hub 授权表判断。
  * 写入类能力的 request_id 由调用方生成（助手用工具调用 ID，CLI 用 --request-id 或随机值），不属于参数。
  */
 
@@ -29,9 +29,6 @@ export const CapabilityName = z.string().regex(/^[a-z][a-z0-9]*(_[a-z0-9]+)*(\.[
 
 /** 给模型和 skill 看的说明；英文为基准（ADR 0028、0029）。 */
 export const CapabilitySummary = z.strictObject({ en: z.string().min(1), zh: z.string().min(1) });
-
-/** agent 只能把任务状态改为这些值；done 与 cancelled 由人决定（ADR 0019、0029 第 3 节）。 */
-export const AGENT_SETTABLE_TASK_STATUSES = ["todo", "active", "waiting", "paused"] as const satisfies readonly z.infer<typeof TaskStatus>[];
 
 /** 笔记引用：ID、论文 citekey 或文件名（不含 .md），与 `lumio show` 相同。 */
 const NoteReference = z.string().min(1).describe("ID, paper citekey, or file name without .md");
@@ -105,11 +102,13 @@ export const CAPABILITIES = [
   define({ name: "approval.proposal.list", kind: "read", args: ApprovalListArgs, result: z.array(Proposal),
     summary: { en: "List pending approvals. Only the user can accept or reject them.", zh: "列出待批准的提议。只有用户本人能接受或拒绝。" } }),
   define({ name: "work.task.create", kind: "write", args: WorkTaskCreate.shape.args, result: WorkCommandResult,
-    summary: { en: "Create a task. Creating or assigning a task never starts a run.", zh: "新建任务。新建或指定负责人都不会派活。" } }),
+    summary: { en: "Create a task with the human todo turn. Creation never starts a run.", zh: "新建任务，默认轮到人（todo），不会开始执行。" } }),
   define({ name: "work.task.update", kind: "write", args: WorkTaskUpdate.shape.args, result: WorkCommandResult,
-    summary: { en: "Change task fields. Agents may set status only to todo, active, waiting or paused; the user marks tasks done or cancelled.", zh: "修改任务字段。agent 只能把状态改为 todo、active、waiting、paused；完成与取消由用户标记。" } }),
+    summary: { en: "Change task fields. Tasks have outcome and turn, with no status or assignee; only the user decides completion.", zh: "修改任务字段。任务没有状态与负责人；完成由用户决定。" } }),
   define({ name: "work.task.comment", kind: "write", args: WorkTaskComment.shape.args, result: WorkCommandResult,
     summary: { en: "Add a comment to a task's discussion.", zh: "在任务讨论里发表评论。" } }),
+  define({ name: "work.task.hand", kind: "write", args: WorkTaskHand.shape.args, result: WorkCommandResult,
+    summary: { en: "Hand a task back to the human or to external waiting (with a note). Agents cannot hand to nobody.", zh: "交回给人或交给外部等待（附说明）。agent 不能交给无人。" } }),
   define({ name: "work.project.create", kind: "write", args: WorkProjectCreate.shape.args, result: WorkCommandResult,
     summary: { en: "Create a project.", zh: "新建项目。" } }),
   define({ name: "work.project.update", kind: "write", args: WorkProjectUpdate.shape.args, result: WorkCommandResult,

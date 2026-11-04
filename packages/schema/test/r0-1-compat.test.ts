@@ -30,8 +30,8 @@ const V = "01J9Z3K8M2N4P6Q8R0S2T4V6W9";
 const now = "2026-10-31T16:30:00+08:00";
 
 const task = {
-  schema_version: 2, type: "task", id: `task_${U}`, title: "合成任务", description: "", revision: 1,
-  status: "todo", assignee: "human", created: now, updated: now, tags: [], dependencies: [], references: [],
+  schema_version: 3, type: "task", id: `task_${U}`, title: "合成任务", description: "", revision: 1,
+  outcome: "open", turn: { holder: "human", reason: "todo", since: now }, created: now, updated: now, tags: [], dependencies: [], references: [],
 } as const;
 const project = {
   schema_version: 2, type: "project", id: `prj_${U}`, title: "合成项目", description: "", revision: 1,
@@ -75,7 +75,7 @@ describe("v2 对象", () => {
 
   test("负责人不接受旧对象写法", () => {
     expect(WorkTask.safeParse({ ...task, assignee: { agent: "pi", device: "server" } }).success).toBe(false);
-    expect(WorkTask.parse({ ...task, assignee: "pi@server" }).assignee).toBe("pi@server");
+    expect(WorkTask.safeParse({ ...task, assignee: "pi@server" }).success).toBe(false);
     expect(ExecutionRoutine.safeParse({ ...routine, assignee: "human" }).success).toBe(false);
     expect(ExecutionRoutine.safeParse({ ...routine, assignee: { agent: "pi" } }).success).toBe(false);
     const dispatch = (to: unknown) =>

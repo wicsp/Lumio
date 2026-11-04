@@ -1,3 +1,4 @@
+import { taskStatus, taskHolder, workStatus } from "../task-compat.ts";
 /**
  * 项目与任务（ADR 0026）：按状态分组的列表 + 右侧详情。
  * 列表上的状态可直接修改（带 revision）；新建在对话框里完成；修改负责人不会派活。
@@ -141,9 +142,9 @@ export class WorkPane {
     }
   }
 
-  private renderGroups<T extends { status: string }>(order: readonly string[], items: T[], row: (item: T) => HTMLElement, labels: Record<string, string>, emptyText: string): void {
+  private renderGroups<T extends WorkTask | WorkProject>(order: readonly string[], items: T[], row: (item: T) => HTMLElement, labels: Record<string, string>, emptyText: string): void {
     if (!items.length) { clear(this.list, empty(emptyText, this.mode === "tasks" ? { label: t("New task"), run: () => this.create() } : { label: t("New project"), run: () => this.create() })); return; }
-    const groups = order.map(status => [status, items.filter(i => i.status === status)] as const).filter(([, list]) => list.length);
+    const groups = order.map(status => [status, items.filter(i => workStatus(i) === status)] as const).filter(([, list]) => list.length);
     clear(this.list, ...groups.map(([status, list]) => {
       const group = h("section", { class: `group${this.folded.has(status) && !this.statusFilter ? " collapsed" : ""}` });
       const head = h("button", { type: "button", class: "group-head", "aria-expanded": String(!group.classList.contains("collapsed")), onclick: () => {
@@ -160,21 +161,21 @@ export class WorkPane {
   private taskRow(task: WorkTask): HTMLElement {
     const due = dueLabel(task.due);
     const project = !this.projectFilter && task.project ? this.projects.find(p => p.id === task.project)?.title : undefined;
-    const statusBtn = h("button", { type: "button", class: "status-btn", title: t("Status: {0}", TASK_LABELS[task.status]), "aria-label": t("Change status (currently {0})", TASK_LABELS[task.status]),
-      onclick: (event: Event) => { event.stopPropagation(); this.quickStatus(task, statusBtn); } }, statusIcon(task.status));
+    const statusBtn = h("button", { type: "button", class: "status-btn", title: t("Status: {0}", TASK_LABELS[taskStatus(task)]), "aria-label": t("Change status (currently {0})", TASK_LABELS[taskStatus(task)]),
+      onclick: (event: Event) => { event.stopPropagation(); this.quickStatus(task, statusBtn); } }, statusIcon(taskStatus(task)));
     const sub = [project && h("span", { class: "project-chip" }, icon("folder", "icon"), project),
-      task.assignee !== "human" && h("span", { class: "who-chip", title: t("Assignee: {0}", task.assignee) }, icon("bot"), task.assignee)].filter(Boolean) as HTMLElement[];
-    return h("div", { class: `row ${task.status}`, "data-id": task.id, role: "button", tabindex: "0",
+      taskHolder(task) !== "human" && h("span", { class: "who-chip", title: t("Assignee: {0}", taskHolder(task)) }, icon("bot"), taskHolder(task))].filter(Boolean) as HTMLElement[];
+    return h("div", { class: `row ${taskStatus(task)}`, "data-id": task.id, role: "button", tabindex: "0",
       onclick: () => void this.open(task.id), onkeydown: (event: Event) => { if ((event as KeyboardEvent).key === "Enter" && event.target === event.currentTarget) void this.open(task.id); } },
       statusBtn,
       h("span", { class: "row-main" }, h("span", { class: "row-title" }, task.title), sub.length ? h("span", { class: "row-sub" }, ...sub) : null),
       h("span", { class: "row-meta" },
-        due && task.status !== "done" && task.status !== "cancelled" && h("span", { class: `due${due.overdue ? " overdue" : due.soon ? " soon" : ""}`, title: t("Due") }, due.text)));
+        due && taskStatus(task) !== "done" && taskStatus(task) !== "cancelled" && h("span", { class: `due${due.overdue ? " overdue" : due.soon ? " soon" : ""}`, title: t("Due") }, due.text)));
   }
 
   private projectRow(project: WorkProject): HTMLElement {
-    const related = this.tasks.filter(t => t.project === project.id && t.status !== "cancelled");
-    const done = related.filter(t => t.status === "done").length;
+    const related = this.tasks.filter(t => t.project === project.id && taskStatus(t) !== "cancelled");
+    const done = related.filter(t => taskStatus(t) === "done").length;
     const fill = h("span", { class: "progress-fill" });
     fill.style.width = `${related.length ? Math.round((done / related.length) * 100) : 0}%`;
     return h("div", { class: `row ${project.status}`, "data-id": project.id, role: "button", tabindex: "0", onclick: () => void this.open(project.id),
@@ -185,7 +186,7 @@ export class WorkPane {
   }
 
   private quickStatus(task: WorkTask, anchor: HTMLElement): void {
-    openMenu(anchor, TASK_STATUSES.map(s => ({ value: s, label: TASK_LABELS[s]!, icon: statusIcon(s), selected: s === task.status })), async value => {
+    openMenu(anchor, TASK_STATUSES.map(s => ({ value: s, label: TASK_LABELS[s]!, icon: statusIcon(s), selected: s === taskStatus(task) })), async value => {
       const request = workPatchCommand(task, { status: value });
       if (!request) return;
       try {

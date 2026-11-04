@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import {
   CONTRACTS, HandoffPlan, NotificationEvent, Operation, PlanRun, Proposal, ProposalOperation, PushDevice, PushSubscriptionInput,
-  RESPONSE_REASONS, TaskTurnChange, Turn, WorkAttention, WorkCommandRequest, WorkCommandResult, WorkTaskDetailV3, WorkTaskV3, capability,
+  RESPONSE_REASONS, TaskTurnChange, Turn, WorkAttention, WorkCommandRequest, WorkCommandResult, WorkTaskDetail, WorkTask, capability,
 } from "../src/index.ts";
 
 const TASK = "task_01JABCDEFGHJKMNPQRSTVWXYZ0", ACT = "act_01JABCDEFGHJKMNPQRSTVWXYZ0", JOB = "job_01JABCDEFGHJKMNPQRSTVWXYZ0";
@@ -30,17 +30,17 @@ describe("three questions: outcome, turn, history (ADR 0032 §1–2)", () => {
     expect([...RESPONSE_REASONS].sort()).toEqual(["answer", "failed", "review"]);
   });
   test("v3 tasks have no status or assignee; finished tasks are held by nobody", () => {
-    expect(WorkTaskV3.safeParse(task()).success).toBe(true);
-    expect(WorkTaskV3.safeParse(task({ status: "todo" })).success).toBe(false);
-    expect(WorkTaskV3.safeParse(task({ assignee: "human" })).success).toBe(false);
-    expect(WorkTaskV3.safeParse(task({ outcome: "done", turn: turn("nobody", "on_hold") })).success).toBe(true);
-    expect(WorkTaskV3.safeParse(task({ outcome: "done" })).success).toBe(false);
-    expect(WorkTaskV3.safeParse(task({ turn: turn("codex@mac", "working", { round: 2, job: JOB }) })).success).toBe(true);
+    expect(WorkTask.safeParse(task()).success).toBe(true);
+    expect(WorkTask.safeParse(task({ status: "todo" })).success).toBe(false);
+    expect(WorkTask.safeParse(task({ assignee: "human" })).success).toBe(false);
+    expect(WorkTask.safeParse(task({ outcome: "done", turn: turn("nobody", "on_hold") })).success).toBe(true);
+    expect(WorkTask.safeParse(task({ outcome: "done" })).success).toBe(false);
+    expect(WorkTask.safeParse(task({ turn: turn("codex@mac", "working", { round: 2, job: JOB }) })).success).toBe(true);
   });
   test("history records each hand-over, append-only", () => {
     const change = { task: TASK, at: NOW, by: ACT, from: turn("codex@mac", "working", { round: 1 }), to: turn("human", "review", { round: 1, job: JOB }) };
     expect(TaskTurnChange.safeParse(change).success).toBe(true);
-    expect(WorkTaskDetailV3.safeParse({ task: task(), comments: [], executions: [], turns: [change] }).success).toBe(true);
+    expect(WorkTaskDetail.safeParse({ task: task(), comments: [], executions: [], turns: [change] }).success).toBe(true);
   });
 });
 
@@ -66,7 +66,7 @@ describe("handoff plans (ADR 0032 §5)", () => {
   test("the author's development flow", () => {
     expect(HandoffPlan.safeParse(develop).success).toBe(true);
     expect(PlanRun.safeParse({ plan: develop, approved: { at: NOW, by: ACT }, stage: "review", rounds: 1 }).success).toBe(true);
-    expect(WorkTaskV3.safeParse(task({ plan: { plan: develop, approved: { at: NOW, by: ACT }, stage: "end", rounds: 4 } })).success).toBe(true);
+    expect(WorkTask.safeParse(task({ plan: { plan: develop, approved: { at: NOW, by: ACT }, stage: "end", rounds: 4 } })).success).toBe(true);
   });
   test("send-back must target an agent stage; ids unique; at least one agent stage", () => {
     expect(HandoffPlan.safeParse({ stages: [{ kind: "agent", id: "a", agent: "codex", instruction: "x", back_to: "merge" }, { kind: "checkpoint", id: "merge", prompt: "?" }] }).success).toBe(false);

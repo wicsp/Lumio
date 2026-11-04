@@ -91,10 +91,14 @@ export async function handleV2(request: Request, route: V2Route, identity: Ident
       if (!parsed.success) throw new HubError("INVALID", { key: "index.invalid_work_command_parameters", args: [] });
       const { operation, request_id } = parsed.data;
       const commandDecision = decision = decide(identity.actor, { operation: route.operation, command: operation.op, args: operation.args });
+      if (commandDecision.result === "needs_approval" && route.operation === "work.command") {
+        const value = modules.workCommands.execute(WorkCommandRequest.parse(body), identity);
+        audited = true; return Response.json(value, { status: 202 });
+      }
       if (commandDecision.result !== "allow") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: commandDecision.result === "deny" ? commandDecision.reason : msg("v2.approval_required") });
       if (capability(operation.op)) return Response.json((await modules.capabilities.execute(operation.op, operation.args, identity, request_id)).result);
       const result = store.db.transaction(() => {
-        const value = route.operation === "work.command" ? modules.work.command(body, identity.actor.id) : modules.routines.command(body, identity.actor.id);
+        const value = route.operation === "work.command" ? modules.workCommands.execute(WorkCommandRequest.parse(body), identity) : modules.routines.command(body, identity.actor.id);
         store.audit(identity, route.operation, decision.result, undefined, "applied"); return value;
       })();
       audited = true; return Response.json(result);

@@ -13,7 +13,7 @@ describe("ADR 0030 commands", () => {
   });
   test("acknowledge names the round", () => {
     const request = acknowledgeCommand(TASK, 2);
-    expect(WorkCommandRequest.parse(request).operation).toEqual({ op: "work.task.acknowledge", args: { task: TASK, round: 2 } });
+    expect(WorkCommandRequest.parse(request).operation).toEqual({ op: "work.task.hand", args: { task: TASK, expected_revision: 2, to: "human" } });
   });
 });
 

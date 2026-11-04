@@ -4,14 +4,13 @@ import { workPatchCommand } from "../src/client/commands.ts";
 import { dueLabel, ago, isoFromDateInput, dateInputValue } from "../src/client/format.ts";
 import { setLang } from "../src/client/i18n.ts";
 
-const task: WorkTask = { schema_version: 2, type: "task", id: "task_01JABCDEFGHJKMNPQRSTVWXYZ0", title: "T", description: "", revision: 4, status: "todo",
-  assignee: "human", created: "2026-11-01T00:00:00+08:00", updated: "2026-11-01T00:00:00+08:00", tags: [], dependencies: [], references: [] };
+const task: WorkTask = { schema_version: 3, type: "task", id: "task_01JABCDEFGHJKMNPQRSTVWXYZ0", title: "T", description: "", revision: 4, outcome: "open", turn: { holder: "human", reason: "todo", since: "2026-11-01T00:00:00Z" }, created: "2026-11-01T00:00:00+08:00", updated: "2026-11-01T00:00:00+08:00", tags: [], dependencies: [], references: [] };
 
 describe("workPatchCommand", () => {
   test("sends only the changed field with the seen revision", () => {
     const cmd = workPatchCommand(task, { status: "active" }, "web-0123456789abcdef")!;
     expect(WorkCommandRequest.parse(cmd)).toEqual(cmd);
-    expect(cmd.operation).toEqual({ op: "work.task.update", args: { task: task.id, expected_revision: 4, patch: { status: "active" } } });
+    expect(cmd.operation).toEqual({ op: "work.task.hand", args: { task: task.id, expected_revision: 4, to: "human" } });
   });
   test("unchanged values and null-vs-missing produce no request", () => {
     expect(workPatchCommand(task, { status: "todo" })).toBeUndefined();

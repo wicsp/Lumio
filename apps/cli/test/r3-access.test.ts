@@ -49,8 +49,9 @@ test("every catalog capability has an executable CLI command returning its resul
   const task = await run("work.task.create", ["task", "new", "Synthetic task", "--project", project.project.id]) as { task: { id: string; revision: number } };
   await run("work.task.list", ["task", "list", "--query", "Synthetic", "--project", project.project.id]);
   await run("work.task.show", ["task", "show", task.task.id]);
-  await run("work.task.update", ["task", "update", task.task.id, "--patch", '{"status":"active"}', "--revision", String(task.task.revision)]);
+  await run("work.task.update", ["task", "update", task.task.id, "--patch", '{"title":"Synthetic updated task"}', "--revision", String(task.task.revision)]);
   await run("work.task.comment", ["task", "comment", task.task.id, "Synthetic comment"]);
+  await run("work.task.hand", ["task", "hand", task.task.id, "--to", "external", "--note", "Synthetic wait"]);
   const search = await run("knowledge.note.search", ["search", "推荐"]) as { hits: { note: { id?: string; path: string } }[] };
   // Select a synthetic note with the public list API if the chosen text has no hits.
   const hits = search.hits.length ? search.hits : (JSON.parse((await cli(["search", "", "--json"])).stdout) as typeof search).hits;
@@ -113,4 +114,22 @@ test("upgrading a symlink installation never writes credentials into its source 
   expect(await readFile(join(source, "SKILL.md"), "utf8")).toBe("original");
   expect(await Bun.file(join(source, "connection.json")).exists()).toBe(false);
   expect(CliConfig.parse(JSON.parse(await readFile(join(directory, "connection.json"), "utf8"))).token).not.toBe(human);
+});
+
+test("task CLI hands, filters and groups turns, finishes/cancels/reopens, and redirects obsolete status/assign commands", async () => {
+  const created = JSON.parse((await cli(["task", "new", "Synthetic lifecycle", "--json"], human)).stdout);
+  const id = created.task.id;
+  expect((await cli(["task", "hand", id, "--to", "external", "--note", "Synthetic wait", "--json"], agent)).code).toBe(0);
+  const list = await cli(["task", "list", "--turn", "external"], human, { LUMIO_LANG: "en" });
+  expect(list.code).toBe(0); expect(list.stdout).toContain("External waiting"); expect(list.stdout).toContain(id);
+  expect(JSON.parse((await cli(["task", "list", "--turn", "me", "--json"], human)).stdout)).toEqual([]);
+  expect((await cli(["task", "hand", id, "--to", "nobody", "--json"], agent)).code).toBe(1);
+  expect((await cli(["task", "finish", id, "--json"], agent)).code).toBe(1);
+  expect(JSON.parse((await cli(["task", "finish", id, "--json"], human)).stdout).task.outcome).toBe("done");
+  expect(JSON.parse((await cli(["task", "reopen", id, "--json"], human)).stdout).task.turn.reason).toBe("todo");
+  expect(JSON.parse((await cli(["task", "cancel", id, "--json"], human)).stdout).task.outcome).toBe("cancelled");
+  for (const action of ["status", "assign"]) {
+    const response = await cli(["task", action, id, "--json"], human);
+    expect(response.code).toBe(1); expect(response.stdout).toContain("hand"); expect(response.stdout).toContain("finish");
+  }
 });

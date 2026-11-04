@@ -32,20 +32,19 @@ describe("markdown", () => {
   test("code blocks are escaped", () => expect(renderMarkdown("```\n<b>[[x]]</b>\n```")).toContain("&lt;b&gt;[[x]]&lt;/b&gt;"));
 });
 
-const task: WorkTask = { schema_version: 2, type: "task", id: "task_01JABCDEFGHJKMNPQRSTVWXYZ0", title: "T", description: "old", revision: 3, status: "todo",
-  assignee: "human", created: "2026-11-01T00:00:00+08:00", updated: "2026-11-01T00:00:00+08:00", tags: [], dependencies: [], references: [] };
+const task: WorkTask = { schema_version: 3, type: "task", id: "task_01JABCDEFGHJKMNPQRSTVWXYZ0", title: "T", description: "old", revision: 3, outcome: "open", turn: { holder: "human", reason: "todo", since: "2026-11-01T00:00:00Z" }, created: "2026-11-01T00:00:00+08:00", updated: "2026-11-01T00:00:00+08:00", tags: [], dependencies: [], references: [] };
 
 describe("work commands", () => {
   test("structural patch excludes description and carries revision", () => {
-    const cmd = taskFieldsCommand(task, { title: "T2", status: "active", assignee: "codex@mac", project: "" })!;
+    const cmd = taskFieldsCommand(task, { title: "T2", status: "todo", assignee: "human", project: "" })!;
     expect(WorkCommandRequest.safeParse(cmd).success).toBe(true);
     const args = (cmd.operation as { args: { expected_revision: number; patch: Record<string, unknown> } }).args;
     expect(args.expected_revision).toBe(3);
-    expect(args.patch).toEqual({ title: "T2", status: "active", assignee: "codex@mac" });
+    expect(args.patch).toEqual({ title: "T2" });
     expect(cmd.operation.op).toBe("work.task.update");
   });
   test("assignee change never dispatches", () => {
-    expect(taskFieldsCommand(task, { title: "T", status: "todo", assignee: "pi", project: "" })!.operation.op).not.toBe("work.task.dispatch");
+    expect(() => taskFieldsCommand(task, { title: "T", status: "todo", assignee: "pi", project: "" })).toThrow();
   });
   test("description patch is alone and schema-valid", () => {
     const cmd = taskDescriptionCommand(task, "new body")!;

@@ -1,3 +1,5 @@
+import { HubStore } from "./store.ts";
+import { migrateTaskModel } from "@lumio/storage";
 import { text as msg } from "./messages.ts";
 import { Database } from "bun:sqlite";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -16,13 +18,19 @@ export async function runMigration(args: string[], log: (line: string) => void, 
     "runtimes-prepared": { type: "boolean" }, json: { type: "boolean" },
   } });
   const [action, id] = positionals, allowed = action === "retire" ? ["vault", "json"] : action === "plan" ? ["vault", "output", "json"] : action === "apply" ? ["vault", "plan", "backup", "runtimes-prepared", "json"] : action === "source" ? ["output", "json"] : ["json"];
-  if (Object.keys(values).some((key) => !allowed.includes(key)) || !["plan", "apply", "retire", "sources", "source"].includes(action ?? "")
+  if (Object.keys(values).some((key) => !allowed.includes(key)) || !["plan", "apply", "retire", "sources", "source", "task-v3"].includes(action ?? "")
     || positionals.length !== (action === "source" ? 2 : 1)
     || (["plan", "apply", "retire"].includes(action!) && !values.vault)
     || (action === "apply" && (!values.plan || !values.backup || !values["runtimes-prepared"]))
     || (action === "source" && (!id || !values.output))) throw new HubError("INVALID", { key: "migrate.usage_migrate_retire_vault_directory_migrate_plan_vault_directory_ou", args: [] });
   const state = options.stateDir ?? stateDirectory(); let lease: Awaited<ReturnType<typeof acquireStateLease>> | undefined, db: Database | undefined;
   try {
+    if (action === "task-v3") {
+      lease = await acquireStateLease(state);
+      const store = await HubStore.open(state);
+      try { log(JSON.stringify(await migrateTaskModel(store.db, state, store.workActor().id))); } finally { store.close(); }
+      return;
+    }
     if (["apply", "retire"].includes(action!)) lease = await acquireStateLease(state);
     db = new Database(join(state, "hub.sqlite"), { readonly: !["apply", "retire"].includes(action!), strict: true });
     const migration = new LegacyMigration(db, values.vault ? resolve(values.vault) : "", { text: msg });

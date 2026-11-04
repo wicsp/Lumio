@@ -1,3 +1,4 @@
+import { taskStatus, taskHolder, workStatus } from "../task-compat.ts";
 import type { Session } from "../api.ts";
 import { h, icon, typing } from "../dom.ts";
 import { OverviewPane } from "../panes/overview.ts";
@@ -149,7 +150,7 @@ export class WorkbenchView {
       el.textContent = value ? String(value) : "";
       el.classList.toggle("attention", attention && !!value);
     };
-    set("work", tasks.status === "fulfilled" ? tasks.value.filter(t => t.status === "active" || t.status === "todo").length : undefined);
+    set("work", tasks.status === "fulfilled" ? tasks.value.filter(t => taskStatus(t) === "active" || taskStatus(t) === "todo").length : undefined);
     set("approvals", proposals.status === "fulfilled" ? proposals.value.length : undefined, true);
     set("execution", jobs.status === "fulfilled" ? jobs.value.filter(j => ["queued", "assigned", "running", "waiting_for_human"].includes(j.status)).length : undefined);
     // 今日的提醒数 = 需要你处理的轮次 + 待批准（ADR 0030）；窄屏底栏只看得到这一个数。

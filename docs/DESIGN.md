@@ -91,7 +91,7 @@ Foundation 提供 ID 和错误；Platform 提供终端、诊断、下载与升�
 | 数据 | 权威来源 | 其他格式的作用 |
 |---|---|---|
 | 知识正文、知识元数据、人的链接 | vault 中 Markdown + frontmatter | index.sqlite / refs.bib 可重建 |
-| Project / Task / 描述 / 讨论 / 依赖 / 委派关联 | hub.sqlite 中 Work 表 | 描述采用 Markdown 语法；外部编辑的是带版本副本，状态和负责人经 Lumio 修改 |
+| Project / Task / 描述 / 讨论 / 依赖 / 委派关联 | hub.sqlite 中 Work 表 | 描述采用 Markdown 语法；外部编辑的是带版本副本，任务结局与交接经 Lumio 修改 |
 | Job / Routine / 输入计划 / 设备能力 | hub.sqlite 中 Execution 表 | Runtime 本地 SQLite 保存队列、结果与归档待交付记录 |
 | 助手对话 / 轮次 / 工具状态 / 显式记忆 | hub.sqlite 中 Assistant 表 | 模型供应商的会话不是本地权威 |
 | 执行过程、原始输出、附件 | 有格式版本的 JSONL / 原始日志 / 文件 | SQLite 保存归属、摘要、大小和 staged/ready 状态；日志不决定任务当前状态 |
@@ -239,7 +239,7 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 ### 4.6 Runtime 与旧任务笔记兼容（P2，ADR 0005、0019）
 
 本节的文件开关和写回语义仅适用于尚未执行 v2 apply/retire 的旧模式；Job 的可靠执行协议继续共用。
-数据库 Work 的负责人、显式委派与结果规则见第 4.7 节。
+数据库 Work 的轮到谁、显式委派与结果规则见第 4.7 节。
 
 本节关于修改笔记负责人触发、元数据交接和 AI 区块写回的条款适用于旧笔记路径；新版数据库 Work 使用第 4.7 节。
 Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用（ADR 0025）。
@@ -275,18 +275,20 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
 ### 4.7 数据库 Work 与内置 Assistant（ADR 0025）
 
 - `/v2/work/commands` 使用 `WorkCommandRequest` 与 `WorkCommandResult`；Task/Project 查询返回严格业务对象，不含路径。
-- **任务模型**（ADR 0032，R4-2 切换后生效）：任务只回答三个问题——结局（open / done / cancelled，只有人能改）、轮到谁（你 / 某个 agent / 外部 / 无人，附原因：todo、answer、review、failed、working、waiting、on_hold）、发生过什么（讨论、轮次、交接记录，只追加）。没有状态与负责人字段。「需要你处理」= 轮到你且原因是 answer、review 或 failed。一轮结束：提问 → answer，失败 → failed，取消 → todo，交付 → review 或按交接计划交给下一阶段。交接计划只有 agent 阶段与检查点两种，计划走完轮到你验收。每一轮的输入只放摘要与 ID，agent 用 skill 沿 ID 取回更多（Inline & Spill）。
-- Task/Project 描述在数据库中；依赖、讨论、执行关联各有明确归属。修改负责人或保存描述不隐式委派。
+- **任务模型**（ADR 0032，R4-2）：任务只回答三个问题——结局（open / done / cancelled，只有人能改）、轮到谁（你 / 某个 agent / 外部 / 无人，附原因：todo、answer、review、failed、working、waiting、on_hold）、发生过什么（讨论、轮次、交接记录，只追加）。没有状态与负责人字段。「需要你处理」= 轮到你且原因是 answer、review 或 failed。一轮结束：提问 → answer，失败 → failed，取消 → todo，交付 → review；有交接计划时的阶段推进与检查点执行留给 R4-3，目前只提供接口。每一轮的输入只放摘要与 ID，agent 用 skill 沿 ID 取回更多（Inline & Spill）。
+- Task/Project 描述在数据库中；依赖、讨论、执行关联各有明确归属。保存描述或计划不隐式委派。
 - 更新带 `expected_revision`；请求用 `request_id` 去重。委派在同一事务内保存 Job、Work 关联和请求回执；同一任务默认只有一轮待完成。
-- 运行结果作为 Work 进展追加一次，不自动把 Task 标成 done，不强制改变负责人。旧 v1 委派接口拒绝操作数据库任务。
-- 一轮里的提问与验收（ADR 0030，R3 实施中）：agent 用 `<lumio-question>` 提问并结束本轮；`/v2/work/attention` 按每个任务最新一轮给出等你回答 / 等你验收 / 执行失败，
-  派出新一轮、任务 done/cancelled/paused 或已查看（`work.task.acknowledge`，仅人）后消失；`work.task.dispatch` 可带 `comment`，回答与派出在同一事务。一轮成功不等于任务完成，由人标记。
+- 运行结果作为 Work 进展追加一次，同时按结果交回给人，不自动把 Task 标成 done。旧 v1 委派接口拒绝操作数据库任务。
+- 一轮里的提问与验收（ADR 0030、0032）：agent 用 `<lumio-question>` 提问并结束本轮；`/v2/work/attention` 只按 turn 选择轮到人且原因为 answer / review / failed 的任务。
+  `work.task.hand to=human` 把原因改为 todo（我自己来）；旧的已查看命令与字段已删除。`work.task.dispatch` 可带 `comment`，回答与派出在同一事务。
+- Work 的交接规则集中在 `packages/work`，每次变化追加 `TaskTurnChange`，一轮结果的自动交接使用 Hub 的稳定系统身份；完成或取消同时取消当前轮次，迟到结果不会抢回交接。
+- 旧数据库任务在 Hub 启动时自动迁移到 v3，也可在停止 Hub 后运行 `lumio hub migrate task-v3`；先完整备份并验证数据库与托管文件，再原子切换，可重复运行。每个任务保留一条初始交接记录；规则见 ADR 0032 第 8 节。
 - 数据库 Routine 使用 `/v2/execution/routines` 与 `/v2/execution/commands`；计划在 Execution，独立于 Task 与知识目录。
   Runtime 继续使用 Job 协议 2，本地触发与 outbox 不变。已交付计划保留历史快照，旧结果按原 lease 匹配输入；心跳无 lease 时不猜测多份历史计划。
 - Work 委派与 Routine 修改的业务数据、请求回执和成功审计参加同一数据库事务；审计失败不交付半个委派。
 - 设备登记规则和在线时限由 Execution 判断，Runtime 表与 Job 表由 Storage 适配；Hub 的身份和 HTTP 入口只组装并转发。
   审批通过 Execution 查询 Job 是否仍有效，取消请求已登记时即拒绝开启高权限工作，不直接读取执行表。
-- CLI：`project new/list/show/update/edit/status`，`task new/list/show/update/edit/status/assign/comment/continue`；`--legacy` 明确使用旧任务笔记。
+- CLI：`project new/list/show/update/edit/status`，`task new/list/show/update/edit/hand/finish/cancel/reopen/comment/continue`；`--legacy` 明确使用旧任务笔记。
   `edit` 打开带版本的外部编辑副本；用 `--file` 提交已有正文时必须带 `--revision`，冲突保留内容。
 - `routine new/list/show/update/edit/status/followup` 使用数据库路径；`--legacy` 选择旧笔记。
   新版追问从指定执行创建人工 Work 任务并保留执行来源；旧 v1 followup 拒绝数据库 Routine。
@@ -303,7 +305,7 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
 - 工具执行使用持久的独立 agent 身份，human 仅作为对话所有者；默认没有生产工具或来源读取适配器。带来源记忆在保存、重放与使用时以 agent 权限重查，无法访问或私密内容不交付模型。
 - 每次模型调用前以既有 AssistantModelRequest 保存不可变请求快照、序号、时间与工具 agent；写入失败不调用模型。快照是准备调用的记录，不代表远端已收到，不用于自动重放，也不提供绕过来源权限的读取接口。每次模型请求前重新筛选记忆。
 - 助手持久化工具调用状态；中断或写操作结果不明标为 unknown，不自动重放。最终空回复明确失败，工具调用中间消息可无文本。
-- 新 v2 工作与助手入口目前仅 human 可访问；ADR 0029（R3 实施中）放宽为 agent 可读、可做低风险写入（见第 5 节），runtime 不变；搜索来源与私密规则继续适用。
+- v2 Work 与执行读取支持 human / agent；agent 写入按第 5 节授权。Assistant 的外部 HTTP 入口只对 human 开放；搜索来源与私密规则继续适用。
 
 ### 4.8 Web 工作台（ADR 0026、0027）
 
@@ -338,8 +340,8 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
   以后作者自己的 agent 都通过同一份**能力目录**（`packages/schema`）和同一张权限表接入；人做决定的事放在 Lumio 页面上。
 - **AI 的入口是 CLI + skill**：`lumio … --json`，配合 `skills/lumio/SKILL.md`（命令表由能力目录生成，英文；`lumio skill install` 安装）；
   Claude Code、Codex、pi 共用一份。内置助手直接把能力目录注册为工具。MCP 只在出现没有 shell 的客户端时，从同一目录生成薄适配层。
-- **agent 的权限**（ADR 0029，R3 实施中）：读允许；低风险写入（新建任务与项目、改字段、评论、状态在 todo/active/waiting/paused 之间）直接执行并记录执行者，
-  内置助手的写入可在对话里撤回；把任务标为 done/cancelled、委派、例行任务的新建与修改、决定提议、高权限命令、删除归档一律拒绝。
+- **agent 的权限**（ADR 0029、0031、0032）：读允许；新建任务与项目、改字段、评论、交给人或外部（附说明）可直接执行并记录执行者；委派与设置计划生成提议，人批准后以原作者、原 request_id 执行，任务 revision 已变则 CONFLICT。
+  完成、取消、重新打开、交给无人、处理检查点、管理计划模板、修改 Routine、决定提议、高权限命令、删除归档拒绝。
   派出的一轮拿到只属于该轮的 agent 凭据，该轮结束即作废；执行器自己的令牌仍不交出。用户自己的 agent 用 `lumio agent add` 取得令牌。
 - **身份与令牌分开**（ADR 0016）：人和每个 AI agent 各是一个身份（`act_<ULID>`），角色是 `human` 或 `agent`；
   令牌只是身份的凭证，一个身份可以有多个，可单独吊销。提议、审计、日志里记身份 ID，不记令牌名称。
@@ -347,14 +349,14 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
 - **每次修改都是一个操作，只有一个入口**（ADR 0016）：程序对 vault 的修改表示为 `{ op, args }`（现有 `task.dispatch`、`routine.followup`、`exec.privileged`；`link.add` 已删除，ADR 0018），
   Hub 先 `authorize(身份, 操作)` 再执行。以后的完整权限系统只替换 `authorize`。
 - **授权结果三种**：允许 → 立即执行；拒绝 → 403；**需要批准 → 生成提议**，提议里存完整的操作，人接受后 Hub 执行它。
-  现行规则：`human` 可查询、委派与决定提议（高权限申请由 runtime 发起）；`agent` 查询允许（私密除外），派任务、开追问任务、决定提议、访问私密实体拒绝；`runtime` 只能用执行器接口及提交 `exec.privileged`；不能查看提议列表或决定提议。
+  现行规则：`human` 可查询、委派与决定提议（高权限申请由 runtime 发起）；`agent` 查询允许（私密除外），数据库委派和计划需要批准；旧任务委派、开追问任务、决定提议、访问私密实体拒绝；`runtime` 只能用执行器接口及提交 `exec.privileged`；不能查看提议列表或决定提议。
   `exec.privileged` 一律需要人批准；只有 runtime 可以申请，而且必须属于它正在执行、未取消的一轮（ADR 0020）。
 - **错误带决策信息**：错误响应统一为 `ApiError`（代码、说明、被拒绝的操作、原因、提议 ID），AI 据此向人解释。
 - **审计**：每次授权与执行都记入 `hub.sqlite`；Hub 执行的操作立即单独提交，提交信息带 `Lumio-Actor`，
   经提议执行的还带 `Lumio-Proposal`、`Lumio-Approved-By`；派出一轮、写回一轮结果的提交带 `Lumio-Job`。自动保存的提交不带身份。
 - **执行器**（ADR 0019）：身份角色 `runtime`，只能领取派给自己的活、回报结果、登记能力；看不到笔记库，只看到 Job 里带的内容。
 - **AI 的汇报只是资料**：不能自行派新活或决定 Task 完成。旧笔记模式在一轮结束时把交接开关改回 human（ADR 0024）；
-  数据库 Work 不强制改变负责人，修改负责人和委派分开（ADR 0025）。
+  数据库 Work 按轮次结果交回给人，任务结局仍由人决定（ADR 0032）。
 - **私密实体**（`life/` 下）：默认不出现在任何查询结果中；`agent` 令牌（含每轮凭据）在任何情况下都拿不到；
   例外是内置助手在 human 拥有的对话里经 Hub 进程内的工具读取，每次显示在对话中并记入审计（ADR 0029）；
   `human` 令牌须显式加 `--include-private`。`refs.bib`、报告等不得引用私密实体（ADR 0012、0014）。
@@ -397,5 +399,5 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
 | R1 | v0.2 上线：一个程序 `lumio`、Hub 提供 Web 与 PWA、`assistant setup`、旧笔记退役与一条命令切换（ADR 0027，[R1-0](tasks/R1-0-v0.2-release.md)） | v0.2.0 已发布，作者 Mac 已切换（2026-11-03），人工验收进行中 |
 | R2 | v0.2.1：默认英文、中文环境用中文；终端进度与颜色；Web 主题与语言切换；升级不重复下载（ADR 0028，[R2-0](tasks/R2-0-language-terminal-theme.md)） | R2-1、R2-3 已合并，R2-2 进行中 |
 | R3 | 能力目录与 agent 访问：助手能查能改任务、Codex/pi 经 skill 接入、每轮凭据、模型在设置页配置（ADR 0029）；一轮里的提问与验收（ADR 0030）（[R3-0](tasks/R3-0-capabilities-agent-access.md)） | R3-1 至 R3-4 已合并（#76、#79、#80、#83 及「已连接的 agent」）；R3-5 人工验收待进行 |
-| R4 | 任务模型 v3（结局、轮到谁、事件）与交接计划（ADR 0032）；agent 委派需要批准、统一推送（先做 PWA）、术语「委派」改为「委派」（ADR 0031）（[R4-0](tasks/R4-0-workflows-delegation-push.md)） | R4-1 契约已合并（#85）与 R4-1b；R4-2 待开始 |
+| R4 | 任务模型 v3（结局、轮到谁、事件）与交接计划（ADR 0032）；agent 委派需要批准、统一推送（先做 PWA）、术语「委派」改为「委派」（ADR 0031）（[R4-0](tasks/R4-0-workflows-delegation-push.md)） | R4-1 契约已合并（#85）与 R4-1b；R4-2 已实现，待合并；计划运行与 Web 重做仍待 R4-3 / R4-5 |
 | P4 | Web GUI 提前按用户要求实现（知识只读、项目任务、执行、助手、审批）；知识写入、Docker / Nix、SDK 与原生手机端后续规划 | Web 工作台已合并（#63、#64），其余未排期 |

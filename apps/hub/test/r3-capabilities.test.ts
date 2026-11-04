@@ -43,11 +43,11 @@ async function command(op: string, args: object, token = human, id = requestId()
   expect(response.status).toBe(200); return WorkCommandResult.parse(await response.json());
 }
 async function task(args: object = {}) {
-  const result = await command("work.task.create", { title: "Synthetic task", assignee: "pi@server", ...args });
+  const result = await command("work.task.create", { title: "Synthetic task", ...args });
   if (result.kind !== "task") throw new Error("task expected"); return result.task;
 }
 async function dispatch(id: string, args: object = {}) {
-  const result = await command("work.task.dispatch", { task: id, ...args });
+  const result = await command("work.task.dispatch", { to: "pi@server", task: id, ...args });
   if (result.kind !== "job") throw new Error("job expected"); return result.job;
 }
 async function finish(job: Job, status: "done" | "waiting_for_human" | "failed" | "unknown") {
@@ -72,18 +72,17 @@ afterEach(async () => { await hub?.stop(); await rm(temp, { recursive: true, for
 
 const actor = Actor.parse({ id: "act_00000000000000000000000001", name: "fixture", role: "agent", created: "2026-01-01T00:00:00Z" });
 for (const [op, args, reason] of [
-  ["work.task.create", { status: "done" }, "agent-cannot-set-terminal-task-status"],
-  ["work.task.create", { status: "cancelled" }, "agent-cannot-set-terminal-task-status"],
-  ["work.task.update", { patch: { status: "done" } }, "agent-cannot-set-terminal-task-status"],
-  ["work.task.update", { patch: { status: "cancelled" } }, "agent-cannot-set-terminal-task-status"],
-  ["work.task.dispatch", {}, "agent-cannot-dispatch-tasks"],
+  ["work.task.finish", {}, "agent-operation-not-allowed"],
+  ["work.task.reopen", {}, "agent-operation-not-allowed"],
+  ["work.task.checkpoint", {}, "agent-operation-not-allowed"],
+  ["work.task.hand", { to: "nobody" }, "agent-cannot-hand-to-nobody"],
   ["execution.routine.create", {}, "agent-cannot-change-routines"],
   ["execution.routine.update", {}, "agent-cannot-change-routines"],
   ["approval.proposal.accept", {}, "agent-cannot-decide-proposals"],
   ["approval.proposal.reject", {}, "agent-cannot-decide-proposals"],
   ["work.task.delete", {}, "agent-cannot-delete-or-archive"],
   ["work.project.archive", {}, "agent-cannot-delete-or-archive"],
-  ["work.task.acknowledge", {}, "agent-cannot-acknowledge-rounds"],
+  ["work.task.acknowledge", {}, "agent-operation-not-allowed"],
 ] as const) test(`agent refusal: ${op} ${JSON.stringify(args)}`, () => {
   expect(authorize(actor, { operation: op, args })).toEqual({ result: "deny", reason });
   expect(authorize(actor, { operation: "work.command", command: op, args })).toEqual({ result: "deny", reason });
@@ -97,7 +96,7 @@ test("catalog tools validate arguments, preserve identity, expose todo/create/co
     if (step === 2) { expect(JSON.parse(input.messages.at(-1)!.content)).toEqual([]); return { content: "", tool_calls: [{ id: "provider-2", name: toolName("work.task.create"), args: { title: "From conversation" } }] }; }
     if (step === 3) { created = JSON.parse(input.messages.at(-1)!.content).task.id; return { content: "", tool_calls: [{ id: "provider-3", name: toolName("work.task.comment"), args: { task: created, body: "Synthetic comment" } }] }; }
     if (step === 4) return { content: "", tool_calls: [{ id: "provider-4", name: toolName("work.task.update"), args: { task: created, expected_revision: 1, patch: { status: "done" } } }] };
-    const failure = JSON.parse(input.messages.at(-1)!.content); expect(failure.code).toBe("FORBIDDEN"); expect(failure.reason).toBe("agent-cannot-set-terminal-task-status");
+    const failure = JSON.parse(input.messages.at(-1)!.content); expect(failure.code).toBe("INVALID");
     return { content: "Only you can mark a task done.", tool_calls: [] };
   } };
   const chat = await client().assistantChat({ request_id: requestId(), message: "Make a todo and comment" });
@@ -106,7 +105,7 @@ test("catalog tools validate arguments, preserve identity, expose todo/create/co
   expect(calls).toHaveLength(4); expect(calls[1]?.change).toMatchObject({ capability: "work.task.create", target: created, after_revision: 1 });
   expect(calls[2]?.change?.target).toBe(created);
   const detail = await client().workTask(created); expect(detail.task.created_by).toBe(hub.store.assistantActor().id);
-  expect(detail.comments[0]?.author).toBe(hub.store.assistantActor().id); expect(detail.task.status).toBe("todo");
+  expect(detail.comments[0]?.author).toBe(hub.store.assistantActor().id); expect(detail.task.turn.reason).toBe("todo");
   await expect(hub.modules.capabilities.execute("work.task.create", { title: "x", injected: true }, hub.store.authenticate(`Bearer ${agent}`)! , requestId())).rejects.toMatchObject({ code: "INVALID" });
   await expect(hub.modules.capabilities.execute("work.task.create", { title: "x" }, hub.store.authenticate(`Bearer ${agent}`)!)).rejects.toMatchObject({ code: "INVALID" });
 });
@@ -115,14 +114,15 @@ test("HTTP agents can read and write low-risk fields but cannot dispatch, approv
   const created = await command("work.task.create", { title: "Agent created" }, agent);
   if (created.kind !== "task") throw new Error("task expected");
   expect(created.task.created_by).toBe(hub.store.authenticate(`Bearer ${agent}`)!.actor.id);
-  for (const status of ["active", "waiting", "paused", "todo"]) {
+  for (const to of ["external", "human"] as const) {
     const current = hub.modules.work.task(created.task.id);
-    await command("work.task.update", { task: current.id, expected_revision: current.revision, patch: { status } }, agent);
+    await command("work.task.hand", { task: current.id, expected_revision: current.revision, to, ...(to === "external" ? { note: "Synthetic wait" } : {}) }, agent);
   }
-  for (const op of ["work.task.dispatch", "work.task.acknowledge", "work.task.update"]) {
-    const args = op.endsWith("dispatch") ? { task: created.task.id } : op.endsWith("acknowledge") ? { task: created.task.id, round: 1 } : { task: created.task.id, expected_revision: 5, patch: { status: "cancelled" } };
+  for (const op of ["work.task.finish", "work.task.reopen", "work.task.hand", "work.task.checkpoint"]) {
+    const args = op.endsWith("hand") ? { task: created.task.id, expected_revision: 3, to: "nobody" } : op.endsWith("checkpoint") ? { task: created.task.id, stage: "end", action: "finish" }
+      : { task: created.task.id, expected_revision: 3, ...(op.endsWith("finish") ? { outcome: "cancelled" } : {}) };
     const response = await api("/v2/work/commands", { request_id: requestId(), operation: { op, args } }, agent);
-    expect(response.status).toBe(403); expect(ApiError.parse(await response.json()).error.reason).toMatch(/^agent-cannot-/);
+    expect(response.status).toBe(403); expect(ApiError.parse(await response.json()).error.reason).toMatch(/^agent-/);
   }
   const proposal = hub.store.createProposal({ op: "task.dispatch", args: { task: created.task.id, trigger: "cli" } }, "synthetic", hub.store.authenticate(`Bearer ${human}`)!.actor.id);
   const denied = await api(`/v1/proposals/${proposal.id}/accept`, {}, agent); expect(denied.status).toBe(403);
@@ -184,15 +184,15 @@ for (const status of ["waiting_for_human", "done", "failed", "unknown"] as const
 for (const status of ["done", "cancelled", "paused"] as const) test(`attention disappears when task becomes ${status}`, async () => {
   const created = await task(), job = await dispatch(created.id); await finish(job, "done");
   const current = hub.modules.work.task(created.id);
-  await command("work.task.update", { task: current.id, expected_revision: current.revision, patch: { status } });
+  await command(status === "paused" ? "work.task.hand" : "work.task.finish", { task: current.id, expected_revision: current.revision, ...(status === "paused" ? { to: "nobody" } : { outcome: status }) });
   expect(await client().workAttention()).toEqual([]);
 });
-test("acknowledge hides the round without changing task status; later rounds still require review", async () => {
+test("hand to human clears attention and records the change; later rounds still require review", async () => {
   const created = await task(), job = await dispatch(created.id); await finish(job, "failed");
   const prior = hub.modules.work.task(created.id);
-  await command("work.task.acknowledge", { task: created.id, round: 1 }); expect(await client().workAttention()).toEqual([]);
-  expect(hub.modules.work.task(created.id)).toEqual(prior);
-  expect(hub.modules.work.detail(created.id).executions[0]?.acknowledged?.by).toBe(hub.store.authenticate(`Bearer ${human}`)!.actor.id);
+  await command("work.task.hand", { task: created.id, expected_revision: prior.revision, to: "human" }); expect(await client().workAttention()).toEqual([]);
+  expect(hub.modules.work.task(created.id)).toMatchObject({ outcome: prior.outcome, turn: { holder: "human", reason: "todo" }, revision: prior.revision + 1 });
+  expect(hub.modules.work.detail(created.id).turns.at(-1)?.by).toBe(hub.store.authenticate(`Bearer ${human}`)!.actor.id);
   await hub.stop();
   hub = await startHub({ ...readConfig({ HOME: temp, LUMIO_STATE_DIR: join(temp, "state") }), localRuntime: "server", port: 0 }, { log() {} });
   expect(await client().workAttention()).toEqual([]);
@@ -203,9 +203,9 @@ test("answer and continue commits once; failure rolls back the comment, job, exe
   const created = await task();
   const audit = hub.store.audit.bind(hub.store); let fail = true;
   hub.store.audit = (...args) => { if (args[1] === "work.command" && fail) { fail = false; throw new Error("synthetic audit failure"); } return audit(...args); };
-  const payload = { request_id: requestId(), operation: { op: "work.task.dispatch", args: { task: created.id, comment: "Synthetic answer" } } };
+  const payload = { request_id: requestId(), operation: { op: "work.task.dispatch", args: { task: created.id, to: "pi@server", comment: "Synthetic answer" } } };
   expect((await api("/v2/work/commands", payload)).status).toBe(500);
-  expect(hub.modules.work.detail(created.id)).toMatchObject({ comments: [], executions: [], task: { status: "todo" } });
+  expect(hub.modules.work.detail(created.id)).toMatchObject({ comments: [], executions: [], task: { turn: { holder: "human", reason: "todo" } } });
   expect(hub.store.db.query("SELECT * FROM jobs").all()).toEqual([]);
   expect((await api("/v2/work/commands", payload)).status).toBe(200);
   expect((await api("/v2/work/commands", payload)).status).toBe(200);
@@ -276,7 +276,7 @@ test("CLI setup/status/clear use the running Hub with no service restart", async
 });
 
 
-test("CLI attention, answer-and-continue and ack expose contract JSON", async () => {
+test("CLI attention, answer-and-continue and hand expose contract JSON", async () => {
   async function cli(args: string[]) {
     const child = Bun.spawn([process.execPath, new URL("../../cli/src/main.ts", import.meta.url).pathname, ...args], {
       env: { HOME: temp, PATH: process.env.PATH, LUMIO_LANG: "zh", LUMIO_HUB_URL: url(), LUMIO_TOKEN: human }, stdout: "pipe", stderr: "pipe",
@@ -285,10 +285,10 @@ test("CLI attention, answer-and-continue and ack expose contract JSON", async ()
     expect(stderr).toBe(""); expect(code).toBe(0); return JSON.parse(stdout);
   }
   const created = await task();
-  const job = Job.parse(await cli(["task", "continue", created.id, "--comment", "Synthetic CLI answer", "--json", "--request-id", "synthetic-cli-continue"]));
+  const job = Job.parse(await cli(["task", "continue", created.id, "--to", "pi@server", "--comment", "Synthetic CLI answer", "--json", "--request-id", "synthetic-cli-continue"]));
   expect(hub.modules.work.detail(created.id).comments[0]?.body).toBe("Synthetic CLI answer");
   await finish(job, "done"); expect(WorkAttention.array().parse(await cli(["attention", "--json"]))).toHaveLength(1);
-  WorkCommandResult.parse(await cli(["task", "ack", created.id, "--round", "1", "--json"]));
+  WorkCommandResult.parse(await cli(["task", "hand", created.id, "--to", "human", "--json"]));
   expect(await cli(["attention", "--json"])).toEqual([]);
 });
 
@@ -350,10 +350,10 @@ test("a model attempting unavailable dispatch, approval and acknowledge tools re
 test("answer-and-continue defaults to the previous agent even if the task owner has changed", async () => {
   const created = await task(), first = await dispatch(created.id); await finish(first, "waiting_for_human");
   const current = hub.modules.work.task(created.id);
-  await command("work.task.update", { task: current.id, expected_revision: current.revision, patch: { assignee: "human" } });
+  await command("work.task.hand", { task: current.id, expected_revision: current.revision, to: "human" });
   const next = await dispatch(created.id, { comment: "Synthetic answer for the same agent" });
   expect(next.spec.run.kind === "agent" && next.spec.run.engine).toBe("pi"); expect(next.spec.runtime).toBe(first.spec.runtime);
-  expect(hub.modules.work.task(created.id).assignee).toBe("human");
+  expect(hub.modules.work.task(created.id).turn.holder).toBe("pi@server");
 });
 
 
@@ -364,4 +364,72 @@ test("local setup before CLI pairing is refreshed by the running Hub without a r
   expect(await client().assistantConfig()).toMatchObject({ model: "local-before-pairing", api_key_set: true, managed: true });
   await assistantConfiguration(["clear"], { home: temp, log() {} });
   expect(await client().assistantConfig()).toEqual({ api_key_set: false, managed: true });
+});
+
+test("agent delegation proposes once; human approval executes as author with the original request ID and records both actors", async () => {
+  const created = await task(), request_id = requestId();
+  const payload = { request_id, operation: { op: "work.task.dispatch", args: { task: created.id, to: "pi@server", comment: "Synthetic proposed answer" } } };
+  const first = await api("/v2/work/commands", payload, agent);
+  expect(first.status).toBe(202);
+  const proposed = WorkCommandResult.parse(await first.json());
+  if (proposed.kind !== "proposal") throw new Error("proposal expected");
+  expect(WorkCommandResult.parse(await (await api("/v2/work/commands", payload, agent)).json())).toEqual(proposed);
+  expect(hub.modules.work.detail(created.id).executions).toEqual([]);
+  expect(hub.modules.work.detail(created.id).comments).toEqual([]);
+  const before = hub.store.proposal(proposed.proposal)!;
+  expect(before.operation).toMatchObject({ op: "work.command", args: { request_id, operation: { args: { expected_revision: 1 } } } });
+  expect((await api(`/v1/proposals/${proposed.proposal}/accept`, {}, agent)).status).toBe(403);
+  expect((await api(`/v1/proposals/${proposed.proposal}/accept`, {})).status).toBe(200);
+  const identity = hub.store.authenticate(`Bearer ${agent}`)!, humanId = hub.store.authenticate(`Bearer ${human}`)!.actor.id;
+  const detail = WorkTaskDetail.parse(await client().workTask(created.id));
+  expect(detail.executions).toHaveLength(1); expect(detail.task.turn).toMatchObject({ holder: "pi@server", reason: "working" });
+  expect(detail.task.updated_by).toBe(identity.actor.id); expect(detail.comments[0]!.author).toBe(identity.actor.id);
+  expect(detail.turns.at(-1)!.by).toBe(identity.actor.id);
+  expect(hub.modules.workStore.receipt(identity.actor.id, request_id)?.result.kind).toBe("job");
+  expect(hub.modules.workStore.receipt(humanId, request_id)).toBeUndefined();
+  const audits = hub.store.db.query<{ actor_id: string; operation: string }, [string]>("SELECT actor_id,operation FROM audit WHERE proposal_id=?").all(proposed.proposal);
+  expect(audits.some(row => row.actor_id === identity.actor.id && row.operation.includes(humanId))).toBe(true);
+  expect(audits.some(row => row.actor_id === humanId && row.operation === "proposal.accept")).toBe(true);
+  expect((await api(`/v1/proposals/${proposed.proposal}/accept`, {})).status).toBe(409);
+  expect(WorkCommandResult.parse(await (await api("/v2/work/commands", payload, agent)).json())).toEqual(proposed);
+  expect(hub.modules.work.detail(created.id).executions).toHaveLength(1);
+});
+
+test("changed revisions conflict on delegation and plan approval; rejected or failed proposals produce no side effects", async () => {
+  const created = await task();
+  for (const op of ["work.task.dispatch", "work.task.plan.set"] as const) {
+    const revision = hub.modules.work.task(created.id).revision;
+    const operation = op === "work.task.dispatch" ? { op, args: { task: created.id, to: "pi@server", comment: "Must not be saved" } }
+      : { op, args: { task: created.id, expected_revision: revision, plan: { stages: [{ kind: "agent", id: "implement", agent: "pi@server", instruction: "Synthetic implementation" }] } } };
+    const proposed = WorkCommandResult.parse(await (await api("/v2/work/commands", { request_id: requestId(), operation }, agent)).json());
+    if (proposed.kind !== "proposal") throw new Error("proposal expected");
+    await command("work.task.update", { task: created.id, expected_revision: revision, patch: { title: `Synthetic revision ${revision}` } });
+    const response = await api(`/v1/proposals/${proposed.proposal}/accept`, {});
+    expect(response.status).toBe(409); expect(ApiError.parse(await response.json()).error.code).toBe("CONFLICT");
+    expect(hub.store.proposal(proposed.proposal)!.status).toBe("pending");
+    expect((await api(`/v1/proposals/${proposed.proposal}/reject`, {})).status).toBe(200);
+  }
+  const detail = hub.modules.work.detail(created.id);
+  expect(detail.executions).toEqual([]); expect(detail.comments).toEqual([]); expect(detail.task.plan).toBeUndefined();
+});
+
+test("plan approval stores the approved plan without starting a round and keeps author attribution", async () => {
+  const created = await task(), request_id = requestId();
+  const operation = { op: "work.task.plan.set", args: { task: created.id, expected_revision: 1,
+    plan: { stages: [{ kind: "agent", id: "implement", agent: "pi@server", instruction: "Synthetic instructions" }] } } };
+  const result = WorkCommandResult.parse(await (await api("/v2/work/commands", { request_id, operation }, agent)).json());
+  if (result.kind !== "proposal") throw new Error("proposal expected");
+  expect((await api(`/v1/proposals/${result.proposal}/accept`, {})).status).toBe(200);
+  const detail = hub.modules.work.detail(created.id), humanId = hub.store.authenticate(`Bearer ${human}`)!.actor.id;
+  expect(detail.task.plan).toMatchObject({ stage: "implement", rounds: 0, approved: { by: humanId, proposal: result.proposal } });
+  expect(detail.task.updated_by).toBe(hub.store.authenticate(`Bearer ${agent}`)!.actor.id);
+  expect(detail.executions).toEqual([]); expect(detail.task.turn.holder).toBe("human");
+});
+
+test("attention membership comes only from turn even when the latest execution suggests review", async () => {
+  const created = await task(), job = await dispatch(created.id); await finish(job, "done");
+  expect(await client().workAttention()).toHaveLength(1);
+  await command("work.task.hand", { task: created.id, expected_revision: hub.modules.work.task(created.id).revision, to: "external", note: "Synthetic external wait" });
+  expect(await client().workAttention()).toEqual([]);
+  expect(hub.modules.work.detail(created.id).executions.at(-1)!.applied).toBe(true);
 });

@@ -1,3 +1,4 @@
+import { taskStatus, taskHolder, workStatus } from "../task-compat.ts";
 /**
  * 任务 / 项目详情。
  * - 属性：点一下就改，立即带 revision 保存；冲突时不覆盖，提示载入最新内容。
@@ -103,14 +104,14 @@ export class WorkEditor {
     const row = (label: string, iconName: string, value: Node) => rows.push(h("div", { class: "prop-label" }, icon(iconName), label), h("div", { class: "prop-value" }, value));
     const labels = r.type === "task" ? TASK_LABELS : PROJECT_LABELS;
 
-    const statusBtn = h("button", { type: "button", class: "prop-btn" }, statusIcon(r.status), h("span", {}, labels[r.status] ?? r.status));
+    const statusBtn = h("button", { type: "button", class: "prop-btn" }, statusIcon(workStatus(r)), h("span", {}, labels[workStatus(r)] ?? workStatus(r)));
     statusBtn.addEventListener("click", () => openMenu(statusBtn,
-      (r.type === "task" ? TASK_STATUSES : PROJECT_STATUSES).map(s => ({ value: s, label: labels[s]!, icon: statusIcon(s), selected: s === r.status })),
+      (r.type === "task" ? TASK_STATUSES : PROJECT_STATUSES).map(s => ({ value: s, label: labels[s]!, icon: statusIcon(s), selected: s === workStatus(r) })),
       value => void this.patch({ status: value }, statusBtn, t("Status changed to “{0}”", labels[value]))));
     row(t("Status"), "clock", statusBtn);
 
     if (r.type === "task") {
-      const who = h("button", { type: "button", class: "prop-btn", title: t("Changing the assignee doesn't dispatch anything") }, icon(r.assignee === "human" ? "user" : "bot"), h("span", {}, assigneeLabel(r.assignee)));
+      const who = h("button", { type: "button", class: "prop-btn", title: t("Changing the assignee doesn't dispatch anything") }, icon(taskHolder(r) === "human" ? "user" : "bot"), h("span", {}, assigneeLabel(taskHolder(r))));
       who.addEventListener("click", () => void this.pickAssignee(who));
       row(t("Assignee"), "user", who);
 
@@ -158,12 +159,12 @@ export class WorkEditor {
     input.value = dateInputValue(value);
     input.addEventListener("change", () => void this.patch({ [key]: isoFromDateInput(input.value) }, input, input.value ? t("Due date set") : t("Due date cleared")));
     const due = dueLabel(value);
-    return h("span", { class: "button-row" }, input, due?.overdue && this.record.status !== "done" ? h("span", { class: "pill pill-red" }, t("Overdue")) : null);
+    return h("span", { class: "button-row" }, input, due?.overdue && workStatus(this.record) !== "done" ? h("span", { class: "pill pill-red" }, t("Overdue")) : null);
   }
 
   private async pickAssignee(anchor: HTMLElement): Promise<void> {
     if (this.record.type !== "task") return;
-    const current = this.record.assignee;
+    const current = taskHolder(this.record as WorkTask);
     const items: MenuItem[] = [{ value: "human", label: t("Me"), icon: icon("user"), selected: current === "human" }];
     const seen = new Set(["human"]);
     const add = (value: string, hint?: string) => { if (seen.has(value)) return; seen.add(value); items.push({ value, label: value, hint, icon: icon("bot"), selected: current === value }); };
@@ -221,7 +222,7 @@ export class WorkEditor {
 
   private exportDraft(): void {
     const r = this.record;
-    const fields = r.type === "task" ? t("Status: {0}\nAssignee: {1}\nProject: {2}\nWorking directory: {3}\nModel: {4}\nTime limit: {5}", r.status, r.assignee, r.project ?? "", r.workdir ?? "", r.model ?? "", r.timeout_minutes ?? "") : t("Status: {0}\nGoal: {1}", r.status, r.goal ?? "");
+    const fields = r.type === "task" ? t("Status: {0}\nAssignee: {1}\nProject: {2}\nWorking directory: {3}\nModel: {4}\nTime limit: {5}", workStatus(r), taskHolder(r), r.project ?? "", r.workdir ?? "", r.model ?? "", r.timeout_minutes ?? "") : t("Status: {0}\nGoal: {1}", workStatus(r), r.goal ?? "");
     const blob = new Blob([t("# {0}\n\n{1}\n\n---\n{2}\n\nUnposted comment:\n{3}", this.title.value, this.bodyDraft?.value ?? r.description, fields, this.commentDraft?.value ?? "")], { type: "text/markdown;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     h("a", { href: url, download: `lumio-draft-${r.id}.md` }).click();
@@ -306,7 +307,7 @@ export class WorkEditor {
       const targets = engineTargets(await this.client.runtimes());
       if (!this.active || !this.root.isConnected) return;
       const task = this.record;
-      const preferred = targets.find(t => t.target === task.assignee)?.target ?? targets.find(t => t.online)?.target ?? "";
+      const preferred = targets.find(t => t.target === taskHolder(task))?.target ?? targets.find(t => t.online)?.target ?? "";
       const target = select("dispatch-target", [["", t("Choose a runtime and engine")], ...targets.map(x => [x.target, x.label] as [string, string])], preferred);
       target.required = true;
       const formId = `dispatch-${newRequestId()}`, error = h("div", { role: "alert" });

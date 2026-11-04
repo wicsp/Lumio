@@ -46,14 +46,14 @@ async function command(op: string, args: Record<string, unknown>, requestId = `s
 test("Hub manages Work without a Knowledge directory, uses explicit dispatch and keeps v1 objects distinct", async () => {
   expect(hub.modules.work.tasks()).toEqual([]);
   expect(await (await request("/v1/status")).json()).toMatchObject({ watching: false });
-  const created = await command("work.task.create", { title: "合成工作", description: "固定输入", assignee: "pi@server" });
+  const created = await command("work.task.create", { title: "合成工作", description: "固定输入" });
   if (created.kind !== "task") throw new Error("task expected");
   expect(hub.store.db.query("SELECT * FROM jobs").all()).toEqual([]);
   expect("path" in created.task).toBe(false);
   const old = await request("/v1/operations", { operation: { op: "task.dispatch", args: { task: created.task.id, trigger: "cli" } } });
   expect(old.status).toBe(409); expect(ApiError.parse(await old.json()).error.message).toContain("新版");
-  const first = await command("work.task.dispatch", { task: created.task.id }, "synthetic-dispatch-0001");
-  const repeated = await command("work.task.dispatch", { task: created.task.id }, "synthetic-dispatch-0001");
+  const first = await command("work.task.dispatch", { to: "pi@server", task: created.task.id }, "synthetic-dispatch-0001");
+  const repeated = await command("work.task.dispatch", { to: "pi@server", task: created.task.id }, "synthetic-dispatch-0001");
   expect(repeated).toEqual(first); expect(hub.store.db.query("SELECT * FROM jobs").all()).toHaveLength(1);
   if (first.kind !== "job") throw new Error("job expected");
   await request("/v1/runtime/ack", { accepted: [first.job.spec.id] }, runtime);
@@ -61,7 +61,7 @@ test("Hub manages Work without a Knowledge directory, uses explicit dispatch and
   expect((await request("/v1/runtime/results", result, runtime)).status).toBe(200);
   expect((await request("/v1/runtime/results", result, runtime)).status).toBe(200);
   const detail = WorkTaskDetail.parse(await (await request(`/v2/work/tasks/${created.task.id}`)).json());
-  expect(detail.task.status).toBe("active"); expect(detail.task.assignee).toBe("pi@server");
+  expect(detail.task.outcome).toBe("open"); expect(detail.task.turn.holder).toBe("human");
   expect(detail.comments).toHaveLength(1); expect(detail.executions[0]!.applied).toBe(true);
   expect(Job.parse(first.job).spec.protocol_version).toBe(2);
   await hub.stop();
@@ -121,22 +121,22 @@ test("v2 Routine plans and historical results work without Knowledge or Task, pr
 });
 
 test("a failed dispatch audit rolls back Job, Work execution, status and request receipt together", async () => {
-  const created = await command("work.task.create", { title: "事务验证", assignee: "pi@server" });
+  const created = await command("work.task.create", { title: "事务验证" });
   if (created.kind !== "task") throw new Error("task expected");
   const audit = hub.store.audit.bind(hub.store); let fail = true;
   hub.store.audit = (...args) => { if (fail && args[1] === "work.command") { fail = false; throw new Error("synthetic audit failure"); } return audit(...args); };
-  const body = { request_id: "synthetic-transaction-0001", operation: { op: "work.task.dispatch", args: { task: created.task.id } } };
+  const body = { request_id: "synthetic-transaction-0001", operation: { op: "work.task.dispatch", args: { to: "pi@server", task: created.task.id } } };
   expect((await request("/v2/work/commands", body)).status).toBe(500);
   expect(hub.store.db.query("SELECT * FROM jobs").all()).toEqual([]);
   expect(hub.modules.work.detail(created.task.id).executions).toEqual([]);
-  expect(hub.modules.work.task(created.task.id).status).toBe("todo");
+  expect(hub.modules.work.task(created.task.id).turn.reason).toBe("todo");
   expect((await request("/v2/work/commands", body)).status).toBe(200);
   expect(hub.store.db.query("SELECT * FROM jobs").all()).toHaveLength(1);
 });
 
 test("file routes enforce runtime ownership, explicit private reads and staged content verification", async () => {
-  const created = await command("work.task.create", { title: "文件边界", assignee: "pi@server" }); if (created.kind !== "task") throw new Error("task expected");
-  const dispatched = await command("work.task.dispatch", { task: created.task.id }); if (dispatched.kind !== "job") throw new Error("job expected");
+  const created = await command("work.task.create", { title: "文件边界" }); if (created.kind !== "task") throw new Error("task expected");
+  const dispatched = await command("work.task.dispatch", { to: "pi@server", task: created.task.id }); if (dispatched.kind !== "job") throw new Error("job expected");
   await request("/v1/runtime/ack", { accepted: [dispatched.job.spec.id] }, runtime);
   const bytes = Buffer.from("合成私密文件"), id = "art_00000000000000000000000001";
   const metadata = StoredArtifact.parse({ id, owner: { module: "execution", id: dispatched.job.spec.id }, key: `${id}.bin`, size: bytes.length,
@@ -182,7 +182,7 @@ test("CLI uses database tasks and projects, preserves conflicting edit files, an
   const output = await cli(["task", "new", "合成任务", "--project", project.project.id, "--file", path, "--json"]);
   expect(output.code).toBe(0);
   const task = WorkCommandResult.parse(JSON.parse(output.stdout)); if (task.kind !== "task") throw new Error("task expected");
-  expect((await cli(["task", "status", task.task.id, "active", "--json"])).code).toBe(0);
+  expect((await cli(["task", "hand", task.task.id, "--to", "human", "--json"])).code).toBe(0);
   await writeFile(path, "第二版正文");
   const conflict = await cli(["task", "edit", task.task.id, "--file", path, "--revision", "1", "--json"]);
   expect(conflict.code).toBe(1); expect(ApiError.parse(JSON.parse(conflict.stdout)).error.code).toBe("CONFLICT");
@@ -216,7 +216,7 @@ test("CLI uses database tasks and projects, preserves conflicting edit files, an
   const followup = await cli(["routine", "followup", routine.id, job, "--json"]); expect(followup.code).toBe(0);
   const followupTask = WorkCommandResult.parse(JSON.parse(followup.stdout));
   if (followupTask.kind !== "task") throw new Error("task expected");
-  expect(followupTask.task.assignee).toBe("human"); expect(followupTask.task.description).toContain("追问来源");
+  expect(followupTask.task.turn.holder).toBe("human"); expect(followupTask.task.description).toContain("追问来源");
   expect(followupTask.task.references).toEqual([{ module: "execution", id: routine.id }, { module: "execution", id: job }]);
 });
 

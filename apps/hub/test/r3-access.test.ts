@@ -19,9 +19,9 @@ async function command(op: string, args: object, token = human) {
   expect(response.status).toBe(200); return WorkCommandResult.parse(await response.json());
 }
 async function round(timeout_seconds = 120) {
-  const created = await command("work.task.create", { title: "Synthetic access", assignee: "pi@server" });
+  const created = await command("work.task.create", { title: "Synthetic access" });
   if (created.kind !== "task") throw new Error("Expected task");
-  const dispatched = await command("work.task.dispatch", { task: created.task.id });
+  const dispatched = await command("work.task.dispatch", { task: created.task.id, to: "pi@server" });
   if (dispatched.kind !== "job") throw new Error("Expected job");
   if (timeout_seconds !== 120) hub.store.executionStore.save({ ...dispatched.job, spec: { ...dispatched.job.spec, timeout_seconds } });
   return { task: created.task, job: dispatched.job };
@@ -75,8 +75,8 @@ test("feature negotiation, redelivery rotation, per-round identity, permissions 
   expect((await api("/v2/work/tasks", undefined, access.token)).status).toBe(200);
   const comment = await command("work.task.comment", { task: task.id, body: "Synthetic round comment" }, access.token);
   expect(comment.kind).toBe("comment");
-  const denied = await api("/v2/work/commands", { request_id: `synthetic-denied-${++seq}`, operation: { op: "work.task.update", args: { task: task.id, expected_revision: task.revision, patch: { status: "done" } } } }, access.token);
-  expect(denied.status).toBe(403); expect(await denied.json()).toMatchObject({ error: { reason: "agent-cannot-set-terminal-task-status" } });
+  const denied = await api("/v2/work/commands", { request_id: `synthetic-denied-${++seq}`, operation: { op: "work.task.finish", args: { task: task.id, expected_revision: task.revision, outcome: "done" } } }, access.token);
+  expect(denied.status).toBe(403); expect(await denied.json()).toMatchObject({ error: { reason: "agent-operation-not-allowed" } });
   expect((await api("/v1/search?q=test&include_private=true", undefined, access.token)).status).toBe(403);
   const agents = AgentInfo.array().parse(await (await api("/v2/agents")).json());
   expect(agents.find(value => value.actor.id === access.actor)).toMatchObject({ actor: { name: "pi@server" }, tokens: [expect.objectContaining({ kind: "job", job: job.spec.id })] });
