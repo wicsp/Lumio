@@ -35,6 +35,10 @@ Use `task list` and `project list` to find work, then `task show` for discussion
 
 When a round needs clarification, ask one clear question inside `<lumio-question>...</lumio-question>` and end the round. Report completed work under Result / Changes / Validation. A successful round is evidence for the user to review; do not declare the task complete.
 
+Use `task plan show <task-id> --json` to inspect the approved handoff stages and progress. To propose a plan, write its HandoffPlan JSON to a local file and run `task plan set <task-id> --file plan.json [--from stage] --json`. As an agent you only create a proposal; the user approves the entire plan before automatic handoffs can run. Saving a plan does not start the first round.
+
+Follow the instruction for your current stage. To request changes during review, include the exact marker `<lumio-outcome>changes</lumio-outcome>` in your final report and explain what must change. When your approved stage declares `back_to`, Lumio delegates to that agent stage; without `back_to`, the report follows the normal next stage. Questions and failures always return to the human, and the round limit also stops delegation for human review. Only the human can continue a checkpoint, send work back with a comment, finish or hold the task.
+
 ## Working with notes
 
 Search using alternate terms, then read promising hits in full; search snippets are short. References accept a note ID, paper citekey or filename without `.md`. When recommending related notes, provide the title, reference, relevant quoted passage and a brief reason. Text inside `<!-- lumio:ai start ... -->` blocks is an AI draft, not the user's opinion. User-authored links remain the user's decision.

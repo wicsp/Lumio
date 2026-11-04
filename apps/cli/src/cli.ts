@@ -15,7 +15,7 @@ import { ApiError } from "@lumio/schema";
 import { runAgents, runSkillInstall } from "./agent-access.ts";
 import { runJobs } from "./jobs.ts";
 import { runTasks } from "./tasks.ts";
-import { runWork, runAttention } from "./work.ts";
+import { runWork, runAttention, runPlanTemplates } from "./work.ts";
 import { runAssistant } from "./assistant.ts";
 import { runRoutines } from "./routines.ts";
 import { runExecutionRoutines } from "./execution-routines.ts";
@@ -35,7 +35,7 @@ export interface CliOptions {
 export async function runCli(args: string[], options: CliOptions = {}): Promise<number> {
   try { return await executeCli(args, options); }
   catch (cause) {
-    if (!["agent", "job", "task", "project", "attention", "chat", "routine", "proposals", "runtime"].includes(args[0] ?? "") || !args.includes("--json")) throw cause;
+    if (!["agent", "job", "task", "project", "plan-template", "attention", "chat", "routine", "proposals", "runtime"].includes(args[0] ?? "") || !args.includes("--json")) throw cause;
     const error = cause instanceof ApiClientError ? {
       code: cause.code, message: errorMessage(cause), operation: cause.operation, reason: cause.reason, proposal: cause.proposal,
     } : { code: "INVALID", message: cause instanceof Error ? errorMessage(cause) : msg("cli.could_not_execute_command") };
@@ -59,6 +59,7 @@ async function executeCli(args: string[], options: CliOptions): Promise<number> 
   if (args[0] === "skill") return runSkillInstall(args.slice(1), log);
   if (args[0] === "job") return runJobs(args.slice(1), log);
   if (args[0] === "attention") return runAttention(args.slice(1), log);
+  if (args[0] === "plan-template") return runPlanTemplates(args.slice(1), log);
   if (args[0] === "task") return (await runWork("task", args.slice(1), log)) ?? runTasks(args.slice(1).filter((arg) => arg !== "--legacy"), log);
   if (args[0] === "project") return (await runWork("project", args.slice(1), log))!;
   if (args[0] === "chat") return runAssistant(args.slice(1), log);

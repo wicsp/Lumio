@@ -111,11 +111,14 @@ export class Capabilities {
     return this.modules.work.tasks().flatMap(task => {
       if (task.outcome !== "open" || task.turn.holder !== "human" || !(RESPONSE_REASONS as readonly string[]).includes(task.turn.reason)) return [];
       const kind = task.turn.reason === "answer" ? "question" : task.turn.reason === "review" ? "review" : "failed";
+      if (!task.turn.job || !task.turn.round) return [];
       const job = jobs.get(task.turn.job!);
+      const stage = task.plan?.plan.stages.find(stage => stage.id === task.turn.stage);
       const runtime = this.store.runtimes(new Date()).find(value => value.actor === job.spec.runtime)?.registration.name;
       return [WorkAttention.parse({ task: task.id, title: task.title, kind, job: task.turn.job, round: task.turn.round,
         ...(job.spec.run.kind === "agent" ? { agent: `${job.spec.run.engine}${runtime ? `@${runtime}` : ""}` } : {}),
-        since: task.turn.since, ...(kind === "question" && job.result?.question?.trim() ? { question: job.result?.question } : {}), summary: (job.result?.report || job.result?.error || "").slice(0, 500) })];
+        since: task.turn.since, stage: task.turn.stage, ...(stage?.kind === "checkpoint" ? { prompt: stage.prompt } : {}),
+        ...(kind === "question" && job.result?.question?.trim() ? { question: job.result?.question } : {}), summary: (task.turn.note || job.result?.report || job.result?.error || "").slice(0, 500) })];
     });
   }
 }

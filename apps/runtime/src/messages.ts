@@ -5,6 +5,14 @@ const locale = new AsyncLocalStorage<Language>();
 export const withLanguage = <T>(lang: Language, action: () => T): T => locale.run(lang, action);
 
 export const en = {
+  "work.plan_dispatch_failed": (stage: unknown, code: unknown) => `Could not delegate plan stage ${String(stage)} (${String(code)}); human action required.`,
+  "work.plan_agent": "Delegate only to the agent in the current plan stage; handle checkpoints with task checkpoint.",
+  "work.plan_max_rounds": (limit: unknown) => `Plan stopped: reached the limit of ${String(limit)} rounds; human review required.`,
+  "work.human_only": "Only a human can handle checkpoints or manage plan templates.",
+  "work.checkpoint_changed": "The plan stage or turn has changed; reload the task before handling it.",
+  "work.checkpoint_back_to": "Send-back requires a comment and an agent stage in the approved plan.",
+  "work.checkpoint_end": "Cannot continue at the end of a plan.",
+  "work.template_not_found": "Plan template not found.",
   "work.hand_other_round": "Another round is still executing this task; only that round or a human can hand it over.",
   "work.invalid_outcome_transition": "This operation is not applicable to the task's current outcome or turn.",
   "work.migration_required": "Task model migration required; stop Hub and run lumio hub migrate task-v3.",
@@ -571,6 +579,14 @@ ${String(p0)}${String(p1)}`,
   "Run tailscale serve status to check": "Run tailscale serve status to check",
 };
 export const zh: typeof en = {
+  "work.plan_dispatch_failed": (stage: unknown, code: unknown) => `无法委派计划阶段 ${String(stage)}（${String(code)}），需要人处理。`,
+  "work.plan_agent": "只能委派给计划当前阶段的 agent；检查点请用 task checkpoint 处理。",
+  "work.plan_max_rounds": (limit: unknown) => `计划已停止：达到 ${String(limit)} 轮上限，需要人验收。`,
+  "work.human_only": "只有人能处理检查点或管理计划模板。",
+  "work.checkpoint_changed": "计划阶段或交接已变化，请重新读取任务后再处理。",
+  "work.checkpoint_back_to": "打回必须附评论，且目标必须是批准计划中的 agent 阶段。",
+  "work.checkpoint_end": "计划结束后不能继续。",
+  "work.template_not_found": "找不到计划模板。",
   "work.hand_other_round": "此任务仍有其他轮次正在执行；只有该轮次或人可以交接。",
   "work.invalid_outcome_transition": "当前结局或交接不适用此操作。",
   "work.migration_required": "需要切换任务模型；停止 Hub 后运行 lumio hub migrate task-v3。",
