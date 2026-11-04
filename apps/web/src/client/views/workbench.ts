@@ -130,12 +130,12 @@ export class WorkbenchView {
     const navigate: Navigate = (s, i, n) => this.go(s, i, n);
     const changed = () => void this.refreshCounts();
     let pane: Pane;
-    if (section === "overview") pane = new OverviewPane(target, client, navigate, this.name);
+    if (section === "overview") pane = new OverviewPane(target, client, this.session.hub, navigate, this.name, changed);
     else if (section === "settings") pane = new SettingsPane(target, this.session, this.name, () => { if (this.canLeave()) this.logout(); }, () => this.leaveSettings());
     else if (section === "knowledge") pane = new KnowledgePane(target, client, id);
-    else if (section === "work") pane = new WorkPane(target, client, id, navigate, changed);
-    else if (section === "execution") pane = new ExecutionPane(target, client, id, navigate);
-    else if (section === "assistant") pane = new AssistantPane(target, client, intent);
+    else if (section === "work") pane = new WorkPane(target, client, this.session.hub, id, navigate, changed);
+    else if (section === "execution") pane = new ExecutionPane(target, client, this.session.hub, id, navigate, changed);
+    else if (section === "assistant") pane = new AssistantPane(target, client, this.session.hub, intent, navigate);
     else pane = new ApprovalsPane(target, client, changed);
     this.pane = pane;
     if (intent && section !== "assistant") pane.intent?.(intent);
@@ -143,7 +143,7 @@ export class WorkbenchView {
 
   private async refreshCounts(): Promise<void> {
     const client = this.session.client;
-    const [tasks, proposals, jobs] = await Promise.allSettled([client.workTasks(), client.proposals("pending"), client.jobs()]);
+    const [tasks, proposals, jobs, attention] = await Promise.allSettled([client.workTasks(), client.proposals("pending"), client.jobs(), this.session.hub.attention()]);
     const set = (section: Section, value: number | undefined, attention = false) => {
       const el = this.counts.get(section)!;
       el.textContent = value ? String(value) : "";
@@ -152,6 +152,9 @@ export class WorkbenchView {
     set("work", tasks.status === "fulfilled" ? tasks.value.filter(t => t.status === "active" || t.status === "todo").length : undefined);
     set("approvals", proposals.status === "fulfilled" ? proposals.value.length : undefined, true);
     set("execution", jobs.status === "fulfilled" ? jobs.value.filter(j => ["queued", "assigned", "running", "waiting_for_human"].includes(j.status)).length : undefined);
+    // 今日的提醒数 = 需要你处理的轮次 + 待批准（ADR 0030）；窄屏底栏只看得到这一个数。
+    const needs = attention.status === "fulfilled" && attention.value ? attention.value.length : 0;
+    set("overview", needs + (proposals.status === "fulfilled" ? proposals.value.length : 0), true);
   }
 
   private leaveSettings(): void {

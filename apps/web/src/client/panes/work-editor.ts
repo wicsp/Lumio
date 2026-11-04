@@ -5,7 +5,8 @@
  * - 派活是单独的明确动作；修改负责人不会派活；运行成功也不会自动完成任务。
  */
 import { PROJECT_STATUSES, TASK_STATUSES, type WorkProject, type WorkTask, type WorkTaskDetail, type WorkCommandRequest } from "@lumio/schema";
-import { errorText, isConflict, type Client } from "../api.ts";
+import { errorText, isConflict, type Client, type HubExtras } from "../api.ts";
+import { attentionCard, attentionFor } from "../attention-card.ts";
 import { commentCommand, dispatchCommand, engineTargets, formatTime, newRequestId, workPatchCommand } from "../commands.ts";
 import { autosize, clear, failure, field, h, icon, openDialog, openMenu, select, statusIcon, toast, type MenuItem } from "../dom.ts";
 import { ago, assigneeLabel, dateInputValue, dueLabel, isoFromDateInput } from "../format.ts";
@@ -39,7 +40,7 @@ export class WorkEditor {
   private showAdvanced = false;
   private updated = h("p", { class: "detail-sub" });
 
-  constructor(private root: HTMLElement, private client: Client, input: WorkProject | WorkTaskDetail, private projects: WorkProject[], private hooks: EditorHooks) {
+  constructor(private root: HTMLElement, private client: Client, private hub: HubExtras, input: WorkProject | WorkTaskDetail, private projects: WorkProject[], private hooks: EditorHooks) {
     this.record = "task" in input ? input.task : input;
     const isTask = this.record.type === "task";
     this.title = new InlineTitle(this.record.title, title => this.saveTitle(title));
@@ -53,13 +54,18 @@ export class WorkEditor {
         h("button", { type: "button", class: "icon-btn", title: t("Copy ID"), "aria-label": t("Copy ID"), onclick: () => void navigator.clipboard?.writeText(this.record.id).then(() => toast(t("ID copied"))) }, icon("link")),
         isTask && h("button", { type: "button", class: "btn btn-primary btn-small", onclick: () => void this.dispatch() }, icon("play"), t("Dispatch"))));
 
-    const detail = h("div", { class: "detail" }, crumbs, h("div", { class: "detail-head" }, this.title.element, this.updated), this.note, this.props,
+    const attention = h("div", { class: "attn-slot" });
+    const detail = h("div", { class: "detail" }, crumbs, h("div", { class: "detail-head" }, this.title.element, this.updated), attention, this.note, this.props,
       h("div", { class: "divider" }), this.bodyHost);
     root.append(detail);
     this.renderMeta();
     this.renderProps();
     this.renderBody();
     if ("task" in input) {
+      // 这个任务需要你处理时（ADR 0030），把卡片放在标题下面。
+      void attentionFor(hub, input.task.id).then(item => {
+        if (item && this.active) attention.append(attentionCard(item, { client, hub, navigate: hooks.navigate, changed: () => { hooks.changed(); hooks.reload(); } }, "task"));
+      }).catch(() => { /* 旧 Hub：没有这个接口 */ });
       detail.append(this.executions(input), this.comments(input));
       if (input.task.dependencies.length || input.task.parent) detail.append(h("section", { class: "section" },
         h("div", { class: "section-head" }, h("h3", {}, t("Relationships"))),
@@ -80,7 +86,14 @@ export class WorkEditor {
     return !this.dirty || confirm(t("You have unsaved changes that will be lost. Leave anyway?"));
   }
 
-  private renderMeta(): void { this.updated.textContent = t("Updated {0}", ago(this.record.updated)); this.updated.title = formatTime(this.record.updated); }
+  private renderMeta(): void {
+    const by = this.record.updated_by;
+    this.updated.textContent = t("Updated {0}", ago(this.record.updated)); this.updated.title = formatTime(this.record.updated);
+    // 最近修改者（ADR 0029）：agent 改的要让人一眼看出来。
+    if (by) void actorName(this.client, by).then(name => {
+      if (name && this.active && this.record.updated_by === by) this.updated.textContent = t("Updated {0} by {1}", ago(this.record.updated), name);
+    });
+  }
 
   // ───────────── 属性 ─────────────
 
@@ -363,4 +376,11 @@ export class WorkEditor {
     return h("section", { class: "section" }, h("div", { class: "section-head" }, h("h3", {}, t("Discussion")), count),
       timeline, form, error);
   }
+}
+
+let actorNames: Promise<Map<string, string>> | undefined;
+/** 身份 ID → 名称（只读一次；失败时下次再试）。 */
+function actorName(client: Client, id: string): Promise<string | undefined> {
+  actorNames ??= client.actors().then(list => new Map(list.map(actor => [actor.id, actor.name])), () => { actorNames = undefined; return new Map<string, string>(); });
+  return actorNames.then(map => map.get(id));
 }
