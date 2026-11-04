@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import {
-  AGENT_SETTABLE_TASK_STATUSES, AgentInfo, AgentTokenRequest, AssistantConfigUpdate, AssistantConfigView, AssistantToolCall,
+   AgentInfo, AgentTokenRequest, AssistantConfigUpdate, AssistantConfigView, AssistantToolCall,
   CAPABILITIES, CAPABILITY_NAMES, CONTRACTS, CapabilityName, JobAccess, JobSpec, RuntimeSync, WorkAttention, WorkCommand, WorkCommandRequest, WorkExecution, WorkTask,
   assistantConfigReason, capability, capabilityFromTool, toolName,
 } from "../src/index.ts";
@@ -32,7 +32,7 @@ describe("capability catalog (ADR 0029 §2)", () => {
 
   test("writes are exactly the low-risk Work commands; dispatch, routines and approvals are absent", () => {
     const writes = CAPABILITIES.filter((item) => item.kind === "write").map((item) => item.name).sort();
-    expect(writes).toEqual(["work.project.create", "work.project.update", "work.task.comment", "work.task.create", "work.task.update"]);
+    expect(writes).toEqual(["work.project.create", "work.project.update", "work.task.comment", "work.task.create", "work.task.hand", "work.task.update"]);
     for (const name of writes) expect(WorkCommand.options.some((option) => option.shape.op.value === name)).toBe(true);
     expect(CAPABILITY_NAMES.some((name) => /dispatch|accept|reject|routine\.(create|update)|privileged/.test(name))).toBe(false);
   });
@@ -42,12 +42,12 @@ describe("capability catalog (ADR 0029 §2)", () => {
     expect(create.args.safeParse({ title: "Renew domain", due: NOW }).success).toBe(true);
     expect(create.args.safeParse({ title: "x", unknown: 1 }).success).toBe(false);
     const update = capability("work.task.update")!;
-    expect(update.args.safeParse({ task: TASK, expected_revision: 3, patch: { status: "waiting" } }).success).toBe(true);
+    expect(update.args.safeParse({ task: TASK, expected_revision: 3, patch: { title: "Updated" } }).success).toBe(true);
     expect(update.args.safeParse({ task: TASK, expected_revision: 3, patch: {} }).success).toBe(false);
   });
 
-  test("agents may not mark tasks done or cancelled", () => {
-    expect([...AGENT_SETTABLE_TASK_STATUSES].sort()).toEqual(["active", "paused", "todo", "waiting"]);
+  test("task updates cannot bypass outcome and turn commands", () => {
+    for (const key of ["status", "assignee", "outcome", "turn"]) expect(capability("work.task.update")!.args.safeParse({ task: TASK, expected_revision: 3, patch: { [key]: "done" } }).success).toBe(false);
   });
 
   test("read arguments are strict", () => {
@@ -92,7 +92,7 @@ describe("agent access (ADR 0029 §5–6)", () => {
 
 describe("compatibility", () => {
   test("tasks and tool calls stored before R3 still parse; new fields are accepted", () => {
-    const task = { schema_version: 2, type: "task", id: TASK, title: "T", description: "", revision: 1, status: "todo", assignee: "human",
+    const task = { schema_version: 3, type: "task", id: TASK, title: "T", description: "", revision: 1, outcome: "open", turn: { holder: "human", reason: "todo", since: NOW },
       created: NOW, updated: NOW, tags: [], dependencies: [], references: [] };
     expect(WorkTask.safeParse(task).success).toBe(true);
     expect(WorkTask.safeParse({ ...task, created_by: ACT, updated_by: ACT }).success).toBe(true);
@@ -118,13 +118,13 @@ describe("rounds that need the user (ADR 0030)", () => {
     expect(WorkCommandRequest.safeParse(dispatch).success).toBe(true);
     expect(WorkCommandRequest.safeParse({ ...dispatch, operation: { ...dispatch.operation, args: { task: TASK, comment: "" } } }).success).toBe(false);
     const acknowledge = { request_id: "req_acknowledge_0001", operation: { op: "work.task.acknowledge", args: { task: TASK, round: 2 } } };
-    expect(WorkCommandRequest.safeParse(acknowledge).success).toBe(true);
+    expect(WorkCommandRequest.safeParse(acknowledge).success).toBe(false);
     expect(capability("work.task.acknowledge")).toBeUndefined();
     expect(capability("work.task.dispatch")).toBeUndefined();
   });
   test("executions stored before ADR 0030 still parse", () => {
     const execution = { task: TASK, job: JOB, round: 1, input_revision: 1, input_snapshot: "", created: NOW, applied: true };
     expect(WorkExecution.safeParse(execution).success).toBe(true);
-    expect(WorkExecution.safeParse({ ...execution, acknowledged: { at: NOW, by: ACT } }).success).toBe(true);
+    expect(WorkExecution.safeParse({ ...execution, acknowledged: { at: NOW, by: ACT } }).success).toBe(false);
   });
 });

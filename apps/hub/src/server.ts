@@ -1,3 +1,4 @@
+import { migrateTaskModel } from "@lumio/storage";
 import { withLanguage, errorMessage, text as msg } from "./messages.ts";
 import { language } from "@lumio/platform";
 import { browserAllowed, browserDenied, webResponse, type HubWeb } from "./web.ts";
@@ -101,6 +102,7 @@ async function startHubInstance(config: HubConfig, options: {
     const assistantConfig = new AssistantConfiguration({ home: options.assistantHome ?? config.assistantHome, external: config.assistantModel, fetch: options.assistantFetch,
       reload: model => modules!.assistant.setModel(configuredModel(model)) });
     const model = await assistantConfig.load();
+    await migrateTaskModel(store.db, config.stateDir, store.workActor().id, options.now?.() ?? new Date());
     modules = new BusinessModules({ ...config, assistantModel: model }, store, options);
     modules.assistantConfig = assistantConfig;
     await modules.artifacts.recover();
@@ -209,7 +211,7 @@ async function startHubInstance(config: HubConfig, options: {
           if (route.operation === "operations" || route.operation === "actors" || route.operation === "proposals" || route.operation === "proposal.accept" || route.operation === "proposal.reject") {
             const response = await vaultWatch!.exclusive(() => handleOperation(request,
               route.operation,
-              route.pattern.exec(url.pathname)?.[1], identity!, store, config, decide, { ...options.operations, tasks, routines, privileged,
+              route.pattern.exec(url.pathname)?.[1], identity!, store, config, decide, { ...options.operations, tasks, routines, privileged, workCommands: modules!.workCommands,
                 isManagedTask: (id) => legacyControlDisabled(store.db) || modules!.workStore.task(id) !== undefined,
                 isManagedRoutine: (id) => legacyControlDisabled(store.db) || modules!.routineStore.get(id) !== undefined }));
             status = response.status;

@@ -68,9 +68,13 @@ const seed: Array<[string, string | undefined, string, string?, number?]> = [
   [msg("web-demo.renew_domain"), undefined, "todo", undefined, -1],
 ];
 const tasks: Record<string, any> = {};
-for (const [title, project, status, assignee, due] of seed) {
-  tasks[title] = (await command({ op: "work.task.create", args: { title, status, ...(project ? { project } : {}), ...(assignee ? { assignee } : {}),
+for (const [title, project, status, _assignee, due] of seed) {
+  tasks[title] = (await command({ op: "work.task.create", args: { title, ...(project ? { project } : {}),
     ...(due !== undefined ? { due: inDays(due) } : {}), description: msg("web-demo.define_completion_criteria_here_markdown_supported_bash_python_run_p") } })).task;
+  const task = tasks[title];
+  if (status === "done" || status === "cancelled") tasks[title] = (await command({ op: "work.task.finish", args: { task: task.id, expected_revision: task.revision, outcome: status } })).task;
+  else if (status === "waiting" || status === "paused") tasks[title] = (await command({ op: "work.task.hand", args: { task: task.id, expected_revision: task.revision,
+    to: status === "paused" ? "nobody" : "external", ...(status === "waiting" ? { note: "Synthetic external wait" } : {}) } })).task;
 }
 await command({ op: "work.task.comment", args: { task: tasks[msg("web-demo.run_experiments_with_three_more_model_families")].id, body: msg("web-demo.the_first_model_has_finished_the_other_two_are_queued") } });
 

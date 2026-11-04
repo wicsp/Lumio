@@ -7,6 +7,7 @@ export type Lang = "en" | "zh";
 const KEY = "lumio.web.lang";
 
 export const ZH: Record<string, string> = {
+  "Choose an agent to dispatch to": "请使用委派操作选择 agent",
   "Connected agents": "已连接的 agent",
   "Agents outside Lumio that can read your tasks and notes and make small changes. They can't mark tasks done, delegate, approve, or read private notes.": "Lumio 以外、能读你的任务和笔记并做小改动的 agent。它们不能把任务标为完成、不能委派、不能审批，也读不到私密笔记。",
   "This Hub doesn't support connected agents yet. Run lumio upgrade.": "这个 Hub 还不支持连接外部 agent。请运行 lumio upgrade。",

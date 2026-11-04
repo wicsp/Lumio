@@ -51,7 +51,7 @@ test("selftest uses real Hub and runtime with fake codex, claude and pi; databas
     expect((await readdir(join(vault, "plan/tasks"))).filter(n => n.startsWith("Lumio 自检"))).toEqual([]);
     const tasks = (await client.workTasks()).filter(task => task.title.startsWith("Lumio 自检")); expect(tasks).toHaveLength(3);
     for (const task of tasks) {
-      expect(WorkTask.parse(task).status).toBe("done");
+      expect(WorkTask.parse(task).outcome).toBe("done");
       const detail = await client.workTask(task.id); expect(detail.executions).toHaveLength(4);
       expect(detail.executions.every(execution => execution.applied)).toBe(true); expect(detail.comments).toHaveLength(4);
     }
@@ -83,19 +83,20 @@ test("selftest uses real Hub and runtime with fake codex, claude and pi; databas
 test("selftest enforces deadlines, continues checks, cancels unfinished database jobs and marks the task done", async () => {
   let time = 0, sequence = 0, cancelled = 0;
   const jobs = new Map<string, Job>(), date = "2026-10-29T00:00:00Z";
-  let task = WorkTask.parse({ schema_version: 2, type: "task", id: "task_00000000000000000000000002", title: "自检", description: "", status: "todo", tags: [], dependencies: [], references: [], revision: 1, created: date, updated: date, assignee: "pi@server" });
+  let task = WorkTask.parse({ schema_version: 3, type: "task", id: "task_00000000000000000000000002", title: "自检", description: "", outcome: "open", turn: { holder: "human", reason: "todo", since: date }, tags: [], dependencies: [], references: [], revision: 1, created: date, updated: date });
   const fetcher = (async (input, init) => {
     const u = new URL(String(input));
     if (u.pathname === "/v1/runtimes") return Response.json([{ actor: "act_00000000000000000000000001", registration: { protocol_version: 2, name: "server", engines: [{ name: "pi", version: "1.4.0", sandbox: "none" }], tags: [], max_concurrent: 1 }, last_seen: date, online: true }]);
     if (u.pathname === "/v2/work/commands") {
       const { operation } = WorkCommandRequest.parse(JSON.parse(String(init?.body)));
+      if (operation.op === "work.task.finish") { task = WorkTask.parse({ ...task, outcome: "done", turn: { holder: "nobody", reason: "on_hold", since: date } }); return Response.json({ kind: "task", task }); }
       if (operation.op === "work.task.create") { task = WorkTask.parse({ ...task, ...operation.args }); return Response.json({ kind: "task", task }); }
       if (operation.op === "work.task.update") { task = WorkTask.parse({ ...task, ...operation.args.patch, revision: task.revision + 1 }); return Response.json({ kind: "task", task }); }
       sequence++;
       const job = Job.parse({ spec: { protocol_version: 2, id: `job_${String(sequence).padStart(26, "0")}`, runtime: "act_00000000000000000000000001", lease: "synthetic_lease_123456", source: { task: task.id, round: sequence }, run: { kind: "agent", engine: "pi", prompt: task.description }, workdir: "~", timeout_seconds: 1, created: date }, status: "running" });
       jobs.set(job.spec.id, job); return Response.json({ kind: "job", job });
     }
-    if (u.pathname.startsWith("/v2/work/tasks/")) return Response.json({ task, executions: [], comments: [] });
+    if (u.pathname.startsWith("/v2/work/tasks/")) return Response.json({ task, executions: [], comments: [], turns: [] });
     const id = u.pathname.split("/")[3]!;
     if (u.pathname.endsWith("/cancel")) cancelled++;
     return Response.json(jobs.get(id));
@@ -104,7 +105,7 @@ test("selftest enforces deadlines, continues checks, cancels unfinished database
   expect(results).toHaveLength(4); expect(results.every(r => !r.ok)).toBe(true);
   // Resume is skipped without a successful session, but independent later steps still run.
   expect(results.map(r => r.elapsed_ms)).toEqual([100, 0, 100, 30]);
-  expect(sequence).toBe(3); expect(cancelled).toBe(4); expect(task.status).toBe("done");
+  expect(sequence).toBe(3); expect(cancelled).toBe(4); expect(task.outcome).toBe("done");
 });
 
 test("--notes is a compatibility alias: no vault is needed or written even on failures", async () => {

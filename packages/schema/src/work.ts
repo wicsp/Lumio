@@ -1,16 +1,16 @@
 import { z } from "zod";
-import { AgentTarget, ID_PREFIXES, Id, RequestId, Revision, TaskAssignee, Timestamp, idOf } from "./common.ts";
+import { AgentTarget, ID_PREFIXES, Id, RequestId, Revision, Timestamp, idOf } from "./common.ts";
 import { TASK_STATUSES } from "./entities.ts";
 import { Job } from "./job.ts";
 import { HandoffPlan, PlanRun, PlanStageId, PlanTemplate } from "./plan.ts";
 
 /**
- * Work 模块契约 v2（ADR 0025 第 1、3、4、8 节，R0-1）。
+ * Work 模块契约（Project v2 / Task v3）（ADR 0025 第 1、3、4、8 节，R0-1）。
  *
  * - Project/Task 是数据库里的业务对象，不是笔记：没有 path，不用 NoteRef 表达；v1 的 entities.ts 只用于旧笔记解码。
  * - 全部是严格对象（未知字段拒绝）；可选字段用"缺失"表示未填，不接受 null。只有 patch 里用 null 表示清空。
  * - revision 是正整数，每次修改加一；update 必须带 expected_revision，不相等时 Hub 返回 CONFLICT。
- * - 负责人只是"谁在负责"，不是执行开关；派活必须用 work.task.dispatch（ADR 0025 第 4 节）。
+ * - Task 的 outcome 与 turn 由独立命令改变；委派必须用 work.task.dispatch（ADR 0032）。
  */
 
 export const MODULES = ["knowledge", "work", "execution", "assistant"] as const;
@@ -71,37 +71,6 @@ export const WorkProject = z.strictObject({
   deadline: Timestamp.optional(),
 });
 
-/** 任务（v2）。assignee 只有字符串写法；当前执行情况见 WorkTaskDetail.executions 与 Job。 */
-export const WorkTask = z
-  .strictObject({
-    schema_version: z.literal(2),
-    type: z.literal("task"),
-    id: idOf("task"),
-    title: z.string().min(1),
-    description: z.string().describe("描述正文，可用 Markdown 语法；不是知识笔记"),
-    revision: Revision,
-    status: TaskStatus,
-    assignee: TaskAssignee.describe("负责人；新建时缺省为 human。修改它不会派活"),
-    created: Timestamp,
-    updated: Timestamp,
-    created_by: idOf("act").optional().describe("创建者身份；R3 之前的数据缺失"),
-    updated_by: idOf("act").optional().describe("最近一次修改者身份（人或 agent，ADR 0029）；界面据此显示「由 codex@server」"),
-    tags: z.array(z.string()),
-    project: idOf("prj").optional(),
-    parent: idOf("task").optional().describe("父任务"),
-    dependencies: z.array(idOf("task")).describe("要先完成的任务"),
-    references: z.array(ResourceRef).describe("资料引用；不是输入快照"),
-    due: Timestamp.optional(),
-    ...RunConfigShape,
-  })
-  .superRefine((task, ctx) => {
-    if (task.parent === task.id) ctx.addIssue({ code: "custom", path: ["parent"], message: "任务不能是自己的父任务" });
-    if (task.dependencies.includes(task.id)) ctx.addIssue({ code: "custom", path: ["dependencies"], message: "任务不能依赖自己" });
-    if (new Set(task.dependencies).size !== task.dependencies.length) {
-      ctx.addIssue({ code: "custom", path: ["dependencies"], message: "dependencies 不能重复" });
-    }
-  });
-
 /** 任务讨论中的一条消息（Work 拥有，与 Assistant 对话无关）。 */
 export const WorkComment = z.strictObject({
   id: idOf("wmsg"),
@@ -123,23 +92,9 @@ export const WorkExecution = z.strictObject({
   input_snapshot: z.string().describe("派出时交给执行的输入快照；之后改描述不影响它"),
   created: Timestamp,
   applied: z.boolean(),
-  acknowledged: z.strictObject({ at: Timestamp, by: idOf("act") }).optional()
-    .describe("人点了「已查看」：这一轮不再出现在需要处理的列表里（ADR 0030）；不改变任务状态"),
 });
 
-/** `GET` 单个任务的完整视图。 */
-export const WorkTaskDetail = z.strictObject({
-  task: WorkTask,
-  comments: z.array(WorkComment),
-  executions: z.array(WorkExecution),
-});
-
-
-// ───────────────────────── 任务模型 v3（ADR 0032）─────────────────────────
-//
-// 任务只回答三个问题：结束了吗（outcome）、现在轮到谁（turn）、发生过什么（事件，只追加）。
-// v3 与上面的 v2 并存，直到 R4-2 一次性切换：届时 WorkTaskV3 改名为 WorkTask、删除 v2 的 status / assignee 与相关命令。
-
+// 任务模型 v3（ADR 0032）
 export const TASK_OUTCOMES = ["open", "done", "cancelled"] as const;
 export const TaskOutcome = z.enum(TASK_OUTCOMES);
 
@@ -171,7 +126,7 @@ export const Turn = z
   .refine((turn) => reasonFits(turn.holder, turn.reason), { message: "持有者与原因不匹配", path: ["reason"] });
 
 /** 任务 v3。没有 status 与 assignee；结局只有人能改，轮到谁按 ADR 0032 第 3、4 节变化。 */
-export const WorkTaskV3 = z
+export const WorkTask = z
   .strictObject({
     schema_version: z.literal(3),
     type: z.literal("task"),
@@ -213,8 +168,8 @@ export const TaskTurnChange = z.strictObject({
 });
 
 /** `GET` 单个任务（v3）：任务、讨论、轮次、交接记录。界面按时间合并成时间线。 */
-export const WorkTaskDetailV3 = z.strictObject({
-  task: WorkTaskV3,
+export const WorkTaskDetail = z.strictObject({
+  task: WorkTask,
   comments: z.array(WorkComment),
   executions: z.array(WorkExecution),
   turns: z.array(TaskTurnChange),
@@ -246,8 +201,6 @@ export const WorkTaskPatch = z
   .strictObject({
     title: z.string().min(1).optional(),
     description: z.string().optional(),
-    status: TaskStatus.optional(),
-    assignee: TaskAssignee.optional().describe("只改负责人，不派活"),
     tags: z.array(z.string()).optional(),
     project: idOf("prj").nullable().optional().describe("null：清空"),
     parent: idOf("task").nullable().optional().describe("null：清空"),
@@ -284,8 +237,6 @@ export const WorkTaskCreate = z.strictObject({
   args: z.strictObject({
     title: z.string().min(1),
     description: z.string().optional().describe("缺省为空字符串"),
-    status: TaskStatus.optional().describe("缺省 todo"),
-    assignee: TaskAssignee.optional().describe("缺省 human；新建不会派活"),
     project: idOf("prj").optional(),
     parent: idOf("task").optional(),
     dependencies: z.array(idOf("task")).optional().describe("缺省 []"),
@@ -311,7 +262,7 @@ export const WorkTaskDispatch = z.strictObject({
   op: z.literal("work.task.dispatch"),
   args: z.strictObject({
     task: idOf("task"),
-    to: AgentTarget.optional().describe("派给谁；缺省用任务的负责人（负责人是 human 时拒绝）"),
+    to: AgentTarget.optional().describe("委派给谁；缺省沿用最近一轮的 agent（没有历史时须指定）"),
     expected_revision: Revision.optional().describe("给出时与当前 revision 不符则 CONFLICT，确保派出的是看到的版本"),
     comment: z.string().min(1).optional().describe(
       "回答并继续（ADR 0030）：先以调用者身份发表这条评论，再在同一事务里派出，下一轮的输入包含它；派出失败时评论也不保存",
@@ -384,17 +335,8 @@ export const PlanTemplateDelete = z.strictObject({
   args: z.strictObject({ template: idOf("wft") }),
 });
 
-/**
- * 人确认看过某一轮（等你验收、执行失败）而暂不处理（ADR 0030）。只有人能用；agent 一律拒绝。
- * 已被 ADR 0032 取代（改为 work.task.hand to=human，即「我自己来」）；R4-2 切换时删除。
- */
-export const WorkTaskAcknowledge = z.strictObject({
-  op: z.literal("work.task.acknowledge"),
-  args: z.strictObject({ task: idOf("task"), round: z.number().int().positive() }),
-});
-
 export const WorkCommand = z.discriminatedUnion("op", [
-  WorkProjectCreate, WorkProjectUpdate, WorkTaskCreate, WorkTaskUpdate, WorkTaskComment, WorkTaskDispatch, WorkTaskAcknowledge,
+  WorkProjectCreate, WorkProjectUpdate, WorkTaskCreate, WorkTaskUpdate, WorkTaskComment, WorkTaskDispatch,
   WorkTaskHand, WorkTaskFinish, WorkTaskReopen, WorkTaskPlanSet, WorkTaskCheckpoint, PlanTemplateSave, PlanTemplateDelete,
 ]);
 
@@ -465,6 +407,4 @@ export type TaskOutcome = z.infer<typeof TaskOutcome>;
 export type TurnHolder = z.infer<typeof TurnHolder>;
 export type TurnReason = z.infer<typeof TurnReason>;
 export type Turn = z.infer<typeof Turn>;
-export type WorkTaskV3 = z.infer<typeof WorkTaskV3>;
 export type TaskTurnChange = z.infer<typeof TaskTurnChange>;
-export type WorkTaskDetailV3 = z.infer<typeof WorkTaskDetailV3>;

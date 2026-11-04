@@ -1,3 +1,4 @@
+import { taskStatus, taskHolder } from "./task-compat.ts";
 /**
  * 命令构造（ADR 0026）：纯函数，便于用 @lumio/schema 做契约测试。
  *
@@ -12,17 +13,17 @@ export function newRequestId(prefix = "web"): string {
   return `${prefix}-${Date.now().toString(36)}-${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`;
 }
 
-export interface TaskFieldsDraft { title: string; status: WorkTask["status"]; assignee: string; project: string }
+export interface TaskFieldsDraft { title: string; status: import("@lumio/schema").TaskStatus; assignee: string; project: string }
 
 /** 只包含有变化的结构化字段；没有变化时返回 undefined。 */
 export function taskFieldsCommand(task: WorkTask, draft: TaskFieldsDraft, requestId = newRequestId()): WorkCommandRequest | undefined {
   const patch: Record<string, unknown> = {};
   if (draft.title.trim() && draft.title.trim() !== task.title) patch.title = draft.title.trim();
-  if (draft.status !== task.status) patch.status = draft.status;
-  if (draft.assignee !== task.assignee) patch.assignee = draft.assignee;
+  if (draft.status !== taskStatus(task)) patch.status = draft.status;
+  if (draft.assignee !== taskHolder(task)) patch.assignee = draft.assignee;
   if (draft.project !== (task.project ?? "")) patch.project = draft.project || null;
   if (!Object.keys(patch).length) return undefined;
-  return { request_id: requestId, operation: { op: "work.task.update", args: { task: task.id, expected_revision: task.revision, patch } } } as WorkCommandRequest;
+  return workPatchCommand(task, patch, requestId);
 }
 
 export function taskDescriptionCommand(task: Pick<WorkTask, "id" | "revision" | "description">, description: string, requestId = newRequestId()): WorkCommandRequest | undefined {
@@ -48,6 +49,16 @@ export function projectDescriptionCommand(project: WorkProject, description: str
  * 值与当前相同（null 与缺省视为相同）时返回 undefined，不发请求。
  */
 export function workPatchCommand(record: WorkTask | WorkProject, patch: Record<string, unknown>, requestId = newRequestId()): WorkCommandRequest | undefined {
+  if (record.type === "task" && ("status" in patch || "assignee" in patch)) {
+    const base = { task: record.id, expected_revision: record.revision };
+    const status = patch.status;
+    if (status === taskStatus(record) && !("assignee" in patch)) return;
+    if (status === "done" || status === "cancelled") return { request_id: requestId, operation: { op: "work.task.finish", args: { ...base, outcome: status } } };
+    if (record.outcome !== "open") return { request_id: requestId, operation: { op: "work.task.reopen", args: base } };
+    const to = patch.assignee ?? (status === "paused" ? "nobody" : status === "waiting" ? "external" : "human");
+    if (to !== "human" && to !== "external" && to !== "nobody") throw new Error(t("Choose an agent to dispatch to"));
+    return { request_id: requestId, operation: { op: "work.task.hand", args: { ...base, to, ...(to === "external" ? { note: "Waiting" } : {}) } } };
+  }
   const changed: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(patch)) {
     const current = (record as Record<string, unknown>)[key] ?? null;
@@ -85,8 +96,8 @@ export function answerCommand(task: Pick<WorkTask, "id" | "revision">, target: s
 }
 
 /** 已查看某一轮（ADR 0030）：不改任务状态。 */
-export function acknowledgeCommand(task: string, round: number, requestId = newRequestId()): WorkCommandRequest {
-  return { request_id: requestId, operation: { op: "work.task.acknowledge", args: { task, round } } };
+export function acknowledgeCommand(task: string, revision: number, requestId = newRequestId()): WorkCommandRequest {
+  return { request_id: requestId, operation: { op: "work.task.hand", args: { task, expected_revision: revision, to: "human" } } };
 }
 
 /** 执行器登记的引擎 → 可选目标 engine@device。 */

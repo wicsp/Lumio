@@ -1,5 +1,5 @@
 import { text as msg } from "./messages.ts";
-import { AGENT_SETTABLE_TASK_STATUSES, type Actor } from "@lumio/schema";
+import { type Actor } from "@lumio/schema";
 
 export const PAIRING_OPERATIONS = ["runtime.invite", "runtime.join", "client.invite", "client.join", "runtime.remove", "runtime.signing-key"] as const;
 export type PairingOperation = typeof PAIRING_OPERATIONS[number];
@@ -65,13 +65,12 @@ const LOW_RISK_WRITES = ["work.task.create", "work.task.update", "work.task.comm
 /** Argument-sensitive rules share the same decision point for HTTP and in-process tools. */
 function agentCommand(operation: string, args: Record<string, unknown> = {}): Decision {
   let reason: string | undefined;
-  const status = operation === "work.task.create" ? args.status : (args.patch as Record<string, unknown> | undefined)?.status;
-  if (operation.startsWith("work.task.") && status !== undefined && !(AGENT_SETTABLE_TASK_STATUSES as readonly unknown[]).includes(status)) reason = "agent-cannot-set-terminal-task-status";
-  else if (operation.endsWith(".dispatch") || operation === "job.submit") reason = "agent-cannot-dispatch-tasks";
+  if (operation === "work.task.dispatch" || operation === "work.task.plan.set") return { result: "needs_approval" };
+  if (operation === "work.task.hand") return args.to === "human" || args.to === "external" ? { result: "allow" } : { result: "deny", reason: "agent-cannot-hand-to-nobody" };
+  if (operation.endsWith(".dispatch") || operation === "job.submit") reason = "agent-cannot-dispatch-tasks";
   else if (operation.includes("routine")) reason = "agent-cannot-change-routines";
   else if (operation.startsWith("proposal.") || operation.startsWith("approval.proposal.")) reason = "agent-cannot-decide-proposals";
   else if (/\.(delete|archive|cancel)$/.test(operation)) reason = "agent-cannot-delete-or-archive";
-  else if (operation === "work.task.acknowledge") reason = "agent-cannot-acknowledge-rounds";
   else if (!LOW_RISK_WRITES.includes(operation)) reason = "agent-operation-not-allowed";
   return reason ? { result: "deny", reason } : { result: "allow" };
 }

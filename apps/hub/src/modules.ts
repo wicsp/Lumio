@@ -1,3 +1,4 @@
+import { WorkCommands } from "./work-commands.ts";
 import { text as msg } from "./messages.ts";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { join } from "node:path";
@@ -21,6 +22,7 @@ import { workdirInVault } from "./execution-policy.ts";
 export class BusinessModules {
   readonly workStore: SqliteWorkStore;
   readonly work: WorkService;
+  readonly workCommands: WorkCommands;
   readonly assistant: AssistantService;
   readonly capabilities: Capabilities;
   assistantConfig!: AssistantConfiguration;
@@ -51,7 +53,7 @@ export class BusinessModules {
       },
     });
     this.workStore = new SqliteWorkStore(store.db);
-    this.work = new WorkService(this.workStore, { text: msg, now, id,
+    this.work = new WorkService(this.workStore, { text: msg, now, id, systemActor: store.workActor().id, job: id => jobs.get(id),
       dispatch: (task, input, round, to) => this.dispatch(task, input, round, to, now()),
       agentForJob: jobId => {
         const job = jobs.get(jobId);
@@ -60,6 +62,7 @@ export class BusinessModules {
       },
       cancel: (task) => { const job = jobs.activeForTask(task); if (job) jobs.cancel(job.spec.id); },
     });
+    this.workCommands = new WorkCommands(store, this.work, options.authorize ?? authorize);
     this.capabilities = new Capabilities(this, store, config, options.authorize);
     this.assistantStore = new SqliteAssistantStore(store.db);
     this.assistant = new AssistantService(this.assistantStore, options.assistantModel ?? configuredModel(config.assistantModel),
@@ -83,7 +86,7 @@ export class BusinessModules {
     return outcome.result as WorkCommandResult;
   }
   private dispatch(task: WorkTask, input: string, round: number, to: string | undefined, now: Date) {
-    const target = parseAssignee(to ?? task.assignee);
+    const target = parseAssignee(to ?? "human");
     if (target === "human") throw new HubError("INVALID", { key: "modules.specify_an_agent_e_g_pi_server", args: [] });
     const runtime = this.store.runtimes(now).find((value) => value.registration.name === (target.device ?? this.config.localRuntime));
     if (!runtime) throw new HubError("INVALID", { key: "modules.the_specified_runtime_is_not_registered_pair_it_first", args: [] });

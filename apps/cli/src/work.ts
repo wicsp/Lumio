@@ -15,7 +15,7 @@ const options = {
   file: { type: "string" }, status: { type: "string" }, project: { type: "string" }, parent: { type: "string" },
   depends: { type: "string" }, due: { type: "string" }, workdir: { type: "string" }, model: { type: "string" },
   timeout: { type: "string" }, patch: { type: "string" }, revision: { type: "string" }, "request-id": { type: "string" },
-  comment: { type: "string" }, round: { type: "string" },
+  comment: { type: "string" }, turn: { type: "string" }, note: { type: "string" },
   goal: { type: "string" }, repo: { type: "string" }, deadline: { type: "string" },
 } as const;
 
@@ -24,10 +24,11 @@ export async function runWork(kind: "task" | "project", args: string[], log: (li
   if (kind === "task" && args.includes("--legacy")) return;
   const { values, positionals } = parseArgs({ args, allowPositionals: true, strict: true, options });
   const [action, reference, ...rest] = positionals;
-  if (!action || !["new", "create", "list", "show", "update", "edit", "status", "assign", "comment", "continue", "ack"].includes(action)) {
+  if (!action || !["new", "create", "list", "show", "update", "edit", "status", "assign", "comment", "continue", "hand", "finish", "cancel", "reopen", "ack"].includes(action)) {
     if (kind === "task") return;
     throw new Error(usage());
   }
+  if (kind === "task" && ["status", "assign", "ack"].includes(action)) throw new Error(msg("work.use_turn_commands"));
   const client = createClient({ ...hubCredentials(), language: language() });
   const emit = (value: unknown) => log(values.json ? JSON.stringify(value) : typeof value === "string" ? value : JSON.stringify(value, null, 2));
   const send = async (op: string, payload: Record<string, unknown>): Promise<WorkCommandResult> => client.workCommand(WorkCommandRequest.parse({
@@ -42,16 +43,26 @@ export async function runWork(kind: "task" | "project", args: string[], log: (li
         if (values.json) emit(projects); else for (const project of projects) log(`${project.id}  ${project.status}  ${project.title}`);
       } else {
         const tasks = await client.workTasks({ project: values.project, status: values.status, query: values.query });
-        if (values.json) emit(tasks); else for (const task of tasks) log(`${task.id}  ${task.status}  ${task.assignee}  ${task.title}`);
+        const groups = ["me", "agents", "external", "hold"] as const;
+        if (values.turn && !groups.includes(values.turn as typeof groups[number])) throw new Error(msg("work.invalid_turn"));
+        const group = (task: typeof tasks[number]) => task.turn.holder === "human" ? "me" : task.turn.holder === "external" ? "external" : task.turn.holder === "nobody" ? "hold" : "agents";
+        const filtered = tasks.filter(task => !values.turn || group(task) === values.turn);
+        if (values.json) emit(filtered); else for (const key of groups) {
+          const rows = filtered.filter(task => group(task) === key);
+          if (!rows.length) continue;
+          log(msg(`work.turn.${key}`));
+          for (const task of rows) log(`${task.id}  ${task.outcome}  ${task.turn.holder} (${task.turn.reason})  ${task.title}`);
+        }
       }
       return 0;
     }
     if (!reference) throw new Error(usage());
     if (action === "new" || action === "create") {
       if (rest.length) throw new Error(msg("work.quote_titles_containing_spaces"));
+      if (kind === "task" && (values.to || values.status)) throw new Error(msg("work.use_turn_commands"));
       const description = values.file ? await readFile(values.file, "utf8") : values.description;
       const fields = kind === "project" ? { goal: values.goal, repo: values.repo, deadline: values.deadline }
-        : { assignee: values.to, status: values.status, project: values.project, parent: values.parent,
+        : { project: values.project, parent: values.parent,
           dependencies: values.depends?.split(",").filter(Boolean), due: values.due, workdir: values.workdir, model: values.model,
           timeout_minutes: values.timeout === undefined ? undefined : Number(values.timeout) };
       const result = await send(`work.${kind}.create`, { title: reference, description, ...fields });
@@ -63,16 +74,19 @@ export async function runWork(kind: "task" | "project", args: string[], log: (li
     resolved = true;
     if (action === "show") {
       const detail = kind === "task" ? await client.workTask(reference) : current;
-      if (values.json) emit(detail); else log(`${current.id}  ${current.status}  ${current.title}\n\n${current.description}${kind === "task" ? `\n\n${JSON.stringify(detail, null, 2)}` : ""}`);
+      if (values.json) emit(detail); else log(`${current.id}  ${current.type === "task" ? `${current.outcome} / ${current.turn.holder} (${current.turn.reason})` : current.status}  ${current.title}\n\n${current.description}${kind === "task" ? `\n\n${JSON.stringify(detail, null, 2)}` : ""}`);
       return 0;
     }
     if (action === "continue" && kind === "task") {
-      const result = await send("work.task.dispatch", { task: reference, to: values.to, comment: values.comment, expected_revision: current.revision });
-      if (values.json) emit(result.kind === "job" ? result.job : result); else if (result.kind === "job") log(msg("work.dispatched", result.job.spec.id));
+      const result = await send("work.task.dispatch", { task: reference, to: values.to, comment: values.comment, expected_revision: values.revision === undefined ? current.revision : Number(values.revision) });
+      if (values.json) emit(result.kind === "job" ? result.job : result); else if (result.kind === "job") log(msg("work.dispatched", result.job.spec.id)); else emit(result);
       return 0;
     }
-    if (action === "ack" && kind === "task") {
-      emit(await send("work.task.acknowledge", { task: reference, round: Number(values.round) })); return 0;
+    if (["hand", "finish", "cancel", "reopen"].includes(action) && kind === "task") {
+      const payload = { task: reference, expected_revision: values.revision === undefined ? current.revision : Number(values.revision) };
+      emit(await send(action === "hand" ? "work.task.hand" : action === "reopen" ? "work.task.reopen" : "work.task.finish",
+        { ...payload, ...(action === "hand" ? { to: values.to, note: values.note } : action === "reopen" ? {} : { outcome: action === "finish" ? "done" : "cancelled" }) }));
+      return 0;
     }
     if (action === "comment" && kind === "task") {
       const body = values.file ? await readFile(values.file, "utf8") : rest.join(" ");
@@ -104,7 +118,6 @@ export async function runWork(kind: "task" | "project", args: string[], log: (li
     } else if (values.patch) {
       try { patch = JSON.parse(values.patch); } catch { throw new Error(msg("execution-routines.patch_must_be_a_json_object")); }
     } else if (action === "status") patch = { status: values.status ?? rest[0] };
-    else if (action === "assign" && kind === "task") patch = { assignee: values.to ?? rest[0] };
     else throw new Error(msg("work.use_patch_to_update_use_edit_for_text_status_for_status_and_assign_f"));
     const result = await send(`work.${kind}.update`, { [kind]: reference, expected_revision: values.revision === undefined ? current.revision : Number(values.revision), patch });
     emit(result); return 0;

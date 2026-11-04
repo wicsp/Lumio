@@ -21,9 +21,10 @@ Always add `--json`. Each successful command returns one JSON value matching its
 
 ## Boundaries
 
-- You may create tasks and projects, update their fields and comment on tasks. Creating or changing an assignee never dispatches work.
-- Task status may only be `todo`, `active`, `waiting` or `paused`. Only the user can mark a task `done` or `cancelled`.
-- Never dispatch tasks, create or modify routines, approve or reject proposals, delete or archive records, or acknowledge rounds for the user.
+- Tasks have an outcome and a turn: there is no status or assignee. New tasks start with the human's todo turn.
+- You may create tasks and projects, update fields, comment, and hand tasks to the human or to external waiting (with a note). You cannot hand a task to nobody.
+- Delegation (`task continue`) and setting a handoff plan only create proposals for the user to approve. They never start work without approval. Keep the original request ID; changed revisions require a new proposal.
+- Only the user decides completion, cancellation, reopening, checkpoints and plan templates. Do not create or modify routines, approve or reject proposals, delete or archive records.
 - Never read private content or use `--include-private`. Never bypass a denial by reading files or using another credential.
 - Never edit, rename or move vault files or write links on the user's behalf. Recommend links and let the user decide.
 - On failure, read `error.code` and `error.reason` and explain them. Do not work around the Hub's decision.

@@ -42,7 +42,7 @@ test("legacy import preserves IDs, exact bytes, unknown fields, body, source map
   const plan = await f.migration.plan(); expect(MigrationPlan.safeParse(plan).success).toBe(true); expect(plan.entries).toHaveLength(3); expect(plan.problems).toEqual([]);
   await backupBusiness(f.state, f.backup); await f.migration.apply(plan, f.backup, true); await expect(f.migration.apply(plan, f.backup, true)).rejects.toThrow("CONFLICT");
   const store = new SqliteWorkStore(f.db), current = store.task(task)!;
-  expect(current.id).toBe(task); expect(current.assignee).toBe("pi@server"); expect(current.description).toContain("人写的正文与 [[旧链接]]"); expect(current.description).toContain("旧汇报");
+  expect(current.id).toBe(task); expect(current.turn.holder).toBe("human"); expect(current.description).toContain("人写的正文与 [[旧链接]]"); expect(current.description).toContain("旧汇报");
   expect(f.migration.source(task).bytes).toEqual(original); expect(await readFile(join(f.vault, t))).toEqual(original);
   expect(isMigratedSource(f.db, t)).toBe(true); expect(f.migration.sources()).toHaveLength(3); expect((await f.migration.plan()).entries).toEqual([]);
   expect(store.executions(task).map((execution) => [execution.round, execution.applied, execution.input_snapshot])).toEqual([[2, true, "第 2 轮的真实历史输入"], [5, true, "第 5 轮的真实历史输入"]]);
@@ -52,7 +52,7 @@ test("legacy import preserves IDs, exact bytes, unknown fields, body, source map
   const work = new WorkService(store, { now: () => new Date(time), id: (prefix) => `${prefix}_${"9".padStart(26, "0")}`, dispatch: (_task, _input, round) => {
     nextRound = round; return Job.parse({ spec: { protocol_version: 2, id: "job_00000000000000000000000009", runtime: actor, lease: "synthetic-lease-0123456789", created: time, source: { task, round }, run: { kind: "agent", engine: "pi", prompt: "new input" }, workdir: "~", timeout_seconds: 60 }, status: "queued" });
   } });
-  work.command({ request_id: "synthetic-after-import", operation: { op: "work.task.dispatch", args: { task } } }, actor); expect(nextRound).toBe(6);
+  work.command({ request_id: "synthetic-after-import", operation: { op: "work.task.dispatch", args: { task, to: "pi@server" } } }, actor); expect(nextRound).toBe(6);
   const restored = join(f.root, "restored"); await restoreBusiness(f.backup, restored);
   const old = new Database(join(restored, "hub.sqlite"), { readonly: true });
   try { expect(old.query("SELECT name FROM sqlite_master WHERE name='migration_sources'").get()).toBeNull(); expect(old.query("SELECT * FROM jobs ORDER BY id").all()).toEqual(jobs); } finally { old.close(); }

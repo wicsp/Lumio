@@ -105,21 +105,20 @@ describe("Work contracts", () => {
 
   test("WorkTask requires task_… id and validates self-references", () => {
     const task = WorkTask.parse({
-      schema_version: 2,
+      schema_version: 3,
       type: "task",
       id: `task_${U}`,
       title: "Write schemas",
       description: "Contracts for v2.",
       revision: 2,
-      status: "active",
-      assignee: "human",
+      outcome: "open", turn: { holder: "human", reason: "todo", since: now },
       created: now,
       updated: now,
       tags: [],
       dependencies: [],
       references: [],
     });
-    expect(task.assignee).toBe("human");
+    expect(task.turn.holder).toBe("human");
     // 自己依赖自己拒绝
     expect(WorkTask.safeParse({ ...task, dependencies: [`task_${U}`] }).success).toBe(false);
     expect(WorkTask.safeParse({ ...task, parent: `task_${U}` }).success).toBe(false);
@@ -130,7 +129,7 @@ describe("Work contracts", () => {
 
   test("WorkTaskPatch validates non-empty and description alone", () => {
     expect(WorkTaskPatch.parse({ title: "New title" }).title).toBe("New title");
-    expect(WorkTaskPatch.parse({ status: "done" }).status).toBe("done");
+    expect(WorkTaskPatch.safeParse({ status: "done" }).success).toBe(false);
     // null 清空
     expect(WorkTaskPatch.parse({ due: null }).due).toBeNull();
     // 空 patch 拒绝
@@ -175,14 +174,13 @@ describe("Work contracts", () => {
   test("WorkTaskDetail aggregates", () => {
     const detail = WorkTaskDetail.parse({
       task: {
-        schema_version: 2,
+        schema_version: 3,
         type: "task",
         id: `task_${U}`,
         title: "Test",
         description: "",
         revision: 1,
-        status: "todo",
-        assignee: "human",
+        outcome: "open", turn: { holder: "human", reason: "todo", since: now },
         created: now,
         updated: now,
         tags: [],
@@ -190,7 +188,7 @@ describe("Work contracts", () => {
         references: [],
       },
       comments: [],
-      executions: [],
+      executions: [], turns: [],
     });
     expect(detail.comments).toHaveLength(0);
   });
@@ -206,7 +204,7 @@ describe("Work contracts", () => {
       request_id: "req_update_001_xyz",
       operation: {
         op: "work.task.update",
-        args: { task: `task_${U}`, expected_revision: 2, patch: { status: "done" } },
+        args: { task: `task_${U}`, expected_revision: 2, patch: { title: "Updated title" } },
       },
     });
     if (update.operation.op === "work.task.update") {

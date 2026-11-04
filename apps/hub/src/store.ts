@@ -3,12 +3,12 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { chmod, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { newId } from "@lumio/foundation";
-import { AgentInfo, AgentTokenIssued, JobAccess, type JobSpec, Actor, Proposal, type Operation, type ProposalStatus, type ActorRole, RuntimeRegistration, RuntimeInfo } from "@lumio/schema";
+import { AgentInfo, AgentTokenIssued, JobAccess, type JobSpec, Actor, Proposal, type ProposalOperation, type ProposalStatus, type ActorRole, RuntimeRegistration, RuntimeInfo } from "@lumio/schema";
 import { HubError } from "./errors.ts";
 import { ExecutionRuntimes } from "@lumio/execution";
-import { SqliteRuntimeRegistry, SqliteExecutionStore } from "@lumio/storage";
+import { workSystemActor, SqliteRuntimeRegistry, SqliteExecutionStore } from "@lumio/storage";
 
-export interface Identity { actor: Actor; label: string }
+export interface Identity { actor: Actor; label: string; job?: string }
 export class HubStore {
   readonly executionStore: SqliteExecutionStore;
   private readonly runtimeRegistry: ExecutionRuntimes;
@@ -56,6 +56,9 @@ export class HubStore {
       this.db.query("INSERT INTO internal_actors(purpose,actor) VALUES('assistant-tools',?)").run(actor.id); return actor;
     })();
   }
+
+  /** Stable, tokenless identity for automatic Work hand-backs and migration. */
+  workActor(): Actor { return workSystemActor(this.db); }
 
   createActor(name: string, role: ActorRole): Actor {
     const now = new Date();
@@ -177,7 +180,8 @@ export class HubStore {
     if (!row || !equal || row.revoked !== null || !this.validAgentToken(row.label, now)) return null;
     this.db.query("UPDATE agent_tokens SET last_used=? WHERE label=?").run(now.toISOString(), row.label);
     const actor = Actor.parse(this.db.query("SELECT * FROM actors WHERE id=?").get(row.actor_id));
-    return { actor, label: row.label };
+    const access = this.db.query<{ job: string | null }, [string]>("SELECT job FROM agent_tokens WHERE label=?").get(row.label);
+    return { actor, label: row.label, ...(access?.job ? { job: access.job } : {}) };
   }
 
   auditDenied(identity: Identity, operation: string): void {
@@ -198,10 +202,10 @@ export class HubStore {
     return row ? Proposal.parse({ ...row, operation: JSON.parse(row.operation), decided: row.decided ?? undefined, decided_by: row.decided_by ?? undefined }) : undefined;
   }
 
-  createProposal(operation: Operation, reason: string, author: string): Proposal {
+  createProposal(operation: ProposalOperation, reason: string, author: string): Proposal {
     // 内容相同的待批准提议只保留一个（按完整操作比较，与操作种类无关）。
-    const duplicate = this.proposals("pending").find((p) => JSON.stringify(p.operation) === JSON.stringify(operation));
-    if (duplicate) throw new HubError("CONFLICT", { key: "store.an_identical_proposal_is_already_pending", args: [] }, { operation, proposal: duplicate.id });
+    const duplicate = this.proposals("pending").find((p) => p.author === author && JSON.stringify(p.operation) === JSON.stringify(operation));
+    if (duplicate) throw new HubError("CONFLICT", { key: "store.an_identical_proposal_is_already_pending", args: [] }, { ...(operation.op !== "work.command" ? { operation } : {}), proposal: duplicate.id });
     const now = new Date();
     const proposal = Proposal.parse({ id: newId("prop", now, randomBytes), operation, reason, author, status: "pending", created: now.toISOString() });
     this.db.query("INSERT INTO proposals VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)")

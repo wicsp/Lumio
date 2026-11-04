@@ -1,3 +1,4 @@
+import { taskStatus, taskHolder, workStatus } from "../task-compat.ts";
 /**
  * 今日：先是需要你处理的事，再是今天要推进的任务，旁边是 agent 动态与项目进度。
  * 各区块独立加载失败；不在这里放统计大字。
@@ -53,11 +54,11 @@ export class OverviewPane {
 
     const now = new Date();
     const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() + DAY;
-    const open = taskData?.filter(task => task.status === "active" || task.status === "todo") ?? [];
+    const open = taskData?.filter(task => taskStatus(task) === "active" || taskStatus(task) === "todo") ?? [];
     const dueSoon = (task: WorkTask) => !!task.due && new Date(task.due).getTime() < endOfToday;
-    const focus = open.filter(task => task.status === "active" || dueSoon(task)).sort(byFocus);
+    const focus = open.filter(task => taskStatus(task) === "active" || dueSoon(task)).sort(byFocus);
     const next = open.filter(task => !focus.includes(task)).sort(byDue);
-    const waiting = taskData?.filter(task => task.status === "waiting") ?? [];
+    const waiting = taskData?.filter(task => taskStatus(task) === "waiting") ?? [];
     const running = jobData?.filter(job => LIVE.includes(job.status)) ?? [];
     // ADR 0030：Hub 按每个任务最新一轮给出需要处理的事；旧 Hub 没有接口时退回按 Job 状态显示（例行任务的轮次也走这里）。
     const attentionData = attention.status === "fulfilled" ? attention.value : undefined;
@@ -98,11 +99,11 @@ export class OverviewPane {
       const due = dueLabel(task.due);
       const project = projects.find(p => p.id === task.project)?.title;
       return h("button", { type: "button", class: "today-row", onclick: () => this.navigate("work", task.id) },
-        statusIcon(task.status),
+        statusIcon(taskStatus(task)),
         h("span", { class: "row-main" }, h("span", { class: "row-title" }, task.title),
-          (project || task.assignee !== "human") && h("span", { class: "row-sub" },
+          (project || taskHolder(task) !== "human") && h("span", { class: "row-sub" },
             project && h("span", { class: "project-chip" }, icon("folder"), project),
-            task.assignee !== "human" && h("span", { class: "who-chip" }, icon("bot"), task.assignee))),
+            taskHolder(task) !== "human" && h("span", { class: "who-chip" }, icon("bot"), taskHolder(task)))),
         due && h("span", { class: `due-tag${due.overdue ? " overdue" : due.soon ? " soon" : ""}` }, due.overdue ? t("Overdue · {0}", due.text) : due.text));
     }));
   }
@@ -150,8 +151,8 @@ export class OverviewPane {
     const open = projects.filter(p => p.status !== "done").slice(0, 5);
     if (!open.length) return h("p", { class: "today-empty" }, t("No active projects."));
     return h("div", { class: "today-rows" }, ...open.map(project => {
-      const related = tasks.filter(task => task.project === project.id && task.status !== "cancelled");
-      const done = related.filter(task => task.status === "done").length;
+      const related = tasks.filter(task => task.project === project.id && taskStatus(task) !== "cancelled");
+      const done = related.filter(task => taskStatus(task) === "done").length;
       const fill = h("span", { class: "progress-fill" });
       fill.style.width = `${related.length ? Math.round((done / related.length) * 100) : 0}%`;
       return h("button", { type: "button", class: "today-row project-row", onclick: () => this.navigate("work", project.id) },

@@ -6,7 +6,7 @@ const view = { base_url: "http://localhost/v1", model: "synthetic", api_key_set:
 const attention = [{ task: `task_${U}`, title: "Synthetic task", kind: "review" as const, job: `job_${U}`, round: 1, since: "2026-11-04T00:00:00Z" }];
 
 test("R3 config, attention, tool history and undo use the endpoint methods and result contracts", async () => {
-  const task = { schema_version: 2, type: "task", id: `task_${U}`, title: "Synthetic task", description: "", revision: 2, status: "todo", assignee: "human", tags: [], dependencies: [], references: [], created: "2026-11-04T00:00:00Z", updated: "2026-11-04T00:00:00Z" };
+  const task = { schema_version: 3, type: "task", id: `task_${U}`, title: "Synthetic task", description: "", revision: 2, outcome: "open", turn: { holder: "human", reason: "todo", since: "2026-11-04T00:00:00Z" }, tags: [], dependencies: [], references: [], created: "2026-11-04T00:00:00Z", updated: "2026-11-04T00:00:00Z" };
   const job = { spec: { id: `job_${U}`, protocol_version: 2, runtime: `act_${U}`, lease: "synthetic-job-lease", run: { kind: "command", argv: ["true"] }, workdir: "~", timeout_seconds: 60, created: "2026-11-04T00:00:00Z" }, status: "queued" };
   const cases: { path: string; method: string; result: unknown; body?: unknown; call(client: ReturnType<typeof createClient>): Promise<unknown> }[] = [
     { path: "/v2/execution/jobs", method: "GET", result: [], call: client => client.executionJobs({ task: undefined }) },

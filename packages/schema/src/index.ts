@@ -38,7 +38,7 @@ import { NotificationEvent, PushDevice, PushDeviceUpdate, PushPublicKey, PushSub
 import { ExecutionRoutine, ExecutionRoutineCommandRequest, ExecutionRoutineInfo } from "./execution.ts";
 import { BackupManifest, MigrationPlan, RunLogEvent, StoredArtifact } from "./storage.ts";
 import {
-  ResourceRef, TaskTurnChange, Turn, WorkAttention, WorkTaskDetailV3, WorkTaskV3, WorkComment, WorkCommandRequest, WorkCommandResult, WorkExecution, WorkProject, WorkTask, WorkTaskDetail,
+  ResourceRef, TaskTurnChange, Turn, WorkAttention, WorkComment, WorkCommandRequest, WorkCommandResult, WorkExecution, WorkProject, WorkTask, WorkTaskDetail,
 } from "./work.ts";
 import { ApiError, OperationRequest, OperationResult } from "./api.ts";
 import { Asset, Experiment, Idea, Paper, Post, Project, Routine, Source, Task } from "./entities.ts";
@@ -132,8 +132,6 @@ export const CONTRACTS = {
   "agent-info": AgentInfo,
   "agent-revoke-request": AgentRevokeRequest,
   // 任务模型 v3、交接计划与通知（ADR 0031、0032，R4-1、R4-1b）
-  "work-task-v3": WorkTaskV3,
-  "work-task-detail-v3": WorkTaskDetailV3,
   turn: Turn,
   "task-turn-change": TaskTurnChange,
   "handoff-plan": HandoffPlan,

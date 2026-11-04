@@ -64,7 +64,7 @@ export async function selftest(options: SelftestOptions): Promise<SelftestResult
           : msg("selftest.wait_120_seconds_before_replying_ok_you_may_run_a_sleep_command_that");
         if (!task) {
           const created = await send("work.task.create", { title: msg("selftest.lumio_selftest", engine, new Date(now()).toISOString()),
-            description: safety() + prompt, assignee: `${engine}@${runtime.registration.name}`, workdir: "~", timeout_minutes: Math.max(1, Math.ceil(timeout / 60_000)) });
+            description: safety() + prompt, workdir: "~", timeout_minutes: Math.max(1, Math.ceil(timeout / 60_000)) });
           if (created.kind !== "task") throw new SelftestError(msg("selftest.database_selftest_task_was_not_created"));
           task = created.task.id;
         } else {
@@ -72,7 +72,7 @@ export async function selftest(options: SelftestOptions): Promise<SelftestResult
           await send("work.task.update", { task, expected_revision: current.task.revision, patch: { description: safety() + prompt } });
         }
         const current = await client.workTask(task);
-        const dispatched = await send("work.task.dispatch", { task, expected_revision: current.task.revision });
+        const dispatched = await send("work.task.dispatch", { to: `${engine}@${runtime.registration.name}`, task, expected_revision: current.task.revision });
         if (dispatched.kind !== "job") throw new SelftestError(msg("selftest.database_dispatch_job_was_not_received"));
         const job = dispatched.job; id = job.spec.id;
         if (step === msg("selftest.resume_session") && (job.spec.run.kind !== "agent" || !job.spec.run.session?.resume || job.spec.run.session.id !== session)) throw new SelftestError(msg("selftest.round_2_did_not_resume_the_original_session"));
@@ -105,7 +105,7 @@ export async function selftest(options: SelftestOptions): Promise<SelftestResult
     if (task) {
       try {
         const current = await client.workTask(task);
-        await send("work.task.update", { task, expected_revision: current.task.revision, patch: { status: "done" } });
+        await send("work.task.finish", { task, expected_revision: current.task.revision, outcome: "done" });
       } catch { record({ name: msg("selftest.selftest_task_cleanup", engine), ok: false, elapsed_ms: now() - started, problem: msg("selftest.could_not_mark_database_selftest_task_as_done"), fix: msg("selftest.after_checking_run_lumio_task_status_done", task) }); }
     }
   }

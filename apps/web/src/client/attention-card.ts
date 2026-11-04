@@ -84,7 +84,7 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
 
   const seen = h("button", { type: "button", class: "btn btn-quiet btn-small", title: t("Clear this reminder without changing the task") }, t("Seen"));
   seen.addEventListener("click", () => void run(async () => {
-    await ctx.client.workCommand(acknowledgeCommand(item.task, item.round));
+    await ctx.client.workCommand(acknowledgeCommand(item.task, (await ctx.client.workTask(item.task)).task.revision));
     return t("Marked as seen.");
   }));
 

@@ -51,7 +51,7 @@ export async function runExecutionRoutines(args: string[], log: (line: string) =
       const sensitive = textContainsCardNumber(report) || /\b(?:sk-|gh[pousr]_|github_pat_|AKIA|xox[abprs]-|lumio_)[A-Za-z0-9_-]{16,}|-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(report);
       const { workdir, model, gpus, timeout_minutes } = current;
       emit(await client.workCommand(WorkCommandRequest.parse({ request_id: request, operation: { op: "work.task.create", args: {
-        title: msg("execution-routines.followup", current.title, local(job.spec.source!.fired_at!)), assignee: "human", workdir, model, gpus, timeout_minutes,
+        title: msg("execution-routines.followup", current.title, local(job.spec.source!.fired_at!)), workdir, model, gpus, timeout_minutes,
         description: msg("execution-routines.source_run_result", values.description ?? msg("execution-routines.write_your_followup_here"), sensitive ? msg("execution-routines.report_may_contain_sensitive_information_use_lumio_job_show_to_view") : report.slice(0, 20_000)),
         references: [{ module: "execution", id: current.id }, { module: "execution", id: job.spec.id }],
       } } }))); return 0;

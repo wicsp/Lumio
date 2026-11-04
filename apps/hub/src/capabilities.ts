@@ -1,4 +1,5 @@
-import { capability, CAPABILITIES, toolName, WorkCommandRequest, WorkAttention, type CapabilityChange, type CapabilityNameOf } from "@lumio/schema";
+import type { WorkCommands } from "./work-commands.ts";
+import { capability, RESPONSE_REASONS, CAPABILITIES, toolName, WorkCommandRequest, WorkAttention, type CapabilityChange, type CapabilityNameOf } from "@lumio/schema";
 import type { AssistantTool } from "@lumio/assistant";
 import { KnowledgeService } from "@lumio/knowledge";
 import { FileKnowledgeRepository } from "@lumio/storage";
@@ -11,7 +12,7 @@ import { Jobs } from "./jobs.ts";
 import { HubError } from "./errors.ts";
 import { text as msg } from "./messages.ts";
 
-interface CapabilityModules { work: WorkService; routines: ExecutionRoutines }
+interface CapabilityModules { workCommands: WorkCommands; work: WorkService; routines: ExecutionRoutines }
 
 export interface CapabilityResult { result: unknown; change?: CapabilityChange; private_read?: boolean }
 
@@ -62,7 +63,7 @@ export class Capabilities {
           const current = name === "work.task.update" ? this.modules.work.task(String(args.task)) : this.modules.work.project(String(args.project));
           before = Object.fromEntries(Object.keys(args.patch as object).map(key => [key, (current as unknown as Record<string, unknown>)[key] ?? null]));
         }
-        const result = this.modules.work.command(input.data, identity.actor.id);
+        const result = this.modules.workCommands.execute(input.data, identity);
         const entity = result.kind === "task" ? result.task : result.kind === "project" ? result.project : undefined;
         const change: CapabilityChange = { capability: name, target: entity?.id ?? (result.kind === "comment" ? result.comment.task : ""),
           ...(before ? { before } : {}), ...(entity ? { after_revision: entity.revision } : {}) };
@@ -100,7 +101,7 @@ export class Capabilities {
         }
         case "execution.job.show": result = jobs.get(String(args.job)); break;
         case "execution.routine.list": result = this.modules.routines.list(); break;
-        case "approval.proposal.list": result = this.store.proposals("pending"); break;
+        case "approval.proposal.list": result = this.store.proposals("pending", identity.actor.role === "agent" ? identity.actor.id : undefined); break;
       }
     }
     return { result: def.result.parse(result), ...(privateRead ? { private_read: true } : {}) };
@@ -108,16 +109,13 @@ export class Capabilities {
   attention(): WorkAttention[] {
     const jobs = new Jobs(this.store);
     return this.modules.work.tasks().flatMap(task => {
-      if (["done", "cancelled", "paused"].includes(task.status)) return [];
-      const latest = this.modules.work.detail(task.id).executions.sort((a, b) => b.round - a.round)[0];
-      if (!latest?.applied || latest.acknowledged) return [];
-      const job = jobs.get(latest.job);
-      const kind = job.status === "waiting_for_human" ? "question" : job.status === "done" ? "review" : ["failed", "unknown"].includes(job.status) ? "failed" : undefined;
-      if (!kind || !job.result) return [];
+      if (task.outcome !== "open" || task.turn.holder !== "human" || !(RESPONSE_REASONS as readonly string[]).includes(task.turn.reason)) return [];
+      const kind = task.turn.reason === "answer" ? "question" : task.turn.reason === "review" ? "review" : "failed";
+      const job = jobs.get(task.turn.job!);
       const runtime = this.store.runtimes(new Date()).find(value => value.actor === job.spec.runtime)?.registration.name;
-      return [WorkAttention.parse({ task: task.id, title: task.title, kind, job: latest.job, round: latest.round,
+      return [WorkAttention.parse({ task: task.id, title: task.title, kind, job: task.turn.job, round: task.turn.round,
         ...(job.spec.run.kind === "agent" ? { agent: `${job.spec.run.engine}${runtime ? `@${runtime}` : ""}` } : {}),
-        since: job.result.finished, ...(kind === "question" && job.result.question?.trim() ? { question: job.result.question } : {}), summary: (job.result.report || job.result.error || "").slice(0, 500) })];
+        since: task.turn.since, ...(kind === "question" && job.result?.question?.trim() ? { question: job.result?.question } : {}), summary: (job.result?.report || job.result?.error || "").slice(0, 500) })];
     });
   }
 }

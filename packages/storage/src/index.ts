@@ -10,3 +10,4 @@ export * from "./backup.ts";
 export * from "./lease.ts";
 export * from "./migration.ts";
 export * from "./runtimes.ts";
+export { migrateTaskModel, workSystemActor } from "./task-model.ts";
