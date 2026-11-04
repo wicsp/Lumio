@@ -181,6 +181,9 @@ export const AssistantConversationDetail = z.strictObject({
   conversation: AssistantConversation,
   messages: z.array(AssistantMessage),
   turns: z.array(AssistantTurn),
+  tool_calls: z.array(AssistantToolCall).optional().describe(
+    "这些轮次里的工具调用（ADR 0029）：界面据此在重新打开对话时显示读了什么、改了什么（变更卡片与撤回）。旧 Hub 缺失",
+  ),
 });
 
 /** 聊天结果：新建或更新的对话、这一轮的 turn 和新增的消息。 */
