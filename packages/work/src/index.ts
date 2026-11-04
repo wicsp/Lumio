@@ -168,7 +168,12 @@ export class WorkService {
           const comment = WorkComment.parse({ id: this.context.id("wmsg"), task: operation.args.task, author: actor, body: operation.args.body, created: time });
           this.store.putComment(comment); result = { kind: "comment", comment }; break;
         }
+        case "work.task.acknowledge":
+          // Contract from ADR 0030; implemented in R3-2. Until then it is refused rather than silently ignored.
+          throw new WorkError("INVALID", { key: "index.invalid_work_command_parameters", args: [] });
         case "work.task.dispatch": {
+          // ADR 0030 "answer and continue" is implemented in R3-2; refuse rather than drop the comment.
+          if (operation.args.comment !== undefined) throw new WorkError("INVALID", { key: "index.invalid_work_command_parameters", args: [] });
           const task = this.task(operation.args.task);
           if (operation.args.expected_revision !== undefined && task.revision !== operation.args.expected_revision) throw new WorkError("CONFLICT", { key: "index.task_changed_reload_before_dispatching", args: [] });
           if (["done", "cancelled", "paused"].includes(task.status)) throw new WorkError("CONFLICT", { key: "index.task_is_done_cancelled_or_paused", args: [] });

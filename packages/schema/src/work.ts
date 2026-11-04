@@ -62,6 +62,8 @@ export const WorkProject = z.strictObject({
   status: ProjectStatus,
   created: Timestamp,
   updated: Timestamp,
+  created_by: idOf("act").optional().describe("创建者身份；R3 之前的数据缺失"),
+  updated_by: idOf("act").optional().describe("最近一次修改者身份（人或 agent，ADR 0029）；R3 之前的数据缺失"),
   tags: z.array(z.string()),
   goal: z.string().min(1).optional(),
   repo: z.string().min(1).optional().describe("关联代码仓库的路径或 URL"),
@@ -81,6 +83,8 @@ export const WorkTask = z
     assignee: TaskAssignee.describe("负责人；新建时缺省为 human。修改它不会派活"),
     created: Timestamp,
     updated: Timestamp,
+    created_by: idOf("act").optional().describe("创建者身份；R3 之前的数据缺失"),
+    updated_by: idOf("act").optional().describe("最近一次修改者身份（人或 agent，ADR 0029）；界面据此显示「由 codex@server」"),
     tags: z.array(z.string()),
     project: idOf("prj").optional(),
     parent: idOf("task").optional().describe("父任务"),
@@ -118,6 +122,8 @@ export const WorkExecution = z.strictObject({
   input_snapshot: z.string().describe("派出时交给执行的输入快照；之后改描述不影响它"),
   created: Timestamp,
   applied: z.boolean(),
+  acknowledged: z.strictObject({ at: Timestamp, by: idOf("act") }).optional()
+    .describe("人点了「已查看」：这一轮不再出现在需要处理的列表里（ADR 0030）；不改变任务状态"),
 });
 
 /** `GET` 单个任务的完整视图。 */
@@ -220,12 +226,44 @@ export const WorkTaskDispatch = z.strictObject({
     task: idOf("task"),
     to: AgentTarget.optional().describe("派给谁；缺省用任务的负责人（负责人是 human 时拒绝）"),
     expected_revision: Revision.optional().describe("给出时与当前 revision 不符则 CONFLICT，确保派出的是看到的版本"),
+    comment: z.string().min(1).optional().describe(
+      "回答并继续（ADR 0030）：先以调用者身份发表这条评论，再在同一事务里派出，下一轮的输入包含它；派出失败时评论也不保存",
+    ),
   }),
 });
 
+/** 人确认看过某一轮（等你验收、执行失败）而暂不处理（ADR 0030）。只有人能用；agent 一律拒绝。 */
+export const WorkTaskAcknowledge = z.strictObject({
+  op: z.literal("work.task.acknowledge"),
+  args: z.strictObject({ task: idOf("task"), round: z.number().int().positive() }),
+});
+
 export const WorkCommand = z.discriminatedUnion("op", [
-  WorkProjectCreate, WorkProjectUpdate, WorkTaskCreate, WorkTaskUpdate, WorkTaskComment, WorkTaskDispatch,
+  WorkProjectCreate, WorkProjectUpdate, WorkTaskCreate, WorkTaskUpdate, WorkTaskComment, WorkTaskDispatch, WorkTaskAcknowledge,
 ]);
+
+// ───────────────────────── 需要你处理（ADR 0030）─────────────────────────
+
+export const ATTENTION_KINDS = ["question", "review", "failed"] as const;
+export const AttentionKind = z.enum(ATTENTION_KINDS);
+
+/**
+ * `GET /v2/work/attention`：需要人处理的任务，由 Hub 按每个任务**最新一轮**计算，不存储。
+ * question：最新一轮在等回答；review：最新一轮正常结束，等人验收；failed：最新一轮失败或结果不明。
+ * 以下任一情况发生即不再出现：派出新一轮、任务变为 done / cancelled / paused、这一轮被标为已查看。
+ * 仍在运行或排队的轮次不出现；例行任务的轮次不在这里（没有任务）。
+ */
+export const WorkAttention = z.strictObject({
+  task: idOf("task"),
+  title: z.string().min(1).describe("任务标题"),
+  kind: AttentionKind,
+  job: idOf("job"),
+  round: z.number().int().positive(),
+  agent: AgentTarget.optional().describe("这一轮由谁执行；回答并继续时默认派给它"),
+  since: Timestamp.describe("这一轮结束的时间"),
+  question: z.string().min(1).optional().describe("kind 为 question 时 agent 的问题"),
+  summary: z.string().optional().describe("汇报或失败原因的开头部分（最多 500 字符）；完整内容见 Job"),
+});
 export const WORK_COMMAND_NAMES = WorkCommand.options.map((o) => o.shape.op.value);
 
 export const WorkCommandRequest = z.strictObject({
@@ -256,3 +294,5 @@ export type WorkCommand = z.infer<typeof WorkCommand>;
 export type WorkCommandName = WorkCommand["op"];
 export type WorkCommandRequest = z.infer<typeof WorkCommandRequest>;
 export type WorkCommandResult = z.infer<typeof WorkCommandResult>;
+export type AttentionKind = z.infer<typeof AttentionKind>;
+export type WorkAttention = z.infer<typeof WorkAttention>;

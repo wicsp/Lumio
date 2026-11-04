@@ -278,6 +278,8 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
 - Task/Project 描述在数据库中；状态、负责人、依赖、讨论、执行关联各有明确归属。修改负责人或保存描述不隐式派活。
 - 更新带 `expected_revision`；请求用 `request_id` 去重。派活在同一事务内保存 Job、Work 关联和请求回执；同一任务默认只有一轮待完成。
 - 运行结果作为 Work 进展追加一次，不自动把 Task 标成 done，不强制改变负责人。旧 v1 派活接口拒绝操作数据库任务。
+- 一轮里的提问与验收（ADR 0030，R3 实施中）：agent 用 `<lumio-question>` 提问并结束本轮；`/v2/work/attention` 按每个任务最新一轮给出等你回答 / 等你验收 / 执行失败，
+  派出新一轮、任务 done/cancelled/paused 或已查看（`work.task.acknowledge`，仅人）后消失；`work.task.dispatch` 可带 `comment`，回答与派出在同一事务。一轮成功不等于任务完成，由人标记。
 - 数据库 Routine 使用 `/v2/execution/routines` 与 `/v2/execution/commands`；计划在 Execution，独立于 Task 与知识目录。
   Runtime 继续使用 Job 协议 2，本地触发与 outbox 不变。已交付计划保留历史快照，旧结果按原 lease 匹配输入；心跳无 lease 时不猜测多份历史计划。
 - Work 派活与 Routine 修改的业务数据、请求回执和成功审计参加同一数据库事务；审计失败不交付半个派活。
@@ -393,5 +395,5 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
 | P3 | 飞书 Bot（派活、批准、通知）、审批模型、资产到期提醒、多维表格镜像；Chrome 插件入库论文 | |
 | R1 | v0.2 上线：一个程序 `lumio`、Hub 提供 Web 与 PWA、`assistant setup`、旧笔记退役与一条命令切换（ADR 0027，[R1-0](tasks/R1-0-v0.2-release.md)） | v0.2.0 已发布，作者 Mac 已切换（2026-11-03），人工验收进行中 |
 | R2 | v0.2.1：默认英文、中文环境用中文；终端进度与颜色；Web 主题与语言切换；升级不重复下载（ADR 0028，[R2-0](tasks/R2-0-language-terminal-theme.md)） | R2-1、R2-3 已合并，R2-2 进行中 |
-| R3 | 能力目录与 agent 访问：助手能查能改任务、Codex/pi 经 skill 接入、每轮凭据、模型在设置页配置（ADR 0029，[R3-0](tasks/R3-0-capabilities-agent-access.md)） | 契约起草中 |
+| R3 | 能力目录与 agent 访问：助手能查能改任务、Codex/pi 经 skill 接入、每轮凭据、模型在设置页配置（ADR 0029）；一轮里的提问与验收（ADR 0030）（[R3-0](tasks/R3-0-capabilities-agent-access.md)） | R3-1 契约已合并；R3-2 进行中 |
 | P4 | Web GUI 提前按用户要求实现（知识只读、项目任务、执行、助手、审批）；知识写入、Docker / Nix、SDK 与原生手机端后续规划 | Web 工作台已合并（#63、#64），其余未排期 |

@@ -50,10 +50,10 @@
 | [R2-2](R2-0-language-terminal-theme.md) | 命令行与 Hub 错误说明的中英文 | 后端（Codex） | R2-1 |
 | [R2-3](R2-0-language-terminal-theme.md) | Web 主题切换与中英文界面 | Claude | — |
 | R2-4 | 发布 v0.2.1 与验收 | 人类 + Claude | R2-1 至 R2-3 |
-| [R3-1](R3-0-capabilities-agent-access.md) | 契约：能力目录、助手配置接口、每轮访问凭据 | Claude 起草，人类批准 | — |
-| [R3-2](R3-0-capabilities-agent-access.md) | Hub：agent 权限、能力执行层、内置助手接上工具、模型配置接口 | 后端（Codex） | R3-1、R2-2 |
+| [R3-1](R3-0-capabilities-agent-access.md) ✅ | 契约：能力目录、助手配置接口、每轮访问凭据；提问与验收（ADR 0030） | Claude 起草，人类批准 | — |
+| [R3-2](R3-0-capabilities-agent-access.md) | Hub：agent 权限、能力执行层、内置助手接上工具、模型配置接口；需要你处理、回答并继续、已查看 | 后端（Codex） | R3-1、R2-2 |
 | [R3-3](R3-0-capabilities-agent-access.md) | 每轮凭据、`lumio agent`、`lumio skill install`、生成 SKILL.md | 后端（Codex） | R3-2 |
-| [R3-4](R3-0-capabilities-agent-access.md) | Web：模型配置、已连接的 agent、对话里的变更卡片与撤回 | Claude | R3-2 |
+| [R3-4](R3-0-capabilities-agent-access.md) | Web：模型配置、已连接的 agent、对话里的变更卡片与撤回；回答框与验收卡片 | Claude | R3-2 |
 | R3-5 | 验收 | 人类 + Claude | R3-1 至 R3-4 |
 
 P1 的设计决定见 ADR 0014、0016、0017、0018；P2 见 ADR 0019、0020、0021、0022 与修订后的 ADR 0005；契约见 `packages/schema/src/` 中的 `query.ts`、`actor.ts`、`operation.ts`、`proposal.ts`、`api.ts`。
