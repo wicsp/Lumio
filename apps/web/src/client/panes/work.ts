@@ -4,7 +4,7 @@
  */
 import type { WorkProject, WorkTask } from "@lumio/schema";
 import { TASK_STATUSES, PROJECT_STATUSES } from "@lumio/schema";
-import { errorText, isConflict, type Client } from "../api.ts";
+import { errorText, isConflict, type Client, type HubExtras } from "../api.ts";
 import { newRequestId, projectCreateCommand, taskCreateCommand, workPatchCommand } from "../commands.ts";
 import { autosize, clear, debounce, empty, failure, field, h, icon, loading, openDialog, openMenu, placeholder, select, statusIcon, toast } from "../dom.ts";
 import { dueLabel } from "../format.ts";
@@ -41,7 +41,7 @@ export class WorkPane {
   private active = true;
   private unbindKeys: () => void;
 
-  constructor(root: HTMLElement, private client: Client, initialId: string | undefined, private navigate: Navigate, private changed: () => void) {
+  constructor(root: HTMLElement, private client: Client, private hub: HubExtras, initialId: string | undefined, private navigate: Navigate, private changed: () => void) {
     this.statusButton.addEventListener("click", () => this.pickStatusFilter());
     this.projectButton.addEventListener("click", () => this.pickProjectFilter());
     this.query.addEventListener("input", debounce(() => void this.load(), 200));
@@ -222,7 +222,7 @@ export class WorkPane {
       const scroll = this.detail.scrollTop;
       this.editor?.dispose();
       clear(this.detail);
-      this.editor = new WorkEditor(this.detail, this.client, object, this.projects, {
+      this.editor = new WorkEditor(this.detail, this.client, this.hub, object, this.projects, {
         changed: () => { this.changed(); void this.load(); },
         reload: () => void this.open(id, true),
         back: () => { if (this.canLeave()) { this.detailGeneration++; this.editor?.dispose(); this.editor = undefined; this.selected = undefined; markSelected(this.list, undefined); this.showPlaceholder(); } },

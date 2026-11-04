@@ -2,6 +2,7 @@
  * 浏览器会话（ADR 0026）：请求会话持有令牌；保存与恢复由 App 负责。登出或 401 时中止所有未完成请求。
  */
 import { ApiClientError, createClient } from "@lumio/api-client";
+import { ApiError, AssistantConfigView, WorkAttention, type AssistantConfigUpdate } from "@lumio/schema";
 import { acceptLanguage, t } from "./i18n.ts";
 
 /**
@@ -21,6 +22,16 @@ export interface Session {
   readonly signal: AbortSignal;
   /** Hub 的 /health：设置页用来显示版本。 */
   health(): Promise<{ ok: boolean; version?: string }>;
+  /** ADR 0029/0030 的新接口；R3-2 合并后改用 api-client 的同名方法。 */
+  hub: HubExtras;
+}
+
+export interface HubExtras {
+  /** 需要你处理（ADR 0030）。旧 Hub 没有这个接口时返回 undefined，界面退回按 Job 显示。 */
+  attention(): Promise<WorkAttention[] | undefined>;
+  assistantConfig(): Promise<AssistantConfigView>;
+  saveAssistantConfig(update: AssistantConfigUpdate): Promise<AssistantConfigView>;
+  clearAssistantConfig(): Promise<AssistantConfigView>;
 }
 
 /** 返回绑定当前页面 API 地址（见 apiBase）的会话；任何 401 都调用 onUnauthorized。 */
@@ -46,7 +57,24 @@ export function createSession(token: string | undefined, onUnauthorized: () => v
     const body = await response.json() as { ok?: unknown; version?: unknown };
     return { ok: body.ok === true, ...(typeof body.version === "string" ? { version: body.version } : {}) };
   };
-  return { client, health, signal: controller.signal, close: () => {closed=true;controller.abort();} };
+  const call = async <T>(path: string, schema: { parse(value: unknown): T }, init: RequestInit = {}, missing?: () => T): Promise<T> => {
+    const response = await fetcher(`${apiBase()}${path}`, { ...init, headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(init.body ? { "Content-Type": "application/json" } : {}) } });
+    if (response.status === 404 && missing) return missing();
+    const body: unknown = await response.json().catch(() => undefined);
+    if (!response.ok) {
+      const parsed = ApiError.safeParse(body);
+      throw new ApiClientError(parsed.success ? parsed.data.error : { code: "INTERNAL", message: t("Something went wrong.") }, response.status);
+    }
+    return schema.parse(body);
+  };
+  const hub: HubExtras = {
+    attention: () => call("/v2/work/attention", { parse: (value) => WorkAttention.array().parse(value) as WorkAttention[] | undefined }, {}, () => undefined),
+    assistantConfig: () => call("/v2/assistant/config", AssistantConfigView),
+    saveAssistantConfig: (update) => call("/v2/assistant/config", AssistantConfigView, { method: "PUT", body: JSON.stringify(update) }),
+    clearAssistantConfig: () => call("/v2/assistant/config", AssistantConfigView, { method: "DELETE" }),
+  };
+  return { client, health, hub, signal: controller.signal, close: () => {closed=true;controller.abort();} };
 }
 
 const CODE_TEXT: Record<string, string> = {

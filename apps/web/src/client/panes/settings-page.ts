@@ -9,6 +9,7 @@ import { ago } from "../format.ts";
 import { lang, setLang, t, type Lang } from "../i18n.ts";
 import { onTheme, setTheme, themeChoice, type ThemeChoice } from "../theme.ts";
 import { LANGS, THEMES } from "../settings.ts";
+import { AssistantSettings } from "../assistant-settings.ts";
 
 const SOURCE = "https://github.com/wicsp/Lumio";
 
@@ -18,6 +19,7 @@ export class SettingsPane {
   private themeTiles = new Map<ThemeChoice, HTMLButtonElement>();
   private hubRows = h("div", { class: "set-rows" });
   private runtimeRows = h("div", { class: "set-rows" });
+  private assistant: AssistantSettings;
 
   constructor(owner: HTMLElement, private session: Session, private name: string, private logout: () => void, back: () => void) {
     const bar = h("header", { class: "bar set-bar" },
@@ -27,6 +29,7 @@ export class SettingsPane {
       this.profile(),
       this.group(t("Appearance"), t("Choose how Lumio looks on this device."), this.themes()),
       this.group(t("Language"), t("Used for menus, dates and messages from the Hub."), this.languages()),
+      this.group(t("Assistant model"), t("Any service with a Chat Completions-compatible API. Saving takes effect immediately."), (this.assistant = new AssistantSettings(session.hub)).element),
       this.group(t("Hub"), undefined, this.hubRows),
       this.group(t("Runtimes"), t("Machines that run agents for this Hub."), this.runtimeRows),
       this.group(t("About"), undefined, h("div", { class: "set-rows" },
@@ -43,7 +46,7 @@ export class SettingsPane {
     void this.loadRuntimes();
   }
 
-  dispose(): void { this.active = false; this.unbindTheme(); }
+  dispose(): void { this.active = false; this.unbindTheme(); this.assistant.dispose(); }
 
   private profile(): HTMLElement {
     return h("section", { class: "set-profile" },

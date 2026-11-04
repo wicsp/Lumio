@@ -78,6 +78,29 @@ export function dispatchCommand(task: Pick<WorkTask, "id" | "revision">, target:
   return { request_id: requestId, operation: { op: "work.task.dispatch", args: { task: task.id, to: target, expected_revision: task.revision } } };
 }
 
+/** 回答并继续（ADR 0030）：评论与派出在同一事务里提交；目标缺省为上一轮的 agent。 */
+export function answerCommand(task: Pick<WorkTask, "id" | "revision">, target: string | undefined, comment: string, requestId = newRequestId()): WorkCommandRequest {
+  return { request_id: requestId, operation: { op: "work.task.dispatch", args: {
+    task: task.id, ...(target ? { to: target } : {}), expected_revision: task.revision, comment: comment.trim() } } } as WorkCommandRequest;
+}
+
+/** 已查看某一轮（ADR 0030）：不改任务状态。 */
+export function acknowledgeCommand(task: string, round: number, requestId = newRequestId()): WorkCommandRequest {
+  return { request_id: requestId, operation: { op: "work.task.acknowledge", args: { task, round } } };
+}
+
+/**
+ * 撤回助手的一次修改（ADR 0029）：用记录的旧值作为 patch，带写入后的 revision；
+ * 之后有人改过就会 CONFLICT，不覆盖。新建与评论没有旧值，不能撤回。
+ */
+export function undoCommand(change: { capability: string; target: string; before?: Record<string, unknown>; after_revision?: number }, requestId = newRequestId()): WorkCommandRequest | undefined {
+  if (!change.before || !change.after_revision || !Object.keys(change.before).length) return undefined;
+  const patch = Object.fromEntries(Object.entries(change.before).map(([key, value]) => [key, value === undefined ? null : value]));
+  if (change.capability === "work.task.update") return { request_id: requestId, operation: { op: "work.task.update", args: { task: change.target, expected_revision: change.after_revision, patch } } } as WorkCommandRequest;
+  if (change.capability === "work.project.update") return { request_id: requestId, operation: { op: "work.project.update", args: { project: change.target, expected_revision: change.after_revision, patch } } } as WorkCommandRequest;
+  return undefined;
+}
+
 /** 执行器登记的引擎 → 可选目标 engine@device。 */
 export function engineTargets(runtimes: Array<{ online: boolean; registration: { name: string; engines: Array<{ name: string; version: string }> } }>) {
   return runtimes.flatMap((runtime) => runtime.registration.engines.map((engine) => ({

@@ -2,8 +2,9 @@
  * 今日：先是需要你处理的事，再是今天要推进的任务，旁边是 agent 动态与项目进度。
  * 各区块独立加载失败；不在这里放统计大字。
  */
-import type { Job, Proposal, WorkProject, WorkTask } from "@lumio/schema";
-import { errorText, type Client } from "../api.ts";
+import type { Job, Proposal, WorkAttention, WorkProject, WorkTask } from "@lumio/schema";
+import { errorText, type Client, type HubExtras } from "../api.ts";
+import { attentionCard } from "../attention-card.ts";
 import { formatTime } from "../commands.ts";
 import { clear, failure, h, icon, loading, statusIcon } from "../dom.ts";
 import { ago, dueLabel, jobTitle } from "../format.ts";
@@ -20,7 +21,7 @@ export class OverviewPane {
   private generation = 0;
   private active = true;
 
-  constructor(owner: HTMLElement, private client: Client, private navigate: Navigate, private name: string) {
+  constructor(owner: HTMLElement, private client: Client, private hub: HubExtras, private navigate: Navigate, private name: string, private changed: () => void = () => {}) {
     owner.append(h("div", { class: "today" }, this.body));
     clear(this.body, this.header(), loading(t("Gathering today's work…")));
     void this.load();
@@ -43,7 +44,7 @@ export class OverviewPane {
 
   private async load(): Promise<void> {
     const generation = ++this.generation;
-    const [tasks, projects, jobs, approvals] = await Promise.allSettled([this.client.workTasks(), this.client.workProjects(), this.client.jobs(), this.client.proposals("pending")]);
+    const [tasks, projects, jobs, approvals, attention] = await Promise.allSettled([this.client.workTasks(), this.client.workProjects(), this.client.jobs(), this.client.proposals("pending"), this.hub.attention()]);
     if (!this.active || generation !== this.generation) return;
     const taskData = tasks.status === "fulfilled" ? tasks.value : undefined;
     const projectData = projects.status === "fulfilled" ? projects.value : [];
@@ -58,7 +59,9 @@ export class OverviewPane {
     const next = open.filter(task => !focus.includes(task)).sort(byDue);
     const waiting = taskData?.filter(task => task.status === "waiting") ?? [];
     const running = jobData?.filter(job => LIVE.includes(job.status)) ?? [];
-    const attentionJobs = jobData?.filter(job => ATTENTION.includes(job.status)) ?? [];
+    // ADR 0030：Hub 按每个任务最新一轮给出需要处理的事；旧 Hub 没有接口时退回按 Job 状态显示（例行任务的轮次也走这里）。
+    const attentionData = attention.status === "fulfilled" ? attention.value : undefined;
+    const attentionJobs = jobData?.filter(job => ATTENTION.includes(job.status) && (!attentionData || !job.spec.source?.task)) ?? [];
 
     const parts = taskData ? [
       t(focus.length === 1 ? "{0} task for today" : "{0} tasks for today", focus.length),
@@ -70,7 +73,7 @@ export class OverviewPane {
       this.ask(),
       h("div", { class: "today-grid" },
         h("div", { class: "today-col" },
-          this.needsYou(approvalData, attentionJobs, approvals.status === "rejected" ? approvals.reason : undefined, taskData ?? []),
+          this.needsYou(approvalData, attentionJobs, approvals.status === "rejected" ? approvals.reason : undefined, taskData ?? [], attentionData ?? []),
           this.section(t("Today"), focus.length, () => this.navigate("work"),
             tasks.status === "rejected" ? failure(errorText(tasks.reason)) : this.taskList(focus, projectData, t("Nothing due today. Pick something from Up next."))),
           tasks.status === "fulfilled" && (next.length || !focus.length) ? this.section(t("Up next"), next.length, () => this.navigate("work"), this.taskList(next.slice(0, 6), projectData, t("Your to-do list is clear."))) : null,
@@ -104,9 +107,11 @@ export class OverviewPane {
     }));
   }
 
-  private needsYou(approvals: Proposal[] | undefined, jobs: Job[], error: unknown, tasks: WorkTask[]): HTMLElement | null {
+  private needsYou(approvals: Proposal[] | undefined, jobs: Job[], error: unknown, tasks: WorkTask[], rounds: WorkAttention[]): HTMLElement | null {
     if (error) return this.section(t("Needs you"), 0, undefined, failure(errorText(error)));
+    const context = { client: this.client, hub: this.hub, navigate: this.navigate, changed: () => { this.changed(); setTimeout(() => void this.load(), 1200); } };
     const cards = [
+      ...rounds.map(item => attentionCard(item, context, "today")),
       ...(approvals ?? []).map(p => this.needCard("approvals", "ochre",
         p.operation.op === "exec.privileged" ? p.operation.args.argv.join(" ") : p.operation.op, p.reason, t("Approval"), t("Review"), () => this.navigate("approvals"))),
       ...jobs.map(j => j.status === "waiting_for_human"
