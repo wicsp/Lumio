@@ -30,6 +30,12 @@ export class OverviewPane {
     void this.load();
   }
   dispose(): void { this.active = false; this.generation++; }
+  /** 静默刷新；卡片里正在输入或正在提交时不打断。 */
+  liveRefresh(): void {
+    const typing = [...this.body.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("textarea, input")].some(el => el.value.trim());
+    if (typing || this.body.querySelector(".is-busy")) return;
+    void this.load();
+  }
 
   private header(summary?: string): HTMLElement {
     const now = new Date();

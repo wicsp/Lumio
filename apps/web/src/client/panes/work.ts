@@ -71,6 +71,13 @@ export class WorkPane {
 
   dispose(): void { this.active = false; this.listGeneration++; this.detailGeneration++; this.editor?.dispose(); this.unbindKeys(); }
   get dirty(): boolean { return this.editor?.dirty ?? false; }
+  /** 静默刷新列表；详情只在没有未保存内容、焦点不在详情里时重新载入。 */
+  liveRefresh(): void {
+    void this.load();
+    const focused = (this.detail.contains(document.activeElement) && document.activeElement !== this.detail)
+      || [...this.detail.querySelectorAll("textarea")].some(area => area.value.trim());
+    if (this.selected && this.editor && !this.editor.dirty && !focused && !this.detail.querySelector(".is-busy")) void this.open(this.selected, true);
+  }
   canLeave(): boolean { return this.editor?.canLeave() ?? true; }
   intent(name: string): void {
     if (name === "new") { if (this.mode !== "tasks") this.switchMode("tasks"); this.create(); }
@@ -236,6 +243,7 @@ export class WorkPane {
         back: () => { if (this.canLeave()) { this.detailGeneration++; this.editor?.dispose(); this.editor = undefined; this.selected = undefined; markSelected(this.list, undefined); this.showPlaceholder(); } },
         navigate: this.navigate,
         openProject: projectId => this.switchMode("projects", projectId),
+        newTask: projectId => this.create("tasks", projectId),
       });
       if (quiet) this.detail.scrollTop = scroll;
     } catch (error) {
@@ -245,17 +253,20 @@ export class WorkPane {
 
   // ───────────── 新建 ─────────────
 
-  private create(): void {
-    const isTask = this.mode === "tasks";
+  /** kind 缺省跟随当前视图；从项目页新建任务时带 preset，创建后回到该项目。 */
+  private create(kind: Mode = this.mode, preset?: string): void {
+    const isTask = kind === "tasks";
     const title = h("input", { name: "title", required: true, placeholder: isTask ? t("What needs to get done?") : t("Project name"), autocomplete: "off" });
     const description = autosize(h("textarea", { name: "description", rows: "4", placeholder: isTask ? t("Background, approach or definition of done (optional, Markdown)") : t("Project background (optional, Markdown)") }));
     const goal = h("input", { name: "goal", placeholder: t("What should this phase achieve?"), autocomplete: "off" });
-    const project = select("project", [["", t("No project")], ...this.projects.filter(p => p.status !== "done").map(p => [p.id, p.title] as [string, string])], this.projectFilter);
+    const project = select("project", [["", t("No project")], ...this.projects.filter(p => p.status !== "done" || p.id === preset).map(p => [p.id, p.title] as [string, string])], preset ?? this.projectFilter);
+    const workdir = h("input", { name: "workdir", placeholder: t("~ (runtime's home directory)"), autocomplete: "off", spellcheck: "false" });
     const error = h("div", { class: "form-message", role: "alert" });
     const formId = `create-${newRequestId()}`;
     const form = h("form", { id: formId, class: "form-stack" },
       field(isTask ? t("Title") : t("Name"), title),
       isTask ? field(t("Project"), project) : field(t("Goal"), goal),
+      isTask ? null : field(t("Working directory"), workdir, t("Tasks in this project run here unless they set their own.")),
       field(t("Description"), description), error);
     const save = h("button", { type: "submit", form: formId, class: "btn btn-primary" }, isTask ? t("Create task") : t("Create project"), h("kbd", {}, "⌘↵"));
     const dialog = openDialog(isTask ? t("New task") : t("New project"), form, [save]);
@@ -266,19 +277,20 @@ export class WorkPane {
       if (pending) return;
       pending = true; save.disabled = true; clear(error);
       // 同样的内容重试时复用 request_id，Hub 据此去重；内容变了才换新的。
-      const key = JSON.stringify([title.value, description.value, project.value, goal.value]);
+      const key = JSON.stringify([title.value, description.value, project.value, goal.value, workdir.value]);
       if (prior && key !== prior) requestId = newRequestId();
       prior = key;
       try {
         const request = isTask
           ? taskCreateCommand({ title: title.value, description: description.value, project: project.value || undefined }, requestId)
-          : projectCreateCommand({ title: title.value, description: description.value, goal: goal.value }, requestId);
+          : projectCreateCommand({ title: title.value, description: description.value, goal: goal.value, workdir: workdir.value }, requestId);
         const result = await this.client.workCommand(request);
         if (!this.active) return;
         dialog.dataset.dirty = "false"; dialog.close();
         toast(isTask ? t("Task created") : t("Project created"));
         this.changed();
-        if (result.kind === "task" || result.kind === "project") { await this.load(); await this.open(result.kind === "task" ? result.task.id : result.project.id); }
+        if (preset && result.kind === "task") { await this.load(); await this.open(preset, true); }
+        else if (result.kind === "task" || result.kind === "project") { await this.load(); await this.open(result.kind === "task" ? result.task.id : result.project.id); }
       } catch (cause) {
         clear(error, failure(t("{0} Your input is kept; if the connection dropped, refresh the list to check whether it was created.", errorText(cause))));
       } finally { pending = false; save.disabled = false; }

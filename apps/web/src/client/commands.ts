@@ -51,9 +51,10 @@ export function taskCreateCommand(input: { title: string; description?: string; 
     title: input.title.trim(), ...(input.description ? { description: input.description } : {}), ...(input.project ? { project: input.project } : {}) } } };
 }
 
-export function projectCreateCommand(input: { title: string; description?: string; goal?: string }, requestId = newRequestId()): WorkCommandRequest {
+export function projectCreateCommand(input: { title: string; description?: string; goal?: string; workdir?: string }, requestId = newRequestId()): WorkCommandRequest {
   return { request_id: requestId, operation: { op: "work.project.create", args: {
-    title: input.title.trim(), ...(input.description ? { description: input.description } : {}), ...(input.goal?.trim() ? { goal: input.goal.trim() } : {}) } } };
+    title: input.title.trim(), ...(input.description ? { description: input.description } : {}), ...(input.goal?.trim() ? { goal: input.goal.trim() } : {}),
+    ...(input.workdir?.trim() ? { workdir: input.workdir.trim() } : {}) } } };
 }
 
 export function commentCommand(task: string, body: string, requestId = newRequestId()): WorkCommandRequest {
