@@ -1,5 +1,5 @@
 import { text as msg } from "./messages.ts";
-import { AgentInfo, AgentTokenRequest, AgentRevokeRequest, AssistantChatRequest, WorkCommandRequest, ExecutionRoutineCommandRequest, RequestId, AssistantToolCall, capability, ExecutionRoutine, type AssistantEvent } from "@lumio/schema";
+import { AgentInfo, AgentTokenRequest, AgentRevokeRequest, AssistantChatRequest, WorkCommandRequest, ExecutionRoutineCommandRequest, RequestId, AssistantToolCall, capability, ExecutionRoutine, PlanTemplate, type AssistantEvent } from "@lumio/schema";
 import { AssistantError } from "@lumio/assistant";
 import { WorkError } from "@lumio/work";
 import type { BusinessModules } from "./modules.ts";
@@ -18,6 +18,7 @@ export const V2_ROUTES = [
   { operation: "assistant.read", method: "GET", pattern: /^\/v2\/assistant\/conversations\/(conv_[0-9A-HJKMNP-TV-Z]{26})\/tools$/, path: "/v2/assistant/conversations/<id>/tools" },
   { operation: "assistant.undo", method: "POST", pattern: /^\/v2\/assistant\/tools\/(tool_[0-9A-HJKMNP-TV-Z]{26})\/undo$/, path: "/v2/assistant/tools/<id>/undo" },
   { operation: "work.read", method: "GET", pattern: /^\/v2\/work\/attention$/, path: "/v2/work/attention" },
+  { operation: "work.plan_templates.read", method: "GET", pattern: /^\/v2\/work\/plan-templates$/, path: "/v2/work/plan-templates" },
   { operation: "assistant.memory.read", method: "GET", pattern: /^\/v2\/assistant\/memories$/, path: "/v2/assistant/memories" },
   { operation: "assistant.memory.command", method: "POST", pattern: /^\/v2\/assistant\/memory-commands$/, path: "/v2/assistant/memory-commands" },
   { operation: "work.read", method: "GET", pattern: /^\/v2\/work\/tasks$/, path: "/v2/work/tasks" },
@@ -56,6 +57,7 @@ export async function handleV2(request: Request, route: V2Route, identity: Ident
   try {
     if (decision.result !== "allow") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: decision.result === "deny" ? decision.reason : msg("v2.approval_required") });
     const url = new URL(request.url), id = route.pattern.exec(url.pathname)?.[1];
+    if (route.operation === "work.plan_templates.read") return Response.json(PlanTemplate.array().parse(modules.work.planTemplates()));
     if (route.operation === "agents.manage") {
       if (request.method === "GET") return Response.json(AgentInfo.array().parse(store.agents(now)));
       const body = await json(request);

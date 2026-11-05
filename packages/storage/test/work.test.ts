@@ -57,3 +57,20 @@ test("v3 store persists actors and append-only turns across reopen", () => {
     expect(db.query("SELECT * FROM platform_migrations WHERE name='work-3'").all()).toHaveLength(1);
   } finally { db.close(); }
 });
+
+test("plan templates survive adapter reopen, overwrite in place, delete and transaction rollback", () => {
+  const db = new Database(":memory:");
+  try {
+    const f = fixture(db), plan = { stages: [{ kind: "agent", id: "implement", agent: "codex@mac", instruction: "Synthetic implementation" }] };
+    const saved = f.command("work.plan_template.save", { name: "Synthetic template", plan });
+    if (saved.kind !== "template") throw new Error("template expected");
+    let store = new SqliteWorkStore(db);
+    expect(store.planTemplates()).toEqual([saved.template]);
+    f.command("work.plan_template.save", { template: saved.template.id, name: "Updated", plan });
+    expect(store.planTemplates()).toMatchObject([{ id: saved.template.id, name: "Updated", created: saved.template.created }]);
+    expect(() => db.transaction(() => { f.command("work.plan_template.delete", { template: saved.template.id }); throw new Error("synthetic rollback"); })()).toThrow("synthetic rollback");
+    expect(store.planTemplates()).toHaveLength(1);
+    f.command("work.plan_template.delete", { template: saved.template.id });
+    store = new SqliteWorkStore(db); expect(store.planTemplates()).toEqual([]);
+  } finally { db.close(); }
+});

@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { ApiClientError, createClient } from "@lumio/api-client";
-import { WorkCommandRequest, idOf, type WorkCommandResult } from "@lumio/schema";
+import { HandoffPlan, WorkCommandRequest, idOf, type WorkCommandResult } from "@lumio/schema";
 import { hubCredentials } from "./config.ts";
 
 const usage = () => msg("work.usage_lumio_task_new_list_show_update_edit_status_assign_comment_con");
@@ -16,6 +16,7 @@ const options = {
   depends: { type: "string" }, due: { type: "string" }, workdir: { type: "string" }, model: { type: "string" },
   timeout: { type: "string" }, patch: { type: "string" }, revision: { type: "string" }, "request-id": { type: "string" },
   comment: { type: "string" }, turn: { type: "string" }, note: { type: "string" },
+  from: { type: "string" }, stage: { type: "string" }, action: { type: "string" }, "back-to": { type: "string" },
   goal: { type: "string" }, repo: { type: "string" }, deadline: { type: "string" },
 } as const;
 
@@ -24,7 +25,7 @@ export async function runWork(kind: "task" | "project", args: string[], log: (li
   if (kind === "task" && args.includes("--legacy")) return;
   const { values, positionals } = parseArgs({ args, allowPositionals: true, strict: true, options });
   const [action, reference, ...rest] = positionals;
-  if (!action || !["new", "create", "list", "show", "update", "edit", "status", "assign", "comment", "continue", "hand", "finish", "cancel", "reopen", "ack"].includes(action)) {
+  if (!action || !["new", "create", "list", "show", "update", "edit", "status", "assign", "comment", "continue", "hand", "finish", "cancel", "reopen", "ack", "plan", "checkpoint"].includes(action)) {
     if (kind === "task") return;
     throw new Error(usage());
   }
@@ -36,6 +37,20 @@ export async function runWork(kind: "task" | "project", args: string[], log: (li
   }));
   let resolved = false;
   try {
+    if (kind === "task" && action === "plan") {
+      const taskId = rest[0];
+      if (!["set", "show"].includes(reference ?? "") || rest.length !== 1 || !taskId || (reference === "set" && !values.file)) throw new Error(msg("work.plan_usage"));
+      const task = (await client.workTask(taskId)).task;
+      if (reference === "show") emit(task.plan ?? null);
+      else emit(await send("work.task.plan.set", { task: taskId, expected_revision: values.revision === undefined ? task.revision : Number(values.revision),
+        plan: await readPlan(values.file!, true), from: values.from }));
+      return 0;
+    }
+    if (kind === "task" && action === "checkpoint") {
+      if (!reference || rest.length || !values.stage || !values.action || !["continue", "send-back", "finish", "hold"].includes(values.action)) throw new Error(msg("work.checkpoint_usage"));
+      emit(await send("work.task.checkpoint", { task: reference, stage: values.stage, action: values.action.replace("-", "_"), back_to: values["back-to"], comment: values.comment }));
+      return 0;
+    }
     if (action === "list") {
       if (reference) throw new Error(usage());
       if (kind === "project") {
@@ -125,6 +140,34 @@ export async function runWork(kind: "task" | "project", args: string[], log: (li
     if (!resolved && kind === "task" && cause instanceof ApiClientError && cause.status === 404 && ["list", "show", "continue"].includes(action)) return;
     throw cause;
   }
+}
+
+async function readPlan(path: string, nullable = false): Promise<HandoffPlan | null> {
+  const content = await readFile(path, "utf8");
+  try {
+    const value: unknown = JSON.parse(content);
+    return nullable && value === null ? null : HandoffPlan.parse(value);
+  } catch { throw new Error(msg("work.invalid_plan_file")); }
+}
+
+export async function runPlanTemplates(args: string[], log: (line: string) => void): Promise<number> {
+  const { values, positionals } = parseArgs({ args, allowPositionals: true, strict: true, options: {
+    file: { type: "string" }, template: { type: "string" }, json: { type: "boolean" }, "request-id": { type: "string" },
+  } });
+  const [action, reference, ...rest] = positionals;
+  if (rest.length || !["list", "save", "delete"].includes(action ?? "") || (action === "list" ? Boolean(reference) : !reference)
+    || (action === "save" && !values.file)) throw new Error(msg("work.template_usage"));
+  const client = createClient({ ...hubCredentials(), language: language() });
+  const requestId = values["request-id"] ?? randomUUID();
+  if (action === "list") {
+    const templates = await client.workPlanTemplates();
+    if (values.json) log(JSON.stringify(templates)); else for (const value of templates) log(`${value.id}  ${value.name}`);
+  } else {
+    const value = action === "save" ? await client.saveWorkPlanTemplate({ name: reference!, plan: (await readPlan(values.file!))!, template: values.template }, requestId)
+      : await client.deleteWorkPlanTemplate(reference!, requestId);
+    log(JSON.stringify(value, null, values.json ? undefined : 2));
+  }
+  return 0;
 }
 
 export async function runAttention(args: string[], log: (line: string) => void): Promise<number> {

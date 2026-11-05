@@ -53,3 +53,27 @@ test("agent management validates requests and responses and supports empty revok
   expect(seen).toEqual(["POST /v2/agents/tokens", "GET /v2/agents", "POST /v2/agents/revoke"]);
   expect(() => client.issueAgentToken({ name: actor.name, label: "../bad" })).toThrow();
 });
+
+test("plan template methods validate their write commands and list contract", async () => {
+  const plan = { stages: [{ kind: "agent" as const, id: "implement", agent: "codex@mac", instruction: "Synthetic implementation" }] };
+  const template = { id: `wft_${U}`, name: "Synthetic template", plan, created: "2026-11-05T00:00:00Z", updated: "2026-11-05T00:00:00Z" };
+  const seen: unknown[] = [];
+  const client = createClient({ url: "http://localhost", token: "synthetic-human", fetch: (async (url: URL, init: RequestInit) => {
+    expect(init.headers).toMatchObject({ Authorization: "Bearer synthetic-human" });
+    if (init.method === "GET") { expect(url.pathname).toBe("/v2/work/plan-templates"); return Response.json([template]); }
+    expect(url.pathname).toBe("/v2/work/commands");
+    const body = JSON.parse(String(init.body)); seen.push(body);
+    return Response.json(body.operation.op === "work.plan_template.save" ? { kind: "template", template } : { kind: "removed", id: template.id });
+  }) as unknown as typeof fetch });
+  expect(await client.workPlanTemplates()).toEqual([template]);
+  expect(await client.saveWorkPlanTemplate({ name: template.name, plan }, "synthetic-template-save")).toEqual({ kind: "template", template });
+  expect(await client.deleteWorkPlanTemplate(template.id, "synthetic-template-delete")).toEqual({ kind: "removed", id: template.id });
+  expect(seen).toEqual([
+    { request_id: "synthetic-template-save", operation: { op: "work.plan_template.save", args: { name: template.name, plan } } },
+    { request_id: "synthetic-template-delete", operation: { op: "work.plan_template.delete", args: { template: template.id } } },
+  ]);
+  expect(() => client.deleteWorkPlanTemplate("invalid", "synthetic-invalid-template")).toThrow();
+  expect(() => client.saveWorkPlanTemplate({ name: "", plan }, "synthetic-invalid-template")).toThrow();
+  const malformed = createClient({ url: "http://localhost", fetch: (async () => Response.json([{ ...template, extra: "invalid" }])) as unknown as typeof fetch });
+  await expect(malformed.workPlanTemplates()).rejects.toMatchObject({ code: "INTERNAL" });
+});

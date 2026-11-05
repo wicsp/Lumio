@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { WorkProject, WorkTask, WorkComment, WorkExecution, TaskTurnChange, WorkCommandResult } from "@lumio/schema";
+import { WorkProject, WorkTask, WorkComment, WorkExecution, TaskTurnChange, WorkCommandResult, PlanTemplate } from "@lumio/schema";
 import { WorkError, type WorkStore } from "@lumio/work";
 
 
@@ -25,6 +25,7 @@ export class SqliteWorkStore implements WorkStore {
       CREATE TABLE IF NOT EXISTS work_comments (id TEXT PRIMARY KEY, task TEXT NOT NULL REFERENCES work_tasks(id), author TEXT NOT NULL,
         body TEXT NOT NULL, created TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS work_comments_task ON work_comments(task);
+      CREATE TABLE IF NOT EXISTS work_plan_templates (id TEXT PRIMARY KEY, record TEXT NOT NULL CHECK(json_valid(record)));
       CREATE TABLE IF NOT EXISTS work_executions (job TEXT PRIMARY KEY, task TEXT NOT NULL REFERENCES work_tasks(id),
         round INTEGER NOT NULL CHECK(round>0), input_revision INTEGER NOT NULL CHECK(input_revision>0), input_snapshot TEXT NOT NULL,
         created TEXT NOT NULL, applied INTEGER NOT NULL CHECK(applied IN (0,1)), UNIQUE(task,round));
@@ -116,6 +117,14 @@ export class SqliteWorkStore implements WorkStore {
     const value = TaskTurnChange.parse(input);
     this.db.query("INSERT INTO work_turns(task,record) VALUES (?,?)").run(value.task, JSON.stringify(value));
   }
+  planTemplates(): PlanTemplate[] {
+    return this.db.query<{ record: string }, []>("SELECT record FROM work_plan_templates ORDER BY rowid").all().map(row => PlanTemplate.parse(JSON.parse(row.record)));
+  }
+  putPlanTemplate(input: PlanTemplate): void {
+    const value = PlanTemplate.parse(input);
+    this.db.query("INSERT INTO work_plan_templates(id,record) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET record=excluded.record").run(value.id, JSON.stringify(value));
+  }
+  deletePlanTemplate(id: string): void { this.db.query("DELETE FROM work_plan_templates WHERE id=?").run(id); }
   receipt(actor: string, request: string): { operation: string; result: WorkCommandResult } | undefined {
     const row = this.db.query<{ operation: string; result: string }, [string, string]>("SELECT operation,result FROM work_requests WHERE actor=? AND request=?").get(actor, request);
     return row ? { operation: row.operation, result: WorkCommandResult.parse(JSON.parse(row.result)) } : undefined;

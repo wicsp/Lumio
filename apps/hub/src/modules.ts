@@ -54,6 +54,11 @@ export class BusinessModules {
     });
     this.workStore = new SqliteWorkStore(store.db);
     this.work = new WorkService(this.workStore, { text: msg, now, id, systemActor: store.workActor().id, job: id => jobs.get(id),
+      auditPlan: (change, plan) => {
+        const actor = store.actors().find(actor => actor.id === change.by)!;
+        store.audit({ actor, label: actor.name }, JSON.stringify({ op: "work.task.plan.advance", task: change.task, plan,
+          from: change.from.stage, stage: change.to.stage, turn: change.to }), "allow", plan.approved.proposal, "applied");
+      },
       dispatch: (task, input, round, to) => this.dispatch(task, input, round, to, now()),
       agentForJob: jobId => {
         const job = jobs.get(jobId);

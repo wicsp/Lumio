@@ -1,5 +1,5 @@
 import { AgentInfo, AgentTokenIssued, AgentTokenRequest, AgentRevokeRequest, ClientInvite, ClientInviteRequest, ClientJoin, ClientJoinRequest, RuntimeInvite, RuntimeInviteRequest } from "@lumio/schema";
-import { AssistantConfigView, AssistantConfigUpdate, AssistantToolCall, ExecutionJobListArgs, RequestId, WorkAttention, WorkCommandRequest, WorkCommandResult, WorkTask, WorkTaskDetail, WorkProject, ExecutionRoutine, ExecutionRoutineCommandRequest, ExecutionRoutineInfo,
+import { AssistantConfigView, AssistantConfigUpdate, AssistantToolCall, ExecutionJobListArgs, RequestId, WorkAttention, WorkCommandRequest, WorkCommandResult, PlanTemplate, type WorkCommand, WorkTask, WorkTaskDetail, WorkProject, ExecutionRoutine, ExecutionRoutineCommandRequest, ExecutionRoutineInfo,
   ProjectStatus, AssistantMemory, AssistantMemoryCommandRequest, AssistantMemoryCommandResult, AssistantChatRequest, AssistantChatResult, AssistantConversation, AssistantConversationDetail, AssistantEvent, StoredArtifact, idOf } from "@lumio/schema";
 import { JobRun, Job, JobSpec, JobStatus, RoutineInfo, RuntimeName, RuntimeInfo, Actor, OperationRequest, OperationResult, Proposal, ProposalStatus, ApiError, CheckResult, LinksResult, NoteDetail, SearchResult, type ApiErrorCode, type NoteRef } from "@lumio/schema";
 
@@ -72,6 +72,13 @@ export function createClient(options: { url: string; token?: string; language?: 
     undoAssistantTool(tool: string, request_id: string) { return request(`/v2/assistant/tools/${validate(idOf("tool"), tool)}/undo`, {}, WorkCommandResult, { request_id: validate(RequestId, request_id) }); },
     workAttention() { return request("/v2/work/attention", {}, WorkAttention.array()); },
     workCommand(input: WorkCommandRequest) { return request("/v2/work/commands", {}, WorkCommandResult, validate(WorkCommandRequest, input)); },
+    workPlanTemplates() { return request("/v2/work/plan-templates", {}, PlanTemplate.array()); },
+    saveWorkPlanTemplate(args: Extract<WorkCommand, { op: "work.plan_template.save" }>["args"], request_id: string) {
+      return request("/v2/work/commands", {}, WorkCommandResult, validate(WorkCommandRequest, { request_id, operation: { op: "work.plan_template.save", args } }));
+    },
+    deleteWorkPlanTemplate(template: string, request_id: string) {
+      return request("/v2/work/commands", {}, WorkCommandResult, validate(WorkCommandRequest, { request_id, operation: { op: "work.plan_template.delete", args: { template } } }));
+    },
     workTasks(filter: { project?: string; status?: string; query?: string } = {}) {
       return request("/v2/work/tasks", { ...(filter.project ? { project: validate(idOf("prj"), filter.project) } : {}),
         ...(filter.status ? { status: filter.status } : {}), ...(filter.query ? { q: filter.query } : {}) }, WorkTask.array());
