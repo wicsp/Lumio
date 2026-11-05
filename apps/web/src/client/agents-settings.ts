@@ -10,8 +10,13 @@ import { clear, failure, h, icon, toast } from "./dom.ts";
 import { ago } from "./format.ts";
 import { t } from "./i18n.ts";
 
+type AgentKind = "codex" | "claude" | "pi";
+const AGENT_KINDS: Array<[AgentKind, string]> = [["codex", "Codex"], ["claude", "Claude Code"], ["pi", "pi"]];
+const INSTALL: Record<AgentKind, string> = { codex: "lumio skill install --for codex", claude: "lumio skill install --for claude", pi: "lumio skill install --for pi" };
+
 export class AgentsSettings {
   readonly element = h("div", { class: "set-rows" });
+  private kind: AgentKind = "codex";
   private active = true;
 
   constructor(private client: Client) {
@@ -34,12 +39,22 @@ export class AgentsSettings {
   private render(agents: AgentInfo[]): void {
     const connected = agents.filter(agent => agent.tokens.length).sort((a, b) => (b.last_activity ?? "").localeCompare(a.last_activity ?? ""));
     const rows = connected.map(agent => this.row(agent));
+    // 三种 agent 的安装命令（R4-8）：切换后显示对应的命令。
+    const code = h("code", { class: "set-code" }, INSTALL[this.kind]);
+    const tabs = h("div", { class: "segmented set-tabs", role: "group", "aria-label": t("Agent") }, ...AGENT_KINDS.map(([kind, label]) => {
+      const tab = h("button", { type: "button", "aria-pressed": String(kind === this.kind) }, label);
+      tab.addEventListener("click", () => {
+        this.kind = kind; code.textContent = INSTALL[kind];
+        tabs.querySelectorAll("button").forEach(button => button.setAttribute("aria-pressed", String(button === tab)));
+      });
+      return tab;
+    }));
     const howto = h("div", { class: "set-row set-howto" },
       icon("terminal"),
       h("span", { class: "set-label" }, t("Connect Codex, Claude Code or pi"),
         h("span", { class: "set-sub" }, t("On that machine, in a terminal logged in to this Hub, run:")),
-        h("code", { class: "set-code" }, "lumio skill install --for codex")),
-      h("button", { type: "button", class: "btn btn-small", onclick: () => void navigator.clipboard?.writeText("lumio skill install --for codex").then(() => toast(t("Copied"))) }, icon("link"), t("Copy")));
+        tabs, code),
+      h("button", { type: "button", class: "btn btn-small", onclick: () => void navigator.clipboard?.writeText(INSTALL[this.kind]).then(() => toast(t("Copied"))) }, icon("link"), t("Copy")));
     clear(this.element, ...(rows.length ? rows : [h("p", { class: "set-empty" }, t("No agents connected yet."))]), howto);
   }
 

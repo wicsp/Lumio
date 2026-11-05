@@ -549,6 +549,18 @@ export const ZH: Record<string, string> = {
   "⌘↵ to post · Markdown supported": "⌘↵ 发表 · 支持 Markdown",
   "Ready for review": "等你验收",
   "Withdrawn": "已撤回",
+  // R4-8
+  "From project: {0}": "来自项目：{0}",
+  "URL or path, for reference": "URL 或路径，仅供参考",
+  "{0} (from project)": "{0}（来自项目）",
+  "New task in this project": "在此项目新建任务",
+  "No tasks in this project yet.": "这个项目还没有任务。",
+  "Post the comment and delegate the next round in one step": "发表评论并在同一步委派下一轮",
+  "Comment and continue with {0}": "发表并交给 {0} 继续",
+  "Tasks in this project run here unless they set their own.": "这个项目的任务默认在这里执行，除非任务自己另设。",
+  "Agent": "agent",
+  "Withdrawn: replaced by a newer proposal from the same agent.": "已撤回：被同一个 agent 的新提议取代。",
+  "Withdrawn by the agent.": "agent 已撤回。",
   // R4-5：轮到谁、交接计划、提议、通知（ADR 0031、0032）
   "Continue with the plan's agent": "由计划里的 agent 继续",
   "the agent": "agent",

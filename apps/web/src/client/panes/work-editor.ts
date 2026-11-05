@@ -9,12 +9,12 @@
 import { PROJECT_STATUSES, type WorkProject, type WorkTask, type WorkTaskDetail, type WorkCommandRequest } from "@lumio/schema";
 import { errorText, isConflict, type Client, type HubExtras } from "../api.ts";
 import { attentionCard, attentionFor } from "../attention-card.ts";
-import { commentCommand, dispatchCommand, engineTargets, formatTime, newRequestId, workPatchCommand } from "../commands.ts";
+import { answerCommand, commentCommand, dispatchCommand, engineTargets, formatTime, newRequestId, workPatchCommand } from "../commands.ts";
 import { autosize, clear, failure, field, h, icon, openDialog, openMenu, select, statusIcon, toast, type MenuItem } from "../dom.ts";
 import { ago, dateInputValue, dueLabel, isoFromDateInput } from "../format.ts";
 import { PROJECT_LABELS } from "../labels.ts";
 import { checkpointCommand, openPlanEditor, planProgress, stageLabel } from "../plan.ts";
-import { TURN_ACTION_DONE, TURN_ACTION_ICONS, TURN_ACTION_LABELS, reasonLabel, turnActionCommand, turnActions, turnGroup, turnIcon, turnText, type TurnAction } from "../turn.ts";
+import { TURN_ACTION_DONE, TURN_ACTION_ICONS, TURN_ACTION_LABELS, TURN_GROUPS, TURN_GROUP_LABELS, reasonLabel, turnActionCommand, turnActions, turnGroup, turnIcon, turnText, type TurnAction } from "../turn.ts";
 import { renderMarkdown } from "../utils/markdown.ts";
 import { InlineTitle } from "../inline-title.ts";
 import type { Navigate } from "../navigation.ts";
@@ -28,6 +28,8 @@ export interface EditorHooks {
   back(): void;
   navigate: Navigate;
   openProject(id: string): void;
+  /** 在这个项目里新建任务（项目页用）。 */
+  newTask?(project: string): void;
 }
 
 export class WorkEditor {
@@ -48,8 +50,8 @@ export class WorkEditor {
     const isTask = this.record.type === "task";
     this.title = new InlineTitle(this.record.title, title => this.saveTitle(title));
     const rec = this.record;
-    this.showAdvanced = rec.type === "task" && !!(rec.workdir || rec.model || rec.timeout_minutes);
     const project = rec.type === "task" && rec.project ? projects.find(p => p.id === rec.project) : undefined;
+    this.showAdvanced = rec.type === "task" && !!(rec.workdir || rec.model || rec.timeout_minutes || project?.workdir);
     const crumbs = h("div", { class: "detail-crumbs" },
       h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": t("Back to list"), onclick: () => hooks.back() }, icon("back")),
       isTask ? (project ? h("button", { type: "button", onclick: () => hooks.openProject(project.id) }, icon("folder"), project.title) : h("span", {}, t("No project"))) : h("span", {}, t("Projects")),
@@ -77,7 +79,7 @@ export class WorkEditor {
       if (input.task.references.length) detail.append(h("section", { class: "section" },
         h("div", { class: "section-head" }, h("h3", {}, t("References")), h("span", { class: "count" }, input.task.references.length)),
         h("ul", {}, ...input.task.references.map(ref => h("li", {}, ref.label ?? ref.id)))));
-    }
+    } else detail.append(this.projectTasks(input));
   }
 
   dispose(): void { this.active = false; }
@@ -129,14 +131,17 @@ export class WorkEditor {
       row(t("Due"), "calendar", this.dateInput("due", r.due));
 
       if (this.showAdvanced) {
-        row(t("Working directory"), "terminal", this.textInput("workdir", r.workdir, t("~ (runtime's home directory)")));
+        // 没有自己的目录时，委派那一刻用项目的工作目录（ADR 0033）。
+        const inherited = this.projects.find(p => p.id === r.project)?.workdir;
+        row(t("Working directory"), "terminal", this.textInput("workdir", r.workdir, inherited ? t("From project: {0}", inherited) : t("~ (runtime's home directory)")));
         row(t("Model"), "bot", this.textInput("model", r.model, t("Use the engine's default model")));
         row(t("Time limit"), "clock", this.textInput("timeout_minutes", r.timeout_minutes?.toString(), t("120 minutes"), "number"));
       } else rows.push(h("button", { type: "button", class: "text-btn advanced-toggle", onclick: () => { this.showAdvanced = true; this.renderProps(); } }, t("+ Run settings (working directory, model, time limit)")));
     } else {
       row(t("Goal"), "check", this.textInput("goal", r.goal, t("What should this phase achieve?")));
       row(t("Due"), "calendar", this.dateInput("deadline", r.deadline));
-      row(t("Repository"), "link", this.textInput("repo", r.repo, t("Path or URL")));
+      row(t("Working directory"), "terminal", this.textInput("workdir", r.workdir, t("~ (runtime's home directory)")));
+      row(t("Repository"), "link", this.textInput("repo", r.repo, t("URL or path, for reference")));
     }
     if (r.tags.length) row(t("Tags"), "more", h("span", { class: "button-row" }, ...r.tags.map(tag => h("span", { class: "pill" }, tag))));
     clear(this.props, ...rows);
@@ -298,6 +303,32 @@ export class WorkEditor {
     finally { this.setBusy(false); }
   }
 
+  /** 一轮实际会用的工作目录：任务 → 项目 → ~（ADR 0033）。 */
+  private effectiveWorkdir(task: WorkTask): string {
+    if (task.workdir) return task.workdir;
+    const inherited = this.projects.find(p => p.id === task.project)?.workdir;
+    return inherited ? t("{0} (from project)", inherited) : "~";
+  }
+
+  // ───────────── 项目里的任务 ─────────────
+
+  private projectTasks(project: WorkProject): HTMLElement {
+    const body = h("div", {}, h("p", { class: "muted" }, t("Loading…")));
+    const add = h("button", { type: "button", class: "btn btn-small", onclick: () => this.hooks.newTask?.(project.id) }, icon("plus"), t("New task in this project"));
+    void this.client.workTasks({ project: project.id }).then(tasks => {
+      if (!this.active) return;
+      if (!tasks.length) { clear(body, h("p", { class: "muted" }, t("No tasks in this project yet."))); return; }
+      const groups = TURN_GROUPS.map(group => [group, tasks.filter(task => turnGroup(task) === group)] as const).filter(([, list]) => list.length);
+      clear(body, ...groups.map(([group, list]) => h("div", { class: "project-task-group" },
+        h("p", { class: "project-task-head" }, turnIcon(group), TURN_GROUP_LABELS[group], h("span", { class: "count" }, list.length)),
+        h("div", { class: "runs" }, ...list.map(task => h("button", { type: "button", class: "run", onclick: () => this.hooks.navigate("work", task.id) },
+          turnIcon(turnGroup(task)), h("span", { class: "run-round" }, task.title),
+          group === "todo" || group === "done" || group === "cancelled" ? null : h("span", { class: "muted" }, turnText(task)),
+          h("span", { class: "row-meta" }, icon("chevron"))))))));
+    }).catch(cause => { if (this.active) clear(body, failure(errorText(cause))); });
+    return h("section", { class: "section" }, h("div", { class: "section-head" }, h("h3", {}, t("Tasks")), h("div", { class: "detail-actions" }, add)), body);
+  }
+
   // ───────────── 交接计划 ─────────────
 
   private planSection(task: WorkTask): HTMLElement {
@@ -336,7 +367,7 @@ export class WorkEditor {
       const form = h("form", { id: formId, class: "form-stack" },
         h("p", {}, ...tParts("“{0}” will be handed to the runtime as currently saved.", h("strong", {}, task.title))),
         field(t("Target"), target, fixed ? t("Set by the plan step “{0}”.", stage!.id) : undefined),
-        h("dl", { class: "meta-grid" }, h("div", {}, h("dt", {}, t("Working directory")), h("dd", {}, task.workdir ?? "~")), h("div", {}, h("dt", {}, t("Time limit")), h("dd", {}, t("{0} min", task.timeout_minutes ?? 120)))),
+        h("dl", { class: "meta-grid" }, h("div", {}, h("dt", {}, t("Working directory")), h("dd", {}, this.effectiveWorkdir(task))), h("div", {}, h("dt", {}, t("Time limit")), h("dd", {}, t("{0} min", task.timeout_minutes ?? 120)))),
         !targets.length && !fixed && h("div", { class: "notice" }, icon("alert"), h("span", {}, t("No device with a registered engine yet. Run lumio runtime add in a terminal to connect one."))),
         error);
       const submit = h("button", { type: "submit", form: formId, class: "btn btn-primary", disabled: !targets.length && !fixed }, icon("play"), t("Confirm"));
@@ -421,9 +452,27 @@ export class WorkEditor {
     this.commentDraft = text;
     const error = h("div", { role: "alert" });
     const submit = h("button", { type: "submit", class: "btn btn-primary btn-small" }, t("Comment"));
-    const form = h("form", { class: "composer" }, text, h("div", { class: "composer-foot" }, h("span", { class: "hint" }, t("⌘↵ to post · Markdown supported")), submit));
+    // 评论并交给 agent 继续：评论与委派在同一事务（ADR 0030）；继续的是计划当前步骤或上一轮的 agent。
+    const next = continueTarget(input);
+    const onward = next ? h("button", { type: "button", class: "btn btn-small", title: t("Post the comment and delegate the next round in one step") }, icon("play"), t("Comment and continue with {0}", next)) : null;
+    const form = h("form", { class: "composer" }, text, h("div", { class: "composer-foot" }, h("span", { class: "hint" }, t("⌘↵ to post · Markdown supported")), onward, submit));
     text.addEventListener("keydown", event => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); form.requestSubmit(); } });
     let requestId = newRequestId(), previous = "";
+    onward?.addEventListener("click", async () => {
+      if (this.busy || !text.value.trim()) { text.focus(); return; }
+      if (this.record.type !== "task") return;
+      this.setBusy(true); onward.disabled = submit.disabled = true; clear(error);
+      if (previous && previous !== `continue\n${text.value}`) requestId = newRequestId();
+      previous = `continue\n${text.value}`;
+      try {
+        await this.client.workCommand(answerCommand(this.record, undefined, text.value, requestId));
+        text.value = ""; this.commentDraft = undefined;
+        toast(t("Dispatched to {0}", next!));
+        this.hooks.changed(); this.hooks.reload();
+      } catch (cause) {
+        clear(error, failure(t("{0} Your input is kept; refresh to check whether it was posted.", errorText(cause))));
+      } finally { this.setBusy(false); onward.disabled = submit.disabled = false; }
+    });
     form.addEventListener("submit", async event => {
       event.preventDefault();
       if (this.busy || !text.value.trim()) return;
@@ -441,9 +490,7 @@ export class WorkEditor {
         clear(error, failure(t("{0} Your input is kept; refresh to check whether it was posted.", errorText(cause))));
       } finally { this.setBusy(false); submit.disabled = false; }
     });
-    return h("section", { class: "section" }, h("div", { class: "section-head" }, h("h3", {}, t("Activity")), count,
-      h("div", { class: "detail-actions" }, h("button", { type: "button", class: "btn btn-small", onclick: () => void this.dispatch() }, icon("play"), t("Delegate")))),
-      list, form, error);
+    return h("section", { class: "section" }, h("div", { class: "section-head" }, h("h3", {}, t("Activity")), count), list, form, error);
   }
 }
 
@@ -474,4 +521,15 @@ let actorNames: Promise<Map<string, string>> | undefined;
 function actorName(client: Client, id: string): Promise<string | undefined> {
   actorNames ??= client.actors().then(list => new Map(list.map(actor => [actor.id, actor.name.startsWith("work-system-") ? "Lumio" : actor.name])), () => { actorNames = undefined; return new Map<string, string>(); });
   return actorNames.then(map => map.get(id));
+}
+
+/** 「评论并继续」交给谁：计划当前的 agent 步骤，否则最近一轮的 agent；不能继续时返回 undefined。 */
+export function continueTarget(input: WorkTaskDetail): string | undefined {
+  const task = input.task;
+  if (task.outcome !== "open" || task.turn.reason === "working" || task.turn.holder === "nobody") return undefined;
+  if (task.plan) {
+    const stage = task.plan.stage === "end" ? undefined : task.plan.plan.stages.find(value => value.id === task.plan!.stage);
+    return stage?.kind === "agent" ? stage.agent : undefined;
+  }
+  return input.turns.filter(change => change.to.reason === "working").at(-1)?.to.holder;
 }

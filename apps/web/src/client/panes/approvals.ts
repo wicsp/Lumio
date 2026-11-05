@@ -31,7 +31,7 @@ export class ApprovalsPane {
 
   constructor(root: HTMLElement, private client: Client, private changed: () => void, private navigate: Navigate) {
     const seg = h("div", { class: "segmented", role: "group", "aria-label": t("Approval status") });
-    for (const status of ["pending", "accepted", "rejected"] as const) {
+    for (const status of ["pending", "accepted", "rejected", "withdrawn"] as const) {
       seg.append(h("button", { type: "button", "aria-pressed": String(status === this.status), onclick: (event: Event) => {
         this.status = status; seg.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(b === event.currentTarget)));
         this.selected = undefined; this.showPlaceholder(); void this.load();
@@ -46,15 +46,16 @@ export class ApprovalsPane {
   }
 
   dispose(): void { this.active = false; this.generation++; this.detailGeneration++; this.unbindKeys(); }
+  liveRefresh(): void { void this.load(true); }
 
   private showPlaceholder(): void {
     this.split.classList.remove("has-detail");
     clear(this.detail, placeholder("approvals", t("When an agent asks to run something that needs your permission, it shows up here. Select one to see the full command and reason.")));
   }
 
-  private async load(): Promise<void> {
+  private async load(quiet = false): Promise<void> {
     const generation = ++this.generation;
-    clear(this.list, loading());
+    if (!quiet || !this.list.childElementCount) clear(this.list, loading());
     try {
       const proposals = await this.client.proposals(this.status);
       if (!this.active || generation !== this.generation) return;

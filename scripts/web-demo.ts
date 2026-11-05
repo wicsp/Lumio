@@ -56,7 +56,7 @@ const inDays = (d: number) => new Date(Date.now() + d * 86_400_000).toISOString(
 
 const paper = (await command({ op: "work.project.create", args: { title: msg("web-demo.paper_rebuttal"), goal: msg("web-demo.complete_the_rebuttal_and_additional_experiments_during_discussion"), tags: ["research"],
   description: msg("web-demo.background_reviews_focus_on_generalization_and_statistical_significa") } })).project;
-const lumio = (await command({ op: "work.project.create", args: { title: "Lumio v0.2", goal: msg("web-demo.launch_four_separate_modules"), repo: "https://github.com/wicsp/Lumio" } })).project;
+const lumio = (await command({ op: "work.project.create", args: { title: "Lumio v0.2", goal: msg("web-demo.launch_four_separate_modules"), repo: "https://github.com/wicsp/Lumio", workdir: "~/code/lumio" } })).project;
 await command({ op: "work.project.create", args: { title: msg("web-demo.phd_proposal"), goal: msg("web-demo.submit_the_proposal_before_december") } });
 
 const seed: Array<[string, string | undefined, string, string?, number?]> = [
@@ -123,7 +123,9 @@ if (reviewJob) await run({ spec: { id: reviewJob } }, "Looks good. Tests cover t
 
 // agent 的委派提议：需要你批准（ADR 0031 第 2 节）。
 const agentApi = createClient({ url: `http://${HUB}`, token: agentToken });
-await agentApi.workCommand({ request_id: rid(), operation: { op: "work.task.dispatch", args: { task: tasks[msg("web-demo.validate_migration_dry_run")].id, to: "codex@demo",
-  comment: "The migration script is ready; please run the dry run against the fixture vault." } } } as any).catch(() => {});
+for (const comment of ["Please run the dry run.", "The migration script is ready; please run the dry run against the fixture vault."]) {
+  // 第二条取代第一条（ADR 0033）：审批页的「已撤回」里能看到第一条。
+  await agentApi.workCommand({ request_id: rid(), operation: { op: "work.task.dispatch", args: { task: tasks[msg("web-demo.validate_migration_dry_run")].id, to: "codex@demo", comment } } } as any).catch(() => {});
+}
 
 console.log(msg("web-demo.lumio_web_demo_is_running_temporary_data_your_installed_hub_is_unaff", HUB, token));

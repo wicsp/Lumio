@@ -878,3 +878,11 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
   .plan-id { width: 96px; }
   .tl-event { flex-wrap: wrap; }
 }
+
+/* R4-8 */
+.set-tabs { margin: 6px 0 2px; }
+.set-howto .set-code { display: block; margin-top: 6px; }
+.project-task-group { margin-bottom: 12px; }
+.project-task-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; color: var(--ink-2); font-size: var(--fs-sm); font-weight: 600; }
+.project-task-head .count { color: var(--ink-4); font-weight: 400; }
+.composer-foot .btn + .btn { margin-left: 6px; }

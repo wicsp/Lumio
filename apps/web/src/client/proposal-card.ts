@@ -45,7 +45,7 @@ export function proposalCard(proposal: WorkProposal, ctx: ProposalContext): HTML
   const heading = h("button", { type: "button", class: "attn-title", onclick: () => ctx.navigate("work", task) }, proposal.reason);
   void Promise.all([actorName(ctx.client, proposal.author), ctx.client.workTask(task).then(detail => detail.task.title, () => proposal.reason)])
     .then(([author, title]) => { heading.textContent = proposalTitle(proposal, author, title); });
-  const card = h("article", { class: "attn attn-ochre" });
+  const card = h("article", { class: `attn ${proposal.status === "pending" ? "attn-ochre" : "attn-done-state"}` });
   const error = h("div", { role: "alert" });
   const approve = h("button", { type: "button", class: "btn btn-primary btn-small" }, icon("check"), t("Approve"));
   const reject = h("button", { type: "button", class: "btn btn-small" }, icon("close"), t("Reject"));
@@ -69,11 +69,13 @@ export function proposalCard(proposal: WorkProposal, ctx: ProposalContext): HTML
     h("header", { class: "attn-head" },
       h("span", { class: "attn-icon" }, icon("approvals")),
       h("div", { class: "attn-heading" },
-        h("p", { class: "attn-kind" }, t("Waiting for your approval")),
+        h("p", { class: "attn-kind" }, proposal.status === "pending" ? t("Waiting for your approval") : proposal.status === "accepted" ? t("Approved") : proposal.status === "rejected" ? t("Rejected") : t("Withdrawn")),
         heading,
         h("p", { class: "attn-meta", title: formatTime(proposal.created) }, ago(proposal.created)))),
     ...[proposalBody(proposal)].filter((node): node is HTMLElement => node !== null),
-    proposal.status === "pending" ? h("div", { class: "attn-actions" }, approve, reject) : h("p", { class: "muted" }, proposal.status === "accepted" ? t("Approved") : t("Rejected")),
+    proposal.status === "pending" ? h("div", { class: "attn-actions" }, approve, reject)
+      : h("p", { class: "muted" }, proposal.status === "accepted" ? t("Approved") : proposal.status === "rejected" ? t("Rejected")
+        : proposal.superseded_by ? t("Withdrawn: replaced by a newer proposal from the same agent.") : t("Withdrawn by the agent.")),
     error);
   return card;
 }

@@ -51,6 +51,17 @@ export class WorkbenchView {
       if (search) { event.preventDefault(); search.focus(); search.select(); }
     }
   };
+  /** 实时刷新（R4-8）：回到前台或窗口重新获得焦点、收到推送时立即刷新；页面可见时每 15 秒静默刷新一次。 */
+  private lastRefresh = 0;
+  private readonly refreshNow = () => {
+    if (document.visibilityState !== "visible" || document.querySelector("dialog[open]")) return;
+    if (Date.now() - this.lastRefresh < 2000) return;
+    this.lastRefresh = Date.now();
+    this.pane?.liveRefresh?.();
+    void this.refreshCounts();
+  };
+  private readonly onVisible = () => { if (document.visibilityState === "visible") this.refreshNow(); };
+  private liveTimer: ReturnType<typeof setInterval> = setInterval(() => this.refreshNow(), 15_000);
   private readonly onUnload = (event: BeforeUnloadEvent) => {
     if (this.pane?.dirty || document.querySelector("dialog[data-dirty=true]")) { event.preventDefault(); event.returnValue = ""; }
   };
@@ -87,6 +98,9 @@ export class WorkbenchView {
     window.addEventListener("hashchange", this.onRoute);
     window.addEventListener("keydown", this.onKey);
     window.addEventListener("beforeunload", this.onUnload);
+    window.addEventListener("focus", this.refreshNow);
+    window.addEventListener("lumio-refresh", this.refreshNow);
+    document.addEventListener("visibilitychange", this.onVisible);
     const route = this.readRoute();
     this.show(route.section, route.id);
     void this.refreshCounts();
@@ -180,7 +194,10 @@ export class WorkbenchView {
   dispose(): void {
     this.pane?.dispose?.();
     this.palette.dispose();
-    clearInterval(this.countTimer);
+    clearInterval(this.countTimer); clearInterval(this.liveTimer);
+    window.removeEventListener("focus", this.refreshNow);
+    window.removeEventListener("lumio-refresh", this.refreshNow);
+    document.removeEventListener("visibilitychange", this.onVisible);
     window.removeEventListener("hashchange", this.onRoute);
     window.removeEventListener("keydown", this.onKey);
     window.removeEventListener("beforeunload", this.onUnload);
