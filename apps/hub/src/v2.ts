@@ -9,6 +9,12 @@ import type { authorize } from "./authorize.ts";
 import { handleArtifacts } from "./artifacts.ts";
 
 export const V2_ROUTES = [
+  { operation: "notifications.push", method: "GET", pattern: /^\/v2\/notifications\/push\/key$/, path: "/v2/notifications/push/key" },
+  { operation: "notifications.push", method: "GET", pattern: /^\/v2\/notifications\/push\/devices$/, path: "/v2/notifications/push/devices" },
+  { operation: "notifications.push", method: "POST", pattern: /^\/v2\/notifications\/push\/devices$/, path: "/v2/notifications/push/devices" },
+  { operation: "notifications.push", method: "PATCH", pattern: /^\/v2\/notifications\/push\/devices\/(pdev_[0-9A-HJKMNP-TV-Z]{26})$/, path: "/v2/notifications/push/devices/<id>" },
+  { operation: "notifications.push", method: "DELETE", pattern: /^\/v2\/notifications\/push\/devices\/(pdev_[0-9A-HJKMNP-TV-Z]{26})$/, path: "/v2/notifications/push/devices/<id>" },
+  { operation: "notifications.push", method: "POST", pattern: /^\/v2\/notifications\/push\/test$/, path: "/v2/notifications/push/test" },
   { operation: "agents.manage", method: "GET", pattern: /^\/v2\/agents$/, path: "/v2/agents" },
   { operation: "agents.manage", method: "POST", pattern: /^\/v2\/agents\/tokens$/, path: "/v2/agents/tokens" },
   { operation: "agents.manage", method: "POST", pattern: /^\/v2\/agents\/revoke$/, path: "/v2/agents/revoke" },
@@ -58,6 +64,21 @@ export async function handleV2(request: Request, route: V2Route, identity: Ident
     if (decision.result !== "allow") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: decision.result === "deny" ? decision.reason : msg("v2.approval_required") });
     const url = new URL(request.url), id = route.pattern.exec(url.pathname)?.[1];
     if (route.operation === "work.plan_templates.read") return Response.json(PlanTemplate.array().parse(modules.work.planTemplates()));
+    if (route.operation === "notifications.push") {
+      const push = modules.notifications.push, owner = identity.actor.id;
+      // Explicit ownership and role checks also apply when an injected policy is permissive.
+      if (identity.actor.role !== "human") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] });
+      if (url.pathname.endsWith("/key")) return Response.json(push.key(), { headers: { "Cache-Control": "no-store" } });
+      if (request.method === "GET") return Response.json(push.devices(owner), { headers: { "Cache-Control": "no-store" } });
+      if (url.pathname.endsWith("/test")) return Response.json(await push.test(owner));
+      const body = request.method === "DELETE" ? undefined : await json(request);
+      const value = store.db.transaction(() => {
+        const value = request.method === "DELETE" ? push.remove(owner, id!) : request.method === "PATCH" ? push.update(owner, id!, body) : push.subscribe(owner, body, request.headers.get("user-agent") ?? "", request.headers.get("origin") ?? undefined);
+        store.audit(identity, route.operation, "allow", undefined, "applied"); return value;
+      })();
+      audited = true;
+      return value ? Response.json(value, { headers: { "Cache-Control": "no-store" } }) : new Response(null, { status: 204 });
+    }
     if (route.operation === "agents.manage") {
       if (request.method === "GET") return Response.json(AgentInfo.array().parse(store.agents(now)));
       const body = await json(request);
