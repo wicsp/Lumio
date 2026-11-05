@@ -62,6 +62,7 @@
 | [R4-5](R4-0-workflows-delegation-push.md) ✅ | Web：按轮到谁重做今日与任务、时间线、计划与检查点、提议卡片、通知设置 | Claude | R4-2 至 R4-4 |
 | [R4-6](R4-0-workflows-delegation-push.md) ✅ | 术语「派活」→「委派」 | Claude + Codex | — |
 | [R4-7](R4-0-workflows-delegation-push.md#r4-7-验收用-lumio-开发-lumio) | 验收：用 Lumio 开发 Lumio | 人类 + Claude | R4-1 至 R4-6 |
+| [R4-8](R4-8-acceptance-fixes.md) | 验收反馈修复：项目工作目录、提议撤回、执行目标查询、CLI/skill 文档、Web 体验（ADR 0033） | Claude + Codex | R4-7 |
 
 P1 的设计决定见 ADR 0014、0016、0017、0018；P2 见 ADR 0019、0020、0021、0022 与修订后的 ADR 0005；契约见 `packages/schema/src/` 中的 `query.ts`、`actor.ts`、`operation.ts`、`proposal.ts`、`api.ts`。
 

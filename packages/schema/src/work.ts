@@ -46,7 +46,7 @@ export const TaskStatus = z.enum(TASK_STATUSES);
 
 /** 派活时的执行配置（与 v1 任务笔记的平铺字段同名同义）。 */
 const RunConfigShape = {
-  workdir: z.string().min(1).optional().describe("执行器上的工作目录（缺省 ~；绝对路径或以 ~/ 开头）"),
+  workdir: z.string().min(1).optional().describe("执行器上的工作目录（绝对路径或以 ~/ 开头）；缺省用所属项目的 workdir，再缺省为 ~（ADR 0033）"),
   model: z.string().min(1).optional().describe("指定模型，原样交给 agent"),
   gpus: z.array(z.number().int().nonnegative()).optional().describe("只把这些 GPU 暴露给这一轮"),
   timeout_minutes: z.number().int().positive().optional().describe("每一轮最长运行时间；缺省用执行器默认值"),
@@ -67,7 +67,8 @@ export const WorkProject = z.strictObject({
   updated_by: idOf("act").optional().describe("最近一次修改者身份（人或 agent，ADR 0029）；R3 之前的数据缺失"),
   tags: z.array(z.string()),
   goal: z.string().min(1).optional(),
-  repo: z.string().min(1).optional().describe("关联代码仓库的路径或 URL"),
+  repo: z.string().min(1).optional().describe("关联代码仓库的 URL 或路径，只供参考；写进每一轮的输入（ADR 0033）"),
+  workdir: z.string().min(1).optional().describe("项目的工作目录：任务没有自己的 workdir 时，委派那一刻用它（ADR 0033）；规则同任务 workdir"),
   deadline: Timestamp.optional(),
 });
 
@@ -192,6 +193,7 @@ export const WorkProjectPatch = z
     tags: z.array(z.string()).optional(),
     goal: z.string().min(1).nullable().optional().describe("null：清空"),
     repo: z.string().min(1).nullable().optional().describe("null：清空"),
+    workdir: z.string().min(1).nullable().optional().describe("null：清空（ADR 0033）"),
     deadline: Timestamp.nullable().optional().describe("null：清空"),
   })
   .refine(nonEmpty, PATCH_EMPTY)
@@ -223,6 +225,7 @@ export const WorkProjectCreate = z.strictObject({
     tags: z.array(z.string()).optional().describe("缺省为 []"),
     goal: z.string().min(1).optional(),
     repo: z.string().min(1).optional(),
+    workdir: z.string().min(1).optional(),
     deadline: Timestamp.optional(),
   }),
 });

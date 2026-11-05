@@ -13,7 +13,7 @@ import type { Navigate } from "../navigation.ts";
 import { t, translated } from "../i18n.ts";
 import { isWorkProposal, proposalCard } from "../proposal-card.ts";
 
-const STATUS: Record<Proposal["status"], string> = translated({ pending: "Pending", accepted: "Accepted", rejected: "Rejected" });
+const STATUS: Record<Proposal["status"], string> = translated({ pending: "Pending", accepted: "Accepted", rejected: "Rejected", withdrawn: "Withdrawn" });
 const title = (p: Proposal) => p.operation.op === "exec.privileged" ? p.operation.args.argv.join(" ")
   : isWorkProposal(p) ? (p.operation.args.operation.op === "work.task.dispatch" ? t("Delegate a task") : t("Handoff plan")) : p.operation.op;
 

@@ -6,7 +6,8 @@ import { ProposalOperation } from "./operation.ts";
  * 提议（ADR 0014 第 1 节，ADR 0016 第 3 节）：一个"需要批准"的操作，等人决定。
  * 存放在 Hub 的 hub.sqlite 中，不在 vault 里。提议里存的是完整的操作，接受后 Hub 原样执行它。
  */
-export const ProposalStatus = z.enum(["pending", "accepted", "rejected"]);
+/** withdrawn：作者撤回，或被同一作者对同一任务的同类新提议取代（ADR 0033）。 */
+export const ProposalStatus = z.enum(["pending", "accepted", "rejected", "withdrawn"]);
 
 export const Proposal = z.strictObject({
   id: idOf("prop"),
@@ -16,8 +17,9 @@ export const Proposal = z.strictObject({
   status: ProposalStatus,
   created: Timestamp,
   decided: Timestamp.optional(),
-  decided_by: idOf("act").optional().describe("做出决定的身份 ID（必须是 human 角色）"),
-});
+  decided_by: idOf("act").optional().describe("做出决定的身份 ID：接受与拒绝必须是 human 角色；撤回是作者本人"),
+  superseded_by: idOf("prop").optional().describe("被哪条新提议取代（只在 withdrawn 时出现，ADR 0033）"),
+}).refine((proposal) => proposal.superseded_by === undefined || proposal.status === "withdrawn", { message: "只有已撤回的提议能有 superseded_by", path: ["superseded_by"] });
 
 export type ProposalStatus = z.infer<typeof ProposalStatus>;
 export type Proposal = z.infer<typeof Proposal>;

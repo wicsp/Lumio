@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AGENTS, Timestamp, RuntimeName, idOf } from "./common.ts";
+import { AGENTS, AgentTarget, Timestamp, RuntimeName, idOf } from "./common.ts";
 import { NoteRef } from "./query.ts";
 import { JobAccess } from "./access.ts";
 
@@ -126,6 +126,19 @@ export const RuntimeInfo = z.strictObject({
   online: z.boolean().describe("最近 3 分钟内轮询过 Hub；否则显示为失联"),
 });
 
+/**
+ * 可委派的目标（ADR 0033）：某个执行器上登记的一个引擎。`execution.target.list` 返回它；
+ * 委派的 `to` 与交接计划 agent 步骤的 `agent` 必须是其中之一（不带 @ 的写法指 Hub 所在机器的执行器）。
+ */
+export const ExecutionTarget = z.strictObject({
+  target: AgentTarget.describe("委派时使用的写法，如 codex@macsp"),
+  runtime: RuntimeName.describe("执行器名"),
+  engine: z.enum(AGENTS),
+  version: z.string().min(1),
+  online: z.boolean().describe("离线的目标仍可委派，这一轮会在它上线后开始"),
+});
+export const ExecutionTargetListArgs = z.strictObject({ online: z.boolean().optional().describe("true：只列在线的目标") });
+
 /** 例行任务交给执行器的计划（ADR 0019 第 6 节）。Hub 离线时执行器照此自行触发。 */
 export const RoutineSpec = z.strictObject({
   routine: idOf("rtn"),
@@ -184,6 +197,8 @@ export type JobResult = z.infer<typeof JobResult>;
 export type Job = z.infer<typeof Job>;
 export type RuntimeRegistration = z.infer<typeof RuntimeRegistration>;
 export type RuntimeInfo = z.infer<typeof RuntimeInfo>;
+export type ExecutionTarget = z.infer<typeof ExecutionTarget>;
+export type ExecutionTargetListArgs = z.infer<typeof ExecutionTargetListArgs>;
 export type RoutineSpec = z.infer<typeof RoutineSpec>;
 export type RoutineInfo = z.infer<typeof RoutineInfo>;
 export type RuntimeHeartbeat = z.infer<typeof RuntimeHeartbeat>;
