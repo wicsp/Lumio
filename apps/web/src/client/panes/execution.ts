@@ -3,8 +3,9 @@
  * 运行列表每 5 秒静默刷新；正在运行的详情状态变化时自动更新。
  * 产物下载前核对大小与 SHA-256；取消要确认，不自动重跑。
  */
-import { JOB_STATUSES, type Job, type StoredArtifact, type ExecutionRoutineInfo, type RuntimeInfo } from "@lumio/schema";
+import { JOB_STATUSES, type Job, type StoredArtifact, type ExecutionRoutineInfo, type RuntimeInfo, type WorkTask } from "@lumio/schema";
 import { errorText, type Client, type HubExtras } from "../api.ts";
+import { executionGroups, type ExecutionGroup } from "../execution-groups.ts";
 import { attentionCard, attentionFor } from "../attention-card.ts";
 import { formatTime, safeFileName, verifyArtifact, routineStatusCommand } from "../commands.ts";
 import { clear, empty, failure, h, icon, loading, openDialog, openMenu, placeholder, statusIcon, toast } from "../dom.ts";
@@ -18,7 +19,7 @@ import { t } from "../i18n.ts";
 
 type Mode = "jobs" | "routines" | "devices";
 const LIVE = ["queued", "assigned", "running"];
-const GROUPS: Array<[string, string[]]> = [["Needs attention", ["waiting_for_human", "failed", "unknown"]], ["In progress", LIVE], ["Finished", ["done", "cancelled"]]];
+const GROUPS: Array<[string, ExecutionGroup]> = [["Needs attention", "needs"], ["In progress", "live"], ["Finished", "history"]];
 
 export class ExecutionPane {
   private mode: Mode = "jobs";
@@ -37,6 +38,7 @@ export class ExecutionPane {
   private selected?: string;
   private currentJob?: Job;
   private routines: ExecutionRoutineInfo[] = [];
+  private tasks?: WorkTask[];
   private taskTitles: Array<{ id: string; title: string }> = [];
   private runtimeNames = new Map<string, string>();
   private runtimeName = (id: string) => this.runtimeNames.get(id) ?? id;
@@ -117,17 +119,19 @@ export class ExecutionPane {
     if (!quiet && !this.list.childElementCount) clear(this.list, loading());
     try {
       if (this.mode === "jobs") {
-        const [jobs, tasks, runtimes] = await Promise.all([
-          this.client.jobs((this.statusFilter || undefined) as Job["status"] | undefined),
-          this.client.workTasks().catch(() => this.taskTitles),
-          this.client.runtimes().catch(() => undefined)]);
+        const [jobs, tasks, runtimes, attention] = await Promise.all([
+          this.client.jobs(),
+          this.client.workTasks().catch(() => undefined),
+          this.client.runtimes().catch(() => undefined),
+          this.hub.attention().catch(() => undefined)]);
         if (!this.active || generation !== this.listGeneration) return;
-        this.taskTitles = tasks.map(t => ({ id: t.id, title: t.title }));
+        if (tasks) { this.tasks = tasks; this.taskTitles = tasks.map(t => ({ id: t.id, title: t.title })); }
         if (runtimes) this.runtimeNames = new Map(runtimes.map(r => [r.actor, r.registration.name]));
         const sorted = jobs.slice().sort((a, b) => b.spec.created.localeCompare(a.spec.created));
-        if (!sorted.length) { clear(this.list, empty(this.statusFilter ? t("No runs with this status.") : t("No runs yet. Click Delegate on a task and each round shows up here."))); return; }
-        clear(this.list, ...GROUPS.map(([label, statuses]) => {
-          const items = sorted.filter(j => statuses.includes(j.status));
+        const groups = executionGroups(sorted, this.tasks, attention, (this.statusFilter || undefined) as Job["status"] | undefined);
+        if (!Object.values(groups).some(items => items.length)) { clear(this.list, empty(this.statusFilter ? t("No runs with this status.") : t("No runs yet. Click Delegate on a task and each round shows up here."))); return; }
+        clear(this.list, ...GROUPS.map(([label, group]) => {
+          const items = groups[group];
           if (!items.length) return null;
           return h("section", { class: "group" }, h("div", { class: "group-head" }, t(label), h("span", { class: "count" }, items.length)),
             h("div", { class: "group-body" }, ...items.map(job => this.jobRow(job))));

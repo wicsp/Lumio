@@ -1,3 +1,4 @@
+import { executionGroups } from "../execution-groups.ts";
 import { turnGroup } from "../turn.ts";
 import type { Session } from "../api.ts";
 import { h, icon, typing } from "../dom.ts";
@@ -152,7 +153,10 @@ export class WorkbenchView {
     };
     set("work", tasks.status === "fulfilled" ? tasks.value.filter(t => turnGroup(t) === "needs" || turnGroup(t) === "todo").length : undefined);
     set("approvals", proposals.status === "fulfilled" ? proposals.value.length : undefined, true);
-    set("execution", jobs.status === "fulfilled" ? jobs.value.filter(j => ["queued", "assigned", "running", "waiting_for_human"].includes(j.status)).length : undefined);
+    const groups = jobs.status === "fulfilled" ? executionGroups(jobs.value,
+      tasks.status === "fulfilled" ? tasks.value : undefined,
+      attention.status === "fulfilled" ? attention.value : undefined) : undefined;
+    set("execution", groups ? groups.live.length + groups.needs.length : undefined);
     // 今日的提醒数 = 需要你处理的轮次 + 待批准（ADR 0030）；窄屏底栏只看得到这一个数。
     const needs = attention.status === "fulfilled" && attention.value ? attention.value.length : 0;
     set("overview", needs + (proposals.status === "fulfilled" ? proposals.value.length : 0), true);
