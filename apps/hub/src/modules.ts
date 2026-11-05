@@ -1,3 +1,4 @@
+import { Notifications } from "./notifications.ts";
 import { WorkCommands } from "./work-commands.ts";
 import { text as msg } from "./messages.ts";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
@@ -20,6 +21,7 @@ import { workdirInVault } from "./execution-policy.ts";
 
 /** Composition only: domain rules belong to their modules; adapters share one transaction-capable database. */
 export class BusinessModules {
+  readonly notifications: Notifications;
   readonly workStore: SqliteWorkStore;
   readonly work: WorkService;
   readonly workCommands: WorkCommands;
@@ -34,7 +36,7 @@ export class BusinessModules {
   private readonly timer: ReturnType<typeof setInterval>;
   readonly signal = this.stopped.signal;
   constructor(private readonly config: HubConfig, private readonly store: HubStore, options: {
-    authorize?: typeof authorize; now?: () => Date; assistantModel?: AssistantModel; assistantTools?: AssistantTool[];
+    authorize?: typeof authorize; now?: () => Date; assistantModel?: AssistantModel; assistantTools?: AssistantTool[]; pushFetch?: typeof fetch;
   } = {}) {
     const now = options.now ?? (() => new Date());
     const id = (prefix: Parameters<typeof newId>[0]) => newId(prefix, now(), randomBytes);
@@ -52,7 +54,18 @@ export class BusinessModules {
         }
       },
     });
-    this.workStore = new SqliteWorkStore(store.db);
+    const notifications = this.notifications = new Notifications(store, config.stateDir, { fetch: options.pushFetch, now, subject: config.publicUrl, signal: this.signal });
+    this.workStore = new class extends SqliteWorkStore {
+      override putTurn(change: import("@lumio/schema").TaskTurnChange): void {
+        super.putTurn(change);
+        notifications.turn(this.task(change.task)!, change, this.turns(change.task).length);
+      }
+    }(store.db);
+    store.proposalCreated = proposal => {
+      const operation = proposal.operation;
+      const taskId = operation.op === "work.command" ? operation.args.operation.args.task : operation.op === "task.dispatch" ? operation.args.task : undefined;
+      notifications.proposal(proposal, taskId ? this.workStore.task(taskId)?.title : undefined);
+    };
     this.work = new WorkService(this.workStore, { text: msg, now, id, systemActor: store.workActor().id, job: id => jobs.get(id),
       auditPlan: (change, plan) => {
         const actor = store.actors().find(actor => actor.id === change.by)!;
@@ -74,7 +87,10 @@ export class BusinessModules {
       [...this.capabilities.tools(), ...(options.assistantTools ?? [])], { text: msg, now, id, toolActor: store.assistantActor() });
     this.assistant.recover();
     this.reconcile();
-    this.timer = setInterval(() => { try { this.reconcile(); } catch { /* Persisted pending results remain for the next pass. */ } }, 1000);
+    this.timer = setInterval(() => {
+      try { this.reconcile(); } catch { /* Persisted pending results remain for the next pass. */ }
+      void this.notifications.drain().catch(() => {});
+    }, 1000);
   }
   async undo(callId: string, identity: Identity, requestId: string): Promise<WorkCommandResult> {
     // Resolve only within the owner's conversations; the caller cannot undo another owner's tools.
@@ -119,5 +135,5 @@ export class BusinessModules {
       catch (cause) { if (!(cause instanceof HubError && cause.code === "NOT_FOUND") && !(cause instanceof CoreError)) throw cause; }
     }
   }
-  stop(): void { clearInterval(this.timer); this.stopped.abort(); }
+  stop(): void { clearInterval(this.timer); this.stopped.abort(); this.store.proposalCreated = undefined; }
 }
