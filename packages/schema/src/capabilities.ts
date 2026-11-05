@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { Id, Timestamp, idOf } from "./common.ts";
 import { ExecutionRoutineInfo } from "./execution.ts";
-import { Job, JobStatus } from "./job.ts";
+import { ExecutionTarget, ExecutionTargetListArgs, Job, JobStatus } from "./job.ts";
 import { Proposal } from "./proposal.ts";
 import { LinksResult, NOTE_TYPES, NoteDetail, SearchResult } from "./query.ts";
 import {
@@ -93,6 +93,10 @@ export const CAPABILITIES = [
     summary: { en: "List projects.", zh: "列出项目。" } }),
   define({ name: "work.project.show", kind: "read", args: WorkProjectShowArgs, result: WorkProject,
     summary: { en: "Show one project.", zh: "查看一个项目。" } }),
+  define({ name: "execution.target.list", kind: "read", args: ExecutionTargetListArgs, result: z.array(ExecutionTarget),
+    summary: { en: "List registered delegation targets, including offline targets.", zh: "列出已登记的委派目标，包括离线目标。" } }),
+  define({ name: "approval.proposal.withdraw", kind: "write", args: z.strictObject({ proposal: idOf("prop") }), result: Proposal,
+    summary: { en: "Withdraw your own pending proposal.", zh: "撤回自己的待批准提议。" } }),
   define({ name: "execution.job.list", kind: "read", args: ExecutionJobListArgs, result: z.array(Job),
     summary: { en: "List agent and command runs, most recent first.", zh: "列出 agent 与命令的执行轮次，最新的在前。" } }),
   define({ name: "execution.job.show", kind: "read", args: ExecutionJobShowArgs, result: Job,

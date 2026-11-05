@@ -9,16 +9,9 @@ import { ApiClientError, createClient } from "@lumio/api-client";
 import { HandoffPlan, WorkCommandRequest, idOf, type WorkCommandResult } from "@lumio/schema";
 import { hubCredentials } from "./config.ts";
 
+import { WORK_OPTIONS as options } from "./command-definitions.ts";
+
 const usage = () => msg("work.usage_lumio_task_new_list_show_update_edit_status_assign_comment_con");
-const options = {
-  query: { type: "string" }, json: { type: "boolean" }, legacy: { type: "boolean" }, to: { type: "string" }, description: { type: "string" },
-  file: { type: "string" }, status: { type: "string" }, project: { type: "string" }, parent: { type: "string" },
-  depends: { type: "string" }, due: { type: "string" }, workdir: { type: "string" }, model: { type: "string" },
-  timeout: { type: "string" }, patch: { type: "string" }, revision: { type: "string" }, "request-id": { type: "string" },
-  comment: { type: "string" }, turn: { type: "string" }, note: { type: "string" },
-  from: { type: "string" }, stage: { type: "string" }, action: { type: "string" }, "back-to": { type: "string" },
-  goal: { type: "string" }, repo: { type: "string" }, deadline: { type: "string" },
-} as const;
 
 /** Returns undefined only when an old task command must use the v1 compatibility path. */
 export async function runWork(kind: "task" | "project", args: string[], log: (line: string) => void): Promise<number | undefined> {
@@ -30,7 +23,7 @@ export async function runWork(kind: "task" | "project", args: string[], log: (li
     throw new Error(usage());
   }
   if (kind === "task" && ["status", "assign", "ack"].includes(action)) throw new Error(msg("work.use_turn_commands"));
-  const client = createClient({ ...hubCredentials(), language: language() });
+  const client = createClient({ ...hubCredentials(), language: language(), onOfflineTargets: targets => console.error(msg("targets.offline", targets.join(", "))) });
   const emit = (value: unknown) => log(values.json ? JSON.stringify(value) : typeof value === "string" ? value : JSON.stringify(value, null, 2));
   const send = async (op: string, payload: Record<string, unknown>): Promise<WorkCommandResult> => client.workCommand(WorkCommandRequest.parse({
     request_id: values["request-id"] ?? randomUUID(), operation: { op, args: payload },
@@ -76,10 +69,10 @@ export async function runWork(kind: "task" | "project", args: string[], log: (li
       if (rest.length) throw new Error(msg("work.quote_titles_containing_spaces"));
       if (kind === "task" && (values.to || values.status)) throw new Error(msg("work.use_turn_commands"));
       const description = values.file ? await readFile(values.file, "utf8") : values.description;
-      const fields = kind === "project" ? { goal: values.goal, repo: values.repo, deadline: values.deadline }
+      const fields = kind === "project" ? { goal: values.goal, repo: values.repo, deadline: values.deadline, workdir: values.workdir }
         : { project: values.project, parent: values.parent,
           dependencies: values.depends?.split(",").filter(Boolean), due: values.due, workdir: values.workdir, model: values.model,
-          timeout_minutes: values.timeout === undefined ? undefined : Number(values.timeout) };
+          timeout_minutes: values.timeout === undefined ? undefined : Number(values.timeout), gpus: values.gpus?.split(",").map(Number) };
       const result = await send(`work.${kind}.create`, { title: reference, description, ...fields });
       if (values.json) emit(result); else if (result.kind === "task") log(`${result.task.id}  ${result.task.title}`); else if (result.kind === "project") log(`${result.project.id}  ${result.project.title}`);
       return 0;
@@ -132,6 +125,11 @@ export async function runWork(kind: "task" | "project", args: string[], log: (li
       }
     } else if (values.patch) {
       try { patch = JSON.parse(values.patch); } catch { throw new Error(msg("execution-routines.patch_must_be_a_json_object")); }
+    } else if (action === "update") {
+      const fields = current.type === "project" ? { goal: values.goal, repo: values.repo, deadline: values.deadline, workdir: values.workdir }
+        : { project: values.project, parent: values.parent, dependencies: values.depends?.split(",").filter(Boolean), due: values.due, workdir: values.workdir, model: values.model,
+          gpus: values.gpus?.split(",").map(Number), timeout_minutes: values.timeout === undefined ? undefined : Number(values.timeout) };
+      patch = Object.fromEntries(Object.entries({ ...fields, description: values.file ? await readFile(values.file, "utf8") : values.description }).filter(([, value]) => value !== undefined));
     } else if (action === "status") patch = { status: values.status ?? rest[0] };
     else throw new Error(msg("work.use_patch_to_update_use_edit_for_text_status_for_status_and_assign_f"));
     const result = await send(`work.${kind}.update`, { [kind]: reference, expected_revision: values.revision === undefined ? current.revision : Number(values.revision), patch });

@@ -39,6 +39,7 @@ export class HubStore {
         CREATE TABLE IF NOT EXISTS audit (time TEXT NOT NULL, actor_id TEXT NOT NULL REFERENCES actors(id), token_label TEXT NOT NULL,
           operation TEXT NOT NULL, authorization TEXT NOT NULL, proposal_id TEXT, execution_result TEXT);
       `);
+      if (!db.query<{ name: string }, []>("PRAGMA table_info(proposals)").all().some(column => column.name === "superseded_by")) db.exec("ALTER TABLE proposals ADD COLUMN superseded_by TEXT REFERENCES proposals(id)");
       return new HubStore(db);
     } catch (cause) { db.close(); throw cause; }
   }
@@ -197,10 +198,10 @@ export class HubStore {
   }
 
   proposal(id: string): Proposal | undefined {
-    const row = this.db.query<{ id: string; operation: string; reason: string; author: string; status: string; created: string; decided: string | null; decided_by: string | null }, [string]>(
+    const row = this.db.query<{ id: string; operation: string; reason: string; author: string; status: string; created: string; decided: string | null; decided_by: string | null; superseded_by: string | null }, [string]>(
       "SELECT * FROM proposals WHERE id=?",
     ).get(id);
-    return row ? Proposal.parse({ ...row, operation: JSON.parse(row.operation), decided: row.decided ?? undefined, decided_by: row.decided_by ?? undefined }) : undefined;
+    return row ? Proposal.parse({ ...row, operation: JSON.parse(row.operation), decided: row.decided ?? undefined, superseded_by: row.superseded_by ?? undefined, decided_by: row.decided_by ?? undefined }) : undefined;
   }
 
   createProposal(operation: ProposalOperation, reason: string, author: string): Proposal {
@@ -210,10 +211,23 @@ export class HubStore {
       if (duplicate) throw new HubError("CONFLICT", { key: "store.an_identical_proposal_is_already_pending", args: [] }, { ...(operation.op !== "work.command" ? { operation } : {}), proposal: duplicate.id });
       const now = new Date();
       const proposal = Proposal.parse({ id: newId("prop", now, randomBytes), operation, reason, author, status: "pending", created: now.toISOString() });
-      this.db.query("INSERT INTO proposals VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)")
+      this.db.query("INSERT INTO proposals(id,operation,reason,author,status,created) VALUES (?, ?, ?, ?, ?, ?)")
         .run(proposal.id, JSON.stringify(operation), reason, author, proposal.status, proposal.created);
       this.proposalCreated?.(proposal);
       return proposal;
+    })();
+  }
+
+  withdrawProposal(id: string, identity: Identity, supersededBy?: string): Proposal {
+    return this.db.transaction(() => {
+      const proposal = this.proposal(id);
+      if (!proposal) throw new HubError("NOT_FOUND", { key: "operations.proposal_not_found", args: [] });
+      if (identity.actor.role === "runtime" || proposal.author !== identity.actor.id) throw new HubError("FORBIDDEN", { key: "proposal.own_only", args: [] });
+      if (proposal.status !== "pending") throw new HubError("CONFLICT", { key: "operations.only_pending_proposals_can_be_decided", args: [] });
+      this.db.query("UPDATE proposals SET status='withdrawn',decided=?,decided_by=?,superseded_by=? WHERE id=? AND status='pending'")
+        .run(new Date().toISOString(), identity.actor.id, supersededBy ?? null, id);
+      this.audit(identity, "approval.proposal.withdraw", "allow", id, supersededBy ? `superseded_by:${supersededBy}` : "withdrawn");
+      return this.proposal(id)!;
     })();
   }
 

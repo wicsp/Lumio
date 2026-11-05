@@ -9,6 +9,8 @@ import type { authorize } from "./authorize.ts";
 import { handleArtifacts } from "./artifacts.ts";
 
 export const V2_ROUTES = [
+  { operation: "execution.read", method: "GET", pattern: /^\/v2\/execution\/targets$/, path: "/v2/execution/targets" },
+  { operation: "work.command", method: "POST", pattern: /^\/v2\/approval\/proposals\/(prop_[0-9A-HJKMNP-TV-Z]{26})\/withdraw$/, path: "/v2/approval/proposals/<id>/withdraw" },
   { operation: "notifications.push", method: "GET", pattern: /^\/v2\/notifications\/push\/key$/, path: "/v2/notifications/push/key" },
   { operation: "notifications.push", method: "GET", pattern: /^\/v2\/notifications\/push\/devices$/, path: "/v2/notifications/push/devices" },
   { operation: "notifications.push", method: "POST", pattern: /^\/v2\/notifications\/push\/devices$/, path: "/v2/notifications/push/devices" },
@@ -63,6 +65,8 @@ export async function handleV2(request: Request, route: V2Route, identity: Ident
   try {
     if (decision.result !== "allow") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: decision.result === "deny" ? decision.reason : msg("v2.approval_required") });
     const url = new URL(request.url), id = route.pattern.exec(url.pathname)?.[1];
+    if (url.pathname === "/v2/execution/targets") return Response.json((await modules.capabilities.execute("execution.target.list", Object.fromEntries([...url.searchParams].map(([key, value]) => [key, value === "true" ? true : value === "false" ? false : value])), identity)).result);
+    if (url.pathname.startsWith("/v2/approval/proposals/")) return Response.json((await modules.capabilities.execute("approval.proposal.withdraw", { proposal: id }, identity)).result);
     if (route.operation === "work.plan_templates.read") return Response.json(PlanTemplate.array().parse(modules.work.planTemplates()));
     if (route.operation === "notifications.push") {
       const push = modules.notifications.push, owner = identity.actor.id;
@@ -113,18 +117,20 @@ export async function handleV2(request: Request, route: V2Route, identity: Ident
       const parsed = (route.operation === "work.command" ? WorkCommandRequest : ExecutionRoutineCommandRequest).safeParse(body);
       if (!parsed.success) throw new HubError("INVALID", { key: "index.invalid_work_command_parameters", args: [] });
       const { operation, request_id } = parsed.data;
+      const offline = route.operation === "work.command" ? modules.workCommands.offlineTargets(WorkCommandRequest.parse(body)) : [];
+      const headers = offline.length ? { "X-Lumio-Offline-Targets": offline.join(", ") } : undefined;
       const commandDecision = decision = decide(identity.actor, { operation: route.operation, command: operation.op, args: operation.args });
       if (commandDecision.result === "needs_approval" && route.operation === "work.command") {
         const value = modules.workCommands.execute(WorkCommandRequest.parse(body), identity);
-        audited = true; return Response.json(value, { status: 202 });
+        audited = true; return Response.json(value, { status: 202, headers });
       }
       if (commandDecision.result !== "allow") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: commandDecision.result === "deny" ? commandDecision.reason : msg("v2.approval_required") });
-      if (capability(operation.op)) return Response.json((await modules.capabilities.execute(operation.op, operation.args, identity, request_id)).result);
+      if (capability(operation.op)) return Response.json((await modules.capabilities.execute(operation.op, operation.args, identity, request_id)).result, { headers });
       const result = store.db.transaction(() => {
         const value = route.operation === "work.command" ? modules.workCommands.execute(WorkCommandRequest.parse(body), identity) : modules.routines.command(body, identity.actor.id);
         store.audit(identity, route.operation, decision.result, undefined, "applied"); return value;
       })();
-      audited = true; return Response.json(result);
+      audited = true; return Response.json(result, { headers });
     }
     const read = async (name: string, args: Record<string, unknown>) => Response.json((await modules.capabilities.execute(name, args, identity)).result);
     if (route.operation === "execution.read" && url.pathname.startsWith("/v2/execution/jobs")) {

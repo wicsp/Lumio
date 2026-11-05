@@ -65,6 +65,7 @@ const LOW_RISK_WRITES = ["work.task.create", "work.task.update", "work.task.comm
 /** Argument-sensitive rules share the same decision point for HTTP and in-process tools. */
 function agentCommand(operation: string, args: Record<string, unknown> = {}): Decision {
   let reason: string | undefined;
+  if (operation === "approval.proposal.withdraw") return { result: "allow" };
   if (operation === "work.task.dispatch" || operation === "work.task.plan.set") return { result: "needs_approval" };
   if (operation === "work.task.hand") return args.to === "human" || args.to === "external" ? { result: "allow" } : { result: "deny", reason: "agent-cannot-hand-to-nobody" };
   if (operation.endsWith(".dispatch") || operation === "job.submit") reason = "agent-cannot-dispatch-tasks";

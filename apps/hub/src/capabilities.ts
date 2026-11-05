@@ -8,6 +8,7 @@ import type { ExecutionRoutines } from "@lumio/execution";
 import type { HubStore, Identity } from "./store.ts";
 import type { HubConfig } from "./config.ts";
 import { authorize } from "./authorize.ts";
+import { executionTargets } from "./targets.ts";
 import { Jobs } from "./jobs.ts";
 import { HubError } from "./errors.ts";
 import { text as msg } from "./messages.ts";
@@ -54,6 +55,7 @@ export class Capabilities {
       this.store.audit(identity, name, decision.result, undefined, "FORBIDDEN");
       throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: decision.result === "deny" ? decision.reason : msg("v2.approval_required") });
     }
+    if (name === "approval.proposal.withdraw") return { result: def.result.parse(this.store.withdrawProposal(String(args.proposal), identity)) };
     if (def.kind === "write") {
       const input = WorkCommandRequest.safeParse({ request_id: requestId, operation: { op: name, args } });
       if (!input.success) throw new HubError("INVALID", { key: "capability.invalid", args: [] });
@@ -94,6 +96,7 @@ export class Capabilities {
         case "work.project.list": result = work.projects().filter(value => !args.status || value.status === args.status); break;
         case "work.project.show": result = work.project(String(args.project)); break;
         case "work.attention.list": result = this.attention(); break;
+        case "execution.target.list": result = executionTargets(this.store).filter(target => args.online !== true || target.online); break;
         case "execution.job.list": {
           const list = jobs.list(args.status as string | undefined, args.task as string | undefined, args.routine as string | undefined);
           // The v1 compatibility route keeps its unbounded chronological presentation.

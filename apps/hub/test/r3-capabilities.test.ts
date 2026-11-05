@@ -312,7 +312,7 @@ test("catalog read endpoints validate their results, and project writes preserve
   const args: Record<string, object> = {
     "knowledge.note.search": { query: "index" }, "knowledge.note.show": { ref: "Main" }, "knowledge.note.links": { ref: "Main" },
     "work.task.list": {}, "work.task.show": { task: created.id }, "work.project.list": {}, "work.project.show": { project: project.project.id },
-    "execution.job.list": {}, "execution.job.show": { job: job.spec.id }, "execution.routine.list": {}, "approval.proposal.list": {}, "work.attention.list": {},
+    "execution.target.list": {}, "execution.job.list": {}, "execution.job.show": { job: job.spec.id }, "execution.routine.list": {}, "approval.proposal.list": {}, "work.attention.list": {},
   };
   for (const def of CAPABILITIES.filter(value => value.kind === "read")) {
     const result = await hub.modules.capabilities.execute(def.name, args[def.name], identity);

@@ -1,3 +1,4 @@
+import { printHelp } from "./help.ts";
 import { errorMessage, text as msg } from "./messages.ts";
 import { language } from "@lumio/platform";
 import { doctor } from "./doctor.ts";
@@ -33,9 +34,9 @@ export interface CliOptions {
 }
 
 export async function runCli(args: string[], options: CliOptions = {}): Promise<number> {
-  try { return await executeCli(args, options); }
+  try { if (printHelp(args, options.log ?? console.log)) return 0; return await executeCli(args, options); }
   catch (cause) {
-    if (!["agent", "job", "task", "project", "plan-template", "attention", "chat", "routine", "proposals", "runtime"].includes(args[0] ?? "") || !args.includes("--json")) throw cause;
+    if (!["targets", "agent", "job", "task", "project", "plan-template", "attention", "chat", "routine", "proposals", "runtime"].includes(args[0] ?? "") || !args.includes("--json")) throw cause;
     const error = cause instanceof ApiClientError ? {
       code: cause.code, message: errorMessage(cause), operation: cause.operation, reason: cause.reason, proposal: cause.proposal,
     } : { code: "INVALID", message: cause instanceof Error ? errorMessage(cause) : msg("cli.could_not_execute_command") };
@@ -46,6 +47,14 @@ export async function runCli(args: string[], options: CliOptions = {}): Promise<
 
 async function executeCli(args: string[], options: CliOptions): Promise<number> {
   const log = options.log ?? console.log;
+  if (args[0] === "targets") {
+    const { values, positionals } = parseArgs({ args: args.slice(1), allowPositionals: true, options: { json: { type: "boolean" }, online: { type: "boolean" } } });
+    if (positionals.length) throw new Error(msg("targets.usage"));
+    const targets = await createClient({ ...hubCredentials(), language: language() }).targets({ online: values.online });
+    if (values.json) log(JSON.stringify(targets));
+    else for (const target of targets) log(`${target.target}  ${target.version}  ${target.online ? msg("cli.online") : msg("cli.disconnected")}`);
+    return 0;
+  }
   if (args[0] === "doctor") {
     const { values, positionals } = parseArgs({ args: args.slice(1), allowPositionals: true, options: { json: { type: "boolean" } } });
     if (positionals.length) throw new Error(msg("cli.usage_lumio_doctor_json"));
@@ -99,7 +108,9 @@ async function executeCli(args: string[], options: CliOptions): Promise<number> 
     if (!["http:", "https:"].includes(endpoint.protocol) || endpoint.username || endpoint.password) throw new Error(msg("cli.lumio_hub_url_must_be_an_http_s_url"));
     endpoint.pathname = `${endpoint.pathname.replace(/\/$/, "")}/v1/status`;
     endpoint.search = ""; endpoint.hash = "";
-    const response = await fetch(endpoint, { headers: { "Accept-Language": language(), Authorization: `Bearer ${token}` }, redirect: "error" });
+    let response: Response;
+    try { response = await fetch(endpoint, { headers: { "Accept-Language": language(), Authorization: `Bearer ${token}` }, redirect: "error" }); }
+    catch { throw new Error(msg("client.connection_failed", endpoint.origin)); }
     if (!response.ok) throw new Error(msg("cli.could_not_get_hub_status_http", response.status));
     log(JSON.stringify(await response.json()));
     return 0;

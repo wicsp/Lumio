@@ -44,6 +44,7 @@ export class SqliteWorkStore implements WorkStore {
       if (db.query("SELECT 1 FROM work_tasks LIMIT 1").get()) throw new WorkError("CONFLICT", { key: "work.migration_required", args: [] });
       upgradeWorkTables(db);
     }
+    if (!db.query<{ name: string }, []>("PRAGMA table_info(work_projects)").all().some(column => column.name === "workdir")) db.exec("ALTER TABLE work_projects ADD COLUMN workdir TEXT");
   }
   transaction<T>(action: () => T): T { return this.db.transaction(action)(); }
   private readProject(row: Record<string, unknown> | null): WorkProject | undefined {
@@ -59,12 +60,12 @@ export class SqliteWorkStore implements WorkStore {
   }
   putProject(input: WorkProject): void {
     const value = WorkProject.parse(input);
-    this.db.query(`INSERT INTO work_projects(id,title,description,revision,status,created,updated,tags,goal,repo,deadline,created_by,updated_by)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+    this.db.query(`INSERT INTO work_projects(id,title,description,revision,status,created,updated,tags,goal,repo,deadline,created_by,updated_by,workdir)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(id) DO UPDATE SET title=excluded.title,description=excluded.description,revision=excluded.revision,
-      status=excluded.status,updated=excluded.updated,tags=excluded.tags,goal=excluded.goal,repo=excluded.repo,deadline=excluded.deadline,updated_by=excluded.updated_by`).run(
+      status=excluded.status,updated=excluded.updated,tags=excluded.tags,goal=excluded.goal,repo=excluded.repo,workdir=excluded.workdir,deadline=excluded.deadline,updated_by=excluded.updated_by`).run(
       value.id, value.title, value.description, value.revision, value.status, value.created, value.updated,
-      JSON.stringify(value.tags), value.goal ?? null, value.repo ?? null, value.deadline ?? null, value.created_by ?? null, value.updated_by ?? null);
+      JSON.stringify(value.tags), value.goal ?? null, value.repo ?? null, value.deadline ?? null, value.created_by ?? null, value.updated_by ?? null, value.workdir ?? null);
   }
 
   private readTask(row: Record<string, unknown> | null): WorkTask | undefined {
