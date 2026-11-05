@@ -76,6 +76,7 @@ async function startHubInstance(config: HubConfig, options: {
   routines?: RoutineOptions;
   assistantHome?: string;
   assistantFetch?: typeof fetch;
+  pushFetch?: typeof fetch;
   assistantModel?: AssistantModel;
   assistantTools?: AssistantTool[];
 } = {}) {
@@ -272,8 +273,8 @@ async function startHubInstance(config: HubConfig, options: {
     server = Bun.serve({ hostname: config.hostname, port: config.port,
       async fetch(request, server) { return webResponse(await withLanguage(language({ LUMIO_LANG: request.headers.get("Accept-Language") ?? undefined }), () => handle(request, server)), options.web?.csp); },
     });
-  } catch (cause) { modules?.stop(); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); throw cause; }
-  return { server, store, tasks: tasks!, routines: routines!, modules: modules!, async stop() { modules?.stop(); await server.stop(true); await modules?.artifacts.drain(); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); } };
+  } catch (cause) { modules?.stop(); await modules?.notifications.stop(); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); throw cause; }
+  return { server, store, tasks: tasks!, routines: routines!, modules: modules!, async stop() { modules?.stop(); await server.stop(true); await modules?.notifications.stop(); await modules?.artifacts.drain(); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); } };
 }
 
 /** One Hub or offline migration owns a state directory. OS locks disappear on crashes, without deleting lock files. */

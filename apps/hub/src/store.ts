@@ -10,6 +10,7 @@ import { workSystemActor, SqliteRuntimeRegistry, SqliteExecutionStore } from "@l
 
 export interface Identity { actor: Actor; label: string; job?: string }
 export class HubStore {
+  proposalCreated: ((proposal: Proposal) => void) | undefined;
   readonly executionStore: SqliteExecutionStore;
   private readonly runtimeRegistry: ExecutionRuntimes;
   private constructor(public readonly db: Database) {
@@ -203,14 +204,17 @@ export class HubStore {
   }
 
   createProposal(operation: ProposalOperation, reason: string, author: string): Proposal {
-    // 内容相同的待批准提议只保留一个（按完整操作比较，与操作种类无关）。
-    const duplicate = this.proposals("pending").find((p) => p.author === author && JSON.stringify(p.operation) === JSON.stringify(operation));
-    if (duplicate) throw new HubError("CONFLICT", { key: "store.an_identical_proposal_is_already_pending", args: [] }, { ...(operation.op !== "work.command" ? { operation } : {}), proposal: duplicate.id });
-    const now = new Date();
-    const proposal = Proposal.parse({ id: newId("prop", now, randomBytes), operation, reason, author, status: "pending", created: now.toISOString() });
-    this.db.query("INSERT INTO proposals VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)")
-      .run(proposal.id, JSON.stringify(operation), reason, author, proposal.status, proposal.created);
-    return proposal;
+    return this.db.transaction(() => {
+      // 内容相同的待批准提议只保留一个（按完整操作比较，与操作种类无关）。
+      const duplicate = this.proposals("pending").find((p) => p.author === author && JSON.stringify(p.operation) === JSON.stringify(operation));
+      if (duplicate) throw new HubError("CONFLICT", { key: "store.an_identical_proposal_is_already_pending", args: [] }, { ...(operation.op !== "work.command" ? { operation } : {}), proposal: duplicate.id });
+      const now = new Date();
+      const proposal = Proposal.parse({ id: newId("prop", now, randomBytes), operation, reason, author, status: "pending", created: now.toISOString() });
+      this.db.query("INSERT INTO proposals VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)")
+        .run(proposal.id, JSON.stringify(operation), reason, author, proposal.status, proposal.created);
+      this.proposalCreated?.(proposal);
+      return proposal;
+    })();
   }
 
   decideProposal(id: string, status: "accepted" | "rejected", actor: string): Proposal {

@@ -4,6 +4,9 @@ const locale = new AsyncLocalStorage<Language>();
 export const withLanguage = <T>(lang: Language, action: () => T): T => locale.run(lang, action);
 
 export const en = {
+  "notifications.invalid": "Invalid push subscription or device settings",
+  "notifications.device_missing": "Push device not found",
+  "notifications.test_failed": "Test notification could not be delivered to every device; check device delivery status.",
   "work.hand_other_round": "Another round is still executing this task; only that round or a human can hand it over.",
   "work.invalid_outcome_transition": "This operation is not applicable to the task's current outcome or turn.",
   "work.migration_required": "Task model migration required; stop Hub and run lumio hub migrate task-v3.",
@@ -768,6 +771,9 @@ ${String(p0)}${String(p1)}`,
   "Run tailscale serve status to check": "Run tailscale serve status to check",
 };
 export const zh: typeof en = {
+  "notifications.invalid": "推送订阅或设备设置不合法",
+  "notifications.device_missing": "找不到推送设备",
+  "notifications.test_failed": "测试通知未能送达所有设备，请检查设备的发送状态。",
   "work.hand_other_round": "此任务仍有其他轮次正在执行；只有该轮次或人可以交接。",
   "work.invalid_outcome_transition": "当前结局或交接不适用此操作。",
   "work.migration_required": "需要切换任务模型；停止 Hub 后运行 lumio hub migrate task-v3。",

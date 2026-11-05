@@ -1,3 +1,4 @@
+import { PushSubscriptionInput, PushDevice, PushDeviceUpdate, PushPublicKey, PushTestResult } from "@lumio/schema";
 import { AgentInfo, AgentTokenIssued, AgentTokenRequest, AgentRevokeRequest, ClientInvite, ClientInviteRequest, ClientJoin, ClientJoinRequest, RuntimeInvite, RuntimeInviteRequest } from "@lumio/schema";
 import { AssistantConfigView, AssistantConfigUpdate, AssistantToolCall, ExecutionJobListArgs, RequestId, WorkAttention, WorkCommandRequest, WorkCommandResult, WorkTask, WorkTaskDetail, WorkProject, ExecutionRoutine, ExecutionRoutineCommandRequest, ExecutionRoutineInfo,
   ProjectStatus, AssistantMemory, AssistantMemoryCommandRequest, AssistantMemoryCommandResult, AssistantChatRequest, AssistantChatResult, AssistantConversation, AssistantConversationDetail, AssistantEvent, StoredArtifact, idOf } from "@lumio/schema";
@@ -58,6 +59,14 @@ export function createClient(options: { url: string; token?: string; language?: 
   }
   const queryParams = (options: QueryOptions): Record<string, string> => options.includePrivate === undefined ? {} : { include_private: String(options.includePrivate) };
   return {
+    pushKey() { return request("/v2/notifications/push/key", {}, PushPublicKey); },
+    pushDevices() { return request("/v2/notifications/push/devices", {}, PushDevice.array()); },
+    subscribePush(input: PushSubscriptionInput) { return request("/v2/notifications/push/devices", {}, PushDevice, validate(PushSubscriptionInput, input)); },
+    updatePushDevice(id: string, input: PushDeviceUpdate) {
+      return request(`/v2/notifications/push/devices/${validate(idOf("pdev"), id)}`, {}, PushDevice, validate(PushDeviceUpdate, input), "PATCH");
+    },
+    removePushDevice(id: string) { return request(`/v2/notifications/push/devices/${validate(idOf("pdev"), id)}`, {}, { parse: () => undefined }, undefined, "DELETE"); },
+    testPush() { return request("/v2/notifications/push/test", {}, PushTestResult, {}); },
     agents() { return request("/v2/agents", {}, AgentInfo.array()); },
     issueAgentToken(input: AgentTokenRequest) { return request("/v2/agents/tokens", {}, AgentTokenIssued, validate(AgentTokenRequest, input)); },
     revokeAgent(input: AgentRevokeRequest) { return request("/v2/agents/revoke", {}, { parse: () => undefined }, validate(AgentRevokeRequest, input)); },

@@ -90,7 +90,7 @@ test("v2 retains shared authorization, request validation, revision conflicts an
 test("all v2 routes obey the shared deny policy before reading bodies or exposing objects", async () => {
   await hub.stop(); hub = await startHub({ ...readConfig({ LUMIO_STATE_DIR: temp }), port: 0 }, { log() {}, authorize: () => ({ result: "deny", reason: "synthetic denial" }) });
   for (const route of V2_ROUTES) {
-    const path = route.path.replace("<job>", "job_00000000000000000000000001").replace("<artifact>", "art_00000000000000000000000001").replace("<id>", route.path.includes("/tools/") ? "tool_00000000000000000000000001" : route.path.includes("conversations") ? "conv_00000000000000000000000001" : route.path.includes("projects") ? "prj_00000000000000000000000001" : route.path.includes("routines") ? "rtn_00000000000000000000000001" : "task_00000000000000000000000001");
+    const path = route.path.replace("<job>", "job_00000000000000000000000001").replace("<artifact>", "art_00000000000000000000000001").replace("<id>", route.path.includes("/push/devices/") ? "pdev_00000000000000000000000001" : route.path.includes("/tools/") ? "tool_00000000000000000000000001" : route.path.includes("conversations") ? "conv_00000000000000000000000001" : route.path.includes("projects") ? "prj_00000000000000000000000001" : route.path.includes("routines") ? "rtn_00000000000000000000000001" : "task_00000000000000000000000001");
     const response = await fetch(`http://127.0.0.1:${hub.server.port}${path}`, { method: route.method, headers: { "Accept-Language": "zh", Authorization: `Bearer ${human}` } });
     expect(response.status).toBe(403); expect(ApiError.parse(await response.json()).error.reason).toBe("synthetic denial");
   }
