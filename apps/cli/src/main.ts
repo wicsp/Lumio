@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { printHelp } from "./help.ts";
 import { en, errorMessage, text as msg } from "./messages.ts";
 import { basename } from "node:path";
 import { runUpgrade } from "./upgrade.ts";
@@ -18,6 +19,8 @@ export function invocation(args: string[], name: string): { role: "cli" | "hub" 
 }
 
 export async function main(assets?: WebAssets, args = process.argv.slice(2), name = basename(process.argv0)): Promise<void> {
+  const helpArgs = name === "lumio-hub" ? ["hub", ...args] : name === "lumio-runtime" ? ["runtime", ...args] : args;
+  if (printHelp(helpArgs, console.log)) return;
   const call = invocation(args, name);
   try {
     if (call.role === "hub") {

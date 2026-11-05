@@ -30,10 +30,10 @@ describe("capability catalog (ADR 0029 §2)", () => {
     }
   });
 
-  test("writes are exactly the low-risk Work commands; dispatch, routines and approvals are absent", () => {
+  test("writes are low-risk Work commands and own-proposal withdrawal; dispatch and approval decisions are absent", () => {
     const writes = CAPABILITIES.filter((item) => item.kind === "write").map((item) => item.name).sort();
-    expect(writes).toEqual(["work.project.create", "work.project.update", "work.task.comment", "work.task.create", "work.task.hand", "work.task.update"]);
-    for (const name of writes) expect(WorkCommand.options.some((option) => option.shape.op.value === name)).toBe(true);
+    expect(writes).toEqual(["approval.proposal.withdraw", "work.project.create", "work.project.update", "work.task.comment", "work.task.create", "work.task.hand", "work.task.update"]);
+    for (const name of writes.filter(name => name.startsWith("work."))) expect(WorkCommand.options.some((option) => option.shape.op.value === name)).toBe(true);
     expect(CAPABILITY_NAMES.some((name) => /dispatch|accept|reject|routine\.(create|update)|privileged/.test(name))).toBe(false);
   });
 

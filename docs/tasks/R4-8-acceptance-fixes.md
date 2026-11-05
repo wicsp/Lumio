@@ -44,3 +44,16 @@
 - 任务页只保留顶部一个委派按钮；底部输入框增加「发表并交给 X 继续」（评论与委派在同一事务）。
 - 设置页「已连接的 agent」：Codex / Claude / pi 三个命令可切换。
 - 审批与今日：已撤回的提议在历史里显示「已撤回」，并链接到取代它的提议。
+
+## R4-8b / R4-8c 实现验收证据
+
+两片在同一个后端 PR 中交付：能力目录登记后，CLI 的逐能力执行检查需要同时接上新命令。先实现 Hub/Work，再实现 CLI/skill；R4-8d 不在本 PR 范围内。
+
+- R4-8b：`apps/hub/test/r4-8b.test.ts` 覆盖任务 / 项目 / `~` 的目录优先级、项目目录更新后的自动交接与旧 Job 不变、每轮 repo、清空项目目录与继承目录的 vault 检查。
+- R4-8b：同文件覆盖两类提议各自取代、作者 / 任务 / 类型隔离、原 request_id 重放、撤回的状态与审计、撤回后不能决定、不能撤回他人的提议、撤回不新增通知、取代只产生新提议的通知、审计故障整体回滚和重启持久化。
+- R4-8b：同文件覆盖人 / agent 查询目标，错误的委派与计划目标在提交时返回 INVALID 并列出候选；离线目标允许提交。离线说明通过 `X-Lumio-Offline-Targets` 响应头返回，也写入提议理由；CLI 在 stderr 提示。
+- R4-8c：`apps/cli/test/r4-8c.test.ts` 遍历命令和命名空间的结构化帮助，检查 Hub / Runtime 路由也在执行前显示帮助；中英文本与 JSON 的断线说明都包含地址和三种可能原因。
+- R4-8c：同文件检查 task new / update 的执行字段与 continue 的完整参数；skill 表由能力目录和 `apps/cli/src/command-definitions.ts` 生成，测试确保 Work 参数没有漏写，并包含先查 targets、错误提议直接重提或撤回的说明。
+- 联动：`apps/cli/test/r3-access.test.ts` 逐能力执行 CLI 并校验结果契约；`packages/api-client/test/r4-8.test.ts` 检查新端点、输入输出契约、离线提示及连接错误的地址脱敏。
+- 契约仅机械登记 `execution.target.list` 与 `approval.proposal.withdraw`，运行 `bun run schema:export` 重新生成（生成目录按现有规则不入库）。未新增依赖；测试只用 fixtures 和临时合成数据。
+- 完整验证：`LUMIO_LANG=en bun run check` 与 `LUMIO_LANG=zh bun run check` 均通过（各 1117 pass / 3 skip / 0 fail）；另有中英文帮助分组专项回归。

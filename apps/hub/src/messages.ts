@@ -4,6 +4,10 @@ const locale = new AsyncLocalStorage<Language>();
 export const withLanguage = <T>(lang: Language, action: () => T): T => locale.run(lang, action);
 
 export const en = {
+  "proposal.own_only": "You can only withdraw your own pending proposals.",
+  "target.invalid": (target: unknown, available: unknown) => `Unknown delegation target ${String(target)}. Available targets: ${String(available) || "(none)"}.`,
+  "target.offline": (targets: unknown) => `Offline targets (execution waits until they reconnect): ${String(targets)}`,
+
   "notifications.https_required": "Push notifications require an HTTPS contact address. Set LUMIO_PUBLIC_URL to an HTTPS URL, or subscribe from an allowed HTTPS page that sends its Origin header.",
   "work.plan_dispatch_failed": (stage: unknown, code: unknown) => `Could not delegate plan stage ${String(stage)} (${String(code)}); human action required.`,
   "work.plan_agent": "Delegate only to the agent in the current plan stage; handle checkpoints with task checkpoint.",
@@ -780,6 +784,10 @@ ${String(p0)}${String(p1)}`,
   "Run tailscale serve status to check": "Run tailscale serve status to check",
 };
 export const zh: typeof en = {
+  "proposal.own_only": "只能撤回自己的待批准提议。",
+  "target.invalid": (target: unknown, available: unknown) => `委派目标 ${String(target)} 未登记。可用目标：${String(available) || "（无）"}。`,
+  "target.offline": (targets: unknown) => `离线目标（上线后开始执行）：${String(targets)}`,
+
   "notifications.https_required": "推送通知需要 HTTPS 联系地址。请将 LUMIO_PUBLIC_URL 设置为 HTTPS 地址，或从允许访问的 HTTPS 页面订阅并携带 Origin 请求头。",
   "work.plan_dispatch_failed": (stage: unknown, code: unknown) => `无法委派计划阶段 ${String(stage)}（${String(code)}），需要人处理。`,
   "work.plan_agent": "只能委派给计划当前阶段的 agent；检查点请用 task checkpoint 处理。",

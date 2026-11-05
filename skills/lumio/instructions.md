@@ -15,9 +15,17 @@ For a personal installation, run commands with `LUMIO_CONFIG_FILE` pointing to `
 
 ## Commands
 
-Always add `--json`. Each successful command returns one JSON value matching its capability's result contract. Writes return a WorkCommandResult, including the updated task or project and revision. Use stable IDs from list/create results. Use `--request-id <unique-id>` on writes when retrying an uncertain request; reuse it for that request only. Fetch the current revision before updating; a conflict requires rereading and reconsidering the change.
+Always add `--json`. Each successful command returns one JSON value matching its capability's result contract. Work writes return a WorkCommandResult, including the updated task or project and revision. Use stable IDs from list/create results. Use `--request-id <unique-id>` on writes when retrying an uncertain request; reuse it for that request only. Fetch the current revision before updating; a conflict requires rereading and reconsidering the change.
 
 <!-- commands -->
+
+Additional Work commands (generated from the same CLI definitions):
+
+<!-- workflow-commands -->
+
+Use `lumio <command> --help --json` for structured usage without connecting to the Hub. Task/project update accepts either `--patch <json>` or the listed field flags; null in a patch clears an optional field. `--timeout` is in minutes, `--gpus` and `--depends` are comma-separated lists. `--revision` selects the observed revision (otherwise the CLI fetches it first); `edit --file` requires an explicit revision. Plan files contain HandoffPlan JSON, or null to clear a task plan.
+
+Before delegation or setting a plan, run `lumio targets --json` and use a returned target (offline targets are allowed and wait for reconnection). If a proposal is wrong, submit a corrected proposal directly: it automatically supersedes your pending proposal of the same kind for that task. Alternatively use `lumio proposals withdraw <id> --json` to withdraw your own pending proposal.
 
 ## Boundaries
 

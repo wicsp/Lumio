@@ -1,3 +1,4 @@
+import { ExecutionTarget, ExecutionTargetListArgs } from "@lumio/schema";
 import { PushSubscriptionInput, PushDevice, PushDeviceUpdate, PushPublicKey, PushTestResult } from "@lumio/schema";
 import { AgentInfo, AgentTokenIssued, AgentTokenRequest, AgentRevokeRequest, ClientInvite, ClientInviteRequest, ClientJoin, ClientJoinRequest, RuntimeInvite, RuntimeInviteRequest } from "@lumio/schema";
 import { AssistantConfigView, AssistantConfigUpdate, AssistantToolCall, ExecutionJobListArgs, RequestId, WorkAttention, WorkCommandRequest, WorkCommandResult, PlanTemplate, type WorkCommand, WorkTask, WorkTaskDetail, WorkProject, ExecutionRoutine, ExecutionRoutineCommandRequest, ExecutionRoutineInfo,
@@ -5,6 +6,7 @@ import { AssistantConfigView, AssistantConfigUpdate, AssistantToolCall, Executio
 import { JobRun, Job, JobSpec, JobStatus, RoutineInfo, RuntimeName, RuntimeInfo, Actor, OperationRequest, OperationResult, Proposal, ProposalStatus, ApiError, CheckResult, LinksResult, NoteDetail, SearchResult, type ApiErrorCode, type NoteRef } from "@lumio/schema";
 
 export class ApiClientError extends Error {
+  hubUrl?: string;
   readonly code: ApiErrorCode;
   readonly operation: ApiError["error"]["operation"];
   readonly reason: string | undefined;
@@ -28,9 +30,14 @@ export interface SubmitJobInput {
 export interface QueryOptions { includePrivate?: boolean }
 export interface SearchOptions extends QueryOptions { type?: NoteRef["type"]; limit?: number }
 
-export function createClient(options: { url: string; token?: string; language?: string; fetch?: typeof globalThis.fetch }) {
+export function createClient(options: { url: string; token?: string; language?: string; fetch?: typeof globalThis.fetch; onOfflineTargets?: (targets: string[]) => void }) {
   const fetcher = options.fetch ?? globalThis.fetch;
   const base = options.url.replace(/\/+$/, "");
+  function transportError(message: string, status?: number): ApiClientError {
+    const error = new ApiClientError({ code: "INTERNAL", message }, status);
+    if (status === undefined) { try { error.hubUrl = new URL(base).origin; } catch { /* invalid URL */ } }
+    return error;
+  }
   async function request<T>(path: string, params: Record<string, string>, schema: { parse(value: unknown): T }, body?: unknown, method?: string): Promise<T> {
     let status: number | undefined;
     try {
@@ -45,11 +52,14 @@ export function createClient(options: { url: string; token?: string; language?: 
       if (response.status === 204 && response.ok) return schema.parse(undefined);
       const responseBody: unknown = await response.json();
       if (!response.ok) throw new ApiClientError(ApiError.parse(responseBody).error, response.status);
-      return schema.parse(responseBody);
+      const result = schema.parse(responseBody);
+      const offline = response.headers.get("X-Lumio-Offline-Targets");
+      if (offline) options.onOfflineTargets?.(offline.split(",").map(target => target.trim()));
+      return result;
     } catch (cause) {
       if (cause instanceof ApiClientError) throw cause;
       // Fetch/schema errors can contain request URLs or response data. Do not expose them.
-      throw new ApiClientError({ code: "INTERNAL", message: "无法调用 Hub，或 Hub 返回了不合法的响应" }, status);
+      throw transportError("无法调用 Hub，或 Hub 返回了不合法的响应", status);
     }
   }
   function validate<T>(schema: { safeParse(value: unknown): { success: true; data: T } | { success: false } }, value: unknown): T {
@@ -110,7 +120,7 @@ export function createClient(options: { url: string; token?: string; language?: 
         return response;
       } catch (cause) {
         if (cause instanceof ApiClientError) throw cause;
-        throw new ApiClientError({ code: "INTERNAL", message: "无法读取 Hub 归档文件" }, status);
+        throw transportError("无法读取 Hub 归档文件", status);
       }
     },
     memories() { return request("/v2/assistant/memories", {}, AssistantMemory.array()); },
@@ -121,9 +131,11 @@ export function createClient(options: { url: string; token?: string; language?: 
     async *assistantEvents(input: AssistantChatRequest, signal?: AbortSignal): AsyncGenerator<AssistantEvent> {
       const payload = validate(AssistantChatRequest, input);
       let release: (() => Promise<void>) | undefined;
+      let status: number | undefined;
       try {
         const response = await fetcher(`${base}/v2/assistant/chat`, { method: "POST", redirect: "error", signal,
           headers: { ...(options.language ? { "Accept-Language": options.language } : {}), ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}), "Content-Type": "application/json", Accept: "application/x-ndjson" }, body: JSON.stringify(payload) });
+        status = response.status;
         if (!response.ok) throw new ApiClientError(ApiError.parse(await response.json()).error, response.status);
         if (!response.body) throw new Error("missing stream");
         const reader = response.body.getReader();
@@ -146,7 +158,7 @@ export function createClient(options: { url: string; token?: string; language?: 
         if (pending.trim() || !terminal) throw new Error("truncated assistant stream");
       } catch (cause) {
         if (cause instanceof ApiClientError) throw cause;
-        throw new ApiClientError({ code: "INTERNAL", message: "助手连接中断或返回了不合法的事件；请查询已保存的对话，勿自动重试操作" });
+        throw transportError("助手连接中断或返回了不合法的事件；请查询已保存的对话，勿自动重试操作", status);
       } finally { await release?.(); }
     },
     runtimeInvite(name: string) { return request("/v1/runtime-invites", {}, RuntimeInvite, validate(RuntimeInviteRequest, { name })); },
@@ -164,6 +176,8 @@ export function createClient(options: { url: string; token?: string; language?: 
     runtimes() { return request("/v1/runtimes", {}, RuntimeInfo.array()); },
     actors() { return request("/v1/actors", {}, Actor.array()); },
     operation(input: OperationRequest) { return request("/v1/operations", {}, OperationResult, validate(OperationRequest, input)); },
+    targets(args: { online?: boolean } = {}) { const value = validate(ExecutionTargetListArgs, args); return request("/v2/execution/targets", value.online === undefined ? {} : { online: String(value.online) }, ExecutionTarget.array()); },
+    withdrawProposal(id: string) { return request(`/v2/approval/proposals/${encodeURIComponent(validate(idOf("prop"), id))}/withdraw`, {}, Proposal, {}); },
     proposals(status: ProposalStatus = "pending") { return request("/v1/proposals", { status: validate(ProposalStatus, status) }, Proposal.array()); },
     acceptProposal(id: string) { return request(`/v1/proposals/${encodeURIComponent(id)}/accept`, {}, Proposal, {}); },
     rejectProposal(id: string) { return request(`/v1/proposals/${encodeURIComponent(id)}/reject`, {}, Proposal, {}); },

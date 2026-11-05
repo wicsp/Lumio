@@ -44,6 +44,7 @@ export interface WorkContext {
   text?: (key: string, ...args: unknown[]) => string;
   now(): Date;
   id(prefix: (typeof ID_PREFIXES)[keyof typeof ID_PREFIXES]): string;
+  validateTarget?(target: string): void;
   dispatch?(task: WorkTask, input: string, round: number, to?: string): Job;
   cancel?(task: string): void;
   agentForJob?(job: string): string | undefined;
@@ -139,7 +140,8 @@ export class WorkService {
     const boundary = history.findLastIndex(comment => runtimes.has(comment.author));
     const comments = history.slice(boundary + 1).filter(comment => !returned || comment.created >= returned.at);
     const stage = task.plan?.plan.stages.find(stage => stage.id === task.plan?.stage);
-    return [`# ${task.title}`, "", `Task ID: ${task.id}`, "", task.description,
+    const repo = task.project ? this.project(task.project).repo : undefined;
+    return [`# ${task.title}`, "", `Task ID: ${task.id}`, ...(repo ? [`Repository: ${repo}`] : []), "", task.description,
       ...(stage?.kind === "agent" ? ["", `## Plan stage: ${stage.id}`, stage.instruction,
         ...(stage.back_to ? ["If changes are needed, explain what must change and put <lumio-outcome>changes</lumio-outcome> on a separate line at the end of your report to send work back."] : [])] : []),
       "", "Use the Lumio skill to retrieve more context by ID: task show, job show, show (notes). Older discussions and reports are not included in full.",
@@ -182,6 +184,7 @@ export class WorkService {
     if (operation.op !== "work.task.dispatch" && operation.op !== "work.task.plan.set") throw new WorkError("INVALID", { key: "index.invalid_work_command_parameters", args: [] });
     const task = this.task(operation.args.task);
     if (operation.args.expected_revision !== undefined && operation.args.expected_revision !== task.revision) throw new WorkError("CONFLICT", { key: "index.task_changed_reload_before_dispatching", args: [] });
+    if (operation.op === "work.task.plan.set") this.validatePlan(operation.args.plan);
     return WorkCommandRequest.parse({ ...request, operation: { ...operation, args: { ...operation.args, expected_revision: task.revision,
       ...(operation.op === "work.task.dispatch" ? { to: this.taskTarget(task, operation.args.to) } : {}) } } });
   }
@@ -193,10 +196,17 @@ export class WorkService {
   }
   private taskTarget(task: WorkTask, explicit?: string): string {
     const stage = task.plan?.plan.stages.find(stage => stage.id === task.plan?.stage);
+    if (explicit) this.context.validateTarget?.(explicit);
     if (task.plan && (stage?.kind !== "agent" || (explicit !== undefined && explicit !== stage.agent))) {
       throw new WorkError("CONFLICT", { key: "work.plan_agent", args: [] });
     }
-    return this.dispatchTarget(task.id, stage?.kind === "agent" ? stage.agent : explicit);
+    const target = this.dispatchTarget(task.id, stage?.kind === "agent" ? stage.agent : explicit);
+    this.context.validateTarget?.(target);
+    return target;
+  }
+
+  private validatePlan(plan: import("@lumio/schema").HandoffPlan | null): void {
+    for (const stage of plan?.stages ?? []) if (stage.kind === "agent") this.context.validateTarget?.(stage.agent);
   }
 
   private reviewTurn(task: WorkTask, stage: string, at: string, note?: string): Turn {
@@ -272,7 +282,7 @@ export class WorkService {
         case "work.project.create": {
           const project = WorkProject.parse({ schema_version: 2, type: "project", id: this.context.id("prj"),
             title: operation.args.title, description: operation.args.description ?? "", tags: operation.args.tags ?? [],
-            goal: operation.args.goal, repo: operation.args.repo, deadline: operation.args.deadline,
+            goal: operation.args.goal, repo: operation.args.repo, workdir: operation.args.workdir, deadline: operation.args.deadline,
             revision: 1, status: "planning", created: time, updated: time, created_by: actor, updated_by: actor });
           this.store.putProject(project); result = { kind: "project", project }; break;
         }
@@ -329,6 +339,7 @@ export class WorkService {
           const task = this.task(operation.args.task);
           if (task.revision !== operation.args.expected_revision) throw new WorkError("CONFLICT", { key: "index.task_changed_reload_before_saving", args: [] });
           const { plan, from } = operation.args;
+          this.validatePlan(plan);
           if (from && (!plan || !plan.stages.some(stage => stage.id === from))) throw new WorkError("INVALID", { key: "index.invalid_work_command_parameters", args: [] });
           if (task.turn.reason === "working" || task.outcome !== "open") throw new WorkError("CONFLICT", { key: "work.invalid_outcome_transition", args: [] });
           const updated = WorkTask.parse({ ...task, plan: plan ? { plan, approved: { at: time, by: approval?.by ?? actor, ...(approval ? { proposal: approval.proposal } : {}) }, stage: from ?? plan.stages[0]!.id, rounds: 0 } : undefined,

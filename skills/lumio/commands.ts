@@ -1,21 +1,2 @@
-/** CLI spellings are checked against the capability catalog and exercised over HTTP. */
-export const CAPABILITY_COMMANDS: Record<string, string> = {
-  "knowledge.note.search": "search <query> [--type <type>] [--limit N]",
-  "knowledge.note.show": "show <ref>",
-  "knowledge.note.links": "links <ref>",
-  "work.task.list": "task list [--project <id>] [--turn me|agents|external|hold] [--query <text>]",
-  "work.task.show": "task show <id>",
-  "work.attention.list": "attention",
-  "work.project.list": "project list [--status <status>]",
-  "work.project.show": "project show <id>",
-  "execution.job.list": "job list [--status <status>] [--task <id>] [--routine <id>] [--limit N]",
-  "execution.job.show": "job show <id>",
-  "execution.routine.list": "routine list",
-  "approval.proposal.list": "proposals",
-  "work.task.create": "task new <title> [--description <text>]",
-  "work.task.update": "task update <id> --patch <json> --revision N",
-  "work.task.hand": "task hand <id> --to human|external [--note <text>]",
-  "work.task.comment": "task comment <id> <text>",
-  "work.project.create": "project new <title> [--description <text>] [--goal <text>]",
-  "work.project.update": "project update <id> --patch <json> --revision N",
-};
+/** Generated spellings come from the executable CLI definitions. */
+export { CAPABILITY_COMMANDS } from "../../apps/cli/src/command-definitions.ts";

@@ -1,6 +1,11 @@
 import { language, renderMessage, type Language } from "@lumio/platform";
 
 export const en = {
+  "help.usage": "Usage",
+  "targets.offline": (targets: unknown) => `Offline targets (execution waits until they reconnect): ${String(targets)}`,
+  "targets.usage": "Usage: lumio targets [--online] [--json]",
+  "client.connection_failed": (url: unknown) => `Cannot connect to Hub at ${String(url)}. Hub may not be running, the address may be incorrect, or this environment may restrict network access.`,
+
   "work.plan_dispatch_failed": (stage: unknown, code: unknown) => `Could not delegate plan stage ${String(stage)} (${String(code)}); human action required.`,
   "work.plan_agent": "Delegate only to the agent in the current plan stage; handle checkpoints with task checkpoint.",
   "work.plan_max_rounds": (limit: unknown) => `Plan stopped: reached the limit of ${String(limit)} rounds; human review required.`,
@@ -528,7 +533,7 @@ Outgoing links:`,
   "jobs.no_sandbox": "No sandbox",
   "jobs.uncommitted_changes": "(uncommitted changes)",
   "jobs.error": (p0: unknown) => `Error: ${String(p0)}`,
-  "operations.usage_lumio_proposals_status_pending_accepted_rejected_json_lumio_pr": "Usage: lumio proposals [--status pending|accepted|rejected] [--json]; lumio proposals accept|reject <ID> [--json]",
+  "operations.usage_lumio_proposals_status_pending_accepted_rejected_json_lumio_pr": "Usage: lumio proposals [--status pending|accepted|rejected|withdrawn] [--json]; lumio proposals accept|reject|withdraw <ID> [--json]",
   "operations.run_as_root_on": (p0: unknown, p1: unknown) => `Run as root on ${String(p0)}: ${String(p1)}`,
   "operations.source": (p0: unknown, p1: unknown) => `
 Source: ${String(p0)}${String(p1)}`,
@@ -542,7 +547,7 @@ Reason: ${String(p3)}
 Submitted by: ${String(p4)}  ${String(p5)}${String(p6)}`,
   "operations.decided_by": (p0: unknown, p1: unknown) => `
 Decided by: ${String(p0)}  ${String(p1)}`,
-  "operations.proposal_status_must_be_pending_accepted_or_rejected": "Proposal status must be pending, accepted or rejected",
+  "operations.proposal_status_must_be_pending_accepted_or_rejected": "Proposal status must be pending, accepted, rejected or withdrawn",
   "operations.no_proposals": "No proposals",
   "cli.could_not_execute_command": "Could not execute command",
   "cli.usage_lumio_doctor_json": "Usage: lumio doctor [--json]",
@@ -753,6 +758,11 @@ ${String(p0)}${String(p1)}`,
   "Run tailscale serve status to check": "Run tailscale serve status to check",
 };
 export const zh: typeof en = {
+  "help.usage": "用法",
+  "targets.offline": (targets: unknown) => `离线目标（上线后开始执行）：${String(targets)}`,
+  "targets.usage": "用法：lumio targets [--online] [--json]",
+  "client.connection_failed": (url: unknown) => `无法连接 Hub：${String(url)}。可能是 Hub 未运行、地址错误，或当前运行环境限制网络访问。`,
+
   "work.plan_dispatch_failed": (stage: unknown, code: unknown) => `无法委派计划阶段 ${String(stage)}（${String(code)}），需要人处理。`,
   "work.plan_agent": "只能委派给计划当前阶段的 agent；检查点请用 task checkpoint 处理。",
   "work.plan_max_rounds": (limit: unknown) => `计划已停止：达到 ${String(limit)} 轮上限，需要人验收。`,
@@ -1281,7 +1291,7 @@ ${String(p1)}`,
   "jobs.no_sandbox": "无沙箱",
   "jobs.uncommitted_changes": "（有未提交的改动）",
   "jobs.error": (p0: unknown) => `错误：${String(p0)}`,
-  "operations.usage_lumio_proposals_status_pending_accepted_rejected_json_lumio_pr": "用法：lumio proposals [--status pending|accepted|rejected] [--json]；lumio proposals accept|reject <ID> [--json]",
+  "operations.usage_lumio_proposals_status_pending_accepted_rejected_json_lumio_pr": "用法：lumio proposals [--status pending|accepted|rejected|withdrawn] [--json]；lumio proposals accept|reject|withdraw <ID> [--json]",
   "operations.run_as_root_on": (p0: unknown, p1: unknown) => `在 ${String(p0)} 上以 root 执行：${String(p1)}`,
   "operations.source": (p0: unknown, p1: unknown) => `
 来源：${String(p0)}${String(p1)}`,
@@ -1295,7 +1305,7 @@ ${String(p2)}
 提交者：${String(p4)}  ${String(p5)}${String(p6)}`,
   "operations.decided_by": (p0: unknown, p1: unknown) => `
 决定者：${String(p0)}  ${String(p1)}`,
-  "operations.proposal_status_must_be_pending_accepted_or_rejected": "提议状态必须是 pending、accepted 或 rejected",
+  "operations.proposal_status_must_be_pending_accepted_or_rejected": "提议状态必须是 pending、accepted、rejected 或 withdrawn",
   "operations.no_proposals": "没有提议",
   "cli.could_not_execute_command": "无法执行命令",
   "cli.usage_lumio_doctor_json": "用法：lumio doctor [--json]",
@@ -1511,10 +1521,12 @@ export function text(key: string, ...args: unknown[]): string {
 }
 export function errorMessage(cause: unknown): string {
   if (cause instanceof Error && "code" in cause && typeof cause.code === "string" && cause.code.startsWith("ERR_PARSE_ARGS_")) return text("arguments.invalid");
-  // The SDK is frozen except for its header option in this slice. Local transport
-  // and validation failures have no server message to translate, so use codes.
+  // Local transport and validation failures have no server message to translate.
   if (cause instanceof Error && cause.name === "ApiClientError" && "code" in cause) {
-    if (cause.code === "INTERNAL") return text("client.transport_failed");
+    if (cause.code === "INTERNAL") {
+      if ("hubUrl" in cause && cause.hubUrl) return text("client.connection_failed", cause.hubUrl);
+      return text("client.transport_failed");
+    }
     if (cause.code === "INVALID" && "status" in cause && cause.status === undefined) return text("client.invalid_request");
   }
   if (cause && typeof cause === "object" && "params" in cause) return renderMessage((language()) === "zh" ? zh : en, (cause as { params: { key: string; args: readonly unknown[] } }).params);

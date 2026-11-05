@@ -8,7 +8,7 @@ import { ProposalStatus, type Proposal } from "@lumio/schema";
 export async function runOperations(args: string[], values: { reason?: string; status?: string; json?: boolean }, log: (line: string) => void): Promise<number> {
   const [command, action] = args;
   const list = command === "proposals" && args.length === 1;
-  const decision = command === "proposals" && (action === "accept" || action === "reject") && args.length === 3;
+  const decision = command === "proposals" && (action === "accept" || action === "reject" || action === "withdraw") && args.length === 3;
   if ((!list && !decision) || values.reason !== undefined || (!list && values.status !== undefined)) {
     throw new Error(msg("operations.usage_lumio_proposals_status_pending_accepted_rejected_json_lumio_pr"));
   }
@@ -43,7 +43,7 @@ export async function runOperations(args: string[], values: { reason?: string; s
     else if (!proposals.length) log(msg("operations.no_proposals"));
     else await render(proposals);
   } else {
-    const proposal = await (action === "accept" ? client.acceptProposal : client.rejectProposal)(args[2]!);
+    const proposal = await (action === "withdraw" ? client.withdrawProposal : action === "accept" ? client.acceptProposal : client.rejectProposal)(args[2]!);
     if (values.json) log(JSON.stringify(proposal));
     else await render([proposal]);
   }

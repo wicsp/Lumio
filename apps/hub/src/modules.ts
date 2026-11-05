@@ -1,3 +1,4 @@
+import { validateTarget } from "./targets.ts";
 import { Notifications } from "./notifications.ts";
 import { WorkCommands } from "./work-commands.ts";
 import { text as msg } from "./messages.ts";
@@ -72,6 +73,7 @@ export class BusinessModules {
         store.audit({ actor, label: actor.name }, JSON.stringify({ op: "work.task.plan.advance", task: change.task, plan,
           from: change.from.stage, stage: change.to.stage, turn: change.to }), "allow", plan.approved.proposal, "applied");
       },
+      validateTarget: target => { validateTarget(this.store, config.localRuntime, target, now()); },
       dispatch: (task, input, round, to) => this.dispatch(task, input, round, to, now()),
       agentForJob: jobId => {
         const job = jobs.get(jobId);
@@ -80,7 +82,7 @@ export class BusinessModules {
       },
       cancel: (task) => { const job = jobs.activeForTask(task); if (job) jobs.cancel(job.spec.id); },
     });
-    this.workCommands = new WorkCommands(store, this.work, options.authorize ?? authorize);
+    this.workCommands = new WorkCommands(store, this.work, options.authorize ?? authorize, config.localRuntime);
     this.capabilities = new Capabilities(this, store, config, options.authorize);
     this.assistantStore = new SqliteAssistantStore(store.db);
     this.assistant = new AssistantService(this.assistantStore, options.assistantModel ?? configuredModel(config.assistantModel),
@@ -107,12 +109,13 @@ export class BusinessModules {
     return outcome.result as WorkCommandResult;
   }
   private dispatch(task: WorkTask, input: string, round: number, to: string | undefined, now: Date) {
+    validateTarget(this.store, this.config.localRuntime, to ?? "human", now);
     const target = parseAssignee(to ?? "human");
     if (target === "human") throw new HubError("INVALID", { key: "modules.specify_an_agent_e_g_pi_server", args: [] });
     const runtime = this.store.runtimes(now).find((value) => value.registration.name === (target.device ?? this.config.localRuntime));
     if (!runtime) throw new HubError("INVALID", { key: "modules.the_specified_runtime_is_not_registered_pair_it_first", args: [] });
     if (!runtime.registration.engines.some((value) => value.name === target.agent)) throw new HubError("INVALID", { key: "modules.selected_agent_is_not_registered_on_runtime", args: [] });
-    const workdir = task.workdir ?? "~";
+    const workdir = task.workdir ?? (task.project ? this.work.project(task.project).workdir : undefined) ?? "~";
     if (this.config.vault && runtime.registration.name === this.config.localRuntime && workdirInVault(this.config.vault, workdir)) {
       throw new HubError("INVALID", { key: "modules.working_directory_must_be_outside_the_knowledge_directory", args: [] });
     }

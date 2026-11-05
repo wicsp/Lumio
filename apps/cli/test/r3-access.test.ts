@@ -66,12 +66,17 @@ test("every catalog capability has an executable CLI command returning its resul
   const manage = (...args: string[]) => Bun.spawnSync([process.execPath, hubMain, ...args], { env: { HOME: temp, LUMIO_STATE_DIR: join(temp, "state") }, stdout: "pipe", stderr: "pipe" });
   expect(manage("actor", "create", runtimeName, "--role", "runtime").exitCode).toBe(0);
   const runtime = manage("token", "create", runtimeName, "--actor", runtimeName).stdout.toString().trim();
-  expect((await fetch(url + "/v1/runtime/register", { method: "POST", headers: { ...auth, Authorization: `Bearer ${runtime}` }, body: JSON.stringify({ protocol_version: 2, name: "server", engines: [], tags: [], max_concurrent: 1 }) })).status).toBe(200);
+  expect((await fetch(url + "/v1/runtime/register", { method: "POST", headers: { ...auth, Authorization: `Bearer ${runtime}` }, body: JSON.stringify({ protocol_version: 2, name: "server", engines: [{ name: "codex", version: "synthetic", sandbox: "os" }], tags: [], max_concurrent: 1 }) })).status).toBe(200);
   const submitted = await fetch(url + "/v1/jobs", { method: "POST", headers: auth, body: JSON.stringify({ runtime: "server", run: { kind: "command", argv: ["/bin/true"] } }) });
   expect(submitted.status).toBe(200); const job = await submitted.json() as { spec: { id: string } };
   await run("execution.job.show", ["job", "show", job.spec.id]);
   await run("execution.routine.list", ["routine", "list"]);
   await run("approval.proposal.list", ["proposals"]);
+  await run("execution.target.list", ["targets"]);
+  const proposalResponse = await fetch(url + "/v2/work/commands", { method: "POST", headers: { ...auth, Authorization: `Bearer ${agent}` }, body: JSON.stringify({ request_id: "synthetic-withdraw-request", operation: { op: "work.task.dispatch", args: { task: task.task.id, to: "codex@server" } } }) });
+  expect(proposalResponse.status).toBe(202);
+  const proposal = await proposalResponse.json() as { proposal: string };
+  await run("approval.proposal.withdraw", ["proposals", "withdraw", proposal.proposal]);
   await run("work.attention.list", ["attention"]);
   expect([...covered].sort()).toEqual(CAPABILITIES.map(value => value.name).sort());
   expect(await generateSkill()).toBe(await readFile(new URL("../../../skills/lumio/SKILL.md", import.meta.url), "utf8"));
