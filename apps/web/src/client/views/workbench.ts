@@ -1,4 +1,4 @@
-import { taskStatus, taskHolder, workStatus } from "../task-compat.ts";
+import { turnGroup } from "../turn.ts";
 import type { Session } from "../api.ts";
 import { h, icon, typing } from "../dom.ts";
 import { OverviewPane } from "../panes/overview.ts";
@@ -137,7 +137,7 @@ export class WorkbenchView {
     else if (section === "work") pane = new WorkPane(target, client, this.session.hub, id, navigate, changed);
     else if (section === "execution") pane = new ExecutionPane(target, client, this.session.hub, id, navigate, changed);
     else if (section === "assistant") pane = new AssistantPane(target, client, this.session.hub, intent, navigate);
-    else pane = new ApprovalsPane(target, client, changed);
+    else pane = new ApprovalsPane(target, client, changed, navigate);
     this.pane = pane;
     if (intent && section !== "assistant") pane.intent?.(intent);
   }
@@ -150,7 +150,7 @@ export class WorkbenchView {
       el.textContent = value ? String(value) : "";
       el.classList.toggle("attention", attention && !!value);
     };
-    set("work", tasks.status === "fulfilled" ? tasks.value.filter(t => taskStatus(t) === "active" || taskStatus(t) === "todo").length : undefined);
+    set("work", tasks.status === "fulfilled" ? tasks.value.filter(t => turnGroup(t) === "needs" || turnGroup(t) === "todo").length : undefined);
     set("approvals", proposals.status === "fulfilled" ? proposals.value.length : undefined, true);
     set("execution", jobs.status === "fulfilled" ? jobs.value.filter(j => ["queued", "assigned", "running", "waiting_for_human"].includes(j.status)).length : undefined);
     // 今日的提醒数 = 需要你处理的轮次 + 待批准（ADR 0030）；窄屏底栏只看得到这一个数。

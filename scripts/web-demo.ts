@@ -29,6 +29,7 @@ const human = store.createActor("demo", "human");
 const token = store.replaceToken("web-demo", human.name);
 store.createActor("demo-runtime", "runtime");
 const runtimeToken = store.replaceToken("demo-runtime", "demo-runtime");
+const agentToken = store.issueAgentToken("claude-code@laptop").token;
 store.close();
 
 const fakeModel = {
@@ -99,5 +100,30 @@ await runtime("/v1/runtime/results", { job: jobs[0].spec.id, lease: lease(jobs[0
   report: msg("web-demo.results_setting_success_rate_a_41_2_b_37_9_c_52_6_two_more_models_ar") });
 await runtime("/v1/runtime/results", { job: jobs[1].spec.id, lease: lease(jobs[1].spec.id), status: "waiting_for_human", started: now, finished: now, question: msg("web-demo.use_1_000_or_10_000_bootstrap_samples_the_latter_takes_about_40_minu") });
 await dispatch(msg("web-demo.run_experiments_with_three_more_model_families"), "codex@demo"); // 第 2 轮，保持排队
+
+// 交接计划（ADR 0032）：实现 → 检查点「是否合并？」。第一轮交付后停在检查点，等你决定。
+const planned = (await command({ op: "work.task.create", args: { title: "Notification settings page", project: lumio.id, description: "Add the Notifications group to Settings." } })).task;
+const withPlan = (await command({ op: "work.task.plan.set", args: { task: planned.id, expected_revision: planned.revision, plan: { stages: [
+  { kind: "agent", id: "implement", agent: "codex@demo", instruction: "Implement the settings group and open a PR." },
+  { kind: "agent", id: "review", agent: "pi@demo", instruction: "Review the PR. Request changes if tests are missing.", back_to: "implement" },
+  { kind: "checkpoint", id: "merge-ok", prompt: "Merge the PR?" },
+] } } })).task;
+const planJob = (await command({ op: "work.task.dispatch", args: { task: planned.id, expected_revision: withPlan.revision } })).job;
+const run = async (job: any, report: string) => {
+  const next = await runtime("/v1/runtime/sync", { running: [], queued: [], outbox: 0 });
+  await runtime("/v1/runtime/ack", { accepted: next.jobs.map((value: any) => value.id) });
+  const lease = next.jobs.find((value: any) => value.id === job.spec.id)?.lease;
+  if (!lease) return;
+  await runtime("/v1/runtime/results", { job: job.spec.id, lease, status: "done", exit_code: 0, started: now, finished: now, report });
+};
+await run(planJob, "Implemented the Notifications group. PR #91.");
+for (let i = 0; i < 20 && (await api.workTask(planned.id)).task.turn.reason !== "working"; i++) await Bun.sleep(100);
+const reviewJob = (await api.workTask(planned.id)).task.turn.job;
+if (reviewJob) await run({ spec: { id: reviewJob } }, "Looks good. Tests cover the new settings.");
+
+// agent 的委派提议：需要你批准（ADR 0031 第 2 节）。
+const agentApi = createClient({ url: `http://${HUB}`, token: agentToken });
+await agentApi.workCommand({ request_id: rid(), operation: { op: "work.task.dispatch", args: { task: tasks[msg("web-demo.validate_migration_dry_run")].id, to: "codex@demo",
+  comment: "The migration script is ready; please run the dry run against the fixture vault." } } } as any).catch(() => {});
 
 console.log(msg("web-demo.lumio_web_demo_is_running_temporary_data_your_installed_hub_is_unaff", HUB, token));

@@ -5,6 +5,7 @@
  */
 import type { WebAssets } from "./build.ts";
 import { ICON_SVG, iconPng } from "./icons.ts";
+import { SERVICE_WORKER } from "./sw.ts";
 
 export interface WebFile { body: string | Uint8Array; type: string }
 export interface PageOptions {
@@ -14,8 +15,8 @@ export interface PageOptions {
   hub?: string;
 }
 
-/** 页面与资源的 CSP：只允许同源脚本、样式、连接；图片允许 data:（图标）；禁止被嵌入。 */
-export const WEB_CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+/** 页面与资源的 CSP：只允许同源脚本、样式、连接与 service worker；图片允许 data:（图标）；禁止被嵌入。 */
+export const WEB_CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 
 const escapeAttr = (value: string) => value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 
@@ -70,6 +71,7 @@ export function webFiles(assets: WebAssets, options: PageOptions): Map<string, W
     ["/", { body: renderPage(options), type: "text/html; charset=utf-8" }],
     ["/assets/app.js", { body: assets.js, type: "text/javascript; charset=utf-8" }],
     ["/assets/app.css", { body: assets.css, type: "text/css; charset=utf-8" }],
+    ["/sw.js", { body: SERVICE_WORKER, type: "text/javascript; charset=utf-8" }],
     ["/manifest.webmanifest", { body: JSON.stringify(MANIFEST), type: "application/manifest+json; charset=utf-8" }],
     ["/favicon.svg", { body: ICON_SVG, type: "image/svg+xml" }],
     ["/assets/icon.svg", { body: ICON_SVG, type: "image/svg+xml" }],

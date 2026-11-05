@@ -1,5 +1,5 @@
 /**
- * 设置页（ADR 0028）：账户、外观、语言、Hub、关于。
+ * 设置页（ADR 0028）：账户、外观、语言、通知、助手模型、Hub、执行器、已连接的 agent、关于。
  * 桌面端从侧栏底部的账户按钮进入，窄屏从今日页右上角的头像进入，返回键回到上一页。
  */
 import type { RuntimeInfo } from "@lumio/schema";
@@ -11,6 +11,7 @@ import { onTheme, setTheme, themeChoice, type ThemeChoice } from "../theme.ts";
 import { LANGS, THEMES } from "../settings.ts";
 import { AssistantSettings } from "../assistant-settings.ts";
 import { AgentsSettings } from "../agents-settings.ts";
+import { NotificationSettings } from "../notification-settings.ts";
 
 const SOURCE = "https://github.com/wicsp/Lumio";
 
@@ -22,6 +23,7 @@ export class SettingsPane {
   private runtimeRows = h("div", { class: "set-rows" });
   private assistant: AssistantSettings;
   private agents: AgentsSettings;
+  private notifications: NotificationSettings;
 
   constructor(owner: HTMLElement, private session: Session, private name: string, private logout: () => void, back: () => void) {
     const bar = h("header", { class: "bar set-bar" },
@@ -31,6 +33,7 @@ export class SettingsPane {
       this.profile(),
       this.group(t("Appearance"), t("Choose how Lumio looks on this device."), this.themes()),
       this.group(t("Language"), t("Used for menus, dates and messages from the Hub."), this.languages()),
+      this.group(t("Notifications"), t("Lumio notifies you only when it's your turn to answer, review or handle a failed round, and when an agent asks for approval. Notifications show the task title only."), (this.notifications = new NotificationSettings(session.client)).element),
       this.group(t("Assistant model"), t("Any service with a Chat Completions-compatible API. Saving takes effect immediately."), (this.assistant = new AssistantSettings(session.hub)).element),
       this.group(t("Hub"), undefined, this.hubRows),
       this.group(t("Runtimes"), t("Machines that run agents for this Hub."), this.runtimeRows),
@@ -49,7 +52,7 @@ export class SettingsPane {
     void this.loadRuntimes();
   }
 
-  dispose(): void { this.active = false; this.unbindTheme(); this.assistant.dispose(); this.agents.dispose(); }
+  dispose(): void { this.active = false; this.unbindTheme(); this.assistant.dispose(); this.agents.dispose(); this.notifications.dispose(); }
 
   private profile(): HTMLElement {
     return h("section", { class: "set-profile" },

@@ -1,24 +1,23 @@
-import { taskStatus, taskHolder, workStatus } from "../task-compat.ts";
 /**
- * 项目与任务（ADR 0026）：按状态分组的列表 + 右侧详情。
- * 列表上的状态可直接修改（带 revision）；新建在对话框里完成；修改负责人不会派活。
+ * 项目与任务（ADR 0026、0032）：任务按「轮到谁」分组，项目按状态分组；右侧详情。
+ * 列表上可直接交回、完成、取消（带 revision）；新建在对话框里完成，新建不会委派。
  */
 import type { WorkProject, WorkTask } from "@lumio/schema";
-import { TASK_STATUSES, PROJECT_STATUSES } from "@lumio/schema";
+import { PROJECT_STATUSES } from "@lumio/schema";
 import { errorText, isConflict, type Client, type HubExtras } from "../api.ts";
-import { newRequestId, projectCreateCommand, taskCreateCommand, workPatchCommand } from "../commands.ts";
+import { newRequestId, projectCreateCommand, taskCreateCommand } from "../commands.ts";
 import { autosize, clear, debounce, empty, failure, field, h, icon, loading, openDialog, openMenu, placeholder, select, statusIcon, toast } from "../dom.ts";
 import { dueLabel } from "../format.ts";
-import { PROJECT_LABELS, TASK_LABELS } from "../labels.ts";
+import { PROJECT_LABELS } from "../labels.ts";
+import { TURN_ACTION_DONE, TURN_ACTION_ICONS, TURN_ACTION_LABELS, TURN_GROUPS, TURN_GROUP_LABELS, turnActionCommand, turnActions, turnGroup, turnIcon, turnText, type TurnAction, type TurnGroup } from "../turn.ts";
 import { listKeys, markSelected } from "../list-keys.ts";
 import type { Navigate } from "../navigation.ts";
 import { WorkEditor } from "./work-editor.ts";
 import { t } from "../i18n.ts";
 
 type Mode = "tasks" | "projects";
-const TASK_ORDER = ["active", "waiting", "todo", "paused", "done", "cancelled"] as const;
 const PROJECT_ORDER = ["active", "planning", "paused", "done"] as const;
-const FOLDED_BY_DEFAULT = new Set(["done", "cancelled"]);
+const FOLDED_BY_DEFAULT = new Set(["done", "cancelled", "hold"]);
 
 export class WorkPane {
   private mode: Mode = "tasks";
@@ -92,8 +91,9 @@ export class WorkPane {
   }
 
   private renderFilters(): void {
-    const labels = this.mode === "tasks" ? TASK_LABELS : PROJECT_LABELS;
-    clear(this.statusButton, this.statusFilter ? statusIcon(this.statusFilter) : icon("down"), this.statusFilter ? labels[this.statusFilter]! : t("Status"));
+    const label = this.mode === "tasks" ? TURN_GROUP_LABELS[this.statusFilter as TurnGroup] : PROJECT_LABELS[this.statusFilter];
+    const glyph = this.mode === "tasks" ? turnIcon(this.statusFilter as TurnGroup) : statusIcon(this.statusFilter);
+    clear(this.statusButton, this.statusFilter ? glyph : icon("down"), this.statusFilter ? label! : this.mode === "tasks" ? t("Turn") : t("Status"));
     this.statusButton.classList.toggle("is-set", !!this.statusFilter);
     this.projectButton.hidden = this.mode !== "tasks";
     const project = this.projects.find(p => p.id === this.projectFilter);
@@ -102,10 +102,10 @@ export class WorkPane {
   }
 
   private pickStatusFilter(): void {
-    const statuses = this.mode === "tasks" ? TASK_STATUSES : PROJECT_STATUSES;
-    const labels = this.mode === "tasks" ? TASK_LABELS : PROJECT_LABELS;
-    openMenu(this.statusButton, [{ value: "", label: t("All statuses"), selected: !this.statusFilter },
-      ...statuses.map(s => ({ value: s, label: labels[s]!, icon: statusIcon(s), selected: this.statusFilter === s }))],
+    const items = this.mode === "tasks"
+      ? TURN_GROUPS.map(group => ({ value: group as string, label: TURN_GROUP_LABELS[group], icon: turnIcon(group), selected: this.statusFilter === group }))
+      : PROJECT_STATUSES.map(s => ({ value: s as string, label: PROJECT_LABELS[s]!, icon: statusIcon(s), selected: this.statusFilter === s }));
+    openMenu(this.statusButton, [{ value: "", label: this.mode === "tasks" ? t("Everyone") : t("All statuses"), selected: !this.statusFilter }, ...items],
       value => { this.statusFilter = value; this.renderFilters(); void this.load(); });
   }
 
@@ -128,30 +128,31 @@ export class WorkPane {
         if (generation !== this.listGeneration || !this.active) return;
         this.tasks = tasks;
         const visible = projects.filter(p => (!this.statusFilter || p.status === this.statusFilter) && (!q || p.title.toLowerCase().includes(q.toLowerCase())));
-        this.renderGroups(PROJECT_ORDER, visible, p => this.projectRow(p), PROJECT_LABELS,
+        this.renderGroups(PROJECT_ORDER, visible, p => p.status, p => this.projectRow(p), PROJECT_LABELS, statusIcon,
           q || this.statusFilter ? t("No matching projects") : t("No projects yet. A project groups the tasks behind one goal."));
         return;
       }
-      const tasks = await this.client.workTasks({ status: this.statusFilter || undefined, project: this.projectFilter || undefined, query: q || undefined });
+      const all = await this.client.workTasks({ project: this.projectFilter || undefined, query: q || undefined });
       if (generation !== this.listGeneration || !this.active) return;
-      this.tasks = tasks;
-      this.renderGroups(TASK_ORDER, tasks, t => this.taskRow(t), TASK_LABELS,
+      this.tasks = all;
+      const tasks = this.statusFilter ? all.filter(task => turnGroup(task) === this.statusFilter) : all;
+      this.renderGroups(TURN_GROUPS, tasks, turnGroup, t => this.taskRow(t), TURN_GROUP_LABELS, group => turnIcon(group as TurnGroup),
         q || this.statusFilter || this.projectFilter ? t("No matching tasks. Try another search or clear the filters.") : t("No tasks yet. Press C to create the first one."));
     } catch (error) {
       if (generation === this.listGeneration && this.active) clear(this.list, failure(errorText(error), () => this.load()));
     }
   }
 
-  private renderGroups<T extends WorkTask | WorkProject>(order: readonly string[], items: T[], row: (item: T) => HTMLElement, labels: Record<string, string>, emptyText: string): void {
+  private renderGroups<T extends WorkTask | WorkProject>(order: readonly string[], items: T[], groupOf: (item: T) => string, row: (item: T) => HTMLElement, labels: Record<string, string>, glyph: (group: string) => SVGSVGElement, emptyText: string): void {
     if (!items.length) { clear(this.list, empty(emptyText, this.mode === "tasks" ? { label: t("New task"), run: () => this.create() } : { label: t("New project"), run: () => this.create() })); return; }
-    const groups = order.map(status => [status, items.filter(i => workStatus(i) === status)] as const).filter(([, list]) => list.length);
+    const groups = order.map(status => [status, items.filter(i => groupOf(i) === status)] as const).filter(([, list]) => list.length);
     clear(this.list, ...groups.map(([status, list]) => {
       const group = h("section", { class: `group${this.folded.has(status) && !this.statusFilter ? " collapsed" : ""}` });
       const head = h("button", { type: "button", class: "group-head", "aria-expanded": String(!group.classList.contains("collapsed")), onclick: () => {
         const collapsed = group.classList.toggle("collapsed");
         head.setAttribute("aria-expanded", String(!collapsed));
         if (collapsed) this.folded.add(status); else this.folded.delete(status);
-      } }, icon("chevron", "icon caret"), statusIcon(status), labels[status] ?? status, h("span", { class: "count" }, list.length));
+      } }, icon("chevron", "icon caret"), glyph(status), labels[status] ?? status, h("span", { class: "count" }, list.length));
       group.append(head, h("div", { class: "group-body" }, ...list.map(row)));
       return group;
     }));
@@ -160,22 +161,26 @@ export class WorkPane {
 
   private taskRow(task: WorkTask): HTMLElement {
     const due = dueLabel(task.due);
+    const group = turnGroup(task);
     const project = !this.projectFilter && task.project ? this.projects.find(p => p.id === task.project)?.title : undefined;
-    const statusBtn = h("button", { type: "button", class: "status-btn", title: t("Status: {0}", TASK_LABELS[taskStatus(task)]), "aria-label": t("Change status (currently {0})", TASK_LABELS[taskStatus(task)]),
-      onclick: (event: Event) => { event.stopPropagation(); this.quickStatus(task, statusBtn); } }, statusIcon(taskStatus(task)));
+    const statusBtn = h("button", { type: "button", class: "status-btn", title: turnText(task), "aria-label": t("Change who has it (now: {0})", turnText(task)),
+      onclick: (event: Event) => { event.stopPropagation(); this.quickTurn(task, statusBtn); } }, turnIcon(group));
+    // 不是轮到你的待办时，副标题说明轮到谁（agent、外部、搁置、需要你处理的原因）。
+    const holder = group === "todo" || group === "done" || group === "cancelled" ? undefined : turnText(task);
     const sub = [project && h("span", { class: "project-chip" }, icon("folder", "icon"), project),
-      taskHolder(task) !== "human" && h("span", { class: "who-chip", title: t("Assignee: {0}", taskHolder(task)) }, icon("bot"), taskHolder(task))].filter(Boolean) as HTMLElement[];
-    return h("div", { class: `row ${taskStatus(task)}`, "data-id": task.id, role: "button", tabindex: "0",
+      holder && h("span", { class: `who-chip${group === "needs" ? " is-needs" : ""}` }, icon(group === "agents" ? "bot" : group === "external" ? "clock" : group === "hold" ? "pause" : "alert"), holder),
+      task.plan && h("span", { class: "who-chip", title: t("Has a handoff plan") }, icon("route"))].filter(Boolean) as HTMLElement[];
+    return h("div", { class: `row t-${group}`, "data-id": task.id, role: "button", tabindex: "0",
       onclick: () => void this.open(task.id), onkeydown: (event: Event) => { if ((event as KeyboardEvent).key === "Enter" && event.target === event.currentTarget) void this.open(task.id); } },
       statusBtn,
       h("span", { class: "row-main" }, h("span", { class: "row-title" }, task.title), sub.length ? h("span", { class: "row-sub" }, ...sub) : null),
       h("span", { class: "row-meta" },
-        due && taskStatus(task) !== "done" && taskStatus(task) !== "cancelled" && h("span", { class: `due${due.overdue ? " overdue" : due.soon ? " soon" : ""}`, title: t("Due") }, due.text)));
+        due && task.outcome === "open" && h("span", { class: `due${due.overdue ? " overdue" : due.soon ? " soon" : ""}`, title: t("Due") }, due.text)));
   }
 
   private projectRow(project: WorkProject): HTMLElement {
-    const related = this.tasks.filter(t => t.project === project.id && taskStatus(t) !== "cancelled");
-    const done = related.filter(t => taskStatus(t) === "done").length;
+    const related = this.tasks.filter(t => t.project === project.id && t.outcome !== "cancelled");
+    const done = related.filter(t => t.outcome === "done").length;
     const fill = h("span", { class: "progress-fill" });
     fill.style.width = `${related.length ? Math.round((done / related.length) * 100) : 0}%`;
     return h("div", { class: `row ${project.status}`, "data-id": project.id, role: "button", tabindex: "0", onclick: () => void this.open(project.id),
@@ -185,13 +190,15 @@ export class WorkPane {
       h("span", { class: "row-meta" }, related.length ? h("span", { class: "progress", title: t("{0} of {1} done", done, related.length) }, fill) : null, related.length ? `${done}/${related.length}` : t("No tasks")));
   }
 
-  private quickStatus(task: WorkTask, anchor: HTMLElement): void {
-    openMenu(anchor, TASK_STATUSES.map(s => ({ value: s, label: TASK_LABELS[s]!, icon: statusIcon(s), selected: s === taskStatus(task) })), async value => {
-      const request = workPatchCommand(task, { status: value });
-      if (!request) return;
+  private quickTurn(task: WorkTask, anchor: HTMLElement): void {
+    openMenu(anchor, turnActions(task).map(action => ({ value: action, label: TURN_ACTION_LABELS[action], icon: icon(TURN_ACTION_ICONS[action]) })), async value => {
+      const action = value as TurnAction;
+      let note: string | undefined;
+      if (action === "external") { note = prompt(t("What are you waiting for?"))?.trim(); if (!note) return; }
+      if (task.turn.reason === "working" && action !== "external" && !confirm(t("An agent is still working on this task. Stop its round and continue?"))) return;
       try {
-        await this.client.workCommand(request);
-        toast(t("Changed to “{0}”", TASK_LABELS[value]));
+        await this.client.workCommand(turnActionCommand(task, action, note));
+        toast(TURN_ACTION_DONE[action]);
         this.changed();
         await this.load();
         if (this.selected === task.id && !this.editor?.dirty) void this.open(task.id, true);

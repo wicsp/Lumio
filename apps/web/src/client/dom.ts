@@ -70,6 +70,11 @@ const ICONS: Record<string, string> = {
   alert: "M12 8v5M12 16.5v.5M10.3 4.2 2.8 17.5A2 2 0 0 0 4.5 20.5h15a2 2 0 0 0 1.7-3L13.7 4.2a2 2 0 0 0-3.4 0z",
   send: "M12 19V5M6 11l6-6 6 6",
   stop: "M7 7h10v10H7z",
+  pause: "M9 6v12M15 6v12",
+  bell: "M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 20.5h4",
+  flag: "M5 21V4M5 4h11l-2 4 2 4H5",
+  undo: "M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3",
+  route: "M6 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM18 9a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM6 15V9a4 4 0 0 1 4-4h6M18 9v6a4 4 0 0 1-4 4H8",
   play: "M7 5l12 7-12 7z",
   download: "M12 4v11M7 10l5 5 5-5M5 20h14",
   folder: "M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z",
@@ -132,6 +137,8 @@ export function statusIcon(status: string): SVGSVGElement {
       add("circle", { cx: "8", cy: "8", r: "6.5", class: "fill" }); add("path", { d: "M5.2 8.2l1.9 1.9 3.8-3.9", class: "mark inverse" }); break;
     case "cancelled":
       add("circle", ring); add("path", { d: "M6 6l4 4M10 6l-4 4", class: "mark" }); break;
+    case "needs":
+      add("circle", { cx: "8", cy: "8", r: "6.5", class: "fill" }); add("path", { d: "M8 4.8v3.8M8 10.8v.4", class: "mark inverse" }); break;
     case "failed": case "unknown":
       add("circle", { cx: "8", cy: "8", r: "6.5", class: "fill" }); add("path", { d: "M8 4.8v3.8M8 10.8v.4", class: "mark inverse" }); break;
     default: add("circle", ring);

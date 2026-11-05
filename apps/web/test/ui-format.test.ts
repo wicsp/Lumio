@@ -8,12 +8,12 @@ const task: WorkTask = { schema_version: 3, type: "task", id: "task_01JABCDEFGHJ
 
 describe("workPatchCommand", () => {
   test("sends only the changed field with the seen revision", () => {
-    const cmd = workPatchCommand(task, { status: "active" }, "web-0123456789abcdef")!;
+    const cmd = workPatchCommand(task, { title: "T2", due: null }, "web-0123456789abcdef")!;
     expect(WorkCommandRequest.parse(cmd)).toEqual(cmd);
-    expect(cmd.operation).toEqual({ op: "work.task.hand", args: { task: task.id, expected_revision: 4, to: "human" } });
+    expect(cmd.operation).toEqual({ op: "work.task.update", args: { task: task.id, expected_revision: 4, patch: { title: "T2" } } });
   });
   test("unchanged values and null-vs-missing produce no request", () => {
-    expect(workPatchCommand(task, { status: "todo" })).toBeUndefined();
+    expect(workPatchCommand(task, { title: "T" })).toBeUndefined();
     expect(workPatchCommand(task, { due: null, workdir: null })).toBeUndefined();
   });
   test("clearing an optional field sends null", () => {

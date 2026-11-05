@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { AssistantConfigUpdate, WorkCommandRequest } from "@lumio/schema";
-import { acknowledgeCommand, answerCommand } from "../src/client/commands.ts";
+import { answerCommand } from "../src/client/commands.ts";
 import { PROVIDER_PRESETS } from "../src/client/providers.ts";
 
 const TASK = "task_01JABCDEFGHJKMNPQRSTVWXYZ0", PRJ = "prj_01JABCDEFGHJKMNPQRSTVWXYZ0";
@@ -10,10 +10,6 @@ describe("ADR 0030 commands", () => {
     const request = answerCommand({ id: TASK, revision: 4 }, "pi@server", "  中文，确认继续 ");
     expect(WorkCommandRequest.parse(request)).toEqual(request);
     expect(request.operation).toEqual({ op: "work.task.dispatch", args: { task: TASK, to: "pi@server", expected_revision: 4, comment: "中文，确认继续" } });
-  });
-  test("acknowledge names the round", () => {
-    const request = acknowledgeCommand(TASK, 2);
-    expect(WorkCommandRequest.parse(request).operation).toEqual({ op: "work.task.hand", args: { task: TASK, expected_revision: 2, to: "human" } });
   });
 });
 

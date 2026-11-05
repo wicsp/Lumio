@@ -12,3 +12,9 @@ if (!root) throw new Error(t("Missing #app element"));
 
 const app = new App(root);
 app.mount();
+
+// 点开推送通知时，service worker 让已打开的页面跳到对应位置（ADR 0031 第 4 节）。
+navigator.serviceWorker?.addEventListener("message", event => {
+  const data = event.data as { type?: unknown; path?: unknown } | null;
+  if (data?.type === "lumio-navigate" && typeof data.path === "string" && /^#[a-z]+(\/[A-Za-z0-9_-]+)?$/.test(data.path)) location.hash = data.path;
+});
