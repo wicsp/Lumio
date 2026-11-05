@@ -2,7 +2,7 @@
 
 - 依据：[ADR 0032](../adr/0032-task-model-outcome-turn.md)（任务模型：结局、轮到谁、事件；交接计划）、
   [ADR 0031](../adr/0031-workflows-delegation-push.md)（委派需要批准、统一推送、术语，2026-11-04 修订），以及 ADR 0029、0030
-- 契约：R4-1（#85）与 R4-1b 已起草；R4-2 按本说明做一次性切换
+- 状态（2026-11-05）：R4-1 至 R4-6 已合并（#85 契约、#86 契约 R4-1b、#87 任务模型 v3、#88 交接计划、#90 推送、#91 Web）；只剩 R4-7 人工验收
 - 前置：R3 完成（R3-5 人工验收可与 R4 并行）
 - 2026-11-04 重排：原 R4-2「流程引擎」按 ADR 0032 改为任务模型切换（R4-2）与交接计划（R4-3）两片；后续切片顺延。
 
@@ -11,11 +11,11 @@
 | 编号 | 内容 | 负责 | 涉及 | 依赖 |
 |---|---|---|---|---|
 | R4-1 ✅ | 契约：委派提议、推送订阅与通知（#85）；任务模型 v3、交接计划、新命令（R4-1b） | Claude 起草，人类批准 | `packages/schema` | R3 |
-| R4-2 | 任务模型 v3 切换：迁移、「轮到谁」的规则、委派需要批准、每一轮的输入（Inline & Spill）、CLI | 后端（Codex） | `packages/schema`（只做下面列出的切换）、`packages/work`、`packages/storage`、`apps/hub`、`apps/cli`、`apps/runtime`（文字）、`apps/web`（只做编译所需的机械修改） | R4-1 |
-| R4-3 | 交接计划：计划运行、检查点、打回、轮数上限、计划模板、CLI | 后端（Codex） | `packages/work`、`apps/hub`、`apps/cli` | R4-2 |
-| R4-4 | 通知：统一接口与 Web Push（VAPID、订阅、发送、测试通知） | 后端（Codex） | `apps/hub`、`packages/api-client` | R4-2 |
-| R4-5 | Web：按「轮到谁」重做今日与任务列表；任务时间线；交回 / 完成 / 我自己来；计划编辑与检查点；提议卡片；设置页「通知」；service worker | Claude | `apps/web` | R4-2 至 R4-4 |
-| R4-6 | 术语「派活」→「委派」：DESIGN、任务说明、Web（Claude）；CLI 与 Hub 输出（Codex，可并入 R4-2） | Claude + Codex | 文档、各 app | — |
+| R4-2 ✅ #87 | 任务模型 v3 切换：迁移、「轮到谁」的规则、委派需要批准、每一轮的输入（Inline & Spill）、CLI | 后端（Codex） | `packages/schema`（只做下面列出的切换）、`packages/work`、`packages/storage`、`apps/hub`、`apps/cli`、`apps/runtime`（文字）、`apps/web`（只做编译所需的机械修改） | R4-1 |
+| R4-3 ✅ #88 | 交接计划：计划运行、检查点、打回、轮数上限、计划模板、CLI | 后端（Codex） | `packages/work`、`apps/hub`、`apps/cli` | R4-2 |
+| R4-4 ✅ #90 | 通知：统一接口与 Web Push（VAPID、订阅、发送、测试通知） | 后端（Codex） | `apps/hub`、`packages/api-client` | R4-2 |
+| R4-5 ✅ #91 | Web：按「轮到谁」重做今日与任务列表；任务时间线；交回 / 完成 / 我自己来；计划编辑与检查点；提议卡片；设置页「通知」；service worker | Claude | `apps/web` | R4-2 至 R4-4 |
+| R4-6 ✅ | 术语「派活」→「委派」：DESIGN、任务说明、Web（Claude）；CLI 与 Hub 输出（Codex，可并入 R4-2） | Claude + Codex | 文档、各 app | — |
 | R4-7 | 验收：用 Lumio 跑一次 Lumio 自己的开发流程（见文末） | 人类 + Claude | — | R4-1 至 R4-6 |
 
 ## R4-1 契约（Claude）✅
@@ -129,9 +129,39 @@
 
 ## R4-7 验收（用 Lumio 开发 Lumio）
 
+### 准备（一次性）
+
+1. **升级并迁移**：Mac 上 `lumio upgrade`（Hub、CLI、网页一起升级）。Hub 启动时会自动把旧任务迁移到 v3，也可以停掉 Hub 后手动运行 `lumio hub migrate task-v3`；迁移前会自动做完整备份。
+2. **HTTPS 地址**：推送必须走 HTTPS。用 `tailscale serve --bg 7420` 得到 `https://<机器名>.<tailnet>.ts.net`，并运行 `lumio-hub setup --public-url https://<机器名>.<tailnet>.ts.net`（作者的 Mac 已于 2026-10-29 设置过，见 personal-setup.md）。推送签名会用这个地址；没设置时退回用订阅页面的地址。
+3. **手机开通知**：iPhone 需要 iOS 16.4 以上。用 Safari 打开上面的 https 地址 → 分享 → 添加到主屏幕 → 从主屏幕打开 Lumio → 设置 → 通知 → 开启 → 发送测试，确认能收到。
+4. **执行器**：确认 Mac 的执行器在线，并登记了 `codex` 和 `claude-code` 两个引擎（设置 → 执行器）。下面用 `codex@mac`、`claude-code@mac` 指代，按你实际的执行器名替换。
+5. **Claude 侧的 skill**：在 Claude Code 所在机器运行 `lumio skill install --for claude`，让它能以 agent 身份读写 Lumio（只能提议委派和计划）。
+6. **GitHub 权限**：Codex 用的 GitHub 凭据只能推分支、开 PR，不能合并；合并由 Claude Code 的凭据完成。
+7. **（可选）存一个计划模板**，以后新任务直接套用：
+
+```json
+{
+  "stages": [
+    { "kind": "agent", "id": "implement", "agent": "codex@mac", "instruction": "Implement the change described in the task on a new branch, run bun run check in English and Chinese shells, push, and open a PR. Report the PR number." },
+    { "kind": "agent", "id": "review", "agent": "claude-code@mac", "instruction": "Review the PR from the previous round against AGENTS.md and the task. If changes are needed, comment on the PR and end your report with <lumio-outcome>changes</lumio-outcome> on its own line.", "back_to": "implement" },
+    { "kind": "checkpoint", "id": "merge-ok", "prompt": "Merge the PR?" },
+    { "kind": "agent", "id": "merge", "agent": "claude-code@mac", "instruction": "Squash-merge the reviewed PR once CI is green, then report the merge commit." }
+  ],
+  "max_rounds": 8
+}
+```
+
+保存：`lumio plan-template save "Lumio dev loop" --file plan.json`；也可以在网页的计划编辑器里「存为模板」。
+
+### 验收步骤
+
 1. 在 Claude（带 Lumio skill）里讨论一个小改动，让它建任务、写好说明，并提议计划「codex@mac 实现 → claude-code@mac review（可打回）→ 检查点：是否合并 → claude-code@mac 合并」。
 2. 手机收到「待批准」通知，批准计划，委派第一轮。
 3. Codex 实现并开 PR，自动交给 Claude Code review；如果打回，就回到 Codex，轮数不超过上限。
 4. 手机收到「是否合并？」的检查点通知，选择继续，Claude Code 合并。
 5. 计划走完，轮到你验收，你标记完成。
 6. 期间检查两点：GitHub 上 Codex 的凭据没有合并权限；任何时候搁置任务，都不会再自动委派。
+
+### 记录
+
+验收中发现的问题按「哪一步、看到了什么、期望什么」记下来，发给 Claude 整理成修复任务；全部通过后在本节写上日期和结论，再发布 v0.2.1（标签由人推送）。
