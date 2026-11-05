@@ -56,12 +56,12 @@
 | [R3-4](R3-0-capabilities-agent-access.md) ✅ | Web：模型配置、已连接的 agent、对话里的变更卡片与撤回；回答框与验收卡片 | Claude | R3-2 |
 | R3-5 | 验收 | 人类 + Claude | R3-1 至 R3-4 |
 | [R4-1](R4-0-workflows-delegation-push.md) ✅ | 契约：委派提议、推送订阅（#85）；任务模型 v3、交接计划（R4-1b，ADR 0032） | Claude 起草，人类批准 | R3 |
-| [R4-2](R4-0-workflows-delegation-push.md) | 任务模型 v3 切换：迁移、轮到谁的规则、委派需要批准、每轮输入、CLI | 后端（Codex） | R4-1 |
-| [R4-3](R4-0-workflows-delegation-push.md) | 交接计划：计划运行、检查点、打回、模板 | 后端（Codex） | R4-2 |
-| [R4-4](R4-0-workflows-delegation-push.md) | 通知：统一接口与 Web Push | 后端（Codex） | R4-2 |
-| [R4-5](R4-0-workflows-delegation-push.md) | Web：按轮到谁重做今日与任务、时间线、计划与检查点、提议卡片、通知设置 | Claude | R4-2 至 R4-4 |
-| [R4-6](R4-0-workflows-delegation-push.md) | 术语「派活」→「委派」 | Claude + Codex | — |
-| R4-7 | 验收：用 Lumio 开发 Lumio | 人类 + Claude | R4-1 至 R4-6 |
+| [R4-2](R4-0-workflows-delegation-push.md) ✅ | 任务模型 v3 切换：迁移、轮到谁的规则、委派需要批准、每轮输入、CLI | 后端（Codex） | R4-1 |
+| [R4-3](R4-0-workflows-delegation-push.md) ✅ | 交接计划：计划运行、检查点、打回、模板 | 后端（Codex） | R4-2 |
+| [R4-4](R4-0-workflows-delegation-push.md) ✅ | 通知：统一接口与 Web Push | 后端（Codex） | R4-2 |
+| [R4-5](R4-0-workflows-delegation-push.md) ✅ | Web：按轮到谁重做今日与任务、时间线、计划与检查点、提议卡片、通知设置 | Claude | R4-2 至 R4-4 |
+| [R4-6](R4-0-workflows-delegation-push.md) ✅ | 术语「派活」→「委派」 | Claude + Codex | — |
+| [R4-7](R4-0-workflows-delegation-push.md#r4-7-验收用-lumio-开发-lumio) | 验收：用 Lumio 开发 Lumio | 人类 + Claude | R4-1 至 R4-6 |
 
 P1 的设计决定见 ADR 0014、0016、0017、0018；P2 见 ADR 0019、0020、0021、0022 与修订后的 ADR 0005；契约见 `packages/schema/src/` 中的 `query.ts`、`actor.ts`、`operation.ts`、`proposal.ts`、`api.ts`。
 
