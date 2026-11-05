@@ -5,6 +5,7 @@
  */
 import type { Job, Proposal, WorkAttention, WorkProject, WorkTask } from "@lumio/schema";
 import { errorText, type Client, type HubExtras } from "../api.ts";
+import { executionGroups } from "../execution-groups.ts";
 import { attentionCard } from "../attention-card.ts";
 import { formatTime } from "../commands.ts";
 import { clear, failure, h, icon, loading, statusIcon } from "../dom.ts";
@@ -16,7 +17,6 @@ import { turnGroup, turnIcon, turnText } from "../turn.ts";
 import { isWorkProposal, proposalCard } from "../proposal-card.ts";
 
 const LIVE = ["queued", "assigned", "running"];
-const ATTENTION = ["waiting_for_human", "failed", "unknown"];
 const DAY = 86_400_000;
 
 export class OverviewPane {
@@ -64,11 +64,12 @@ export class OverviewPane {
     const agentsWorking = taskData?.filter(task => turnGroup(task) === "agents") ?? [];
     const waiting = taskData?.filter(task => turnGroup(task) === "external") ?? [];
     const running = jobData?.filter(job => LIVE.includes(job.status)) ?? [];
-    // ADR 0030：Hub 按每个任务最新一轮给出需要处理的事；旧 Hub 没有接口时退回按 Job 状态显示（例行任务的轮次也走这里）。
+    // ADR 0032：任务提醒按当前交接；旧 Hub 与独立运行使用同一套回退规则。
     const attentionData = attention.status === "fulfilled" ? attention.value : undefined;
-    const attentionJobs = jobData?.filter(job => ATTENTION.includes(job.status) && (!attentionData || !job.spec.source?.task)) ?? [];
+    const attentionJobs = executionGroups(jobData ?? [], taskData, attentionData).needs
+      .filter(job => attentionData === undefined || !job.spec.source?.task);
 
-    const needCount = (attentionData?.length ?? 0) + (approvalData?.length ?? 0);
+    const needCount = (attentionData?.length ?? 0) + attentionJobs.length + (approvalData?.length ?? 0);
     const parts = taskData ? [
       needCount ? t(needCount === 1 ? "{0} needs you" : "{0} need you", needCount) : "",
       t(mine.length === 1 ? "{0} to-do" : "{0} to-dos", mine.length),
