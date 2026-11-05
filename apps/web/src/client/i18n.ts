@@ -548,6 +548,7 @@ export const ZH: Record<string, string> = {
   "↵ send · ⇧↵ new line": "↵ 发送 · ⇧↵ 换行",
   "⌘↵ to post · Markdown supported": "⌘↵ 发表 · 支持 Markdown",
   "Ready for review": "等你验收",
+  "Withdrawn": "已撤回",
   // R4-5：轮到谁、交接计划、提议、通知（ADR 0031、0032）
   "Continue with the plan's agent": "由计划里的 agent 继续",
   "the agent": "agent",

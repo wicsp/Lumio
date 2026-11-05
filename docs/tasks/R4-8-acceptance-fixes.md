@@ -7,12 +7,15 @@
 
 | 编号 | 内容 | 负责 | 涉及 | 依赖 |
 |---|---|---|---|---|
-| R4-8a | 契约：项目 `workdir`、提议 `withdrawn` 与 `superseded_by`、撤回命令、`execution.target.list` 与 `ExecutionTarget` | Claude 起草，人类批准 | `packages/schema` | ADR 0033 |
+| R4-8a ✅ #94 | 契约：项目 `workdir`、提议 `withdrawn` 与 `superseded_by`、撤回命令、`execution.target.list` 与 `ExecutionTarget` | Claude 起草，人类批准 | `packages/schema` | ADR 0033 |
 | R4-8b | Hub 与 Work：工作目录继承、提议取代与撤回、目标查询与校验、每轮输入加 repo | 后端（Codex） | `packages/work`、`packages/storage`、`apps/hub`、`packages/api-client` | R4-8a |
 | R4-8c | CLI 与 skill：`--help`、完整的参数文档、连接错误说明、`lumio targets`、撤回提议 | 后端（Codex） | `apps/cli`、`skills/lumio` | R4-8b |
 | R4-8d | Web：项目页任务列表与新建、项目工作目录与任务的实际目录、实时刷新、底部「发表并继续」、已连接 agent 的三种命令、已撤回的提议 | Claude | `apps/web` | R4-8b |
 
 ## R4-8b Hub 与 Work（Codex）
+
+- **契约（R4-8a 已批准，只做机械登记）**：能力目录加入 `execution.target.list`（read，参数 `ExecutionTargetListArgs`，结果 `ExecutionTarget[]`）与
+  `approval.proposal.withdraw`（write，参数 `{ proposal }`，结果 `Proposal`；只能撤回自己的待批准提议）；重新导出 JSON Schema。不做其他契约改动。
 
 - **工作目录**：委派（包括交接计划的自动委派）时按「任务 → 项目 → `~`」确定目录，再做现有的 vault 检查；Job 记录最终目录。
   项目 create / update 支持 `workdir`（patch 里 `null` 清空）。

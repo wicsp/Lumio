@@ -1,11 +1,12 @@
 # 0033 项目工作目录、提议撤回与执行目标查询
 
-- 状态：Proposed（2026-11-05，R4-7 人工验收的反馈；人类已在对话中同意方向，待批准本文）
+- 状态：Accepted（2026-11-05 人类批准；R4-7 人工验收的反馈）
 - 日期：2026-11-05
 - 领域：数据 | AI 协作与权限 | Hub 与运行
 - 影响：补充 ADR 0025（项目字段）、ADR 0031 第 2 节（委派提议）、ADR 0029（能力目录）；不改变 ADR 0032 的任务模型。
   契约：`WorkProject` 增加 `workdir`；`ProposalStatus` 增加 `withdrawn`，`Proposal` 增加 `superseded_by`；
-  新增只读能力 `execution.target.list` 与其结果类型 `ExecutionTarget`。均为向后兼容的新增。
+  新增 `ExecutionTarget` 与 `ExecutionTargetListArgs`（R4-8a）。能力目录里的 `execution.target.list` 与撤回能力
+  随实现由 R4-8b 机械加入（只登记名称、参数与结果，不改其他契约）。均为向后兼容的新增。
 - 实施说明：[R4-8](../tasks/R4-8-acceptance-fixes.md)
 
 ## 背景
@@ -59,3 +60,5 @@ R4-7 验收（用 Lumio 开发 Lumio）中，人和 agent 各碰到三个问题�
 - 风险：执行器改名后，引用旧名字的计划在下一次 `plan.set` 或委派时才会报错；已保存的计划不会被自动改写。
 
 ## 修订记录
+
+- 2026-11-05：人类批准；契约 R4-8a 与本 ADR 同一个 PR（#94）。
