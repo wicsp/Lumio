@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { AssistantConfigUpdate, AssistantConfigView, assistantConfigReason, type AssistantConfigProblem } from "@lumio/schema";
-import { modelConfiguration, type ModelConfiguration } from "./assistant-model.ts";
+import { modelConfiguration, modelRequestOptions, type ModelConfiguration } from "./assistant-model.ts";
 import { atomicFile, environmentText, optional, parseEnvironment } from "./setup.ts";
 import { WriteCoordinator } from "./coordinator.ts";
 import { HubError } from "./errors.ts";
@@ -79,7 +79,7 @@ export class AssistantConfiguration {
     try {
       response = await (this.options.fetch ?? fetch)(`${config.baseUrl}/chat/completions`, { method: "POST", redirect: "error", signal,
         headers: { "Content-Type": "application/json", ...(config.credential() ? { Authorization: `Bearer ${config.credential()}` } : {}) },
-        body: JSON.stringify({ model: config.model, stream: false, messages: [{ role: "user", content: "ping" }] }),
+        body: JSON.stringify({ model: config.model, stream: false, ...modelRequestOptions(config.baseUrl), messages: [{ role: "user", content: "ping" }] }),
       });
       if (!response.ok) throw failure(response.status === 401 || response.status === 403 ? "auth" : response.status === 400 || response.status === 404 || response.status === 422 ? "model" : "address");
       const reader = response.body?.getReader(); if (!reader) throw failure("response");

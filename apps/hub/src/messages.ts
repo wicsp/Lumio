@@ -4,6 +4,15 @@ const locale = new AsyncLocalStorage<Language>();
 export const withLanguage = <T>(lang: Language, action: () => T): T => locale.run(lang, action);
 
 export const en = {
+  "assistant-model.http.auth": (status: unknown) => `Model authentication failed (HTTP ${String(status)}); check the API key and model access permissions.`,
+  "assistant-model.http.balance": (status: unknown) => `Model account has insufficient balance or credit (HTTP ${String(status)}); check billing with the provider.`,
+  "assistant-model.http.endpoint": (status: unknown) => `Model API endpoint or model was not found (HTTP ${String(status)}); check the API base URL and model name.`,
+  "assistant-model.http.rate_limit": (status: unknown) => `Model service rate limit or quota reached (HTTP ${String(status)}); check quota or try again later.`,
+  "assistant-model.http.timeout": (status: unknown) => `Model service timed out (HTTP ${String(status)}); try again later.`,
+  "assistant-model.http.size": (status: unknown) => `Model request is too large (HTTP ${String(status)}); start a new conversation or reduce the input.`,
+  "assistant-model.http.request": (status: unknown) => `Model service rejected the request format or parameters (HTTP ${String(status)}); check model support for tool calls and thinking mode.`,
+  "assistant-model.http.unavailable": (status: unknown) => `Model service is temporarily unavailable (HTTP ${String(status)}); check provider status or try again later.`,
+  "assistant-model.http.rejected": (status: unknown) => `Model service rejected the request (HTTP ${String(status)}); check the provider's API requirements.`,
   "proposal.own_only": "You can only withdraw your own pending proposals.",
   "target.invalid": (target: unknown, available: unknown) => `Unknown delegation target ${String(target)}. Available targets: ${String(available) || "(none)"}.`,
   "target.offline": (targets: unknown) => `Offline targets (execution waits until they reconnect): ${String(targets)}`,
@@ -784,6 +793,15 @@ ${String(p0)}${String(p1)}`,
   "Run tailscale serve status to check": "Run tailscale serve status to check",
 };
 export const zh: typeof en = {
+  "assistant-model.http.auth": (status: unknown) => `模型鉴权失败（HTTP ${String(status)}），请检查 API 密钥和模型访问权限。`,
+  "assistant-model.http.balance": (status: unknown) => `模型账户余额或额度不足（HTTP ${String(status)}），请检查服务商账户账单。`,
+  "assistant-model.http.endpoint": (status: unknown) => `模型接口或模型不存在（HTTP ${String(status)}），请检查 API 基础地址和模型名称。`,
+  "assistant-model.http.rate_limit": (status: unknown) => `模型服务触发限流或达到配额（HTTP ${String(status)}），请检查配额或稍后重试。`,
+  "assistant-model.http.timeout": (status: unknown) => `模型服务响应超时（HTTP ${String(status)}），请稍后重试。`,
+  "assistant-model.http.size": (status: unknown) => `模型请求过大（HTTP ${String(status)}），请新建对话或减少输入内容。`,
+  "assistant-model.http.request": (status: unknown) => `模型服务拒绝了请求格式或参数（HTTP ${String(status)}），请检查模型对工具调用和思考模式的支持。`,
+  "assistant-model.http.unavailable": (status: unknown) => `模型服务暂时不可用（HTTP ${String(status)}），请检查服务商状态或稍后重试。`,
+  "assistant-model.http.rejected": (status: unknown) => `模型服务拒绝了请求（HTTP ${String(status)}），请检查服务商的 API 要求。`,
   "proposal.own_only": "只能撤回自己的待批准提议。",
   "target.invalid": (target: unknown, available: unknown) => `委派目标 ${String(target)} 未登记。可用目标：${String(available) || "（无）"}。`,
   "target.offline": (targets: unknown) => `离线目标（上线后开始执行）：${String(targets)}`,
