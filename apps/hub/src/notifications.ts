@@ -5,13 +5,13 @@ import { NOTIFICATION_KINDS, RESPONSE_REASONS, NotificationEvent, PushDevice, Pu
 import type { HubStore } from "./store.ts";
 import { HubError } from "./errors.ts";
 import { text as msg } from "./messages.ts";
-import { encryptPush, validatePushKeys, VapidKeys } from "./web-push.ts";
+import { encryptPush, validatePushKeys, VapidKeys, pushSubject } from "./web-push.ts";
 
 export interface NotificationChannel {
   readonly id: string;
   send(event: NotificationEvent): Promise<void>;
 }
-type DeviceRow = { id: string; owner: string; subscription: string; device: string };
+type DeviceRow = { id: string; owner: string; subscription: string; device: string; origin: string | null };
 // Classify known names instead of echoing a caller-controlled User-Agent into a response.
 function deviceLabel(userAgent: string): string {
   for (const [pattern, label] of [[/iPhone/i, "iPhone"], [/iPad/i, "iPad"], [/Android/i, "Android"], [/Firefox\//i, "Firefox"], [/Edg\//i, "Edge"], [/Chrome\//i, "Chrome"], [/Safari\//i, "Safari"]] as const) {
@@ -31,7 +31,11 @@ export class WebPushChannel implements NotificationChannel {
     this.vapid = new VapidKeys(stateDir);
     store.db.exec(`CREATE TABLE IF NOT EXISTS notification_push_devices (
       id TEXT PRIMARY KEY, owner TEXT NOT NULL REFERENCES actors(id), endpoint_hash TEXT NOT NULL UNIQUE,
-      subscription TEXT NOT NULL, device TEXT NOT NULL);`);
+      subscription TEXT NOT NULL, device TEXT NOT NULL, origin TEXT);`);
+    // Upgrade subscriptions created by the earlier notification implementation.
+    if (!store.db.query<{ name: string }, []>("PRAGMA table_info(notification_push_devices)").all().some(column => column.name === "origin")) {
+      store.db.exec("ALTER TABLE notification_push_devices ADD COLUMN origin TEXT");
+    }
   }
   private now() { return this.options.now?.() ?? new Date(); }
   key(): PushPublicKey { return PushPublicKey.parse({ public_key: this.vapid.publicKey() }); }
@@ -39,14 +43,14 @@ export class WebPushChannel implements NotificationChannel {
     return this.rows(owner).map(row => PushDevice.parse(JSON.parse(row.device)));
   }
   private rows(owner: string): DeviceRow[] {
-    return this.store.db.query<DeviceRow, [string]>("SELECT id,owner,subscription,device FROM notification_push_devices WHERE owner=? ORDER BY rowid").all(owner);
+    return this.store.db.query<DeviceRow, [string]>("SELECT id,owner,subscription,device,origin FROM notification_push_devices WHERE owner=? ORDER BY rowid").all(owner);
   }
   private row(owner: string, id: string): DeviceRow {
     const row = this.rows(owner).find(row => row.id === id);
     if (!row) throw new HubError("NOT_FOUND", { key: "notifications.device_missing", args: [] });
     return row;
   }
-  subscribe(owner: string, input: unknown, userAgent = ""): PushDevice {
+  subscribe(owner: string, input: unknown, userAgent = "", origin?: string): PushDevice {
     const parsed = PushSubscriptionInput.safeParse(input);
     if (!parsed.success) throw invalid();
     const subscription = parsed.data;
@@ -55,14 +59,16 @@ export class WebPushChannel implements NotificationChannel {
       const url = new URL(subscription.endpoint);
       if (url.username || url.password || url.hash) throw new Error();
     } catch { throw invalid(); }
+    const privateOrigin = pushSubject(undefined, origin);
+    if (!pushSubject(this.options.subject, privateOrigin)) throw new HubError("INVALID", { key: "notifications.https_required", args: [] });
     const digest = createHash("sha256").update(subscription.endpoint).digest("hex");
-    const previous = this.store.db.query<DeviceRow, [string]>("SELECT id,owner,subscription,device FROM notification_push_devices WHERE endpoint_hash=?").get(digest);
+    const previous = this.store.db.query<DeviceRow, [string]>("SELECT id,owner,subscription,device,origin FROM notification_push_devices WHERE endpoint_hash=?").get(digest);
     if (previous && previous.owner !== owner) throw new HubError("CONFLICT", { key: "notifications.invalid", args: [] });
     const now = this.now();
     const device = PushDevice.parse(previous ? { ...JSON.parse(previous.device), label: subscription.label ?? JSON.parse(previous.device).label, last_error: undefined }
       : { id: newId("pdev", now, randomBytes), owner, label: subscription.label ?? deviceLabel(userAgent), events: [...NOTIFICATION_KINDS], created: now.toISOString() });
-    this.store.db.query(`INSERT INTO notification_push_devices(id,owner,endpoint_hash,subscription,device) VALUES(?,?,?,?,?)
-      ON CONFLICT(id) DO UPDATE SET subscription=excluded.subscription,device=excluded.device`).run(device.id, owner, digest, JSON.stringify(subscription), JSON.stringify(device));
+    this.store.db.query(`INSERT INTO notification_push_devices(id,owner,endpoint_hash,subscription,device,origin) VALUES(?,?,?,?,?,?)
+      ON CONFLICT(id) DO UPDATE SET subscription=excluded.subscription,device=excluded.device,origin=excluded.origin`).run(device.id, owner, digest, JSON.stringify(subscription), JSON.stringify(device), privateOrigin ?? null);
     return device;
   }
   update(owner: string, id: string, input: unknown): PushDevice {
@@ -82,11 +88,13 @@ export class WebPushChannel implements NotificationChannel {
     let error: string | undefined;
     try {
       const subscription = PushSubscriptionInput.parse(JSON.parse(row.subscription));
+      const subject = pushSubject(this.options.subject, row.origin ?? undefined);
+      if (!subject) throw new Error("HTTPS VAPID subject required");
       const body = encryptPush(Buffer.from(JSON.stringify({ title: event.title, kind: event.kind, path: event.path })), subscription.keys);
       const response = await (this.options.fetch ?? globalThis.fetch)(subscription.endpoint, {
         method: "POST", redirect: "error", signal: AbortSignal.any([AbortSignal.timeout(10_000), ...(this.options.signal ? [this.options.signal] : [])]),
-        headers: { Authorization: this.vapid.authorization(subscription.endpoint, this.now(), this.options.subject),
-          "Content-Encoding": "aes128gcm", "Content-Type": "application/octet-stream", TTL: "300" }, body,
+        headers: { Authorization: this.vapid.authorization(subscription.endpoint, this.now(), subject),
+          "Content-Encoding": "aes128gcm", "Content-Type": "application/octet-stream", TTL: "86400" }, body,
       });
       // Do not read service-controlled error bodies, URLs or exception messages.
       await response.body?.cancel();

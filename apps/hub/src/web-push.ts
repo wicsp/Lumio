@@ -25,6 +25,20 @@ export function validatePushKeys(keys: PushSubscriptionInput["keys"]): void {
   const ephemeral = createECDH("prime256v1"); ephemeral.generateKeys(); ephemeral.computeSecret(pub);
 }
 
+/** Prefer the configured HTTPS URI; Origin fallback must be an origin, not an arbitrary URL. */
+export function pushSubject(publicUrl?: string, origin?: string): string | undefined {
+  const https = (value: string | undefined) => {
+    if (!value) return;
+    try {
+      const url = new URL(value);
+      if (url.protocol === "https:" && !url.username && !url.password && !url.search && !url.hash) return url;
+    } catch { /* Invalid or absent contact URI. */ }
+  };
+  if (https(publicUrl)) return publicUrl;
+  const url = https(origin);
+  if (url?.pathname === "/") return url.origin;
+}
+
 /** Lazy, private, stable signing identity. Never silently replace a damaged existing key. */
 export class VapidKeys {
   constructor(private readonly stateDir: string) {}
@@ -50,11 +64,12 @@ export class VapidKeys {
   }
   publicKey(): string { return this.load().publicKey; }
   /** RFC 8292: ES256 JWS uses raw r||s, with the push service origin as audience. */
-  authorization(endpoint: string, now: Date, subject?: string): string {
+  authorization(endpoint: string, now: Date, subject: string): string {
+    if (!pushSubject(subject)) throw new Error("HTTPS VAPID subject required");
     const { key, publicKey } = this.load();
     const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
     const input = `${encode({ typ: "JWT", alg: "ES256" })}.${encode({ aud: new URL(endpoint).origin,
-      exp: Math.floor(now.getTime() / 1000) + 12 * 60 * 60, ...(subject?.startsWith("https:") ? { sub: subject } : {}) })}`;
+      exp: Math.floor(now.getTime() / 1000) + 12 * 60 * 60, sub: subject })}`;
     const signature = sign("sha256", Buffer.from(input), { key, dsaEncoding: "ieee-p1363" }).toString("base64url");
     return `vapid t=${input}.${signature}, k=${publicKey}`;
   }

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { NotificationEvent, PushDevice, PushPublicKey, PushTestResult, WorkCommandResult } from "@lumio/schema";
+import { NotificationEvent, PushDevice, PushPublicKey, PushTestResult, WorkCommandResult, WorkAttention, ApiError } from "@lumio/schema";
 import { startHub } from "../src/server.ts";
 import { HubStore } from "../src/store.ts";
 import { readConfig } from "../src/config.ts";
@@ -17,13 +17,13 @@ const pushFetch = (async (url: string, init: RequestInit) => {
   expect(url).toBe(receiver.subscription.endpoint);
   expect(init.redirect).toBe("error"); expect(init.signal).toBeDefined();
   const headers = new Headers(init.headers);
-  expect(headers.get("content-encoding")).toBe("aes128gcm"); expect(headers.get("ttl")).toBe("300");
+  expect(headers.get("content-encoding")).toBe("aes128gcm"); expect(headers.get("ttl")).toBe("86400");
   received.push({ payload: receiver.decrypt(Buffer.from(init.body as Uint8Array)), auth: verifyVapid(headers.get("authorization")!) });
   if (failNetwork) throw new Error(`service echoed ${receiver.subscription.endpoint} ${receiver.subscription.keys.auth}`);
   return new Response(`service echoed ${receiver.subscription.endpoint}`, { status: serviceStatus });
 }) as unknown as typeof fetch;
-async function boot() {
-  hub = await startHub({ ...readConfig({ LUMIO_STATE_DIR: temp, LUMIO_PUBLIC_URL: "https://hub.example.test" }), localRuntime: "server", port: 0 }, { log: line => logs.push(line), pushFetch });
+async function boot(publicUrl: string | undefined = "https://hub.example.test", webOrigins: string[] = []) {
+  hub = await startHub({ ...readConfig({ LUMIO_STATE_DIR: temp, LUMIO_PUBLIC_URL: publicUrl, LUMIO_WEB_ORIGINS: webOrigins.join(",") }), localRuntime: "server", port: 0 }, { log: line => logs.push(line), pushFetch });
 }
 beforeEach(async () => {
   temp = await mkdtemp(join(tmpdir(), "lumio-notifications-"));
@@ -36,9 +36,9 @@ beforeEach(async () => {
   store.close(); await boot();
 });
 afterEach(async () => { await hub?.stop(); await rm(temp, { recursive: true, force: true }); });
-function request(path: string, method = "GET", body?: unknown, token = human, language = "en") {
+function request(path: string, method = "GET", body?: unknown, token = human, language = "en", origin?: string) {
   return fetch(`http://127.0.0.1:${hub.server.port}${path}`, { method,
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "Accept-Language": language },
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "Accept-Language": language, ...(origin ? { Origin: origin } : {}) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 }
 async function subscribe(token = human) {
@@ -209,7 +209,7 @@ test("in-flight delivery does not resurrect a deleted device", async () => {
   let release!: () => void, entered!: () => void;
   const blocked = new Promise<void>(resolve => { release = resolve; });
   const started = new Promise<void>(resolve => { entered = resolve; });
-  const notifications = new Notifications(hub.store, temp, { fetch: (async () => {
+  const notifications = new Notifications(hub.store, temp, { subject: "https://hub.example.test", fetch: (async () => {
     entered(); await blocked; return new Response(null, { status: 201 });
   }) as unknown as typeof fetch });
   notifications.notify(event()); const sending = notifications.drain();
@@ -218,4 +218,90 @@ test("in-flight delivery does not resurrect a deleted device", async () => {
   release(); await sending;
   expect(notifications.push.devices(owner)).toEqual([]);
   await notifications.stop();
+});
+
+
+test("VAPID always has an HTTPS sub: publicUrl wins and request Origin stays private", async () => {
+  const origin = "https://fallback.example.test";
+  await hub.stop(); await boot("https://hub.example.test", [origin]);
+  const response = await request("/v2/notifications/push/devices", "POST", receiver.subscription, human, "en", origin);
+  expect(response.status).toBe(200);
+  const device = PushDevice.parse(await response.json()); expect(JSON.stringify(device)).not.toContain(origin);
+  await request("/v2/notifications/push/test", "POST", {});
+  expect(received.at(-1)!.auth.claims.sub).toBe("https://hub.example.test");
+  expect(hub.store.db.query<{ origin: string }, []>("SELECT origin FROM notification_push_devices").get()?.origin).toBe(origin);
+  // Drop the configured HTTPS address, keeping the private Origin across restart.
+  await hub.stop(); await boot("http://hub.example.test", [origin]);
+  expect(PushTestResult.parse(await (await request("/v2/notifications/push/test", "POST", {})).json()).delivered).toBe(true);
+  expect(received.at(-1)!.auth.claims.sub).toBe(origin);
+  const views = await (await request("/v2/notifications/push/devices")).json();
+  expect(JSON.stringify(views)).not.toContain(origin);
+  expect(JSON.stringify(logs)).not.toContain(origin);
+  expect(JSON.stringify(hub.store.db.query("SELECT * FROM audit").all())).not.toContain(origin);
+});
+
+test("without HTTPS publicUrl, subscribing requires an HTTPS Origin and gives a clear localized error", async () => {
+  const origin = "https://fallback.example.test";
+  await hub.stop(); await boot("", [origin]);
+  for (const [language, pattern] of [["en", /Set LUMIO_PUBLIC_URL/], ["zh", /请将 LUMIO_PUBLIC_URL/]] as const) {
+    const response = await request("/v2/notifications/push/devices", "POST", receiver.subscription, human, language);
+    expect(response.status).toBe(400); const error = ApiError.parse(await response.json()); expect(error.error.code).toBe("INVALID"); expect(error.error.message).toMatch(pattern); noSecrets(error);
+  }
+  expect(hub.modules.notifications.push.devices(owner)).toEqual([]);
+  const fallback = await request("/v2/notifications/push/devices", "POST", receiver.subscription, human, "en", origin);
+  expect(fallback.status).toBe(200); PushDevice.parse(await fallback.json());
+  expect(PushTestResult.parse(await (await request("/v2/notifications/push/test", "POST", {})).json()).delivered).toBe(true);
+  expect(received.at(-1)!.auth.claims.sub).toBe(origin);
+  expect(() => hub.modules.notifications.push.subscribe(owner, receiver.subscription, "", "http://fallback.example.test")).toThrow();
+  expect(() => hub.modules.notifications.push.subscribe(owner, receiver.subscription, "", "https://fallback.example.test/path")).toThrow();
+});
+
+test("old subscription tables gain the private Origin column without exposing it", async () => {
+  await subscribe(); await hub.stop();
+  const store = await HubStore.open(temp);
+  store.db.exec("ALTER TABLE notification_push_devices DROP COLUMN origin"); store.close();
+  await boot();
+  expect(hub.modules.notifications.push.devices(owner)).toHaveLength(1);
+  expect(PushTestResult.parse(await (await request("/v2/notifications/push/test", "POST", {})).json()).delivered).toBe(true);
+  expect(received.at(-1)!.auth.claims.sub).toBe("https://hub.example.test");
+});
+
+test("automatic plan handoffs notify checkpoints and end once, while agent-to-agent advances stay silent", async () => {
+  await subscribe();
+  const created = await command("work.task.create", { title: "Synthetic planned notification" });
+  if (created.kind !== "task") throw new Error("task expected");
+  const task = created.task.id;
+  await command("work.task.plan.set", { task, expected_revision: created.task.revision, plan: { stages: [
+    { kind: "agent", id: "implement", agent: "pi@server", instruction: "Synthetic implementation" },
+    { kind: "agent", id: "review", agent: "pi@server", instruction: "Synthetic review" },
+    { kind: "checkpoint", id: "approve", prompt: "Secret checkpoint prompt" },
+    { kind: "agent", id: "merge", agent: "pi@server", instruction: "Synthetic merge" },
+  ] } });
+  const started = await command("work.task.dispatch", { task }); if (started.kind !== "job") throw new Error("job expected");
+  async function finishRound(job: string) {
+    const spec = hub.store.executionStore.get(job)!.spec;
+    expect((await request("/v1/runtime/ack", "POST", { accepted: [job] }, runtime)).status).toBe(200);
+    const result = { job, lease: spec.lease, status: "done", finished: new Date().toISOString(), report: "Secret synthetic report" };
+    expect((await request("/v1/runtime/results", "POST", result, runtime)).status).toBe(200);
+    await hub.modules.notifications.drain();
+    // Retried result and reconciliation cannot enqueue the same handoff twice.
+    expect((await request("/v1/runtime/results", "POST", result, runtime)).status).toBe(200);
+    hub.modules.reconcile(); await hub.modules.notifications.drain();
+  }
+  await finishRound(started.job.spec.id);
+  expect(hub.modules.work.task(task).turn).toMatchObject({ holder: "pi@server", stage: "review", reason: "working" });
+  expect(received).toEqual([]);
+  const second = hub.modules.work.detail(task).executions.at(-1)!.job;
+  await finishRound(second);
+  expect(received).toHaveLength(1);
+  expect(received[0]!.payload).toEqual({ title: "Synthetic planned notification", kind: "turn.review", path: `#work/${task}` });
+  expect(WorkAttention.array().parse(await (await request("/v2/work/attention")).json())[0]).toMatchObject({ task, stage: "approve" });
+  await command("work.task.checkpoint", { task, stage: "approve", action: "continue" });
+  await hub.modules.notifications.drain(); expect(received).toHaveLength(1);
+  await finishRound(hub.modules.work.detail(task).executions.at(-1)!.job);
+  expect(hub.modules.work.task(task).turn).toMatchObject({ holder: "human", reason: "review", stage: "end" });
+  expect(received).toHaveLength(2);
+  const turns = hub.modules.work.detail(task).turns.filter(change => change.to.holder === "human" && change.to.reason === "review");
+  expect(turns.map(change => change.to.stage)).toEqual(["approve", "end"]);
+  expect(turns.every(change => change.by === hub.store.workActor().id)).toBe(true);
 });

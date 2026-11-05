@@ -4,6 +4,7 @@ const locale = new AsyncLocalStorage<Language>();
 export const withLanguage = <T>(lang: Language, action: () => T): T => locale.run(lang, action);
 
 export const en = {
+  "notifications.https_required": "Push notifications require an HTTPS contact address. Set LUMIO_PUBLIC_URL to an HTTPS URL, or subscribe from an allowed HTTPS page that sends its Origin header.",
   "work.plan_dispatch_failed": (stage: unknown, code: unknown) => `Could not delegate plan stage ${String(stage)} (${String(code)}); human action required.`,
   "work.plan_agent": "Delegate only to the agent in the current plan stage; handle checkpoints with task checkpoint.",
   "work.plan_max_rounds": (limit: unknown) => `Plan stopped: reached the limit of ${String(limit)} rounds; human review required.`,
@@ -779,6 +780,7 @@ ${String(p0)}${String(p1)}`,
   "Run tailscale serve status to check": "Run tailscale serve status to check",
 };
 export const zh: typeof en = {
+  "notifications.https_required": "推送通知需要 HTTPS 联系地址。请将 LUMIO_PUBLIC_URL 设置为 HTTPS 地址，或从允许访问的 HTTPS 页面订阅并携带 Origin 请求头。",
   "work.plan_dispatch_failed": (stage: unknown, code: unknown) => `无法委派计划阶段 ${String(stage)}（${String(code)}），需要人处理。`,
   "work.plan_agent": "只能委派给计划当前阶段的 agent；检查点请用 task checkpoint 处理。",
   "work.plan_max_rounds": (limit: unknown) => `计划已停止：达到 ${String(limit)} 轮上限，需要人验收。`,

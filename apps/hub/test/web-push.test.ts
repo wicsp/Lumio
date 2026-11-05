@@ -3,7 +3,7 @@ import { createECDH } from "node:crypto";
 import { mkdtemp, rm, stat, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { encryptPush, validatePushKeys, VapidKeys } from "../src/web-push.ts";
+import { encryptPush, validatePushKeys, VapidKeys, pushSubject } from "../src/web-push.ts";
 import { pushReceiver, verifyVapid } from "./fixtures/push.ts";
 const dirs: string[] = [];
 afterEach(async () => { for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true }); });
@@ -35,6 +35,11 @@ test("fresh encryption decrypts; VAPID is lazy, private, persistent, correctly s
   const decoded = verifyVapid(auth);
   expect(decoded.claims).toEqual({ aud: "https://push.example.test:8443", exp: now.getTime() / 1000 + 43200, sub: "https://hub.example.test" });
   expect(decoded.publicKey).toBe(publicKey);
+  for (const missing of [undefined, "", "http://hub.example.test", "https://user:secret@hub.example.test"]) {
+    expect(() => keys.authorization("https://push.example.test/synthetic", now, missing as string)).toThrow("HTTPS VAPID subject required");
+  }
+  expect(pushSubject("https://hub.example.test", "https://fallback.example.test")).toBe("https://hub.example.test");
+  expect(pushSubject("http://hub.example.test", "https://fallback.example.test")).toBe("https://fallback.example.test");
   const receiver = pushReceiver(), payload = { title: "合成标题", kind: "turn.answer", path: "#work/task_synthetic" };
   const first = encryptPush(Buffer.from(JSON.stringify(payload)), receiver.subscription.keys);
   const second = encryptPush(Buffer.from(JSON.stringify(payload)), receiver.subscription.keys);

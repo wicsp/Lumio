@@ -73,7 +73,7 @@ export async function handleV2(request: Request, route: V2Route, identity: Ident
       if (url.pathname.endsWith("/test")) return Response.json(await push.test(owner));
       const body = request.method === "DELETE" ? undefined : await json(request);
       const value = store.db.transaction(() => {
-        const value = request.method === "DELETE" ? push.remove(owner, id!) : request.method === "PATCH" ? push.update(owner, id!, body) : push.subscribe(owner, body, request.headers.get("user-agent") ?? "");
+        const value = request.method === "DELETE" ? push.remove(owner, id!) : request.method === "PATCH" ? push.update(owner, id!, body) : push.subscribe(owner, body, request.headers.get("user-agent") ?? "", request.headers.get("origin") ?? undefined);
         store.audit(identity, route.operation, "allow", undefined, "applied"); return value;
       })();
       audited = true;
