@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { ExecutionRoutineCommandRequest, WorkCommandRequest, type ExecutionRoutine, type WorkTask } from "@lumio/schema";
 import { renderMarkdown, safeExternalUrl } from "../src/client/utils/markdown.ts";
-import { verifyArtifact, sha256Hex, formatTime, dispatchCommand, routineCreateCommand, routineUpdateCommand, safeFileName, taskDescriptionCommand, taskFieldsCommand } from "../src/client/commands.ts";
+import { verifyArtifact, sha256Hex, formatTime, dispatchCommand, routineCreateCommand, routineUpdateCommand, safeFileName, taskDescriptionCommand, workPatchCommand } from "../src/client/commands.ts";
 
 describe("markdown", () => {
   test("escapes raw HTML", () => {
@@ -36,15 +36,12 @@ const task: WorkTask = { schema_version: 3, type: "task", id: "task_01JABCDEFGHJ
 
 describe("work commands", () => {
   test("structural patch excludes description and carries revision", () => {
-    const cmd = taskFieldsCommand(task, { title: "T2", status: "todo", assignee: "human", project: "" })!;
+    const cmd = workPatchCommand(task, { title: "T2", project: null })!;
     expect(WorkCommandRequest.safeParse(cmd).success).toBe(true);
     const args = (cmd.operation as { args: { expected_revision: number; patch: Record<string, unknown> } }).args;
     expect(args.expected_revision).toBe(3);
     expect(args.patch).toEqual({ title: "T2" });
     expect(cmd.operation.op).toBe("work.task.update");
-  });
-  test("assignee change never dispatches", () => {
-    expect(() => taskFieldsCommand(task, { title: "T", status: "todo", assignee: "pi", project: "" })).toThrow();
   });
   test("description patch is alone and schema-valid", () => {
     const cmd = taskDescriptionCommand(task, "new body")!;
@@ -52,7 +49,7 @@ describe("work commands", () => {
     expect((cmd.operation as { args: { patch: object } }).args.patch).toEqual({ description: "new body" });
     expect(taskDescriptionCommand(task, "old")).toBeUndefined();
   });
-  test("no-op structural edit returns undefined", () => expect(taskFieldsCommand(task, { title: "T", status: "todo", assignee: "human", project: "" })).toBeUndefined());
+  test("no-op structural edit returns undefined", () => expect(workPatchCommand(task, { title: "T", project: null })).toBeUndefined());
   test("dispatch is explicit with target and revision", () => {
     const cmd = dispatchCommand(task, "codex@mac");
     expect(WorkCommandRequest.safeParse(cmd).success).toBe(true);

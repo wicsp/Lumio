@@ -1,11 +1,14 @@
 /**
- * 「需要你处理」的一张卡片（ADR 0030）：等你回答 / 等你验收 / 执行失败。
+ * 「需要你处理」的一张卡片（ADR 0030、0032）：等你回答 / 等你验收 / 执行失败 / 交接计划的检查点。
  * 今日、任务页和执行详情共用。每个操作都先读任务的当前版本再提交，冲突时说明而不覆盖。
+ * 「我自己来」把任务交回给你（原因 todo）：提醒消失，任务仍在你手里。
  */
 import type { WorkAttention } from "@lumio/schema";
 import { errorText, isConflict, type Client, type HubExtras } from "./api.ts";
-import { acknowledgeCommand, answerCommand, engineTargets, formatTime, newRequestId, workPatchCommand } from "./commands.ts";
-import { autosize, clear, failure, h, icon, openMenu, toast } from "./dom.ts";
+import { answerCommand, engineTargets, formatTime, newRequestId } from "./commands.ts";
+import { agentStages, checkpointCommand, type CheckpointAction } from "./plan.ts";
+import { finishCommand, handCommand } from "./turn.ts";
+import { autosize, clear, failure, h, icon, openMenu, select, toast } from "./dom.ts";
 import { ago } from "./format.ts";
 import { t } from "./i18n.ts";
 import type { Navigate } from "./navigation.ts";
@@ -27,7 +30,9 @@ const KIND: Record<WorkAttention["kind"], { label: string; glyph: string; tone: 
 /** where：today 显示任务标题；task 在任务页里，不重复标题；job 在执行详情里。 */
 export function attentionCard(item: WorkAttention, ctx: AttentionContext, where: "today" | "task" | "job" = "today"): HTMLElement {
   const kind = KIND[item.kind];
-  let target = item.agent;
+  // 有交接计划时，继续的一定是计划里这一阶段的 agent，不让人改。
+  const planned = item.stage !== undefined;
+  let target = planned ? undefined : item.agent;
   const card = h("article", { class: `attn attn-${kind.tone}`, "data-task": item.task, "data-round": String(item.round) });
   const status = h("div", { role: "status", class: "attn-status" });
   const error = h("div", { role: "alert" });
@@ -52,7 +57,8 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
   const composer = (button: string, required: boolean, placeholder: string) => {
     const text = autosize(h("textarea", { rows: "2", placeholder, "aria-label": placeholder }));
     const chip = h("button", { type: "button", class: "attn-target", title: t("Change who continues") }, icon("bot"), h("span", {}, ""));
-    const renderChip = () => { (chip.lastChild as HTMLElement).textContent = target ? t("Continue with {0}", target) : t("Choose who continues"); };
+    const renderChip = () => { (chip.lastChild as HTMLElement).textContent = planned ? t("Continue with the plan's agent") : target ? t("Continue with {0}", target) : t("Choose who continues"); };
+    if (planned) chip.disabled = true;
     renderChip();
     chip.addEventListener("click", async () => {
       try {
@@ -68,38 +74,73 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
       event.preventDefault();
       const answer = text.value.trim();
       if (required && !answer) { text.focus(); return; }
-      if (!target) { chip.click(); return; }
+      if (!target && !planned) { chip.click(); return; }
       if (previous && previous !== `${target}\n${answer}`) requestId = newRequestId();
       previous = `${target}\n${answer}`;
       void run(async () => {
         const task = await currentTask();
         await ctx.client.workCommand(answer ? answerCommand(task, target, answer, requestId)
-          : { request_id: requestId, operation: { op: "work.task.dispatch", args: { task: task.id, to: target, expected_revision: task.revision } } });
-        toast(t("Dispatched to {0}", target!));
-        return t("Sent. {0} is continuing.", target!);
+          : { request_id: requestId, operation: { op: "work.task.dispatch", args: { task: task.id, ...(target ? { to: target } : {}), expected_revision: task.revision } } });
+        const who = target ?? item.agent ?? t("the agent");
+        toast(t("Dispatched to {0}", who));
+        return t("Sent. {0} is continuing.", who);
       });
     });
     return { form, focus: () => text.focus() };
   };
 
-  const seen = h("button", { type: "button", class: "btn btn-quiet btn-small", title: t("Clear this reminder without changing the task") }, t("Seen"));
+  const seen = h("button", { type: "button", class: "btn btn-quiet btn-small", title: t("Clear this reminder; the task stays with you as a to-do") }, t("I'll handle it"));
   seen.addEventListener("click", () => void run(async () => {
-    await ctx.client.workCommand(acknowledgeCommand(item.task, (await ctx.client.workTask(item.task)).task.revision));
-    return t("Marked as seen.");
+    await ctx.client.workCommand(handCommand(await currentTask(), "human"));
+    return t("It's yours now. The reminder is cleared.");
   }));
+
+  // 交接计划的检查点，或计划走完后的验收（ADR 0032 第 5 节）。
+  const checkpoint = (stage: string) => {
+    const decide = (action: CheckpointAction, done: string, options: { backTo?: string; comment?: string } = {}) => void run(async () => {
+      await ctx.client.workCommand(checkpointCommand(item.task, stage, action, options));
+      return done;
+    });
+    const end = stage === "end";
+    const go = h("button", { type: "button", class: "btn btn-primary btn-small" }, icon("play"), t("Continue"));
+    go.addEventListener("click", () => decide("continue", t("Continuing with the next step.")));
+    const finish = h("button", { type: "button", class: `btn btn-small${end ? " btn-primary" : ""}` }, icon("check"), t("Mark done"));
+    finish.addEventListener("click", () => decide("finish", t("Task marked done.")));
+    const hold = h("button", { type: "button", class: "btn btn-quiet btn-small" }, icon("pause"), t("Put on hold"));
+    hold.addEventListener("click", () => decide("hold", t("Put on hold.")));
+    const back = h("button", { type: "button", class: "btn btn-small" }, icon("undo"), t("Send back…"));
+    back.addEventListener("click", () => void (async () => {
+      try {
+        const task = await currentTask();
+        const stages = task.plan ? agentStages(task.plan.plan) : [];
+        if (!stages.length) { clear(error, failure(t("This task no longer has a plan. Refresh and try again."))); return; }
+        const to = select("back-to", stages.map(value => [value.id, t("{0} ({1})", value.id, value.agent)] as [string, string]), stages.at(-2)?.id ?? stages[0]!.id);
+        const text = autosize(h("textarea", { rows: "2", placeholder: t("What should change?"), "aria-label": t("What should change?") }));
+        const send = h("button", { type: "submit", class: "btn btn-primary btn-small" }, icon("undo"), t("Send back"));
+        const form = h("form", { class: "attn-composer" }, text, h("div", { class: "attn-composer-foot" }, h("label", { class: "attn-back" }, t("Back to"), to), send));
+        form.addEventListener("submit", event => {
+          event.preventDefault();
+          if (!text.value.trim()) { text.focus(); return; }
+          decide("send_back", t("Sent back to {0}.", to.value), { backTo: to.value, comment: text.value });
+        });
+        actions.replaceWith(form); text.focus();
+      } catch (cause) { clear(error, failure(errorText(cause))); }
+    })());
+    actions.append(...(end ? [finish, back, hold] : [go, back, finish, hold]));
+  };
 
   let body: Node | null = null;
   if (item.kind === "question") {
     const answer = composer(t("Answer and continue"), true, t("Your answer…"));
     body = h("div", { class: "attn-body" }, h("p", { class: "attn-question" }, item.question ?? t("The agent is waiting for your input.")), answer.form);
   } else {
-    if (item.summary) body = h("p", { class: "attn-summary" }, item.summary);
-    if (item.kind === "review") {
+    if (item.prompt) body = h("p", { class: "attn-question" }, item.prompt);
+    else if (item.summary) body = h("p", { class: "attn-summary" }, item.summary);
+    if (item.kind === "review" && (item.prompt || item.stage === "end")) checkpoint(item.stage!);
+    else if (item.kind === "review") {
       const done = h("button", { type: "button", class: "btn btn-primary btn-small" }, icon("check"), t("Mark done"));
       done.addEventListener("click", () => void run(async () => {
-        const task = await currentTask();
-        const request = workPatchCommand(task, { status: "done" });
-        if (request) await ctx.client.workCommand(request);
+        await ctx.client.workCommand(finishCommand(await currentTask(), "done"));
         return t("Task marked done.");
       }));
       const feedback = h("button", { type: "button", class: "btn btn-small" }, icon("edit"), t("Add feedback and continue"));
@@ -119,11 +160,12 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
   }
 
   const meta = [t("Round {0}", item.round), item.agent, ago(item.since)].filter(Boolean).join(t(" · "));
+  const label = item.kind === "review" && item.prompt ? t("Checkpoint") : item.kind === "review" && item.stage === "end" ? t("Plan finished · ready for your review") : t(kind.label);
   card.append(
     h("header", { class: "attn-head" },
       h("span", { class: "attn-icon" }, icon(kind.glyph)),
       h("div", { class: "attn-heading" },
-        h("p", { class: "attn-kind" }, t(kind.label)),
+        h("p", { class: "attn-kind" }, label),
         where === "today" ? h("button", { type: "button", class: "attn-title", onclick: () => ctx.navigate("work", item.task) }, item.title) : null,
         h("p", { class: "attn-meta", title: formatTime(item.since) }, meta)),
       where !== "job" ? h("button", { type: "button", class: "text-btn attn-report", onclick: () => ctx.navigate("execution", item.job) }, t("View run")) : null),

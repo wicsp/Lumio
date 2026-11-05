@@ -9,10 +9,13 @@ import { clear, empty, failure, h, icon, loading, placeholder, toast } from "../
 import { ago } from "../format.ts";
 import { JOB_LABELS } from "../labels.ts";
 import { listKeys, markSelected } from "../list-keys.ts";
+import type { Navigate } from "../navigation.ts";
 import { t, translated } from "../i18n.ts";
+import { isWorkProposal, proposalCard } from "../proposal-card.ts";
 
 const STATUS: Record<Proposal["status"], string> = translated({ pending: "Pending", accepted: "Accepted", rejected: "Rejected" });
-const title = (p: Proposal) => p.operation.op === "exec.privileged" ? p.operation.args.argv.join(" ") : p.operation.op;
+const title = (p: Proposal) => p.operation.op === "exec.privileged" ? p.operation.args.argv.join(" ")
+  : isWorkProposal(p) ? (p.operation.args.operation.op === "work.task.dispatch" ? t("Delegate a task") : t("Handoff plan")) : p.operation.op;
 
 export class ApprovalsPane {
   private split = h("div", { class: "split" });
@@ -26,7 +29,7 @@ export class ApprovalsPane {
   private active = true;
   private unbindKeys: () => void;
 
-  constructor(root: HTMLElement, private client: Client, private changed: () => void) {
+  constructor(root: HTMLElement, private client: Client, private changed: () => void, private navigate: Navigate) {
     const seg = h("div", { class: "segmented", role: "group", "aria-label": t("Approval status") });
     for (const status of ["pending", "accepted", "rejected"] as const) {
       seg.append(h("button", { type: "button", "aria-pressed": String(status === this.status), onclick: (event: Event) => {
@@ -59,8 +62,8 @@ export class ApprovalsPane {
       if (!proposals.length) { clear(this.list, empty(this.status === "pending" ? t("No pending requests.") : t("Nothing here."))); return; }
       clear(this.list, ...proposals.map(p => h("div", { class: "row", "data-id": p.id, role: "button", tabindex: "0", onclick: () => this.openProposal(p),
         onkeydown: (event: Event) => { if ((event as KeyboardEvent).key === "Enter") this.openProposal(p); } },
-        icon(p.operation.op === "exec.privileged" ? "terminal" : "approvals"),
-        h("span", { class: "row-main" }, h("span", { class: "row-title mono" }, title(p)), h("span", { class: "row-sub" }, p.reason)),
+        icon(p.operation.op === "exec.privileged" ? "terminal" : isWorkProposal(p) ? (p.operation.args.operation.op === "work.task.dispatch" ? "play" : "route") : "approvals"),
+        h("span", { class: "row-main" }, h("span", { class: `row-title${isWorkProposal(p) ? "" : " mono"}` }, title(p)), h("span", { class: "row-sub" }, p.reason)),
         h("span", { class: "row-meta", title: formatTime(p.created) }, ago(p.created)))));
       markSelected(this.list, this.selected);
     } catch (error) {
@@ -75,6 +78,15 @@ export class ApprovalsPane {
     this.selected = proposal.id; markSelected(this.list, proposal.id);
     this.split.classList.add("has-detail");
     const op = proposal.operation;
+    if (isWorkProposal(proposal)) {
+      clear(this.detail, h("div", { class: "detail" },
+        h("div", { class: "detail-crumbs" },
+          h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": t("Back to list"), onclick: () => { this.selected = undefined; markSelected(this.list, undefined); this.showPlaceholder(); } }, icon("back")),
+          h("span", {}, title(proposal)),
+          h("span", { class: `pill ${proposal.status === "pending" ? "pill-ochre" : proposal.status === "accepted" ? "pill-green" : ""}` }, STATUS[proposal.status])),
+        proposalCard(proposal, { client: this.client, navigate: this.navigate, changed: () => { this.changed(); void this.load(); } })));
+      return;
+    }
     const note = h("div", { role: "alert" });
     const context = h("div", {});
     const reject = h("button", { type: "button", class: "btn" }, icon("close"), t("Reject"));

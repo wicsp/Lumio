@@ -125,7 +125,7 @@ export class ExecutionPane {
         this.taskTitles = tasks.map(t => ({ id: t.id, title: t.title }));
         if (runtimes) this.runtimeNames = new Map(runtimes.map(r => [r.actor, r.registration.name]));
         const sorted = jobs.slice().sort((a, b) => b.spec.created.localeCompare(a.spec.created));
-        if (!sorted.length) { clear(this.list, empty(this.statusFilter ? t("No runs with this status.") : t("No runs yet. Click Dispatch on a task and each round shows up here."))); return; }
+        if (!sorted.length) { clear(this.list, empty(this.statusFilter ? t("No runs with this status.") : t("No runs yet. Click Delegate on a task and each round shows up here."))); return; }
         clear(this.list, ...GROUPS.map(([label, statuses]) => {
           const items = sorted.filter(j => statuses.includes(j.status));
           if (!items.length) return null;

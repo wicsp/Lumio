@@ -268,6 +268,8 @@ select { appearance: none; padding-right: 28px; background-image: linear-gradien
 .s-paused, .s-cancelled { color: var(--grey); }
 .s-done { color: var(--green); }
 .s-failed, .s-unknown { color: var(--red); }
+.s-needs { color: var(--ochre); }
+.s-todo { color: var(--ink-3); }
 
 .pill { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: 11px; background: var(--sunken); color: var(--ink-2); font-size: var(--fs-xs); white-space: nowrap; }
 .pill .icon, .pill .status-icon { width: 12px; height: 12px; }
@@ -818,4 +820,61 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
   .connect-art { display: none; }
   .bar { padding: 0 10px; }
   .hide-narrow { display: none !important; }
+}
+
+/* ───────────── R4-5：轮到谁、交接计划、提议、通知（ADR 0031、0032） ───────────── */
+.who-chip { max-width: 220px; }
+.who-chip.is-needs { color: var(--ochre); }
+.icon.flip { transform: rotate(180deg); }
+.comment-author { color: var(--ink-2); font-weight: 600; }
+.comment-author:empty { display: none; }
+
+.tl-event { display: flex; align-items: center; gap: 8px; min-height: 24px; color: var(--ink-3); font-size: var(--fs-sm); }
+.tl-icon { display: grid; place-items: center; flex: none; width: 24px; height: 24px; }
+.tl-icon .icon { width: 14px; height: 14px; }
+.tl-text { min-width: 0; color: var(--ink-2); }
+.tl-by:empty, .tl-by:empty + * { display: none; }
+.tl-run { flex: none; }
+.tl-time { margin-left: auto; flex: none; color: var(--ink-4); font-size: var(--fs-xs); }
+
+.plan { display: flex; flex-direction: column; gap: 8px; }
+.plan-rounds { color: var(--ink-3); font-size: var(--fs-xs); }
+.plan-rounds.is-limit { color: var(--red); }
+.plan-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.plan-step { position: relative; display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; padding-bottom: 12px; }
+.plan-step:not(:last-child)::before { content: ""; position: absolute; left: 11.5px; top: 24px; bottom: 0; width: 1px; background: var(--line-strong); }
+.plan-dot { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink-3); }
+.plan-dot .icon { width: 13px; height: 13px; }
+.plan-step.is-done .plan-dot { border-color: var(--green); background: var(--green-wash); color: var(--green); }
+.plan-step.is-current .plan-dot { border-color: var(--ochre); background: var(--ochre-wash); color: var(--ochre); }
+.plan-step.is-next { opacity: .72; }
+.plan-step-title { display: flex; align-items: center; gap: 6px; font-weight: 600; overflow-wrap: anywhere; }
+.plan-step-sub { color: var(--ink-3); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+
+.plan-editor { gap: 12px; }
+.plan-templates select { max-width: 280px; }
+.plan-edit-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.plan-edit-step { border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); }
+.plan-edit-step.is-checkpoint { border-style: dashed; }
+.plan-edit-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); color: var(--ink-2); }
+.plan-edit-head > .icon { width: 14px; height: 14px; }
+.plan-edit-n { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--sunken); font-size: var(--fs-xs); font-weight: 600; }
+.plan-edit-kind { font-weight: 600; font-size: var(--fs-sm); }
+.plan-id { width: 140px; height: 26px; margin-left: auto; font-family: var(--mono); font-size: var(--fs-xs); }
+.plan-edit-tools { display: flex; gap: 2px; }
+.plan-edit-body { display: flex; flex-direction: column; gap: 10px; padding: 10px; }
+.plan-edit-foot { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+
+.proposal-plan { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-sm); color: var(--ink-2); }
+.proposal-plan li { display: flex; gap: 6px; align-items: flex-start; }
+.proposal-plan .icon { width: 13px; height: 13px; margin-top: 3px; flex: none; color: var(--ink-3); }
+.attn-back { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-3); font-size: var(--fs-xs); }
+.attn-back select { height: 26px; font-size: var(--fs-xs); }
+
+.set-check-row { cursor: pointer; }
+.set-check-row input { margin-left: auto; width: 16px; height: 16px; accent-color: var(--ink); }
+.set-sub.is-error { color: var(--red); }
+@media (max-width: 720px) {
+  .plan-id { width: 96px; }
+  .tl-event { flex-wrap: wrap; }
 }

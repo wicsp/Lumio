@@ -1,6 +1,6 @@
-import { taskStatus, taskHolder, workStatus } from "../task-compat.ts";
 /**
- * 今日：先是需要你处理的事，再是今天要推进的任务，旁边是 agent 动态与项目进度。
+ * 今日：先是需要你处理的事（轮到你回答 / 验收 / 处理失败、待批准），再是你的待办，
+ * 然后是 agent 在做的和在等外部的（ADR 0032）；旁边是 agent 动态与项目进度。
  * 各区块独立加载失败；不在这里放统计大字。
  */
 import type { Job, Proposal, WorkAttention, WorkProject, WorkTask } from "@lumio/schema";
@@ -12,6 +12,8 @@ import { ago, dueLabel, jobTitle } from "../format.ts";
 import { JOB_LABELS } from "../labels.ts";
 import type { Navigate } from "../navigation.ts";
 import { locale, t } from "../i18n.ts";
+import { turnGroup, turnIcon, turnText } from "../turn.ts";
+import { isWorkProposal, proposalCard } from "../proposal-card.ts";
 
 const LIVE = ["queued", "assigned", "running"];
 const ATTENTION = ["waiting_for_human", "failed", "unknown"];
@@ -54,19 +56,23 @@ export class OverviewPane {
 
     const now = new Date();
     const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() + DAY;
-    const open = taskData?.filter(task => taskStatus(task) === "active" || taskStatus(task) === "todo") ?? [];
+    const mine = taskData?.filter(task => turnGroup(task) === "todo") ?? [];
     const dueSoon = (task: WorkTask) => !!task.due && new Date(task.due).getTime() < endOfToday;
-    const focus = open.filter(task => taskStatus(task) === "active" || dueSoon(task)).sort(byFocus);
-    const next = open.filter(task => !focus.includes(task)).sort(byDue);
-    const waiting = taskData?.filter(task => taskStatus(task) === "waiting") ?? [];
+    // 今天：今天到期或已逾期的待办；没有的话，最近交回给你的排在前面。
+    const focus = mine.filter(dueSoon).sort(byFocus);
+    const next = mine.filter(task => !focus.includes(task)).sort(byDue);
+    const agentsWorking = taskData?.filter(task => turnGroup(task) === "agents") ?? [];
+    const waiting = taskData?.filter(task => turnGroup(task) === "external") ?? [];
     const running = jobData?.filter(job => LIVE.includes(job.status)) ?? [];
     // ADR 0030：Hub 按每个任务最新一轮给出需要处理的事；旧 Hub 没有接口时退回按 Job 状态显示（例行任务的轮次也走这里）。
     const attentionData = attention.status === "fulfilled" ? attention.value : undefined;
     const attentionJobs = jobData?.filter(job => ATTENTION.includes(job.status) && (!attentionData || !job.spec.source?.task)) ?? [];
 
+    const needCount = (attentionData?.length ?? 0) + (approvalData?.length ?? 0);
     const parts = taskData ? [
-      t(focus.length === 1 ? "{0} task for today" : "{0} tasks for today", focus.length),
-      running.length ? t(running.length === 1 ? "{0} agent running" : "{0} agents running", running.length) : "",
+      needCount ? t(needCount === 1 ? "{0} needs you" : "{0} need you", needCount) : "",
+      t(mine.length === 1 ? "{0} to-do" : "{0} to-dos", mine.length),
+      agentsWorking.length ? t(agentsWorking.length === 1 ? "{0} task with agents" : "{0} tasks with agents", agentsWorking.length) : "",
     ].filter(Boolean) : [];
 
     clear(this.body,
@@ -75,9 +81,10 @@ export class OverviewPane {
       h("div", { class: "today-grid" },
         h("div", { class: "today-col" },
           this.needsYou(approvalData, attentionJobs, approvals.status === "rejected" ? approvals.reason : undefined, taskData ?? [], attentionData ?? []),
-          this.section(t("Today"), focus.length, () => this.navigate("work"),
-            tasks.status === "rejected" ? failure(errorText(tasks.reason)) : this.taskList(focus, projectData, t("Nothing due today. Pick something from Up next."))),
-          tasks.status === "fulfilled" && (next.length || !focus.length) ? this.section(t("Up next"), next.length, () => this.navigate("work"), this.taskList(next.slice(0, 6), projectData, t("Your to-do list is clear."))) : null,
+          focus.length || tasks.status === "rejected" ? this.section(t("Due today"), focus.length, () => this.navigate("work"),
+            tasks.status === "rejected" ? failure(errorText(tasks.reason)) : this.taskList(focus, projectData, "")) : null,
+          tasks.status === "fulfilled" ? this.section(focus.length ? t("Your other to-dos") : t("Your to-dos"), next.length, () => this.navigate("work"), this.taskList(next.slice(0, 6), projectData, focus.length ? t("Nothing else on your list.") : t("Your to-do list is clear."))) : null,
+          agentsWorking.length ? this.section(t("Agents working"), agentsWorking.length, () => this.navigate("work"), this.taskList(agentsWorking, projectData, "")) : null,
           waiting.length ? this.section(t("Waiting on others"), waiting.length, () => this.navigate("work"), this.taskList(waiting, projectData, "")) : null),
         h("div", { class: "today-col today-side" },
           this.section(t("Agent activity"), running.length, () => this.navigate("execution"),
@@ -99,11 +106,11 @@ export class OverviewPane {
       const due = dueLabel(task.due);
       const project = projects.find(p => p.id === task.project)?.title;
       return h("button", { type: "button", class: "today-row", onclick: () => this.navigate("work", task.id) },
-        statusIcon(taskStatus(task)),
+        turnIcon(turnGroup(task)),
         h("span", { class: "row-main" }, h("span", { class: "row-title" }, task.title),
-          (project || taskHolder(task) !== "human") && h("span", { class: "row-sub" },
+          (project || task.turn.holder !== "human") && h("span", { class: "row-sub" },
             project && h("span", { class: "project-chip" }, icon("folder"), project),
-            taskHolder(task) !== "human" && h("span", { class: "who-chip" }, icon("bot"), taskHolder(task)))),
+            task.turn.holder !== "human" && h("span", { class: "who-chip" }, icon(task.turn.holder === "external" ? "clock" : "bot"), turnText(task)))),
         due && h("span", { class: `due-tag${due.overdue ? " overdue" : due.soon ? " soon" : ""}` }, due.overdue ? t("Overdue · {0}", due.text) : due.text));
     }));
   }
@@ -113,7 +120,8 @@ export class OverviewPane {
     const context = { client: this.client, hub: this.hub, navigate: this.navigate, changed: () => { this.changed(); setTimeout(() => void this.load(), 1200); } };
     const cards = [
       ...rounds.map(item => attentionCard(item, context, "today")),
-      ...(approvals ?? []).map(p => this.needCard("approvals", "ochre",
+      ...(approvals ?? []).filter(isWorkProposal).map(p => proposalCard(p, context)),
+      ...(approvals ?? []).filter(p => !isWorkProposal(p)).map(p => this.needCard("approvals", "ochre",
         p.operation.op === "exec.privileged" ? p.operation.args.argv.join(" ") : p.operation.op, p.reason, t("Approval"), t("Review"), () => this.navigate("approvals"))),
       ...jobs.map(j => j.status === "waiting_for_human"
         ? this.needCard("help", "ochre", jobTitle(j, tasks), j.result?.question ?? "", JOB_LABELS[j.status] ?? j.status, t("Answer"), () => this.navigate("execution", j.spec.id))
@@ -139,7 +147,7 @@ export class OverviewPane {
     const live = jobs.filter(job => LIVE.includes(job.status));
     const recent = jobs.filter(job => !LIVE.includes(job.status)).sort((a, b) => b.spec.created.localeCompare(a.spec.created));
     const shown = [...live, ...recent].slice(0, 5);
-    if (!shown.length) return h("p", { class: "today-empty" }, t("No agent runs yet. Dispatch a task and each round shows up here."));
+    if (!shown.length) return h("p", { class: "today-empty" }, t("No agent runs yet. Delegate a task and each round shows up here."));
     return h("div", { class: "today-rows" }, ...shown.map(job => h("button", { type: "button", class: "today-row", onclick: () => this.navigate("execution", job.spec.id) },
       statusIcon(job.status),
       h("span", { class: "row-main" }, h("span", { class: "row-title" }, jobTitle(job, tasks)),
@@ -151,8 +159,8 @@ export class OverviewPane {
     const open = projects.filter(p => p.status !== "done").slice(0, 5);
     if (!open.length) return h("p", { class: "today-empty" }, t("No active projects."));
     return h("div", { class: "today-rows" }, ...open.map(project => {
-      const related = tasks.filter(task => task.project === project.id && taskStatus(task) !== "cancelled");
-      const done = related.filter(task => taskStatus(task) === "done").length;
+      const related = tasks.filter(task => task.project === project.id && task.outcome !== "cancelled");
+      const done = related.filter(task => task.outcome === "done").length;
       const fill = h("span", { class: "progress-fill" });
       fill.style.width = `${related.length ? Math.round((done / related.length) * 100) : 0}%`;
       return h("button", { type: "button", class: "today-row project-row", onclick: () => this.navigate("work", project.id) },
