@@ -68,3 +68,4 @@ Bun 1.3.13 生成锁文件。以 `60494af` 为基线，压缩 JS 从 684,838 B �
 - 仅修改 `apps/web` 与设计/交付文档，无契约变更或新增依赖。
 - 合成库浏览器验证：推荐 3 → 5 → 1 → 0 条，列表顶部始终 103px、高度 415px、scrollTop 120px；详情不再显示路径。390px 窄屏推荐入口可打开底部面板，无横向溢出。
 - `bun run check`：1169 pass / 3 skip / 0 fail，1172 tests，143 files；`git diff --check` 通过。首次沙箱运行因本地服务限制失败，允许测试服务后完整重跑通过。
+- 已安装 `0.2.1-dev.editor3.20261106`（功能提交 `d60138c`）；保留 DeepSeek 修复的构建类型检查及 40 项回归通过，Hub 健康与内嵌资源检查通过。旧程序与业务数据已备份并验证：`~/.local/share/lumio/backups/local-editor3-20261106`。二进制 SHA-256：`1d57b4da900e5e973a2d98c1f42e806ff749b64f614d174c6bee8c23e7c3268b`。
