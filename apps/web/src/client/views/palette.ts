@@ -53,6 +53,7 @@ export class CommandPalette {
   private commands(): Item[] {
     const go = (section: Section, intent?: string) => () => this.navigate(section, undefined, intent);
     return [
+      { group: t("Actions"), label: t("New note"), icon: icon("knowledge"), run: go("knowledge", "new") },
       { group: t("Actions"), label: t("New task"), hint: "C", icon: icon("plus"), run: go("work", "new") },
       { group: t("Actions"), label: t("New project"), icon: icon("folder"), run: go("work", "new-project") },
       { group: t("Actions"), label: t("Ask the assistant"), icon: icon("assistant"), run: go("assistant", "new") },

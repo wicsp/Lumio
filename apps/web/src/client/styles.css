@@ -886,3 +886,25 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 .project-task-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; color: var(--ink-2); font-size: var(--fs-sm); font-weight: 600; }
 .project-task-head .count { color: var(--ink-4); font-weight: 400; }
 .composer-foot .btn + .btn { margin-left: 6px; }
+
+/* Knowledge authoring: roomy body, compact metadata, same palette as the workbench. */
+.knowledge-dialog { width: min(850px, calc(100vw - 24px)); }
+.note-types { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.note-type { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 14px 8px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--paper); }
+.note-type[aria-pressed="true"] { border-color: var(--focus); background: var(--surface); box-shadow: 0 0 0 1px var(--focus); }
+.note-import { display: flex; gap: 8px; }
+.note-import input { min-width: 0; flex: 1; }
+.note-optional { border: 1px solid var(--line); border-radius: var(--r-md); padding: 12px; }
+.note-optional summary { cursor: pointer; color: var(--ink-2); }
+.note-optional[open] summary { margin-bottom: 14px; }
+.note-body-bar { display: flex; gap: 6px; align-items: center; }
+.note-body-bar strong { margin-right: auto; }
+.note-body-bar button[aria-pressed="true"] { border-color: var(--focus); }
+.note-body { min-height: 280px; font-family: var(--mono); font-size: var(--fs-sm); }
+.note-preview { min-height: 280px; padding: 16px; border: 1px solid var(--line); border-radius: var(--r-md); overflow-wrap: anywhere; }
+.knowledge-form [hidden] { display: none; }
+@media (max-width: 600px) {
+  .note-types { grid-template-columns: repeat(2, 1fr); }
+  .note-import { flex-direction: column; }
+  .note-body { min-height: 240px; }
+}
