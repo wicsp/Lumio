@@ -56,5 +56,5 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
   Runtime 继续使用 Job 协议 2，本地触发与 outbox 不变。已交付计划保留历史快照，旧结果按原 lease 匹配输入；心跳无 lease 时不猜测多份历史计划。
 - 设备登记规则和在线时限由 Execution 判断，Runtime 表与 Job 表由 Storage 适配；Hub 的身份和 HTTP 入口只组装并转发。
   审批通过 Execution 查询 Job 是否仍有效，取消请求已登记时即拒绝开启高权限工作，不直接读取执行表。
-- `routine new/list/show/update/edit/status/followup` 使用数据库路径；`--legacy` 选择旧笔记。
+- `lumio routine` 默认使用数据库路径（命令以 `--help` 为准）；`--legacy` 选择旧笔记。
   新版追问从指定执行创建人工 Work 任务并保留执行来源；旧 v1 followup 拒绝数据库 Routine。
