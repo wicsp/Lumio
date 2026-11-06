@@ -71,6 +71,9 @@ AI 每次开工都要读全部 50 KB，大部分与手头任务无关。
 - `work.md`：Web 任务页的界面描述删去（`/sw.js` 规则移到 `web.md`）；CLI 命令全表改为以 `--help` 为准。
 - `execution.md`：Routine 的 CLI 命令全表改为以 `--help` 为准。
 - `DESIGN.md` 的终端输出：只保留着色开关与退出码规则，删去符号与颜色的具体样式。
+- 拆分期间合并的 #99（ADR 0034、0035）对旧 DESIGN 的修改按同样原则归位：规则进 `design/knowledge.md` 与 `design/web.md`，
+  界面细节（自动保存间隔、推荐区布局、`【【` 触发、脚注浮层等）进 `apps/web/README.md`。
+- `docs/README.md` 的 ADR 索引补上此前漏登的 0029–0035。
 
 ## 后果
 

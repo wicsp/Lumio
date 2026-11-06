@@ -7,7 +7,8 @@
 > **四模块重构**：[ADR 0025](adr/0025-four-module-architecture.md)（Accepted，2026-10-31 人类批准）规定知识、工作、执行、助手四模块与混合存储，
 > 已于 2026-11-02 合并（#62）：四模块边界、业务存储、日志备份与显式迁移已实现，验收证据见 [R0-0](tasks/R0-0-four-module-refactor.md)。Project/Task 的 Markdown 展示与导出派生物尚未实现。真实数据迁移需按 [migration-v2](migration-v2.md) 单独执行。
 
-> **待批准提案（未生效）**：[ADR 0034](adr/0034-knowledge-creation-and-authoring.md) 提议增加论文、视频、网页、想法的新建入口与字段/正文模板，并记录后续正文编辑、PDF 阅读标注及旧工作笔记的定位。现行的知识只读与权限规则仍有效，批准后按切片实施并同步更新。
+> **已批准、本地验收中**：[ADR 0034](adr/0034-knowledge-creation-and-authoring.md) 第 1–5 节（知识新建入口与模板，[K1-0](tasks/K1-0-knowledge-authoring.md)）与
+> [ADR 0035](adr/0035-live-note-editing-and-related-notes.md) 第 1–8 节（实时编辑、相关推荐、`[[` 候选与上标脚注，[K2-0](tasks/K2-0-live-note-editing.md)）均于 2026-11-06 获批准并已合并（#99），规则已写入 [`design/knowledge.md`](design/knowledge.md)。PDF 与 RAG 不在本期。
 
 ## 0. 目标与非目标
 

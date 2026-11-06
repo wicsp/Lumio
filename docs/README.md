@@ -40,6 +40,7 @@ ADR 0025 的四模块重构已合入：业务库、显式委派、Routine、助�
 | [0026](adr/0026-web-workbench.md) | Web 工作台：同源代理、登录保持与四模块 GUI | Implemented（第 2 节由 0027 取代） |
 | [0027](adr/0027-v0.2-rollout.md) | v0.2 上线：一个程序、Hub 提供 Web 与 PWA、助手模型配置、旧任务笔记直接退役 | Accepted |
 | [0028](adr/0028-language-terminal-theme.md) | 界面语言（默认英文、中文环境用中文）、终端输出样式、Web 主题切换 | Accepted |
+| [0035](adr/0035-live-note-editing-and-related-notes.md) | 笔记实时预览编辑、相关推荐、`[[` 候选与上标脚注 | Accepted |
 
 **工程基础**
 | 编号 | 一句话 | 状态 |
@@ -58,6 +59,8 @@ ADR 0025 的四模块重构已合入：业务库、显式委派、Routine、助�
 | [0009](adr/0009-lumio-owns-metadata.md) | 元数据由 Lumio 补全；只补缺的，不改已有的 | 部分实现 |
 | [0012](adr/0012-vault-layout-sources-posts-assets.md) | vault 六个大类；外部资料、发布内容、资产三种新类型 | 部分实现 |
 | [0018](adr/0018-links-in-body-ai-recommends.md) | 链接只写在正文；改名只在受控环境；导出时从正文找引用 | Implemented |
+| [0032](adr/0032-task-model-outcome-turn.md) | 任务模型：结局、轮到谁、事件；交接计划取代流程 | Accepted |
+| [0034](adr/0034-knowledge-creation-and-authoring.md) | 知识新建入口、类型模板与后续写作 | Accepted（第 1–5 节） |
 
 **Hub 与运行**
 | 编号 | 一句话 | 状态 |
@@ -68,6 +71,8 @@ ADR 0025 的四模块重构已合入：业务库、显式委派、Routine、助�
 | [0014](adr/0014-hub-and-ai-access.md) | Hub 的存放、链接、搜索、写入路径、自动提交 | Implemented（链接部分由 0018 取代） |
 | [0016](adr/0016-operations-actors-authorization.md) | 每次修改都是一个操作，统一授权；审计与 git trailer | Implemented |
 | [0017](adr/0017-single-machine-deployment.md) | Hub 与 vault 同机、只有一个 Hub；单用户（远程访问与 vault 同步部分由 0022 取代） | Implemented（部分被取代） |
+| [0030](adr/0030-round-questions-and-review.md) | 一轮里的提问与验收；需要你处理只看最新一轮 | Accepted |
+| [0033](adr/0033-project-workdir-proposal-withdrawal-targets.md) | 项目工作目录、提议撤回与执行目标查询 | Accepted |
 
 **AI 协作与权限**
 | 编号 | 一句话 | 状态 |
@@ -82,6 +87,8 @@ ADR 0025 的四模块重构已合入：业务库、显式委派、Routine、助�
 | [0022](adr/0022-editor-agnostic-deployment-modes.md) | 编辑器无关；单机 / 服务器两种部署模式；网络由部署者负责，Tailscale 只是补充 | 部分实现（官方 GUI 与改名操作未做） |
 | [0023](adr/0023-write-switch-fields.md) | 补全时写出开关字段（任务交接现见 0024） | Implemented |
 | [0024](adr/0024-assignee-string-default-workdir.md) | `assignee: pi@server` 作为交接开关；`workdir` 缺省 `~` | Implemented（P2-13） |
+| [0029](adr/0029-capabilities-and-agent-access.md) | 能力目录与 agent 访问：Lumio 记录与决策，agent 是可替换的手 | Accepted |
+| [0031](adr/0031-workflows-delegation-push.md) | 交接计划与 agent 接力、委派需要批准、统一推送（先做 PWA） | Accepted |
 
 **安全**
 | 编号 | 一句话 | 状态 |
