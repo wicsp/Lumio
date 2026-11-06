@@ -5,7 +5,7 @@
 
 **实施中的重构**：[R0-0 四模块重构](R0-0-four-module-refactor.md)列出后续切片、迁移与验收要求；
 依据 [ADR 0025](../adr/0025-four-module-architecture.md)（Accepted，2026-10-31 人类批准并授权持续实施）。
-具体契约由 Claude 起草，按切片实现并同步 DESIGN，不读取真实 vault。
+具体契约由 Claude 起草，按切片实现并同步设计文档，不读取真实 vault。
 
 已落地的分支切片：[R0-3 公共维护](R0-3-platform-maintenance.md)、[R0-5 设备登记](R0-5-runtime-registry.md)、
 [R0-7 显式记忆](R0-7-assistant-memory.md)、[R0-7 模型适配](R0-7-model-adapter.md)、[R0-7 上下文记录](R0-7-assistant-context.md)、[R0-1 契约](R0-1-contracts.md)、[R0-5 数据库 Routine](R0-5-execution-routines.md)、
@@ -126,8 +126,26 @@ pi 的 skill 验收说明：pi 的回答完全正确（推荐了 `[[渲染格式
 
 已完成（✅）的任务说明保留当时的原文，其中的 vault 路径（如 `papers/`）以 ADR 0012 的新目录为准。
 
+## 阶段
+
+| 阶段 | 内容 | 状态 |
+|---|---|---|
+| P0 | `lumio new paper`、`lumio new idea`、`lumio sync`；vault 目录结构；source / post / asset 契约 | ✅ |
+| P0-7 | 迁移真实 vault 到新目录 | ✅ |
+| P1 | 本地查询与 `export bib`；Hub（身份与令牌、查询 API、监听、自动提交、操作与提议框架）；按引用导出与断链检查；skill | ✅（pi 的 skill 验收待补） |
+| P2 | 执行器与委派：执行器登记、可靠的委派核心、三种 agent 适配器、任务笔记里的一问一答、例行任务、`lumio runtime sudo` 审批的门（P2-1 至 P2-6）；安装、配对与自检（P2-7 至 P2-9、P2-11、P2-12，ADR 0021、0022、0023）；识别 Markdown 链接（P2-10）；负责人即交接开关（P2-13，ADR 0024） | ✅（v0.1.6；剩余人工验收见 `docs/tasks/README.md`） |
+| P3 | 飞书 Bot（委派、批准、通知）、审批模型、资产到期提醒、多维表格镜像；Chrome 插件入库论文 | |
+| R1 | v0.2 上线：一个程序 `lumio`、Hub 提供 Web 与 PWA、`assistant setup`、旧笔记退役与一条命令切换（ADR 0027，[R1-0](R1-0-v0.2-release.md)） | v0.2.0 已发布，作者 Mac 已切换（2026-11-03），人工验收进行中 |
+| R2 | v0.2.1：默认英文、中文环境用中文；终端进度与颜色；Web 主题与语言切换；升级不重复下载（ADR 0028，[R2-0](R2-0-language-terminal-theme.md)） | R2-1、R2-3 已合并，R2-2 进行中 |
+| R3 | 能力目录与 agent 访问：助手能查能改任务、Codex/pi 经 skill 接入、每轮凭据、模型在设置页配置（ADR 0029）；一轮里的提问与验收（ADR 0030）（[R3-0](R3-0-capabilities-agent-access.md)） | R3-1 至 R3-4 已合并（#76、#79、#80、#83 及「已连接的 agent」）；R3-5 人工验收待进行 |
+| R4 | 任务模型 v3（结局、轮到谁、事件）与交接计划（ADR 0032）；agent 委派需要批准、统一推送（先做 PWA）、术语「派活」改为「委派」（ADR 0031）（[R4-0](R4-0-workflows-delegation-push.md)） | R4-1 至 R4-6 已合并（#85、#86、#87、#88、#90、#91）；R4-7 验收进行中，反馈修复见 [R4-8](R4-8-acceptance-fixes.md)（ADR 0033） |
+| P4 | Web GUI 提前按用户要求实现（知识只读、项目任务、执行、助手、审批）；知识写入、Docker / Nix、SDK 与原生手机端后续规划 | Web 工作台已合并（#63、#64），其余未排期 |
+
+（阶段表 2026-11-06 从 `DESIGN.md` 第 8 节移到这里，ADR 0036。）
+
 ## 给实现者的约定
-- 开始前读 `AGENTS.md`、`docs/DESIGN.md` 和本任务说明；任务说明里列出的 ADR 只在需要了解原因时再读。
+- 开始前读 `AGENTS.md`、`docs/DESIGN.md`、本任务说明，以及任务说明里列出的 `docs/design/` 分册；任务说明里列出的 ADR 只在需要了解原因时再读。
+- 写任务说明时（Claude）：在"依据"里列出要读的分册；具体需求写在任务说明里，不为小功能写 ADR（ADR 0036）。
 - 只做"范围"里列出的事；"不做"里的内容即使顺手也不要做。
 - 说明里写明的决定直接照做。遇到说明没有覆盖、又会影响接口或数据格式的问题，
   **停下来提问**，不要自行决定。
