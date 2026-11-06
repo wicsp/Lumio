@@ -9,7 +9,7 @@
 
 > **已批准、实施中**：[ADR 0034](adr/0034-knowledge-creation-and-authoring.md) 第 1–5 节于 2026-11-06 获人类批准（设计 #98 已合并）：已实现论文、视频、网页、想法的新建入口及字段/正文模板，等待本地试用。新接口仅对 human 开放；已有笔记编辑与 PDF 标注另行设计。先本地试用，通过后提交实现 PR；交付与验证见 [K1-0](tasks/K1-0-knowledge-authoring.md)。
 
-> **已批准、待实施**：[ADR 0035](adr/0035-live-note-editing-and-related-notes.md) 第 1–7 节于 2026-11-06 获批准：打开即编辑的实时预览、版本检查与自动保存、最多 5 篇相关推荐（默认 3 篇，附命中段落），以及 `[[` 空查询沿用上下文、输入文字后按标题与正文检索的引用补全。尚未修改契约或运行行为；第 8 节上标脚注是本次新增设计草案。PDF 与 RAG 不在本期。
+> **已批准、本地验收中**：[ADR 0035](adr/0035-live-note-editing-and-related-notes.md) 第 1–8 节于 2026-11-06 全部获批准：打开即编辑的实时预览、版本检查与自动保存、最多 5 篇相关推荐（默认 3 篇，附命中段落）、`[[` 上下文候选与标题/正文搜索，以及上标脚注。用户授权本次由 Codex 完成契约和前端，覆盖原分工。交付见 [K2-0](tasks/K2-0-live-note-editing.md)。PDF 与 RAG 不在本期。
 
 ## 0. 目标与非目标
 
@@ -322,14 +322,14 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
 
 中文 GUI，网页由 Hub 提供；决定见 ADR 0026、0027。
 
-- **技术栈**：原生 TypeScript、DOM 与 CSS，用 Bun 1.3.x 构建静态资源，由 Hub 提供。只依赖 `@lumio/api-client` 与 `@lumio/schema`。
+- **技术栈**：原生 TypeScript、DOM 与 CSS，用 Bun 1.3.x 构建静态资源，由 Hub 提供。业务依赖 `@lumio/api-client` 与 `@lumio/schema`；笔记编辑集成 CodeMirror 6 的 state/view/commands/language/lang-markdown/autocomplete，保留原始 Markdown（ADR 0035）。Hub 为每次 HTML 响应生成样式 nonce，允许编辑器动态样式，不放宽脚本 CSP。
 - **类型隔离**：浏览器端与服务端是两个独立的 TypeScript 程序，根 typecheck 同时检查两者。
 - **访问路径**（ADR 0027）：网页由 Hub 在自己的地址上提供（单机 `http://127.0.0.1:7420`；服务器模式为 Hub 的对外地址），浏览器与 Hub 同源，直接调用 `/v1`、`/v2`。
   Hub 为页面与资源设置限制性 CSP；浏览器请求（带 `Origin` 或 `Sec-Fetch-Site`）的 Origin/Host 必须是本机监听地址、`LUMIO_PUBLIC_URL` 或 `LUMIO_WEB_ORIGINS` 列出的来源。
 - **会话**：先用 `lumio login-code --name web` 配对。身份验证后，默认以 sessionStorage 保留当前标签页登录，刷新自动恢复；勾选「记住这台设备」时使用 localStorage，关闭重开仍可恢复。仅保存凭据，按网页所在的 Hub 来源隔离。恢复前验证 human 身份。同源脚本可读，受现有 CSP 与安全渲染保护；不等同 HttpOnly 或钥匙串隔离。验证遇到 401/403 或登出时清除对应凭据，任何 401 或登出中止请求、清空模块；临时断线保留凭据并允许重试。存储受限时降级并提示，不缓存业务数据或直接访问 vault。
 - **模块**：
   - 概览。
-  - Knowledge：支持搜索、类型与链接视图，私有内容需显式开启。human 可从知识页与命令面板新建论文、视频、网页、想法，按类型填写字段与 Markdown 正文并预览；模板由 Knowledge 生成，翻译由应用注入。保存经 Hub 校验、幂等请求与可恢复回执，立即刷新索引；新增接口不授予 agent/runtime。已有笔记仍只读，正文更新与 PDF 标注另行设计（ADR 0034 §1–5；本地验收中）。
+  - Knowledge：支持搜索、类型与链接视图，私有内容需显式开启。human 可新建论文、视频、网页、想法，在详情页用同一个实时预览编辑器写作。合法公开 paper/source/idea/experiment/post 可直接编辑标题/正文，停顿约 800 ms 自动保存；SHA-256 版本检查和可恢复幂等回执防止覆盖已检测到的外部更新，冲突保留草稿并提供比较。保留未知元数据，更新索引与链接；新增接口不授予 agent/runtime。左侧词法推荐最多 5 篇、默认 3 篇并显示命中片段；`[[` 空查询使用段落上下文，输入后搜索标题与正文，Enter 插入链接，Shift+Enter 插入 Markdown 上标脚注；文末编号按首次出现排列。私密、旧工作笔记与非法元数据保持只读。PDF 与 RAG 后续设计（ADR 0034 §1–5、0035 §1–8；本地验收中）。
   - Project/Task：按状态分组的列表；属性点选后立即保存（每次一个字段，带 revision）；描述默认渲染、点击编辑，单独保存；评论与派发是独立的显式操作。
   - Jobs：结果与待回答问题、取消；文件下载校验大小与 SHA。
   - Routine：创建、编辑、暂停与恢复；设备列表。
