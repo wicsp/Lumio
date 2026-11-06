@@ -78,3 +78,5 @@ Bun 1.3.13 生成锁文件。以 `60494af` 为基线，压缩 JS 从 684,838 B �
 - 修改范围仅 `apps/web` 和设计/交付文档，无契约变更或新增依赖。
 - `bun run check`：1173 pass / 3 skip / 0 fail，1176 tests，144 files；`git diff --check` 通过。
 - 已安装 `0.2.1-dev.editor4.20261106`（功能提交 `919ba26`）；Hub 健康检查通过，保留 DeepSeek 修复的组合包类型检查及 40 项回归通过。旧程序与业务数据已备份并验证：`~/.local/share/lumio/backups/local-editor4-20261106`。二进制 SHA-256：`75b9878856f90b61cec246c3aaf211041147da8d6a0edc06fb5d893de6084f27`。
+- 提交期间整合远端三项保存恢复/导航修复，完整复查：1176 pass / 3 skip / 0 fail，1179 tests，144 files。随后 PR #99 合并；中文引用改动转至基于主线的 `codex/chinese-quote-shortcut` 后续分支，变基前后文件树逐项比较无差异。
+- 最终本地版本为 `0.2.1-dev.editor5.20261106`，包含上述远端修复和中文引用快捷方式，Hub 健康检查通过；组合包类型检查和 40 项回归通过。构建提交 `e901cff` 与变基后的 `e1bcdb5` 文件树相同；SHA-256：`97ea89353dc2f39ecfba60513c66071a06238b4b2348c6dab978c262f64f250c`。旧程序与业务数据备份并验证于 `~/.local/share/lumio/backups/local-editor5-20261106`。
