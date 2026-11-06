@@ -1,6 +1,6 @@
 # D1-0 删除与回收站
 
-依据：[ADR 0038](../adr/0038-delete-and-trash.md)（**Proposed，人类批准后才能开始**）。
+依据：[ADR 0038](../adr/0038-delete-and-trash.md)（Accepted，2026-11-06 人类批准）。D1-1 契约已合入，见 `packages/schema/src/trash.ts`。
 必读：`docs/DESIGN.md`、`docs/design/work.md`、`knowledge.md`、`assistant.md`、`security.md`、`web.md`。
 
 ## 目标
@@ -11,7 +11,7 @@
 
 | 编号 | 内容 | 负责 | 改动范围 |
 |---|---|---|---|
-| D1-1 | 契约：删除、回收站列表、恢复、彻底删除的请求与结果；`TRASHED` 错误码 | Claude 起草，人类批准 | `packages/schema` |
+| D1-1 ✅ | 契约：删除、回收站列表、恢复、彻底删除的请求与结果；读取回收站对象为 NOT_FOUND + `reason: trashed` | Claude 起草，人类批准 | `packages/schema` |
 | D1-2 | 任务与项目的删除、恢复、彻底删除（含停止进行中的一轮、项目下任务置空与恢复挂回） | 后端（Codex） | `packages/work`、`apps/hub` |
 | D1-3 | 笔记移入 `.trash/`、恢复、彻底删除，自动提交 | 后端（Codex） | `packages/knowledge`、`apps/hub` |
 | D1-4 | 对话删除、恢复、彻底删除（先停止生成）；回收站汇总与 30 天到期清理 | 后端（Codex） | `packages/assistant`、`apps/hub` |
@@ -19,12 +19,26 @@
 
 D1-2 到 D1-4 依赖 D1-1；D1-5 依赖 D1-2 到 D1-4 的 Hub 接口。
 
+## 接口（D1-1 契约，`packages/schema/src/trash.ts` 与 `work.ts`）
+
+| 动作 | 入口 | 请求 | 结果 |
+|---|---|---|---|
+| 删除任务 / 项目 | `POST /v2/work/commands` | `work.task.delete` / `work.project.delete`（带 `expected_revision`） | `{ kind: "trashed", item: TrashItem }` |
+| 删除笔记 | `DELETE /v2/knowledge/notes/<id>` | `KnowledgeDeleteRequest` | `TrashResult` |
+| 删除对话 | `DELETE /v2/assistant/conversations/<conv_id>` | `AssistantConversationDeleteRequest` | `TrashResult` |
+| 回收站列表 | `GET /v2/trash?kind=` | `TrashListArgs` | `TrashListResult` |
+| 恢复 | `POST /v2/trash/<id>/restore` | `TrashRestoreRequest` | `TrashRestoreResult` |
+| 彻底删除 | `DELETE /v2/trash/<id>` | `TrashPurgeRequest` | `TrashPurgeResult` |
+
+D1-1 只在 `packages/work` 里让两个新命令明确返回 INVALID（尚未实现），D1-2 替换为真实实现。新路由在 `apps/hub/src/v2.ts` 登记为只有人可用的操作；
+`packages/api-client` 的对应方法由 D1-5（Claude）补上。
+
 ## 后端验收要点（D1-2 到 D1-4）
 
 - 每个写操作带 `request_id`，重复提交返回同一结果；任务、项目、笔记带 `expected_revision`，版本不符返回 `CONFLICT`。
 - 删除正在执行的任务：同一事务里停掉这一轮（语义同 `work.task.finish outcome=cancelled`），再移入回收站；执行记录不删。
 - 删除项目：其下任务 `project` 置空、revision 递增，回收站记录这些任务 ID；恢复时只挂回仍无项目的任务。
-- 回收站中的对象不出现在任何列表、搜索、引用候选、相关推荐、概览、计数和助手工具结果中；按 ID 读取返回 `TRASHED`。
+- 回收站中的对象不出现在任何列表、搜索、引用候选、相关推荐、概览、计数和助手工具结果中；按 ID 读取返回 NOT_FOUND，`error.reason` 为 `trashed`。
 - 笔记移到 `.trash/<原相对路径>`，冲突加后缀；恢复到原路径，被占用时加后缀并在结果中返回实际路径。
 - agent 身份调用一律 `FORBIDDEN`，不生成提议；这些操作不出现在 agent 能力目录与 `skills/lumio/SKILL.md`。
 - 30 天到期清理在 Hub 内定期执行，可在测试中注入时间；彻底删除笔记时删除 `.trash/` 中的文件并提交。

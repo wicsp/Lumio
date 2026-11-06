@@ -382,6 +382,10 @@ export class WorkService {
           if (!this.planTemplates().some(value => value.id === id)) throw new WorkError("NOT_FOUND", { key: "work.template_not_found", args: [] });
           this.store.deletePlanTemplate(id); result = { kind: "removed", id }; break;
         }
+        // ADR 0038：契约已定（D1-1），删除与回收站由 D1-2 实现；在此之前明确拒绝，不做部分删除。
+        case "work.task.delete":
+        case "work.project.delete":
+          throw new WorkError("INVALID", { key: "index.invalid_work_command_parameters", args: [] });
         case "work.task.dispatch": {
           const task = this.task(operation.args.task);
           if (operation.args.expected_revision !== undefined && task.revision !== operation.args.expected_revision) throw new WorkError("CONFLICT", { key: "index.task_changed_reload_before_dispatching", args: [] });

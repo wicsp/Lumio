@@ -3,6 +3,7 @@ import { AgentTarget, ID_PREFIXES, Id, RequestId, Revision, Timestamp, idOf } fr
 import { TASK_STATUSES } from "./entities.ts";
 import { Job } from "./job.ts";
 import { HandoffPlan, PlanRun, PlanStageId, PlanTemplate } from "./plan.ts";
+import { TrashItem } from "./trash.ts";
 
 /**
  * Work 模块契约（Project v2 / Task v3）（ADR 0025 第 1、3、4、8 节，R0-1）。
@@ -338,9 +339,25 @@ export const PlanTemplateDelete = z.strictObject({
   args: z.strictObject({ template: idOf("wft") }),
 });
 
+/**
+ * 删除任务（只有人，ADR 0038）：移入回收站。有一轮正在进行时，同一事务里按 finish outcome=cancelled 的语义先停掉它。
+ * 执行记录不删除；其他任务的 parent/dependencies 不级联修改。
+ */
+export const WorkTaskDelete = z.strictObject({
+  op: z.literal("work.task.delete"),
+  args: z.strictObject({ task: idOf("task"), expected_revision: Revision }),
+});
+
+/** 删除项目（只有人，ADR 0038）：只删项目本身；其下任务在同一事务里置为无项目（各自 revision 递增）。 */
+export const WorkProjectDelete = z.strictObject({
+  op: z.literal("work.project.delete"),
+  args: z.strictObject({ project: idOf("prj"), expected_revision: Revision }),
+});
+
 export const WorkCommand = z.discriminatedUnion("op", [
   WorkProjectCreate, WorkProjectUpdate, WorkTaskCreate, WorkTaskUpdate, WorkTaskComment, WorkTaskDispatch,
   WorkTaskHand, WorkTaskFinish, WorkTaskReopen, WorkTaskPlanSet, WorkTaskCheckpoint, PlanTemplateSave, PlanTemplateDelete,
+  WorkTaskDelete, WorkProjectDelete,
 ]);
 
 // ───────────────────────── 需要你处理（ADR 0030）─────────────────────────
@@ -376,7 +393,7 @@ export const WorkCommandRequest = z.strictObject({
 
 /**
  * 命令结果：create/update/hand/finish/reopen/plan/checkpoint → project 或 task；comment → comment；dispatch → job；
- * 模板保存 → template，删除 → removed；agent 发起而需要批准 → proposal（ADR 0031）。
+ * 模板保存 → template，删除 → removed；任务/项目删除 → trashed（ADR 0038）；agent 发起而需要批准 → proposal（ADR 0031）。
  */
 export const WorkCommandResult = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("project"), project: WorkProject }),
@@ -385,6 +402,7 @@ export const WorkCommandResult = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("job"), job: Job }),
   z.strictObject({ kind: z.literal("template"), template: PlanTemplate }),
   z.strictObject({ kind: z.literal("removed"), id: idOf("wft") }),
+  z.strictObject({ kind: z.literal("trashed"), item: TrashItem }),
   // agent 的委派或流程需要人批准（ADR 0031 第 2 节）：没有执行，生成了这条提议（只给 ID，避免与提议契约互相引用）
   z.strictObject({ kind: z.literal("proposal"), proposal: idOf("prop") }),
 ]);

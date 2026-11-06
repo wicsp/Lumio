@@ -11,6 +11,8 @@
 - **工作目录与目标**（ADR 0033，R4-8）：一轮的工作目录在委派时按「任务 → 项目 → `~`」确定，项目的 `repo` 只供参考并写进每轮输入；
   委派目标与计划里的 agent 在提交时校验，`execution.target.list` 列出可委派的目标。
   同一作者对同一任务的同类 Work 提议会取代它之前的待批准提议（`withdrawn` + `superseded_by`），作者也可以撤回自己的提议。
+- **删除与回收站**（ADR 0038，D1）：`work.task.delete` / `work.project.delete` 只有人能做，带 `expected_revision`，结果为 `trashed`。删除即移入回收站，30 天后永久删除，期间可恢复或彻底删除；回收站中的对象不出现在任何列表、搜索、概览和助手结果中，按 ID 读取返回 NOT_FOUND（`reason: trashed`）。
+  删除进行中的任务时同一事务里先停掉这一轮；执行记录永不随之删除；其他任务的 parent/dependencies 不级联。删除项目只删项目，其下任务置为无项目；恢复项目时把仍无项目的任务挂回。
 - Task/Project 描述在数据库中；依赖、讨论、执行关联各有明确归属。保存描述或计划不隐式委派。
 - 更新带 `expected_revision`；请求用 `request_id` 去重。委派在同一事务内保存 Job、Work 关联和请求回执；同一任务默认只有一轮待完成。
 - 运行结果作为 Work 进展追加一次，同时按结果交回给人，不自动把 Task 标成 done。旧 v1 委派接口拒绝操作数据库任务。
