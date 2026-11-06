@@ -79,7 +79,8 @@ export class KnowledgePane {
   get dirty():boolean{return !!this.creator?.dirty||!!this.saver?.dirty;}
   canLeave():boolean{return this.saver?.dirty?false:(this.creator?.canLeave()??true);}
   async beforeLeave():Promise<boolean>{
-    if(this.saver?.dirty){if(this.saver.error)return false;if(!(await this.saver.save()))return false;}
+    // A failed or conflicting save keeps the draft on screen; leaving then needs explicit confirmation, never a silent dead end.
+    if(this.saver?.dirty&&(this.saver.error||!(await this.saver.save()))&&!confirm(t("You have unsaved changes. Close anyway?")))return false;
     return this.creator?.canLeave()??true;
   }
   intent(name:string):void{if(name==="new")void this.startNew();}

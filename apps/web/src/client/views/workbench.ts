@@ -189,7 +189,11 @@ export class WorkbenchView {
 
   get dirty(): boolean { return !!this.pane?.dirty || !!document.querySelector("dialog[data-dirty=true]"); }
 
-  private beforeLeave(): Promise<boolean> { return this.pane?.beforeLeave ? this.pane.beforeLeave() : Promise.resolve(this.canLeave()); }
+  private async beforeLeave(): Promise<boolean> {
+    if (!this.pane?.beforeLeave) return this.canLeave();
+    if (document.querySelector("dialog[data-dirty=true]") && !confirm(t("You have an unsaved form that will be lost. Continue?"))) return false;
+    return this.pane.beforeLeave();
+  }
 
   canLeave(): boolean {
     if (document.querySelector("dialog[data-dirty=true]") && !confirm(t("You have an unsaved form that will be lost. Continue?"))) return false;
