@@ -50,7 +50,15 @@ import { Proposal } from "./proposal.ts";
 import { CheckResult, LinksResult, NoteDetail, SearchResult } from "./query.ts";
 
 /** 需要导出为 JSON Schema 的全部契约，键名即输出文件名。 */
+import { KnowledgeTemplateRequest, KnowledgeTemplateResult, PaperResolveRequest, PaperResolveResult, KnowledgeCreateRequest, KnowledgeCreateResult } from "./knowledge-authoring.ts";
+
 export const CONTRACTS = {
+  "knowledge-template-request": KnowledgeTemplateRequest,
+  "knowledge-template-result": KnowledgeTemplateResult,
+  "paper-resolve-request": PaperResolveRequest,
+  "paper-resolve-result": PaperResolveResult,
+  "knowledge-create-request": KnowledgeCreateRequest,
+  "knowledge-create-result": KnowledgeCreateResult,
   paper: Paper,
   idea: Idea,
   project: Project,
@@ -145,3 +153,5 @@ export const CONTRACTS = {
   "push-public-key": PushPublicKey,
   "push-test-result": PushTestResult,
 } as const;
+
+export * from "./knowledge-authoring.ts";

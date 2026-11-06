@@ -1,0 +1,6 @@
+[
+  {"request_id":"authoring-fixture-idea-01","note":{"kind":"idea","title":"合成研究想法","tags":["fixture"]},"body":"## 当前想法\n\n保留我的原话。\n---\nid: not-frontmatter\n"},
+  {"request_id":"authoring-fixture-video-01","note":{"kind":"video","title":"合成视频","url":"https://example.invalid/watch?v=fixture","author":"Fixture author","site":"Fixture video"},"body":"## 关键时间点\n\n01:20 合成片段\n"},
+  {"request_id":"authoring-fixture-web-01","note":{"kind":"web","title":"合成网页","status":"read"},"body":"## 核心观点\n\n这是合成内容。\n"},
+  {"request_id":"authoring-fixture-paper-01","note":{"kind":"paper","title":"Fixture: A synthetic paper","authors":["Alice Example"],"year":2026,"doi":"10.5555/synthetic-fixture","bibtex":"@article{old, title={Synthetic}, year={2026}}"},"body":"## 局限\n\n仅为合成测试。\n"}
+]
