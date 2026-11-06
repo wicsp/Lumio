@@ -42,6 +42,7 @@ ADR 0025 的四模块重构已合入：业务库、显式委派、Routine、助�
 | [0028](adr/0028-language-terminal-theme.md) | 界面语言（默认英文、中文环境用中文）、终端输出样式、Web 主题切换 | Accepted |
 | [0035](adr/0035-live-note-editing-and-related-notes.md) | 笔记实时预览编辑、相关推荐、`[[` 候选与上标脚注 | Accepted |
 | [0037](adr/0037-content-autosave-and-local-drafts.md) | 内容自动保存与按账户隔离的浏览器恢复副本 | Accepted |
+| [0038](adr/0038-delete-and-trash.md) | 删除项目、任务、笔记和对话：移入回收站，30 天内可恢复 | Proposed |
 
 **工程基础**
 | 编号 | 一句话 | 状态 |
