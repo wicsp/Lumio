@@ -13,6 +13,7 @@ import type { Navigate } from "../navigation.ts";
 import { referenceInput } from "../reference-input.ts";
 import { drafts, textDraft } from "../drafts.ts";
 import { t, translated } from "../i18n.ts";
+import { MessageNavigation } from "../message-navigation.ts";
 
 const TURN_LABEL: Record<string, string> = translated({ running: "Still working", done: "Done", failed: "Didn't finish", unknown: "Result unknown — check before retrying", cancelled: "Cancelled" });
 const SUGGESTIONS = ["Help me prioritize what to work on today", "How should I organize this week's experiment results?", "Draft an outline for the rebuttal"];
@@ -24,11 +25,13 @@ export class AssistantPane {
   private messages = h("div", { class: "messages", role: "log", "aria-label": t("Conversation messages") });
   private text = autosize(h("textarea", { name: "chat-message", rows: "1", placeholder: t("Ask anything, or think through the next step…"), "aria-label": t("Message") }));
   private model = h("input", { name: "chat-model", class: "model-input", placeholder: t("Default model"), title: t("Applies to this message only; doesn't change the service or permissions"), autocomplete: "off" });
-  private send = h("button", { type: "submit", class: "btn btn-primary btn-small", "aria-label": t("Send") }, icon("send"), t("Send"));
+  private send = h("button", { type: "submit", class: "btn btn-primary btn-small", "aria-label": t("Send"), title: t("↵ send · ⇧↵ new line") }, icon("send"), t("Send"));
   private stop = h("button", { type: "button", class: "btn btn-small", hidden: true, onclick: () => this.controller?.abort() }, icon("stop"), t("Stop"));
   private notice = h("div", { role: "status" });
   private dock: HTMLElement;
   private composer: HTMLFormElement;
+  private messageNav: MessageNavigation;
+  private scrollOnResume = false;
   private segChat = h("button", { type: "button", "aria-pressed": "true", onclick: () => this.switchMode("chat") }, t("Chat"));
   private segMemory = h("button", { type: "button", "aria-pressed": "false", onclick: () => this.switchMode("memory") }, t("Memory"));
   private current?: string;
@@ -42,19 +45,20 @@ export class AssistantPane {
   private mode: "chat" | "memory" = "chat";
   private uncertain?: AssistantChatRequest;
 
-  constructor(private root: HTMLElement, private client: Client, private hub: HubExtras, intent?: string, private navigate: Navigate = () => {}) {
+  constructor(private root: HTMLElement, private client: Client, private hub: HubExtras, private navigate: Navigate = () => {}) {
     this.disposeReferences = referenceInput(this.text,client);
     this.composer = h("form", { class: "composer" }, this.text,
-      h("div", { class: "composer-foot" }, this.model, h("span", { class: "hint hide-narrow" }, t("↵ send · ⇧↵ new line")), this.stop, this.send));
+      h("div", { class: "composer-foot" }, this.model, this.stop, this.send));
     this.composer.addEventListener("submit", event => { event.preventDefault(); void this.submit(); });
     this.text.addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); this.composer.requestSubmit(); } });
     this.dock = h("div", { class: "chat-dock" }, this.notice, this.composer);
     this.scroller.append(this.messages);
+    this.messageNav = new MessageNavigation(this.scroller, this.messages, ".msg-user");
     this.layout.append(
       h("aside", { class: "chat-side" },
         h("div", { class: "list-tools" }, h("button", { type: "button", class: "btn", onclick: () => this.newConversation() }, icon("plus"), t("New chat"))),
         this.conversations),
-      h("section", { class: "chat-main" }, this.scroller, this.dock));
+      h("section", { class: "chat-main" }, h("div", { class: "message-layout" }, this.messageNav.element, this.scroller), this.dock));
     root.append(
       h("header", { class: "bar" },
         h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": t("Conversations"), onclick: () => this.layout.classList.toggle("show-side") }, icon("assistant")),
@@ -68,12 +72,22 @@ export class AssistantPane {
     this.model.addEventListener("input", () => this.captureDraft());
     this.showWelcome();
     void this.loadConversations();
-    if (intent?.startsWith("ask:")) { this.text.value = intent.slice(4); this.text.dispatchEvent(new Event("input")); void this.submit(); }
-    else this.text.focus();
+    this.text.focus();
   }
 
-  dispose(): void { this.disposeReferences(); this.captureDraft(); this.active = false; this.generation++; this.controller?.abort(); }
-  intent(name: string): void { if (name === "new") this.newConversation(); }
+  dispose(): void { this.messageNav.dispose(); this.disposeReferences(); this.captureDraft(); this.active = false; this.generation++; this.controller?.abort(); }
+  resume(): void { if (this.scrollOnResume) this.scrollToLatest(); }
+  intent(name: string): void {
+    if (name === "new") this.newConversation();
+    else if (name.startsWith("ask:")) {
+      if (this.sending) { toast(t("The current reply is still streaming.")); return; }
+      this.newConversation();
+      if (this.text.value.trim()) { toast(t("Finish or clear the current chat draft first.")); return; }
+      this.text.value = name.slice(4);
+      this.text.dispatchEvent(new Event("input"));
+      void this.submit();
+    }
+  }
   get dirty(): boolean { return this.mode === "chat" ? !!this.text.value.trim() : !!this.messages.querySelector<HTMLTextAreaElement>("textarea[name=memory-content]")?.value.trim(); }
   canLeave(): boolean { this.captureDraft(); return true; }
   private captureDraft(): void {
@@ -101,6 +115,11 @@ export class AssistantPane {
       h("h2", {}, t("What would you like to think through?")),
       h("p", {}, t("Ask about your tasks, notes and runs. The assistant can create tasks, comment and change task fields; each change shows here and can be undone. It can't dispatch, approve, or mark tasks done.")),
       h("div", { class: "suggestions" }, ...SUGGESTIONS.map(key => t(key)).map(text => h("button", { type: "button", class: "suggestion", onclick: () => { this.text.value = text; this.text.dispatchEvent(new Event("input")); this.text.focus(); } }, text)))));
+  }
+
+  private scrollToLatest(): void {
+    this.scrollOnResume = this.root.hidden;
+    if (!this.scrollOnResume) this.scroller.scrollTop = this.scroller.scrollHeight;
   }
 
   private newConversation(): void {
@@ -196,7 +215,7 @@ export class AssistantPane {
     if (turn && turn.status !== "done") clear(this.notice, h("div", { class: "notice" }, icon("alert"), h("span", {}, `${TURN_LABEL[turn.status]}${turn.error ? `：${turn.error}` : ""}`)));
     else clear(this.notice);
     this.markCurrent();
-    this.scroller.scrollTop = this.scroller.scrollHeight;
+    this.scrollToLatest();
   }
 
   private async refresh(): Promise<void> {
@@ -259,7 +278,7 @@ export class AssistantPane {
         await this.inspect(request, complete);
         this.setBusy(false); this.controller = undefined;
         void this.loadConversations();
-        this.text.focus();
+        if (this.active && !this.root.hidden) this.text.focus();
       }
     }
   }

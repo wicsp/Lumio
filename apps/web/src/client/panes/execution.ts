@@ -63,7 +63,7 @@ export class ExecutionPane {
     if (initialJob) { this.selected = initialJob; this.split.classList.add("has-detail"); clear(this.detail, loading()); }
     void this.load().then(() => { if (initialJob && this.active && this.selected === initialJob) void this.openJob(initialJob); });
     this.timer = setInterval(() => {
-      if (document.visibilityState !== "visible" || this.mode !== "jobs") return;
+      if (document.visibilityState !== "visible" || this.root.hidden || this.mode !== "jobs") return;
       void this.load(true);
       if (this.currentJob && LIVE.includes(this.currentJob.status) && this.selected) void this.pollJob(this.selected);
     }, 5000);

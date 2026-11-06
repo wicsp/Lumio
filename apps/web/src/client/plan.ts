@@ -94,11 +94,12 @@ const fromDraft = (stage: DraftStage): PlanStage => stage.kind === "agent"
   : { kind: "checkpoint", id: stage.id.trim(), prompt: stage.prompt.trim() };
 
 /** 计划编辑器（对话框）。保存成功后调用 saved。 */
-export async function openPlanEditor(client: Client, task: WorkTask, saved: () => void): Promise<void> {
+export async function openPlanEditor(client: Client, task: WorkTask, saved: () => void, isVisible: () => boolean): Promise<void> {
   const [targets, templates] = await Promise.all([
     client.runtimes().then(engineTargets).catch(() => []),
     client.workPlanTemplates().catch(() => [] as PlanTemplate[]),
   ]);
+  if (!isVisible()) return;
   const store = drafts(), draftKey = `plan:${task.id}`;
   const draft = store.read<{stages:DraftStage[];rounds:string;from:string}>(draftKey);
   const agents = [...new Set([...targets.map(target => target.target), ...(task.plan ? agentStages(task.plan.plan).map(stage => stage.agent) : [])])];

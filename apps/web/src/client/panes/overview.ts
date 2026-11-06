@@ -88,15 +88,15 @@ export class OverviewPane {
       h("div", { class: "today-grid" },
         h("div", { class: "today-col" },
           this.needsYou(approvalData, attentionJobs, approvals.status === "rejected" ? approvals.reason : undefined, taskData ?? [], attentionData ?? []),
-          focus.length || tasks.status === "rejected" ? this.section(t("Due today"), focus.length, () => this.navigate("work"),
+          focus.length || tasks.status === "rejected" ? this.section(t("Due today"), focus.length, () => this.navigate("work", "tasks"),
             tasks.status === "rejected" ? failure(errorText(tasks.reason)) : this.taskList(focus, projectData, "")) : null,
-          tasks.status === "fulfilled" ? this.section(focus.length ? t("Your other to-dos") : t("Your to-dos"), next.length, () => this.navigate("work"), this.taskList(next.slice(0, 6), projectData, focus.length ? t("Nothing else on your list.") : t("Your to-do list is clear."))) : null,
-          agentsWorking.length ? this.section(t("Agents working"), agentsWorking.length, () => this.navigate("work"), this.taskList(agentsWorking, projectData, "")) : null,
-          waiting.length ? this.section(t("Waiting on others"), waiting.length, () => this.navigate("work"), this.taskList(waiting, projectData, "")) : null),
+          tasks.status === "fulfilled" ? this.section(focus.length ? t("Your other to-dos") : t("Your to-dos"), next.length, () => this.navigate("work", "tasks"), this.taskList(next.slice(0, 6), projectData, focus.length ? t("Nothing else on your list.") : t("Your to-do list is clear."))) : null,
+          agentsWorking.length ? this.section(t("Agents working"), agentsWorking.length, () => this.navigate("work", "tasks"), this.taskList(agentsWorking, projectData, "")) : null,
+          waiting.length ? this.section(t("Waiting on others"), waiting.length, () => this.navigate("work", "tasks"), this.taskList(waiting, projectData, "")) : null),
         h("div", { class: "today-col today-side" },
           this.section(t("Agent activity"), running.length, () => this.navigate("execution"),
             jobs.status === "rejected" ? failure(errorText(jobs.reason)) : this.runs(jobData ?? [], taskData ?? [])),
-          this.section(t("Projects"), projectData.filter(p => p.status !== "done").length, () => this.navigate("work"),
+          this.section(t("Projects"), projectData.filter(p => p.status !== "done").length, () => this.navigate("work", "projects"),
             projects.status === "rejected" ? failure(errorText(projects.reason)) : this.projects(projectData, taskData ?? [])))));
   }
 

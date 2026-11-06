@@ -12,6 +12,7 @@ import { renderMarkdown, renderInline, renderMath, renderRichBlock } from "./uti
 import { richBlocks, inlineMath, escapedAt } from "./utils/markdown-extra.ts";
 import { footnotes, referenceTrigger, insertReference, protectedText } from "./note-text.ts";
 import { chineseQuoteInput, chineseQuoteChange } from "./note-input.ts";
+import { articleOutline, markdownHeadings } from "./article-outline.ts";
 type Hit = KnowledgeReferencesResult["hits"][number];
 type ReferenceCompletion = Completion & { hit: Hit; terms: string[] };
 interface Options {
@@ -57,6 +58,12 @@ export class NoteEditor {
     private card = h("aside", { class: "note-reference-card", hidden: true });
     private help = h("div", { class: "note-reference-help", hidden: true, role: "status" });
     private message = h("span", {});
+    private outline = articleOutline(() => markdownHeadings(this.value).map(({ level, label, position }) => ({
+        level, label, jump: () => {
+            this.view.dispatch({ selection: { anchor: position }, effects: EditorView.scrollIntoView(position, { y: "start", yMargin: 44 }) });
+            this.view.focus();
+        },
+    })));
     private lock = new Compartment();
     private active = true;
     private callbackMuted = false;
@@ -74,7 +81,7 @@ export class NoteEditor {
     };
     private cardKey = (event: KeyboardEvent) => { if (event.key === "Escape") this.hideCard(); };
     constructor(private options: Options) {
-        this.root.append(this.editor, this.help, this.card, this.refs);
+        this.root.append(this.outline.element, this.editor, this.help, this.card, this.refs);
         document.addEventListener("pointermove", this.dismissCard);
         document.addEventListener("pointerdown", this.dismissCard);
         document.addEventListener("keydown", this.cardKey);
@@ -133,8 +140,10 @@ export class NoteEditor {
                             this.help.hidden = !referenceTrigger(update.state.doc.toString(), update.state.selection.main.head);
                         }
                         if (update.docChanged)
-                            queueMicrotask(() => { if (this.active)
-                                this.renderReferences(); });
+                            queueMicrotask(() => { if (this.active) {
+                                this.renderReferences();
+                                this.outline.refresh();
+                            } });
                     }), EditorView.domEventHandlers({ compositionstart: () => { options.change(this.value, this.position, true); return false; }, compositionend: () => { queueMicrotask(() => { if (this.active) {
                             const change = !this.view.state.readOnly && chineseQuoteChange(this.view.state.doc, this.position);
                             if (change) this.view.dispatch({ changes: change, userEvent: "input.type" });

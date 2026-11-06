@@ -24,12 +24,18 @@ export const SECTIONS: Array<{ key: Exclude<Section, "settings">; label: string;
   { key: "approvals", label: "Approvals", icon: "approvals", key2: "6" },
 ];
 
+type PaneKey = Section | "projects";
+type MountedPane = { target: HTMLElement; pane: Pane };
+
 export class WorkbenchView {
   private main = h("main", { class: "main", id: "content", tabindex: "-1" });
   private nav = new Map<Section, HTMLButtonElement>();
   private counts = new Map<Section, HTMLElement>();
-  private pane?: Pane;
+  // Keep mounted views and their scroll/editor state in this verified session only.
+  private panes = new Map<PaneKey, MountedPane>();
+  private current?: MountedPane;
   private section: Section = "overview";
+  private workMode: "tasks" | "projects" = "tasks";
   private currentHash = "";
   private palette: CommandPalette;
   private disposeReferenceLinks: () => void;
@@ -40,7 +46,6 @@ export class WorkbenchView {
     const generation=++this.routeGeneration, route=this.readRoute();
     if (!(await this.beforeLeave())) { if(generation===this.routeGeneration) history.pushState(null, "", this.currentHash || "#overview"); return; }
     if(generation!==this.routeGeneration)return;
-    if (route.section === this.section && route.id && this.pane?.open) { this.currentHash = location.hash; this.pane.open(route.id); return; }
     this.show(route.section, route.id);
   };
   private readonly onKey = (event: KeyboardEvent) => {
@@ -51,8 +56,8 @@ export class WorkbenchView {
     if (section) { event.preventDefault(); this.go(section.key); return; }
     if (event.key === "c") { event.preventDefault(); this.go("work", undefined, "new"); return; }
     if (event.key === "/") {
-      const search = this.main.querySelector<HTMLInputElement>("input[type=search]");
-      if (search) { event.preventDefault(); search.focus(); search.select(); }
+      const search = this.current?.target.querySelector<HTMLInputElement>("input[type=search]");
+      if (search && search.offsetParent !== null) { event.preventDefault(); search.focus(); search.select(); }
     }
   };
   /** 实时刷新（R4-8）：回到前台或窗口重新获得焦点、收到推送时立即刷新；页面可见时每 15 秒静默刷新一次。 */
@@ -61,12 +66,12 @@ export class WorkbenchView {
     if (document.visibilityState !== "visible" || document.querySelector("dialog[open]")) return;
     if (Date.now() - this.lastRefresh < 2000) return;
     this.lastRefresh = Date.now();
-    this.pane?.liveRefresh?.();
+    this.current?.pane.liveRefresh?.();
     void this.refreshCounts();
   };
-  private readonly onVisible = () => { if (document.visibilityState === "visible") this.refreshNow(); else void this.pane?.beforeLeave?.(); };
+  private readonly onVisible = () => { if (document.visibilityState === "visible") this.refreshNow(); else void this.current?.pane.beforeLeave?.(); };
   private liveTimer: ReturnType<typeof setInterval> = setInterval(() => this.refreshNow(), 15_000);
-  private readonly onUnload = () => { this.pane?.canLeave?.(); };
+  private readonly onUnload = () => { this.current?.pane.canLeave?.(); };
 
   private name: string;
   private account: HTMLButtonElement;
@@ -80,24 +85,34 @@ export class WorkbenchView {
     for (const s of SECTIONS) {
       if (s.key === "execution") nav.append(h("p", { class: "nav-group-label" }, t("Automation")));
       const count = h("span", { class: "nav-count" });
-      const button = h("button", { type: "button", class: `nav-item${s.short ? "" : " desktop-nav"}`, title: t("{0} ({1})", t(s.label), s.key2), onclick: () => this.go(s.key) },
+      const button = h("button", { type: "button", class: `nav-item${s.short ? "" : " desktop-nav"}`, "aria-label": t(s.label), title: t("{0} ({1})", t(s.label), s.key2), onclick: () => this.go(s.key) },
         icon(s.icon), h("span", { class: "nav-label" }, t(s.label)), s.short && h("span", { class: "nav-short" }, t(s.short)), count);
       this.nav.set(s.key, button); this.counts.set(s.key, count); nav.append(button);
     }
     this.name = humans[0] ?? t("Me");
-    this.account = h("button", { type: "button", class: "account", title: t("Settings"), onclick: () => this.go("settings") },
+    this.account = h("button", { type: "button", class: "account", title: t("Settings"), "aria-label": t("Settings"), onclick: () => this.go("settings") },
       h("span", { class: "who-avatar", "aria-hidden": "true" }, this.name.slice(0, 1).toUpperCase()),
       h("span", { class: "account-text" }, h("span", { class: "who-name" }, this.name),
         h("span", { class: "account-sub" }, h("span", { class: "connection-dot" }), t("Connected to Hub"))),
       icon("settings"));
-    const sidebar = h("aside", { class: "sidebar" },
-      h("div", { class: "brand" }, h("span", { class: "brand-mark", "aria-hidden": "true" }), h("span", {}, "Lumio")),
-      h("button", { type: "button", class: "quick-find", onclick: () => this.palette.open() }, icon("search"), h("span", {}, t("Search or jump to")), h("kbd", {}, "⌘K")),
+    const toggle = h("button", { type: "button", class: "icon-btn sidebar-toggle", "aria-controls": "main-sidebar", "aria-expanded": "true" }, icon("chevron"));
+    const sidebar = h("aside", { class: "sidebar", id: "main-sidebar" },
+      h("div", { class: "brand" }, h("span", { class: "brand-mark", "aria-hidden": "true" }), h("span", { class: "brand-name" }, "Lumio"), toggle),
+      h("button", { type: "button", class: "quick-find", title: t("Search or jump to"), "aria-label": t("Search or jump to"), onclick: () => this.palette.open() }, icon("search"), h("span", {}, t("Search or jump to")), h("kbd", {}, "⌘K")),
       nav,
       h("div", { class: "sidebar-foot" }, this.account));
+    const shell = h("div", { class: "shell" }, sidebar, this.main);
+    const labelToggle = (collapsed: boolean) => {
+      const label = collapsed ? t("Expand sidebar") : t("Collapse sidebar");
+      toggle.title = label;
+      toggle.setAttribute("aria-label", label);
+      toggle.setAttribute("aria-expanded", String(!collapsed));
+    };
+    labelToggle(false);
+    toggle.addEventListener("click", () => labelToggle(shell.classList.toggle("sidebar-collapsed")));
     root.append(
       h("a", { class: "skip-link", href: "#content", onclick: (event: Event) => { event.preventDefault(); this.main.focus(); } }, t("Skip to content")),
-      h("div", { class: "shell" }, sidebar, this.main));
+      shell);
     window.addEventListener("hashchange", this.onRoute);
     window.addEventListener("keydown", this.onKey);
     window.addEventListener("beforeunload", this.onUnload);
@@ -117,35 +132,58 @@ export class WorkbenchView {
   }
 
   private async go(section: Section, id?: string, intent?: string): Promise<void> {
-    const generation=++this.routeGeneration;
-    if (section === this.section && this.pane) {
-      if (!id) { if (intent) this.pane.intent?.(intent); return; }
-      if (this.pane.open) {
-        this.currentHash = `#${section}/${encodeURIComponent(id)}`;
-        history.pushState(null, "", this.currentHash);
-        this.pane.open(id);
-        return;
-      }
-    }
-    if (!(await this.beforeLeave()) || generation!==this.routeGeneration) return;
-    history.pushState(null, "", `#${section}${id ? `/${encodeURIComponent(id)}` : ""}`);
+    const generation = ++this.routeGeneration;
+    if (section === "work" && !id) id = intent === "new-project" ? "projects" : intent === "new" ? "tasks" : this.workMode;
+    if (section === this.section && !intent && (!id || (section === "work" && id === this.workMode))) return;
+    if (!(await this.beforeLeave()) || generation !== this.routeGeneration) return;
+    const hash = `#${section}${id ? `/${encodeURIComponent(id)}` : ""}`;
+    if (location.hash !== hash) history.pushState(null, "", hash);
     this.show(section, id, intent);
   }
 
   private show(section: Section, id?: string, intent?: string): void {
-    if (this.beforeShow()) return;
-    this.pane?.dispose?.();
-    document.querySelectorAll<HTMLDialogElement>("dialog").forEach(dialog => { dialog.close(); dialog.remove(); });
-    document.querySelector(".menu")?.remove();
+    if (!this.dirty && this.beforeShow()) return;
+    if (section === "settings" && this.section !== "settings") this.beforeSettings = this.currentHash || "#overview";
+    const previous = this.current;
+    const previousSection = this.section;
     this.section = section;
     this.currentHash = `#${section}${id ? `/${encodeURIComponent(id)}` : ""}`;
-    if (section === "settings" && this.section !== "settings" && this.currentHash) this.beforeSettings = this.currentHash;
+    let key: PaneKey = section;
+    if (section === "work") {
+      if (id) this.workMode = id === "projects" || id.startsWith("prj_") ? "projects" : "tasks";
+      if (id === "tasks" || id === "projects") id = undefined;
+      if (this.workMode === "projects") key = "projects";
+    }
     const label = section === "settings" ? t("Settings") : t(SECTIONS.find(s => s.key === section)?.label ?? "Today");
     document.title = t(t("{0} · Lumio"), label);
     for (const [key, button] of this.nav) button.setAttribute("aria-current", key === section ? "page" : "false");
     this.account.setAttribute("aria-current", section === "settings" ? "page" : "false");
+    let mounted = this.panes.get(key);
+    if (previous !== mounted) {
+      document.querySelectorAll<HTMLDialogElement>("dialog").forEach(dialog => { dialog.close(); dialog.remove(); });
+      document.querySelector(".menu")?.remove();
+      if (previous) previous.target.hidden = true;
+      if (previousSection === "settings" && previous) {
+        previous.pane.dispose?.();
+        previous.target.remove();
+        this.panes.delete("settings");
+      }
+    }
+    if (!mounted) {
+      mounted = this.mountPane(section, id);
+      this.panes.set(key, mounted);
+    } else {
+      mounted.target.hidden = false;
+      if (previous !== mounted) mounted.pane.resume?.();
+      if (id) mounted.pane.open?.(id);
+    }
+    this.current = mounted;
+    if (intent) mounted.pane.intent?.(intent);
+  }
+
+  private mountPane(section: Section, id?: string): MountedPane {
     const target = h("div", { class: `pane pane-${section}` });
-    this.main.replaceChildren(target);
+    this.main.append(target);
     const client = this.session.client;
     const navigate: Navigate = (s, i, n) => this.go(s, i, n);
     const changed = () => void this.refreshCounts();
@@ -153,12 +191,11 @@ export class WorkbenchView {
     if (section === "overview") pane = new OverviewPane(target, client, this.session.hub, navigate, this.name, changed);
     else if (section === "settings") pane = new SettingsPane(target, this.session, this.name, () => { if (this.canLeave()) this.logout(); }, () => this.leaveSettings());
     else if (section === "knowledge") pane = new KnowledgePane(target, client, id);
-    else if (section === "work") pane = new WorkPane(target, client, this.session.hub, id, navigate, changed);
+    else if (section === "work") pane = new WorkPane(target, client, this.session.hub, this.workMode, id, navigate, changed);
     else if (section === "execution") pane = new ExecutionPane(target, client, this.session.hub, id, navigate, changed);
-    else if (section === "assistant") pane = new AssistantPane(target, client, this.session.hub, intent, navigate);
+    else if (section === "assistant") pane = new AssistantPane(target, client, this.session.hub, navigate);
     else pane = new ApprovalsPane(target, client, changed, navigate);
-    this.pane = pane;
-    if (intent && section !== "assistant") pane.intent?.(intent);
+    return { target, pane };
   }
 
   private async refreshCounts(): Promise<void> {
@@ -188,20 +225,24 @@ export class WorkbenchView {
     this.go(known, id);
   }
 
-  get dirty(): boolean { return !!this.pane?.dirty || !!document.querySelector("dialog[data-dirty=true]"); }
+  get dirty(): boolean { return [...this.panes.values()].some(({ pane }) => pane.dirty) || !!document.querySelector("dialog[data-dirty=true]"); }
 
   private async beforeLeave(): Promise<boolean> {
-    if (!this.pane?.beforeLeave) return this.canLeave();
-    return this.pane.beforeLeave();
+    const pane = this.current?.pane;
+    if (!pane?.beforeLeave) return this.canLeave();
+    return pane.beforeLeave();
   }
 
   canLeave(): boolean {
-    return this.pane?.canLeave?.() ?? true;
+    return this.current?.pane.canLeave?.() ?? true;
   }
 
   dispose(): void {
     this.disposeReferenceLinks();
-    this.pane?.dispose?.();
+    this.routeGeneration++;
+    for (const { pane } of this.panes.values()) pane.dispose?.();
+    this.panes.clear();
+    this.current = undefined;
     this.palette.dispose();
     clearInterval(this.countTimer); clearInterval(this.liveTimer);
     window.removeEventListener("focus", this.refreshNow);

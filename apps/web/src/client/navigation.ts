@@ -6,6 +6,8 @@ export interface Pane {
   canLeave?(): boolean;
   beforeLeave?(): Promise<boolean>;
   dispose?(): void;
+  /** A previously mounted module is visible again. */
+  resume?(): void;
   readonly dirty?: boolean;
   /** 来自命令面板或快捷键的动作，例如 "new"。 */
   intent?(name: string): void;
