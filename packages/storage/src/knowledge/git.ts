@@ -13,7 +13,7 @@ export interface GitTrailers {
 
 export interface VaultGit {
   changedFiles(): Promise<string[]>;
-  add(path: string, expectedContent?: Uint8Array | null): Promise<void>;
+  add(path: string, expectedContent?: Uint8Array | null, force?: boolean): Promise<void>;
   commit(paths: string[], message: string, trailers?: GitTrailers): Promise<void>;
 }
 
@@ -47,9 +47,9 @@ export async function openVaultGit(root: string, executable = "git"): Promise<Va
       const output = (await run(["status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames"])).toString();
       return [...new Set(output.split("\0").filter(Boolean).map((entry) => entry.slice(3)))];
     },
-    async add(path, expectedContent) {
+    async add(path, expectedContent, force) {
       check(path); staged.delete(path);
-      await run(["add", "--", path]);
+      await run(["add", ...(force ? ["-f"] : []), "--", path]);
       const entry = (await run(["ls-files", "--stage", "-z", "--", path])).toString();
       const match = /^(\d+) ([a-f0-9]+) 0\t/.exec(entry);
       if (expectedContent !== undefined) {

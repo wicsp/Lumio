@@ -1,3 +1,4 @@
+import type { Trash } from "./trash.ts";
 import { validateTarget } from "./targets.ts";
 import { Notifications } from "./notifications.ts";
 import { WorkCommands } from "./work-commands.ts";
@@ -28,6 +29,7 @@ export class BusinessModules {
   readonly workCommands: WorkCommands;
   readonly assistant: AssistantService;
   readonly capabilities: Capabilities;
+  trash!: Trash;
   assistantConfig!: AssistantConfiguration;
   readonly assistantStore: SqliteAssistantStore;
   readonly routineStore: SqliteRoutineStore;
@@ -80,7 +82,7 @@ export class BusinessModules {
         const runtime = store.runtimes(now()).find(value => value.actor === job.spec.runtime);
         return job.spec.run.kind === "agent" && runtime ? `${job.spec.run.engine}@${runtime.registration.name}` : undefined;
       },
-      cancel: (task) => { const job = jobs.activeForTask(task); if (job) jobs.cancel(job.spec.id); },
+      cancel: (task) => { const job = jobs.activeForTask(task); if (job) { jobs.cancel(job.spec.id); return job.spec.id; } },
     });
     this.workCommands = new WorkCommands(store, this.work, options.authorize ?? authorize, config.localRuntime);
     this.capabilities = new Capabilities(this, store, config, options.authorize);

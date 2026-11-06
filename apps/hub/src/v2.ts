@@ -1,5 +1,5 @@
 import { text as msg } from "./messages.ts";
-import { AgentInfo, AgentTokenRequest, AgentRevokeRequest, AssistantChatRequest, WorkCommandRequest, ExecutionRoutineCommandRequest, RequestId, AssistantToolCall, capability, ExecutionRoutine, PlanTemplate, type AssistantEvent } from "@lumio/schema";
+import { AgentInfo, AgentTokenRequest, AgentRevokeRequest, AssistantChatRequest, WorkCommandRequest, ExecutionRoutineCommandRequest, RequestId, AssistantToolCall, capability, ExecutionRoutine, PlanTemplate, type AssistantEvent, KnowledgeDeleteRequest, AssistantConversationDeleteRequest, TrashListArgs, TrashPurgeRequest, TrashRestoreRequest } from "@lumio/schema";
 import { AssistantError } from "@lumio/assistant";
 import { WorkError } from "@lumio/work";
 import type { BusinessModules } from "./modules.ts";
@@ -9,6 +9,11 @@ import type { authorize } from "./authorize.ts";
 import { handleArtifacts } from "./artifacts.ts";
 
 export const V2_ROUTES = [
+  { operation: "knowledge.delete", method: "DELETE", pattern: /^\/v2\/knowledge\/notes\/([a-z]+_[0-9A-HJKMNP-TV-Z]{26})$/, path: "/v2/knowledge/notes/<id>" },
+  { operation: "assistant.delete", method: "DELETE", pattern: /^\/v2\/assistant\/conversations\/(conv_[0-9A-HJKMNP-TV-Z]{26})$/, path: "/v2/assistant/conversations/<id>" },
+  { operation: "trash.list", method: "GET", pattern: /^\/v2\/trash$/, path: "/v2/trash" },
+  { operation: "trash.restore", method: "POST", pattern: /^\/v2\/trash\/([a-z]+_[0-9A-HJKMNP-TV-Z]{26})\/restore$/, path: "/v2/trash/<id>/restore" },
+  { operation: "trash.purge", method: "DELETE", pattern: /^\/v2\/trash\/([a-z]+_[0-9A-HJKMNP-TV-Z]{26})$/, path: "/v2/trash/<id>" },
   { operation: "execution.read", method: "GET", pattern: /^\/v2\/execution\/targets$/, path: "/v2/execution/targets" },
   { operation: "work.command", method: "POST", pattern: /^\/v2\/approval\/proposals\/(prop_[0-9A-HJKMNP-TV-Z]{26})\/withdraw$/, path: "/v2/approval/proposals/<id>/withdraw" },
   { operation: "notifications.push", method: "GET", pattern: /^\/v2\/notifications\/push\/key$/, path: "/v2/notifications/push/key" },
@@ -54,7 +59,7 @@ async function json(request: Request): Promise<unknown> {
   try { return await request.json(); } catch { throw new HubError("INVALID", { key: "runtime.request_body_must_be_json", args: [] }); }
 }
 export function moduleError(cause: unknown): HubError | undefined {
-  if (cause instanceof WorkError || cause instanceof AssistantError) return new HubError(cause.code, cause.params);
+  if (cause instanceof WorkError || cause instanceof AssistantError) return new HubError(cause.code, cause.params, { reason: cause.reason });
 }
 export async function handleV2(request: Request, route: V2Route, identity: Identity, store: HubStore,
   modules: BusinessModules, decide: typeof authorize, now = new Date()): Promise<Response> {
@@ -65,6 +70,37 @@ export async function handleV2(request: Request, route: V2Route, identity: Ident
   try {
     if (decision.result !== "allow") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: decision.result === "deny" ? decision.reason : msg("v2.approval_required") });
     const url = new URL(request.url), id = route.pattern.exec(url.pathname)?.[1];
+    if (route.operation === "knowledge.delete" || route.operation === "assistant.delete" || route.operation.startsWith("trash.")) {
+      if (identity.actor.role !== "human") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] });
+      const trash = modules.trash;
+      const invalid = () => new HubError("INVALID", { key: "trash.invalid", args: [] });
+      if (route.operation === "trash.list") {
+        const input = TrashListArgs.safeParse(Object.fromEntries(url.searchParams));
+        if (!input.success) throw invalid();
+        return Response.json(trash.list(identity.actor.id, input.data));
+      }
+      const body = await json(request);
+      if (route.operation === "knowledge.delete") {
+        const input = KnowledgeDeleteRequest.safeParse(body);
+        if (!input.success) throw invalid();
+        const result = await trash.deleteNote(id!, input.data, identity);
+        audited = true;
+        return Response.json(result);
+      }
+      if (route.operation === "assistant.delete") {
+        const input = AssistantConversationDeleteRequest.safeParse(body);
+        if (!input.success) throw invalid();
+        const result = trash.deleteConversation(id!, input.data.request_id, identity);
+        audited = true;
+        return Response.json(result);
+      }
+      const restore = route.operation === "trash.restore";
+      const input = (restore ? TrashRestoreRequest : TrashPurgeRequest).safeParse(body);
+      if (!input.success) throw invalid();
+      const result = await trash.change(restore ? "restore" : "purge", id!, input.data.request_id, identity);
+      audited = true;
+      return Response.json(result);
+    }
     if (url.pathname === "/v2/execution/targets") return Response.json((await modules.capabilities.execute("execution.target.list", Object.fromEntries([...url.searchParams].map(([key, value]) => [key, value === "true" ? true : value === "false" ? false : value])), identity)).result);
     if (url.pathname.startsWith("/v2/approval/proposals/")) return Response.json((await modules.capabilities.execute("approval.proposal.withdraw", { proposal: id }, identity)).result);
     if (route.operation === "work.plan_templates.read") return Response.json(PlanTemplate.array().parse(modules.work.planTemplates()));
@@ -156,6 +192,7 @@ export async function handleV2(request: Request, route: V2Route, identity: Ident
     if (!parsed.success) throw new HubError("INVALID", { key: "v2.invalid_assistant_request_parameters", args: [] });
     await modules.assistantConfig.refresh();
     const signal = AbortSignal.any([request.signal, modules.signal, AbortSignal.timeout(120_000)]);
+    if (parsed.data.conversation) modules.assistant.detail(parsed.data.conversation, identity.actor.id);
     if (request.headers.get("accept")?.includes("application/x-ndjson")) {
       const encoder = new TextEncoder();
       const stream = new ReadableStream<Uint8Array>({ start(controller) {

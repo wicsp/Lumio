@@ -12,10 +12,10 @@
 | 编号 | 内容 | 负责 | 改动范围 |
 |---|---|---|---|
 | D1-1 ✅ | 契约：删除、回收站列表、恢复、彻底删除的请求与结果；读取回收站对象为 NOT_FOUND + `reason: trashed` | Claude 起草，人类批准 | `packages/schema` |
-| D1-2 | 任务与项目的删除、恢复、彻底删除（含停止进行中的一轮、项目下任务置空与恢复挂回） | 后端（Codex） | `packages/work`、`apps/hub` |
-| D1-3 | 笔记移入 `.trash/`、恢复、彻底删除，自动提交 | 后端（Codex） | `packages/knowledge`、`apps/hub` |
-| D1-4 | 对话删除、恢复、彻底删除（先停止生成）；回收站汇总与 30 天到期清理 | 后端（Codex） | `packages/assistant`、`apps/hub` |
-| D1-5 | Web：四处删除入口、确认框、撤销提示、「最近删除」页面 | 前端（Claude） | `packages/api-client`、`apps/web` |
+| D1-2 ✅ | 任务与项目的删除、恢复、彻底删除（含停止进行中的一轮、项目下任务置空与恢复挂回） | 后端（Codex） | `packages/work`、`packages/storage`、`apps/hub` |
+| D1-3 ✅ | 笔记移入 `.trash/`、恢复、彻底删除，自动提交 | 后端（Codex） | `packages/storage`、`apps/hub`（复用 Knowledge 的路径与解析规则） |
+| D1-4 ✅ | 对话删除、恢复、彻底删除（先停止生成）；回收站汇总与 30 天到期清理 | 后端（Codex） | `packages/assistant`、`packages/storage`、`apps/hub` |
+| D1-5 ✅ | Web：四处删除入口、确认框、撤销提示、「最近删除」页面 | 前端（Claude） | `packages/api-client`、`apps/web` |
 
 D1-2 到 D1-4 依赖 D1-1；D1-5 依赖 D1-2 到 D1-4 的 Hub 接口。
 
@@ -43,6 +43,9 @@ D1-1 只在 `packages/work` 里让两个新命令明确返回 INVALID（尚未�
 - agent 身份调用一律 `FORBIDDEN`，不生成提议；这些操作不出现在 agent 能力目录与 `skills/lumio/SKILL.md`。
 - 30 天到期清理在 Hub 内定期执行，可在测试中注入时间；彻底删除笔记时删除 `.trash/` 中的文件并提交。
 - 测试只用 `fixtures/` 合成数据与临时目录，不读写真实 vault。
+
+验证见 `apps/hub/test/trash.test.ts`。任务彻底删除后只保留支持外键的 ID 占位和独立执行记录。Hub 启动及运行中定期清理到期项目。
+笔记文件操作通过持久回执恢复中断的移动或删除，Git 失败会继续重试。
 
 ## Web 验收要点（D1-5）
 

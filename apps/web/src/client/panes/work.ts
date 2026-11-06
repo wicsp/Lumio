@@ -73,6 +73,12 @@ export class WorkPane {
   dispose(): void { this.active = false; this.listGeneration++; this.detailGeneration++; this.editor?.dispose(); this.unbindKeys(); }
   get dirty(): boolean { return this.editor?.dirty ?? false; }
   /** 静默刷新列表；详情只在没有未保存内容、焦点不在详情里时重新载入。 */
+  private closeDetail(): void {
+    this.detailGeneration++; this.editor?.dispose(); this.editor = undefined; this.displayed = undefined;
+    this.clearDock();
+    this.selected = undefined; markSelected(this.list, undefined); this.showPlaceholder();
+  }
+
   liveRefresh(): void {
     void this.load(true);
     if (this.selected && this.canRefreshDetail()) void this.open(this.selected, true, true);
@@ -245,7 +251,13 @@ export class WorkPane {
       this.editor = new WorkEditor(this.detail, this.dock, this.client, this.hub, object, this.projects, {
         changed: () => { this.changed(); void this.load(); },
         reload: () => void this.open(id, true),
-        back: () => { if (this.canLeave()) { this.detailGeneration++; this.editor?.dispose(); this.editor = undefined; this.selected = undefined; markSelected(this.list, undefined); this.showPlaceholder(); } },
+        back: () => { if (this.canLeave()) this.closeDetail(); },
+        removed: () => {
+          this.closeDetail();
+          // Leave the deleted object's URL so a reload doesn't try to open it.
+          history.replaceState(null, "", `#work/${id.startsWith("prj_") ? "projects" : "tasks"}`);
+          this.changed(); void this.load();
+        },
         navigate: this.navigate,
         openProject: projectId => this.navigate("work", projectId),
         newTask: projectId => this.create("tasks", projectId),

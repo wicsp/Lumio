@@ -14,6 +14,7 @@ import { referenceInput } from "../reference-input.ts";
 import { drafts, textDraft } from "../drafts.ts";
 import { t, translated } from "../i18n.ts";
 import { MessageRail } from "../side-rail.ts";
+import { confirmDelete } from "../trash-actions.ts";
 
 const TURN_LABEL: Record<string, string> = translated({ running: "Still working", done: "Done", failed: "Didn't finish", unknown: "Result unknown — check before retrying", cancelled: "Cancelled" });
 const SUGGESTIONS = ["Help me prioritize what to work on today", "How should I organize this week's experiment results?", "Draft an outline for the rebuttal"];
@@ -154,8 +155,11 @@ export class AssistantPane {
     try {
       const conversations = (await this.client.conversations()).slice().sort((a, b) => b.updated.localeCompare(a.updated));
       if (!this.active) return [];
-      clear(this.conversations, ...conversations.map(c => h("button", { type: "button", class: "convo", "data-id": c.id, disabled: this.sending, onclick: () => void this.openConversation(c.id) },
-        h("strong", {}, c.title), h("span", { title: formatTime(c.updated) }, ago(c.updated)))),
+      clear(this.conversations, ...conversations.map(c => h("div", { class: "convo-row", "data-id": c.id },
+        h("button", { type: "button", class: "convo", disabled: this.sending, onclick: () => void this.openConversation(c.id) },
+          h("strong", {}, c.title), h("span", { title: formatTime(c.updated) }, ago(c.updated))),
+        h("button", { type: "button", class: "icon-btn convo-delete", title: t("Delete conversation"), "aria-label": t("Delete conversation {0}", c.title),
+          disabled: this.sending, onclick: () => this.confirmDelete(c) }, icon("trash")))),
         !conversations.length && h("p", { class: "state" }, t("No conversations yet")));
       this.markCurrent();
       return conversations;
@@ -163,6 +167,22 @@ export class AssistantPane {
       if (this.active) clear(this.conversations, failure(errorText(cause), () => this.loadConversations()));
       return [];
     }
+  }
+
+  /** 删除对话（ADR 0038）：移入回收站；从中保存的记忆不受影响。 */
+  private confirmDelete(conversation: AssistantConversation): void {
+    if (this.sending) return;
+    confirmDelete(this.client, {
+      title: t("Delete this conversation?"), name: conversation.title,
+      consequences: [t("Memories saved from it are kept.")],
+      run: async requestId => (await this.client.deleteConversation(conversation.id, { request_id: requestId })).item,
+      deleted: () => {
+        this.store.remove(`chat:${conversation.id}`);
+        if (this.current === conversation.id) this.newConversation();
+        void this.loadConversations();
+      },
+      restored: () => void this.loadConversations(),
+    });
   }
 
   private async openConversation(id: string): Promise<void> {

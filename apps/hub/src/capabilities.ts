@@ -1,3 +1,4 @@
+import { assertNoteVisible } from "./trash.ts";
 import type { WorkCommands } from "./work-commands.ts";
 import { capability, RESPONSE_REASONS, CAPABILITIES, toolName, WorkCommandRequest, WorkAttention, type CapabilityChange, type CapabilityNameOf } from "@lumio/schema";
 import type { AssistantTool } from "@lumio/assistant";
@@ -79,6 +80,7 @@ export class Capabilities {
       const read = async (privateAllowed: boolean) => {
         const options = { includePrivate: privateAllowed };
         if (name === "knowledge.note.search") return this.knowledge!.search(String(args.query), { ...options, type: args.type as never, limit: args.limit as number | undefined });
+        assertNoteVisible(this.store.db, String(args.ref));
         if (name === "knowledge.note.show") return this.knowledge!.show(String(args.ref), options);
         return this.knowledge!.links(String(args.ref), options);
       };
@@ -104,7 +106,12 @@ export class Capabilities {
         }
         case "execution.job.show": result = jobs.get(String(args.job)); break;
         case "execution.routine.list": result = this.modules.routines.list(); break;
-        case "approval.proposal.list": result = this.store.proposals("pending", identity.actor.role === "agent" ? identity.actor.id : undefined); break;
+        case "approval.proposal.list": {
+          const activeTasks = new Set(work.tasks().map(task => task.id));
+          result = this.store.proposals("pending", identity.actor.role === "agent" ? identity.actor.id : undefined)
+            .filter(proposal => proposal.operation.op !== "work.command" || activeTasks.has(proposal.operation.args.operation.args.task));
+          break;
+        }
       }
     }
     return { result: def.result.parse(result), ...(privateRead ? { private_read: true } : {}) };
