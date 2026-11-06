@@ -94,6 +94,8 @@ export function renderInline(text: string): string {
   return out;
 }
 
+const LIST_ITEM = /^\s*([-*+]|\d+\.)\s+/;
+
 export function renderMarkdown(source: string): string {
   source = source.replace(/\r\n?/g, "\n");
   const lines = source.split("\n"), blocks = new Map(richBlocks(source).map(block => [block.from, block]));
@@ -116,7 +118,8 @@ export function renderMarkdown(source: string): string {
       while (++i < lines.length && !close.test(lines[i]!)) code.push(lines[i]!);
       out.push(`<pre><code>${escapeHtml(code.join("\n"))}</code></pre>`); continue;
     }
-    if (/^(?: {4}|\t)/.test(line)) {
+    // Indented code only starts after a blank line: an indented line can also continue a paragraph or a list item.
+    if (/^(?: {4}|\t)/.test(line) && !paragraph.length && (i === 0 || !lines[i - 1]!.trim()) && !LIST_ITEM.test(line)) {
       flush(); const code: string[] = [];
       while (i < lines.length && /^(?: {4}|\t)/.test(lines[i]!)) code.push(lines[i++]!.replace(/^(?: {4}|\t)/, ""));
       i--; out.push(`<pre><code>${escapeHtml(code.join("\n"))}</code></pre>`); continue;

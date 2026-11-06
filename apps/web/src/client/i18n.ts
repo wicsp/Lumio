@@ -42,6 +42,7 @@ export const ZH: Record<string, string> = {
   "Save needs attention": "保存需要处理",
   "Unsaved changes": "有未保存的修改",
   "The note changed elsewhere. Your draft is kept.": "笔记已在其他地方修改，你的草稿已保留。",
+  "This was changed elsewhere. Your draft is kept.": "已在其他地方修改，你的草稿已保留。",
   "Compare saved version": "对比已保存版本",
   "Latest saved version": "最新已保存版本",
   "Merge any changes into your draft below, then resume saving.": "请把需要的内容合并到下方草稿中，再恢复保存。",

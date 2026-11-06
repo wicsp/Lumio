@@ -1,4 +1,5 @@
 import { referenceLinks } from "../reference-links.ts";
+import { drafts } from "../drafts.ts";
 import { executionGroups } from "../execution-groups.ts";
 import { turnGroup } from "../turn.ts";
 import type { Session } from "../api.ts";
@@ -174,7 +175,8 @@ export class WorkbenchView {
       this.panes.set(key, mounted);
     } else {
       mounted.target.hidden = false;
-      if (previous !== mounted) mounted.pane.resume?.();
+      // Returning to a retained module: keep its state, but catch up with changes made elsewhere meanwhile.
+      if (previous !== mounted) { mounted.pane.resume?.(); mounted.pane.liveRefresh?.(); }
       if (id) mounted.pane.open?.(id);
     }
     this.current = mounted;
@@ -189,7 +191,7 @@ export class WorkbenchView {
     const changed = () => void this.refreshCounts();
     let pane: Pane;
     if (section === "overview") pane = new OverviewPane(target, client, this.session.hub, navigate, this.name, changed);
-    else if (section === "settings") pane = new SettingsPane(target, this.session, this.name, () => { if (this.canLeave()) this.logout(); }, () => this.leaveSettings());
+    else if (section === "settings") pane = new SettingsPane(target, this.session, this.name, () => void this.signOut(), () => this.leaveSettings());
     else if (section === "knowledge") pane = new KnowledgePane(target, client, id);
     else if (section === "work") pane = new WorkPane(target, client, this.session.hub, this.workMode, id, navigate, changed);
     else if (section === "execution") pane = new ExecutionPane(target, client, this.session.hub, id, navigate, changed);
@@ -231,6 +233,13 @@ export class WorkbenchView {
     const pane = this.current?.pane;
     if (!pane?.beforeLeave) return this.canLeave();
     return pane.beforeLeave();
+  }
+
+  /** Explicit sign-out: give every retained module a chance to finish autosaving, then drop this account's local drafts. */
+  private async signOut(): Promise<void> {
+    for (const { pane } of [...this.panes.values()]) if (pane.beforeLeave) await pane.beforeLeave(); else pane.canLeave?.();
+    drafts().clear();
+    this.logout();
   }
 
   canLeave(): boolean {

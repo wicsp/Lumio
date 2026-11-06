@@ -37,7 +37,8 @@ export interface EditorHooks {
 
 export class WorkEditor {
   private record: EditableWork;
-  private title: HTMLInputElement;
+  private title: HTMLTextAreaElement;
+  private titleResize?: ResizeObserver;
   private writer: WorkSave;
   private bodyDraft?: HTMLTextAreaElement;
   private disposeBodyReferences?: () => void;
@@ -65,12 +66,25 @@ export class WorkEditor {
     if (draft?.base?.id === this.record.id && typeof draft.title === "string" && typeof draft.description === "string") {
       this.writer.base = draft.base; this.writer.title = draft.title; this.writer.description = draft.description; this.writer.pending = draft.pending; this.writer.properties = draft.properties ?? {};
     }
-    this.title = h("input", { class: "reader-title note-title work-title", "aria-label": t("Title"), maxlength: 500, value: this.writer.title });
-    this.title.addEventListener("input", event => this.changed((event as InputEvent).isComposing));
+    // A wrapping single-paragraph title: long titles stay readable on narrow screens; Enter never inserts a line break.
+    this.title = h("textarea", { class: "reader-title note-title work-title", rows: "1", "aria-label": t("Title"), maxlength: 500 });
+    this.title.value = this.writer.title;
+    const fitTitle = () => { this.title.style.height = "auto"; this.title.style.height = `${this.title.scrollHeight}px`; };
+    this.titleResize = new ResizeObserver(fitTitle);
+    this.titleResize.observe(this.title);
+    this.title.addEventListener("input", event => {
+      if (/[\r\n]/.test(this.title.value)) this.title.value = this.title.value.replace(/[\r\n]+/g, " ");
+      fitTitle();
+      this.changed((event as InputEvent).isComposing);
+    });
     this.title.addEventListener("compositionstart", () => clearTimeout(this.timer));
     this.title.addEventListener("compositionend", () => this.changed(false));
     this.title.addEventListener("blur", () => void this.flush());
-    this.title.addEventListener("keydown", event => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") { event.preventDefault(); if (!event.isComposing) void this.flush(); } });
+    this.title.addEventListener("keydown", event => {
+      if (event.isComposing) return;
+      if (event.key === "Enter") { event.preventDefault(); this.title.blur(); }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void this.flush(); }
+    });
     const rec = this.record;
     const project = rec.type === "task" && rec.project ? projects.find(p => p.id === rec.project) : undefined;
     this.showAdvanced = rec.type === "task" && !!(rec.workdir || rec.model || rec.timeout_minutes || project?.workdir);
@@ -108,7 +122,7 @@ export class WorkEditor {
     } else detail.append(this.projectTasks(input));
   }
 
-  dispose(): void { this.canLeave(); this.active = false; clearTimeout(this.timer); this.disposeBodyReferences?.(); this.disposeReferences?.(); this.messageNav?.dispose(); }
+  dispose(): void { this.canLeave(); this.active = false; this.titleResize?.disconnect(); clearTimeout(this.timer); this.disposeBodyReferences?.(); this.disposeReferences?.(); this.messageNav?.dispose(); }
   get dirty(): boolean { return this.writer.dirty; }
   get isBusy(): boolean { return this.busy; }
   canLeave(): boolean { this.persist(); void this.flush(); return true; }
@@ -280,7 +294,7 @@ export class WorkEditor {
 
   private showFailure(cause: unknown): void {
     const conflict = isConflict(cause);
-    clear(this.note, failure(conflict ? t("The note changed elsewhere. Your draft is kept.") : errorText(cause)), h("div", { class: "button-row" },
+    clear(this.note, failure(conflict ? t("This was changed elsewhere. Your draft is kept.") : errorText(cause)), h("div", { class: "button-row" },
       h("button", { type: "button", class: "btn btn-small", onclick: () => this.exportDraft() }, icon("download"), t("Download draft")),
       h("button", { type: "button", class: "btn btn-small", onclick: async () => {
         if (!conflict) { await this.writer.save(); return; }

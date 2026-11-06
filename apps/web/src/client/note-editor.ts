@@ -12,7 +12,7 @@ import { renderMarkdown, renderInline, renderMath, renderRichBlock } from "./uti
 import { richBlocks, inlineMath, escapedAt } from "./utils/markdown-extra.ts";
 import { footnotes, referenceTrigger, insertReference, protectedText } from "./note-text.ts";
 import { chineseQuoteInput, chineseQuoteChange } from "./note-input.ts";
-import { articleOutline, markdownHeadings } from "./article-outline.ts";
+import { articleOutline, markdownHeadings, mayHaveHeadings } from "./article-outline.ts";
 type Hit = KnowledgeReferencesResult["hits"][number];
 type ReferenceCompletion = Completion & { hit: Hit; terms: string[] };
 interface Options {
@@ -63,7 +63,7 @@ export class NoteEditor {
             this.view.dispatch({ selection: { anchor: position }, effects: EditorView.scrollIntoView(position, { y: "start", yMargin: 44 }) });
             this.view.focus();
         },
-    })));
+    })), () => !!this.view && mayHaveHeadings(this.value));
     private lock = new Compartment();
     private active = true;
     private callbackMuted = false;
@@ -151,11 +151,12 @@ export class NoteEditor {
                         } }); return false; } }),
                 ] }) });
         this.renderReferences();
+        this.outline.refresh();
     }
     get value(): string { return this.view.state.doc.toString(); }
     get position(): number { return this.view.state.selection.main.head; }
     setValue(text: string): void { if (text === this.value)
-        return; this.callbackMuted = true; this.view.dispatch({ changes: { from: 0, to: this.view.state.doc.length, insert: text }, selection: { anchor: 0 } }); this.callbackMuted = false; }
+        return; this.callbackMuted = true; this.view.dispatch({ changes: { from: 0, to: this.view.state.doc.length, insert: text }, selection: { anchor: 0 } }); this.callbackMuted = false; this.outline.refresh(); }
     setReadOnly(locked: boolean): void { this.view.dispatch({ effects: this.lock.reconfigure(EditorState.readOnly.of(locked)) }); }
     focus(position = this.position): void { this.view.dispatch({ selection: { anchor: position }, effects: EditorView.scrollIntoView(position) }); this.view.focus(); }
     destroy(): void {

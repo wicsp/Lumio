@@ -16,12 +16,20 @@ export function markdownHeadings(source: string): Array<{ level: number; label: 
   return headings;
 }
 
+/** Cheap pre-check run on every edit; the full parse only happens when the outline is opened. */
+export function mayHaveHeadings(source: string): boolean {
+  return /^ {0,3}#{1,6}[ \t]+\S/m.test(source) || /\S[^\n]*\n {0,3}(?:=+|-+)[ \t]*$/m.test(source);
+}
+
 type OutlineEntry = { level: number; label: string; jump(): void };
 
-export function articleOutline(entries: () => OutlineEntry[]): { element: HTMLDetailsElement; refresh(): void } {
+/** A collapsed outline that stays out of the way (hidden) while the article has no headings. */
+export function articleOutline(entries: () => OutlineEntry[], available: () => boolean = () => true): { element: HTMLDetailsElement; refresh(): void } {
   const list = h("ol", {});
   const element = h("details", { class: "article-outline" }, h("summary", {}, t("Article outline")), list);
   const refresh = () => {
+    element.hidden = !available();
+    if (element.hidden) { element.open = false; return; }
     if (!element.open) return;
     const items = entries();
     clear(list, ...items.map(({ level, label, jump }) => h("li", { "data-level": level },
@@ -29,5 +37,6 @@ export function articleOutline(entries: () => OutlineEntry[]): { element: HTMLDe
     !items.length && h("li", { class: "muted" }, t("No headings yet.")));
   };
   element.addEventListener("toggle", refresh);
+  refresh();
   return { element, refresh };
 }

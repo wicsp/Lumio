@@ -1041,7 +1041,7 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 }
 
 /* Content stays in place while focus and save status change. */
-.work-title { min-height: 2.4rem; }
+.work-title { min-height: 2.4rem; resize: none; overflow: hidden; line-height: 1.25; }
 .note-save-status { min-height: 1.5rem; }
 .detail .live-note { margin: 0; }
 

@@ -1,5 +1,5 @@
 /** Local recovery copies, isolated by Hub and a hash of the verified credential. */
-export interface DraftStorage { getItem(key: string): string | null; setItem(key: string, value: string): void; removeItem(key: string): void }
+export interface DraftStorage { readonly length: number; key(index: number): string | null; getItem(key: string): string | null; setItem(key: string, value: string): void; removeItem(key: string): void }
 export class DraftStore {
   private memory = new Map<string, string>();
   private owners = new Map<string, symbol>();
@@ -24,6 +24,17 @@ export class DraftStore {
     this.memory.set(this.key(key), data);
     try { if (this.storage) { this.storage.setItem(this.key(key), data); this.persistent = true; return true; } } catch { /* Keep this session's copy. */ }
     this.persistent = false; return false;
+  }
+  /** Remove every recovery copy in this scope (explicit sign-out). */
+  clear(): void {
+    const prefix = this.key("");
+    for (const key of [...this.memory.keys()]) if (key.startsWith(prefix)) this.memory.delete(key);
+    try {
+      if (!this.storage) return;
+      const keys: string[] = [];
+      for (let i = 0; i < this.storage.length; i++) { const key = this.storage.key(i); if (key?.startsWith(prefix)) keys.push(key); }
+      for (const key of keys) this.storage.removeItem(key);
+    } catch { /* Ignore unavailable storage. */ }
   }
   remove(key: string): void {
     this.memory.delete(this.key(key));
