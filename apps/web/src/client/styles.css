@@ -434,7 +434,6 @@ select { appearance: none; padding-right: 28px; background-image: linear-gradien
 .reader { max-width: 760px; margin: 0 auto; padding: 36px 40px 80px; }
 .reader-title { font-family: var(--serif); font-size: 30px; line-height: 1.25; font-weight: 600; letter-spacing: -0.01em; }
 .reader-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0 28px; color: var(--ink-3); font-size: var(--fs-sm); }
-.reader-path { font-family: var(--mono); font-size: var(--fs-xs); color: var(--ink-4); }
 .reader .markdown { font-family: var(--serif); font-size: 16.5px; line-height: 1.8; max-width: 68ch; }
 .reader .markdown h1, .reader .markdown h2, .reader .markdown h3 { font-family: var(--sans); }
 .reader .markdown pre, .reader .markdown code { font-size: 13px; }
@@ -951,7 +950,7 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 .cm-tooltip-autocomplete > ul > li { white-space:normal!important; padding:9px 12px!important; font-family:inherit; }
 .cm-completionLabel { display:inline-block; max-width:80%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; vertical-align:middle; }
 .note-completion-snippet { display:block; font-size:.78rem; opacity:.75; line-height:1.5; margin-top:3px; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
-.related-notes { padding:12px; border-bottom:1px solid var(--line); flex-shrink:0; max-height:48%; overflow:auto; }
+.related-notes { padding:12px; border-top:1px solid var(--line); flex-shrink:0; height:320px; max-height:48%; min-height:0; overflow:auto; overscroll-behavior:contain; }
 .related-heading { display:flex; align-items:center; justify-content:space-between; font-size:.78rem; margin:0 6px 6px; color:var(--ink-3); }
 .related-row { display:block; text-align:left; width:100%; padding:9px; border:0; background:transparent; border-radius:7px; cursor:pointer; color:inherit; }
 .related-row:hover { background:color-mix(in srgb,var(--blue) 8%,transparent); }

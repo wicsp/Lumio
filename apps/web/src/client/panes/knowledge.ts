@@ -67,7 +67,7 @@ export class KnowledgePane {
     this.split.append(
       h("div", { class: "list-pane" },
         h("div", { class: "list-tools", role: "search" }, h("label", { class: "search-box" }, icon("search"), this.query), this.typeButton, this.privateButton),
-        this.related, this.results),
+        this.results, this.related),
       this.detail);
     this.renderFilters();
     this.showPlaceholder();
@@ -188,7 +188,7 @@ export class KnowledgePane {
     clear(this.detail, h("article", { class: "reader" },
       h("div", { class: "detail-crumbs" }, h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": t("Back to list"), onclick: async () => { if (!(await this.beforeLeave())) return; this.clearWriter(); this.selected = undefined; markSelected(this.results, undefined); this.showPlaceholder(); } }, icon("back"))),
       h("h1", { class: "reader-title" }, note.note.title),
-      h("div", { class: "reader-meta" }, h("span", { class: "pill" }, kindLabel), attribution && h("span", {}, attribution), sourceUrl && h("a", { href: sourceUrl, target: "_blank", rel: "noopener noreferrer nofollow", class: "btn btn-small" }, icon("external"), t("Open source")), note.note.citekey && h("span", { class: "pill" }, note.note.citekey), h("span", { class: "reader-path" }, note.note.path)),
+      h("div", { class: "reader-meta" }, h("span", { class: "pill" }, kindLabel), attribution && h("span", {}, attribution), sourceUrl && h("a", { href: sourceUrl, target: "_blank", rel: "noopener noreferrer nofollow", class: "btn btn-small" }, icon("external"), t("Open source")), note.note.citekey && h("span", { class: "pill" }, note.note.citekey)),
       body,
       links && h("footer", { class: "backlinks" }, list(t("Links to"), links.outgoing), list(t("Linked from"), links.incoming))));
     this.detail.scrollTop = 0;
@@ -247,13 +247,16 @@ export class KnowledgePane {
     }catch(cause){clear(this.conflict,failure(errorText(cause)));this.conflict.hidden=false;}
   }
   private recommend(context:KnowledgeContext):void{
-    const key=JSON.stringify(context);if(this.contextKey===key)return;this.contextKey=key;
+    const key=JSON.stringify(context);if(this.contextKey===key)return;const firstContext=!this.contextKey;this.contextKey=key;
+    // Reserve the bottom panel before results arrive, including empty results.
+    if(firstContext)this.renderRelated();
     clearTimeout(this.relatedTimer);const generation=++this.relatedGeneration;const id=this.saver?.base.document.note.id;
     this.relatedTimer=setTimeout(async()=>{try{const result=await this.client.relatedNotes({...context,...(id?{exclude_id:id}:{})});if(!this.active||generation!==this.relatedGeneration)return;this.relatedHits=result.hits;this.relatedTerms=matchTerms(context);this.renderRelated();}catch{if(this.active&&generation===this.relatedGeneration){this.relatedHits=[];this.relatedTerms=[];this.renderRelated();}}},400);
   }
   private renderRelated():void{
-    this.related.hidden=!this.relatedHits.length&&!this.split.classList.contains("show-related");clear(this.related);if(this.related.hidden)return;
+    this.related.hidden=!this.contextKey&&!this.split.classList.contains("show-related");clear(this.related);if(this.related.hidden)return;
     this.related.append(h("div",{class:"related-heading"},h("strong",{},t("Related notes")),h("button",{type:"button",class:"btn btn-small mobile-only",onclick:()=>{this.split.classList.remove("show-related");this.renderRelated();}},t("Back to note"))));
+    if(!this.relatedHits.length)this.related.append(h("p",{class:"field-hint"},t("No matching notes.")));
     for(const hit of this.relatedHits.slice(0,this.relatedExpanded?5:3))this.related.append(h("button",{type:"button",class:"related-row",title:hit.note.title,onclick:()=>{this.split.classList.remove("show-related");void this.open(hit.note.id??hit.note.path);}},h("span",{class:"row-title"},highlightedText(hit.note.title,this.relatedTerms)),h("span",{class:"related-snippet"},hit.snippet?highlightedText(hit.snippet,this.relatedTerms):t("Title match"))));
     if(this.relatedHits.length>3)this.related.append(h("button",{type:"button",class:"btn btn-quiet",onclick:()=>{this.relatedExpanded=!this.relatedExpanded;this.renderRelated();}},this.relatedExpanded?t("Show fewer"):t("Show all {0}",this.relatedHits.length)));
 
