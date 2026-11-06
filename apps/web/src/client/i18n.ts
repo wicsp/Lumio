@@ -7,6 +7,14 @@ export type Lang = "en" | "zh";
 const KEY = "lumio.web.lang";
 
 export const ZH: Record<string, string> = {
+  "Collapse sidebar": "收起侧栏",
+  "Expand sidebar": "展开侧栏",
+  "Jump to a message": "跳转到消息",
+  "Message {0}: {1}": "第 {0} 条消息：{1}",
+  "Article outline": "文章大纲",
+  "No headings yet.": "暂无章节标题。",
+  "The current reply is still streaming.": "当前回复仍在生成。",
+  "Finish or clear the current chat draft first.": "请先发送或清空当前聊天草稿。",
   "Draft saved on this device": "草稿已保存在此设备",
   "Browser storage unavailable; keep this page open until saved.": "浏览器无法保留草稿，请保持页面打开，直到保存完成。",
   "Open note": "打开笔记",
@@ -34,6 +42,7 @@ export const ZH: Record<string, string> = {
   "Save needs attention": "保存需要处理",
   "Unsaved changes": "有未保存的修改",
   "The note changed elsewhere. Your draft is kept.": "笔记已在其他地方修改，你的草稿已保留。",
+  "This was changed elsewhere. Your draft is kept.": "已在其他地方修改，你的草稿已保留。",
   "Compare saved version": "对比已保存版本",
   "Latest saved version": "最新已保存版本",
   "Merge any changes into your draft below, then resume saving.": "请把需要的内容合并到下方草稿中，再恢复保存。",
@@ -698,7 +707,6 @@ export const ZH: Record<string, string> = {
   "Edit plan": "编辑计划",
   "Add a plan": "添加计划",
   "Handoff plan": "交接计划",
-  "No plan. Each delivered round comes back to you for review. Add a plan to hand the task from one agent to the next, with checkpoints where you decide.": "没有计划：每一轮交付后都回到你这里验收。添加计划后，任务会在 agent 之间自动交接，并在检查点等你决定。",
   "Reopen the task before delegating it.": "请先重新打开任务再委派。",
   "{0} is still working on this task.": "{0} 还在执行这个任务。",
   "This task is on hold. Choose “I'll handle it” first.": "这个任务已搁置。请先选「我自己来」。",

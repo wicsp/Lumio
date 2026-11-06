@@ -2,7 +2,7 @@
  * 项目与任务（ADR 0026、0032）：任务按「轮到谁」分组，项目按状态分组；右侧详情。
  * 列表上可直接交回、完成、取消（带 revision）；新建在对话框里完成，新建不会委派。
  */
-import type { WorkProject, WorkTask } from "@lumio/schema";
+import type { WorkProject, WorkTask, WorkTaskDetail } from "@lumio/schema";
 import { PROJECT_STATUSES } from "@lumio/schema";
 import { errorText, isConflict, type Client, type HubExtras } from "../api.ts";
 import { newRequestId, projectCreateCommand, taskCreateCommand } from "../commands.ts";
@@ -20,28 +20,29 @@ const PROJECT_ORDER = ["active", "planning", "paused", "done"] as const;
 const FOLDED_BY_DEFAULT = new Set(["done", "cancelled", "hold"]);
 
 export class WorkPane {
-  private mode: Mode = "tasks";
   private split = h("div", { class: "split" });
   private list = h("div", { class: "list-scroll" });
   private detail = h("section", { class: "detail-pane", "aria-live": "polite" });
+  private dock = h("div", { class: "thread-dock", hidden: true });
+  private detailLayout = h("div", { class: "detail-pane work-detail-layout" }, h("div", { class: "message-layout" }, this.detail), this.dock);
   private query = h("input", { type: "search", name: "work-search", placeholder: t("Search tasks"), autocomplete: "off" });
   private statusFilter = "";
   private projectFilter = "";
   private statusButton = h("button", { type: "button", class: "filter-btn" });
   private projectButton = h("button", { type: "button", class: "filter-btn" });
-  private segTasks = h("button", { type: "button", "aria-pressed": "true", onclick: () => this.switchMode("tasks") }, t("Tasks"));
-  private segProjects = h("button", { type: "button", "aria-pressed": "false", onclick: () => this.switchMode("projects") }, t("Projects"));
   private projects: WorkProject[] = [];
   private tasks: WorkTask[] = [];
   private folded = new Set(FOLDED_BY_DEFAULT);
   private selected?: string;
   private editor?: WorkEditor;
+  private displayed?: WorkTaskDetail | WorkProject;
   private listGeneration = 0;
   private detailGeneration = 0;
   private active = true;
   private unbindKeys: () => void;
 
-  constructor(root: HTMLElement, private client: Client, private hub: HubExtras, initialId: string | undefined, private navigate: Navigate, private changed: () => void) {
+  constructor(private root: HTMLElement, private client: Client, private hub: HubExtras, private mode: Mode, initialId: string | undefined, private navigate: Navigate, private changed: () => void) {
+    this.query.placeholder = mode === "tasks" ? t("Search tasks") : t("Search projects");
     this.statusButton.addEventListener("click", () => this.pickStatusFilter());
     this.projectButton.addEventListener("click", () => this.pickProjectFilter());
     this.query.addEventListener("input", debounce(() => void this.load(), 200));
@@ -49,7 +50,9 @@ export class WorkPane {
     root.append(
       h("header", { class: "bar" },
         h("h1", { class: "bar-title" }, t("Projects & tasks")),
-        h("div", { class: "segmented", role: "group", "aria-label": t("View") }, this.segTasks, this.segProjects),
+        h("div", { class: "segmented", role: "group", "aria-label": t("View") },
+          h("button", { type: "button", "aria-pressed": String(mode === "tasks"), onclick: () => navigate("work", "tasks") }, t("Tasks")),
+          h("button", { type: "button", "aria-pressed": String(mode === "projects"), onclick: () => navigate("work", "projects") }, t("Projects"))),
         h("span", { class: "bar-spacer" }),
         h("button", { type: "button", class: "icon-btn", title: t("Refresh"), "aria-label": t("Refresh"), onclick: (event: Event) => { spin(event); void this.load(); if (this.selected) void this.open(this.selected, true); } }, icon("refresh")),
         h("button", { type: "button", class: "btn btn-primary", title: t("New (C)"), onclick: () => this.create() }, icon("plus"), h("span", { class: "hide-narrow" }, t("New")))),
@@ -58,14 +61,12 @@ export class WorkPane {
       h("div", { class: "list-pane" },
         h("div", { class: "list-tools" }, h("label", { class: "search-box" }, icon("search"), this.query), this.statusButton, this.projectButton),
         this.list),
-      this.detail);
+      this.detailLayout);
     this.renderFilters();
     this.showPlaceholder();
     this.unbindKeys = listKeys(this.list, id => void this.open(id));
     void this.load().then(() => {
-      if (!initialId || !this.active) return;
-      if (initialId.startsWith("prj_") && this.mode !== "projects") this.switchMode("projects", initialId);
-      else void this.open(initialId);
+      if (initialId && this.active && !this.selected) void this.open(initialId);
     });
   }
 
@@ -73,30 +74,22 @@ export class WorkPane {
   get dirty(): boolean { return this.editor?.dirty ?? false; }
   /** 静默刷新列表；详情只在没有未保存内容、焦点不在详情里时重新载入。 */
   liveRefresh(): void {
-    void this.load();
-    const focused = (this.detail.contains(document.activeElement) && document.activeElement !== this.detail)
-      || [...this.detail.querySelectorAll("textarea")].some(area => area.value.trim());
-    if (this.selected && this.editor && !this.editor.dirty && !focused && !this.detail.querySelector(".is-busy")) void this.open(this.selected, true);
+    void this.load(true);
+    if (this.selected && this.canRefreshDetail()) void this.open(this.selected, true, true);
+  }
+  private canRefreshDetail(): boolean {
+    return !this.root.hidden && !!this.editor && !this.editor.dirty && !this.editor.isBusy
+      && !this.detailLayout.contains(document.activeElement)
+      && ![...this.detailLayout.querySelectorAll("textarea")].some(area => area.value.trim())
+      && !this.detailLayout.querySelector(".is-busy");
   }
   beforeLeave(): Promise<boolean> { return this.editor?.beforeLeave() ?? Promise.resolve(true); }
   canLeave(): boolean { return this.editor?.canLeave() ?? true; }
   intent(name: string): void {
-    if (name === "new") { if (this.mode !== "tasks") this.switchMode("tasks"); this.create(); }
-    else if (name === "new-project") { if (this.mode !== "projects") this.switchMode("projects"); this.create(); }
+    if (name === "new" || name === "new-project") this.create();
   }
 
   // ───────────── 列表 ─────────────
-
-  private switchMode(mode: Mode, thenOpen?: string): void {
-    if (mode === this.mode || !this.canLeave()) return;
-    this.detailGeneration++; this.editor?.dispose(); this.editor = undefined; this.selected = undefined;
-    this.mode = mode; this.statusFilter = ""; this.projectFilter = "";
-    this.segTasks.setAttribute("aria-pressed", String(mode === "tasks"));
-    this.segProjects.setAttribute("aria-pressed", String(mode === "projects"));
-    this.query.placeholder = mode === "tasks" ? t("Search tasks") : t("Search projects");
-    this.renderFilters(); this.showPlaceholder();
-    void this.load().then(() => { if (thenOpen && this.active) void this.open(thenOpen); });
-  }
 
   private renderFilters(): void {
     const label = this.mode === "tasks" ? TURN_GROUP_LABELS[this.statusFilter as TurnGroup] : PROJECT_LABELS[this.statusFilter];
@@ -123,7 +116,7 @@ export class WorkPane {
       value => { this.projectFilter = value; this.renderFilters(); void this.load(); }, { filter: this.projects.length > 6, placeholder: t("Find a project") });
   }
 
-  private async load(): Promise<void> {
+  private async load(quiet = false): Promise<void> {
     const generation = ++this.listGeneration;
     if (!this.list.childElementCount) clear(this.list, loading());
     try {
@@ -147,7 +140,7 @@ export class WorkPane {
       this.renderGroups(TURN_GROUPS, tasks, turnGroup, t => this.taskRow(t), TURN_GROUP_LABELS, group => turnIcon(group as TurnGroup),
         q || this.statusFilter || this.projectFilter ? t("No matching tasks. Try another search or clear the filters.") : t("No tasks yet. Press C to create the first one."));
     } catch (error) {
-      if (generation === this.listGeneration && this.active) clear(this.list, failure(errorText(error), () => this.load()));
+      if (!quiet && generation === this.listGeneration && this.active) clear(this.list, failure(errorText(error), () => this.load()));
     }
   }
 
@@ -221,34 +214,47 @@ export class WorkPane {
 
   private showPlaceholder(): void {
     this.split.classList.remove("has-detail");
+    this.clearDock();
     clear(this.detail, placeholder(this.mode === "tasks" ? "work" : "folder", this.mode === "tasks" ? t("Select a task to see details. Use J / K to move between tasks.") : t("Select a project to see its goal and progress.")));
   }
 
-  async open(id: string, quiet = false): Promise<void> {
+  private clearDock(): void {
+    this.dock.hidden = true;
+    clear(this.dock);
+  }
+
+  async open(id: string, quiet = false, live = false): Promise<void> {
     if (!quiet && id === this.selected && this.editor) return;
-    if (!quiet && !(await this.beforeLeave())) return;
-    if (id.startsWith("prj_") !== (this.mode === "projects")) { this.switchMode(id.startsWith("prj_") ? "projects" : "tasks", id); return; }
+    if (!quiet && (!(await this.beforeLeave()) || !this.active)) return;
+    if (id.startsWith("prj_") !== (this.mode === "projects")) { this.navigate("work", id); return; }
     const generation = ++this.detailGeneration;
     this.selected = id; markSelected(this.list, id);
     this.split.classList.add("has-detail");
-    if (!quiet) { this.editor?.dispose(); this.editor = undefined; clear(this.detail, loading()); }
+    if (!quiet) { this.editor?.dispose(); this.editor = undefined; this.clearDock(); clear(this.detail, loading()); }
     try {
       const object = id.startsWith("task_") ? await this.client.workTask(id) : await this.client.workProject(id);
       if (!this.active || generation !== this.detailGeneration) return;
+      if (live && (!this.canRefreshDetail() || JSON.stringify(object) === JSON.stringify(this.displayed))) return;
       const scroll = this.detail.scrollTop;
       this.editor?.dispose();
+      this.clearDock();
       clear(this.detail);
-      this.editor = new WorkEditor(this.detail, this.client, this.hub, object, this.projects, {
+      this.displayed = object;
+      this.editor = new WorkEditor(this.detail, this.dock, this.client, this.hub, object, this.projects, {
         changed: () => { this.changed(); void this.load(); },
         reload: () => void this.open(id, true),
         back: () => { if (this.canLeave()) { this.detailGeneration++; this.editor?.dispose(); this.editor = undefined; this.selected = undefined; markSelected(this.list, undefined); this.showPlaceholder(); } },
         navigate: this.navigate,
-        openProject: projectId => this.switchMode("projects", projectId),
+        openProject: projectId => this.navigate("work", projectId),
         newTask: projectId => this.create("tasks", projectId),
       });
       if (quiet) this.detail.scrollTop = scroll;
     } catch (error) {
-      if (this.active && generation === this.detailGeneration) clear(this.detail, failure(errorText(error), () => this.open(id, true)));
+      if (!live && this.active && generation === this.detailGeneration) {
+        this.editor?.dispose(); this.editor = undefined;
+        this.clearDock();
+        clear(this.detail, failure(errorText(error), () => this.open(id, true)));
+      }
     }
   }
 

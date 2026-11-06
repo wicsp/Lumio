@@ -44,6 +44,10 @@ export class WorkSave {
           if (result.kind !== "task" && result.kind !== "project") throw new Error("unexpected result");
           this.base = result.kind === "task" ? result.task : result.project;
           const operation = this.pending.operation;
+          // If the Hub normalized what we sent and the user hasn't typed since, adopt its value instead of re-sending forever.
+          const sent = (operation.args as { patch?: Record<string, unknown> }).patch ?? {};
+          if (typeof sent.title === "string" && sent.title === this.title.trim()) this.title = this.base.title;
+          if (typeof sent.description === "string" && sent.description === this.description) this.description = this.base.description;
           if (operation.op === "work.task.update" || operation.op === "work.project.update") {
             for (const [key, value] of Object.entries(this.properties)) {
               if (JSON.stringify(value) === JSON.stringify((operation.args.patch as Record<string, unknown>)[key]) || JSON.stringify(value ?? null) === JSON.stringify((this.base as Record<string, unknown>)[key] ?? null)) delete this.properties[key];

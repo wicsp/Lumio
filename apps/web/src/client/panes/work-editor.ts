@@ -14,6 +14,7 @@ import { autosize, clear, failure, field, h, icon, openDialog, openMenu, select,
 import { ago, dateInputValue, dueLabel, isoFromDateInput } from "../format.ts";
 import { PROJECT_LABELS } from "../labels.ts";
 import { checkpointCommand, openPlanEditor, planProgress, stageLabel } from "../plan.ts";
+import { MessageNavigation } from "../message-navigation.ts";
 import { TURN_ACTION_DONE, TURN_ACTION_ICONS, TURN_ACTION_LABELS, TURN_GROUPS, TURN_GROUP_LABELS, reasonLabel, turnActionCommand, turnActions, turnGroup, turnIcon, turnText, type TurnAction } from "../turn.ts";
 import { renderMarkdown } from "../utils/markdown.ts";
 import { referenceInput } from "../reference-input.ts";
@@ -36,7 +37,8 @@ export interface EditorHooks {
 
 export class WorkEditor {
   private record: EditableWork;
-  private title: HTMLInputElement;
+  private title: HTMLTextAreaElement;
+  private titleResize?: ResizeObserver;
   private writer: WorkSave;
   private bodyDraft?: HTMLTextAreaElement;
   private disposeBodyReferences?: () => void;
@@ -49,12 +51,13 @@ export class WorkEditor {
   private props = h("div", { class: "props" });
   private bodyHost = h("div", {});
   private commentDraft?: HTMLTextAreaElement;
+  private messageNav?: MessageNavigation;
   private busy = false;
   private active = true;
   private showAdvanced = false;
   private updated = h("p", { class: "detail-sub" });
 
-  constructor(private root: HTMLElement, private client: Client, private hub: HubExtras, input: WorkProject | WorkTaskDetail, private projects: WorkProject[], private hooks: EditorHooks) {
+  constructor(private root: HTMLElement, private dock: HTMLElement, private client: Client, private hub: HubExtras, input: WorkProject | WorkTaskDetail, private projects: WorkProject[], private hooks: EditorHooks) {
     this.record = "task" in input ? input.task : input;
     const isTask = this.record.type === "task";
     this.recovery = this.store.claim(`work:${this.record.id}`);
@@ -63,12 +66,25 @@ export class WorkEditor {
     if (draft?.base?.id === this.record.id && typeof draft.title === "string" && typeof draft.description === "string") {
       this.writer.base = draft.base; this.writer.title = draft.title; this.writer.description = draft.description; this.writer.pending = draft.pending; this.writer.properties = draft.properties ?? {};
     }
-    this.title = h("input", { class: "reader-title note-title work-title", "aria-label": t("Title"), maxlength: 500, value: this.writer.title });
-    this.title.addEventListener("input", event => this.changed((event as InputEvent).isComposing));
+    // A wrapping single-paragraph title: long titles stay readable on narrow screens; Enter never inserts a line break.
+    this.title = h("textarea", { class: "reader-title note-title work-title", rows: "1", "aria-label": t("Title"), maxlength: 500 });
+    this.title.value = this.writer.title;
+    const fitTitle = () => { this.title.style.height = "auto"; this.title.style.height = `${this.title.scrollHeight}px`; };
+    this.titleResize = new ResizeObserver(fitTitle);
+    this.titleResize.observe(this.title);
+    this.title.addEventListener("input", event => {
+      if (/[\r\n]/.test(this.title.value)) this.title.value = this.title.value.replace(/[\r\n]+/g, " ");
+      fitTitle();
+      this.changed((event as InputEvent).isComposing);
+    });
     this.title.addEventListener("compositionstart", () => clearTimeout(this.timer));
     this.title.addEventListener("compositionend", () => this.changed(false));
     this.title.addEventListener("blur", () => void this.flush());
-    this.title.addEventListener("keydown", event => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") { event.preventDefault(); if (!event.isComposing) void this.flush(); } });
+    this.title.addEventListener("keydown", event => {
+      if (event.isComposing) return;
+      if (event.key === "Enter") { event.preventDefault(); this.title.blur(); }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void this.flush(); }
+    });
     const rec = this.record;
     const project = rec.type === "task" && rec.project ? projects.find(p => p.id === rec.project) : undefined;
     this.showAdvanced = rec.type === "task" && !!(rec.workdir || rec.model || rec.timeout_minutes || project?.workdir);
@@ -77,6 +93,7 @@ export class WorkEditor {
       isTask ? (project ? h("button", { type: "button", onclick: () => hooks.openProject(project.id) }, icon("folder"), project.title) : h("span", {}, t("No project"))) : h("span", {}, t("Projects")),
       h("div", { class: "detail-actions" },
         h("button", { type: "button", class: "icon-btn", title: t("Copy ID"), "aria-label": t("Copy ID"), onclick: () => void navigator.clipboard?.writeText(this.record.id).then(() => toast(t("ID copied"))) }, icon("link")),
+        rec.type === "task" && !rec.plan && this.planButton(rec),
         isTask && h("button", { type: "button", class: "btn btn-primary btn-small", onclick: () => void this.dispatch() }, icon("play"), t("Delegate"))));
 
     const attention = h("div", { class: "attn-slot" });
@@ -93,7 +110,8 @@ export class WorkEditor {
       void attentionFor(hub, input.task.id).then(item => {
         if (item && this.active) attention.append(attentionCard(item, { client, hub, navigate: hooks.navigate, changed: () => { hooks.changed(); hooks.reload(); } }, "task"));
       }).catch(() => { /* 旧 Hub：没有这个接口 */ });
-      detail.append(this.planSection(input.task), this.timeline(input));
+      if (input.task.plan) detail.append(this.planSection(input.task));
+      detail.append(this.timeline(input));
       if (input.task.dependencies.length || input.task.parent) detail.append(h("section", { class: "section" },
         h("div", { class: "section-head" }, h("h3", {}, t("Relationships"))),
         h("p", { class: "muted" }, input.task.parent ? t("Parent task {0}", input.task.parent) : ""),
@@ -104,8 +122,9 @@ export class WorkEditor {
     } else detail.append(this.projectTasks(input));
   }
 
-  dispose(): void { this.canLeave(); this.active = false; clearTimeout(this.timer); this.disposeBodyReferences?.(); this.disposeReferences?.(); }
+  dispose(): void { this.canLeave(); this.active = false; this.titleResize?.disconnect(); clearTimeout(this.timer); this.disposeBodyReferences?.(); this.disposeReferences?.(); this.messageNav?.dispose(); }
   get dirty(): boolean { return this.writer.dirty; }
+  get isBusy(): boolean { return this.busy; }
   canLeave(): boolean { this.persist(); void this.flush(); return true; }
   async beforeLeave(): Promise<boolean> { this.persist(); await this.flush(); return true; }
   private persist(): void {
@@ -275,7 +294,7 @@ export class WorkEditor {
 
   private showFailure(cause: unknown): void {
     const conflict = isConflict(cause);
-    clear(this.note, failure(conflict ? t("The note changed elsewhere. Your draft is kept.") : errorText(cause)), h("div", { class: "button-row" },
+    clear(this.note, failure(conflict ? t("This was changed elsewhere. Your draft is kept.") : errorText(cause)), h("div", { class: "button-row" },
       h("button", { type: "button", class: "btn btn-small", onclick: () => this.exportDraft() }, icon("download"), t("Download draft")),
       h("button", { type: "button", class: "btn btn-small", onclick: async () => {
         if (!conflict) { await this.writer.save(); return; }
@@ -368,15 +387,26 @@ export class WorkEditor {
 
   // ───────────── 交接计划 ─────────────
 
-  private planSection(task: WorkTask): HTMLElement {
+  private planButton(task: WorkTask): HTMLButtonElement {
     const working = task.turn.reason === "working";
-    const edit = h("button", { type: "button", class: "btn btn-small", disabled: working || task.outcome !== "open",
+    return h("button", { type: "button", class: "btn btn-small", disabled: working || task.outcome !== "open",
       title: working ? t("Wait for the current round to finish before changing the plan") : "",
-      onclick: () => void openPlanEditor(this.client, task, () => { this.hooks.changed(); this.hooks.reload(); }).catch(cause => this.showFailure(cause)) },
+      onclick: () => void this.editPlan() },
       icon(task.plan ? "edit" : "plus"), task.plan ? t("Edit plan") : t("Add a plan"));
+  }
+
+  private async editPlan(): Promise<void> {
+    if (this.busy || !(await this.flush()) || !this.active || this.root.closest("[hidden]")) return;
+    const task = this.record;
+    if (task.type !== "task" || task.outcome !== "open" || task.turn.reason === "working") return;
+    await openPlanEditor(this.client, task, () => { this.hooks.changed(); this.hooks.reload(); },
+      () => this.active && !this.root.closest("[hidden]")).catch(cause => this.showFailure(cause));
+  }
+
+  private planSection(task: WorkTask): HTMLElement {
     return h("section", { class: "section" },
-      h("div", { class: "section-head" }, h("h3", {}, t("Handoff plan")), h("div", { class: "detail-actions" }, edit)),
-      planProgress(task) ?? h("p", { class: "muted" }, t("No plan. Each delivered round comes back to you for review. Add a plan to hand the task from one agent to the next, with checkpoints where you decide.")));
+      h("div", { class: "section-head" }, h("h3", {}, t("Handoff plan")), h("div", { class: "detail-actions" }, this.planButton(task))),
+      planProgress(task));
   }
 
   // ───────────── 委派 ─────────────
@@ -394,7 +424,7 @@ export class WorkEditor {
     this.setBusy(true);
     try {
       const targets = engineTargets(await this.client.runtimes());
-      if (!this.active || !this.root.isConnected) return;
+      if (!this.active || this.root.closest("[hidden]")) return;
       const fixed = stage?.kind === "agent" ? stage.agent : undefined;
       const options = fixed ? [[fixed, targets.find(x => x.target === fixed)?.label ?? fixed] as [string, string]] : targets.map(x => [x.target, x.label] as [string, string]);
       const preferred = fixed ?? targets.find(x => x.online)?.target ?? "";
@@ -484,6 +514,8 @@ export class WorkEditor {
     items.sort((a, b) => a.at.localeCompare(b.at) || a.order - b.order);
 
     const list = h("div", { class: "timeline" }, ...items.map(item => item.node()));
+    this.messageNav = new MessageNavigation(this.root, list, ".comment");
+    this.root.before(this.messageNav.element);
     const count = h("span", { class: "count" }, input.comments.length || "");
     const text = autosize(h("textarea", { name: "comment", rows: "1", placeholder: t("Add thoughts, feedback, or questions for the next round…"), "aria-label": t("Discussion") }));
     this.commentDraft = text;
@@ -529,7 +561,9 @@ export class WorkEditor {
         clear(error, failure(t("{0} Your input is kept; refresh to check whether it was posted.", errorText(cause))));
       } finally { this.setBusy(false); submit.disabled = false; }
     });
-    return h("section", { class: "section" }, h("div", { class: "section-head" }, h("h3", {}, t("Activity")), count), list, form, error);
+    this.dock.hidden = false;
+    this.dock.append(form, error);
+    return h("section", { class: "section" }, h("div", { class: "section-head" }, h("h3", {}, t("Activity")), count), list);
   }
 }
 

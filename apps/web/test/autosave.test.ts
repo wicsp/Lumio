@@ -37,13 +37,22 @@ test("no-op property edits settle without a request and invalid numeric input re
   saver.property("workdir",null);expect(await saver.save()).toBe(true);expect(requests).toBe(0);expect(saver.dirty).toBe(false);
   saver.property("timeout_minutes","half");expect(await saver.save()).toBe(false);expect(saver.snapshot.properties).toEqual({timeout_minutes:"half"});
 });
-function storage():DraftStorage {const map=new Map<string,string>();return {getItem:key=>map.get(key)??null,setItem:(key,value)=>{map.set(key,value);},removeItem:key=>{map.delete(key);}};}
+function storage():DraftStorage {const map=new Map<string,string>();return {get length(){return map.size;},key:index=>[...map.keys()][index]??null,getItem:key=>map.get(key)??null,setItem:(key,value)=>{map.set(key,value);},removeItem:key=>{map.delete(key);}};}
 test("drafts persist exact empty fields and isolate accounts; an older editor cannot erase newer input",()=>{
   const disk=storage(),store=new DraftStore("account-a",disk),old=store.claim("task:1");old.write({title:"",body:"half"});
   expect(new DraftStore("account-a",disk).read("task:1")).toEqual({title:"",body:"half"});expect(new DraftStore("account-b",disk).read("task:1")).toBeUndefined();
   const next=store.claim("task:1");next.write({body:"newer"});old.remove();old.write({body:"stale"});expect(next.read()).toEqual({body:"newer"});next.remove();expect(store.read("task:1")).toBeUndefined();
 });
 test("storage denial keeps a session copy and reports that it is not durable; malformed copies are ignored",()=>{
-  const store=new DraftStore("a",{getItem:()=>"broken",setItem(){throw new Error("quota");},removeItem(){throw new Error("denied");}});
+  const store=new DraftStore("a",{length:0,key:()=>null,getItem:()=>"broken",setItem(){throw new Error("quota");},removeItem(){throw new Error("denied");}});
   expect(store.read("draft")).toBeUndefined();expect(store.write("draft","text")).toBe(false);expect(store.persistent).toBe(false);expect(store.read("draft")).toBe("text");store.remove("draft");expect(store.read("draft")).toBeUndefined();
+});
+
+test("sign-out clears only the signed-out account's recovery copies", () => {
+  const disk = storage(), a = new DraftStore("account-a", disk), b = new DraftStore("account-b", disk);
+  a.write("task:1", "x"); a.write("comment:1", "y"); b.write("task:1", "z");
+  a.clear();
+  expect(new DraftStore("account-a", disk).read("task:1")).toBeUndefined();
+  expect(new DraftStore("account-a", disk).read("comment:1")).toBeUndefined();
+  expect(new DraftStore("account-b", disk).read("task:1")).toBe("z");
 });

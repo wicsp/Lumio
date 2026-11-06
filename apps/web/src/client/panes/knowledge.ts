@@ -16,6 +16,7 @@ import { clear, debounce, empty, failure, h, icon, loading, openMenu, placeholde
 import { listKeys, markSelected } from "../list-keys.ts";
 import { renderMarkdown, safeExternalUrl } from "../utils/markdown.ts";
 import { t, translated } from "../i18n.ts";
+import { articleOutline } from "../article-outline.ts";
 
 const TYPE_LABEL: Record<string, string> = translated({ paper: "Paper", idea: "Idea", experiment: "Experiment", source: "Source", post: "Post", asset: "Asset", project: "Old project", task: "Old task", routine: "Old routine" });
 const LEGACY = new Set(["project", "task", "routine"]);
@@ -65,7 +66,7 @@ export class KnowledgePane {
       h("header", { class: "bar" }, h("h1", { class: "bar-title" }, t("Knowledge"), h("span", { class: "bar-meta hide-narrow" }, t("Capture papers, sources and ideas"))),
         h("span", { class: "bar-spacer" }),
         h("button", { type: "button", class: "btn btn-primary", onclick: () => this.intent("new") }, icon("plus"), t("New note")),
-        h("button", { type: "button", class: "icon-btn", title: t("Refresh"), "aria-label": t("Refresh"), onclick: () => { void this.search(); if (this.selected) void this.open(this.selected); } }, icon("refresh"))),
+        h("button", { type: "button", class: "icon-btn", title: t("Refresh"), "aria-label": t("Refresh"), onclick: () => { void this.search(); if (this.selected) void this.open(this.selected, true); } }, icon("refresh"))),
       this.split);
     this.split.append(
       h("div", { class: "list-pane" },
@@ -96,8 +97,12 @@ export class KnowledgePane {
   }
   private clearWriter():void{this.persist();clearTimeout(this.saveTimer);clearTimeout(this.relatedTimer);this.relatedGeneration++;this.contextKey="";this.relatedTerms=[];this.linksRevision="";this.split.classList.remove("show-related");this.relatedHits=[];this.related.hidden=true;clear(this.related);this.editor?.destroy();this.editor=undefined;this.saver=undefined;this.creator?.dispose();this.creator=undefined;}
   dispose():void{this.clearWriter();this.active=false;this.generation++;this.searchGeneration++;this.unbindKeys();}
-  async open(reference:string):Promise<void>{if(!(await this.beforeLeave())||!this.active)return;this.clearWriter();await this.read(reference);}
-  liveRefresh():void{if(!this.dirty)void this.search();}
+  async open(reference: string, reload = false): Promise<void> {
+    if (!reload && reference === this.selected && this.detail.querySelector(".reader")) return;
+    if (!(await this.beforeLeave()) || !this.active) return;
+    await this.read(reference);
+  }
+  liveRefresh():void{if(!this.dirty)void this.search(true);}
 
   private renderFilters(): void {
     clear(this.typeButton, icon("down"), this.type ? TYPE_LABEL[this.type] ?? this.type : t("All types"));
@@ -132,7 +137,7 @@ export class KnowledgePane {
     clear(this.detail, placeholder("knowledge", t("Select a note to read. Links inside it open here.")));
   }
 
-  private async search(): Promise<void> {
+  private async search(quiet = false): Promise<void> {
     const generation = ++this.searchGeneration;
     const includePrivate = this.includePrivate;
     if (!this.results.childElementCount) clear(this.results, loading());
@@ -145,7 +150,7 @@ export class KnowledgePane {
       clear(this.results, ...hits.map(hit => this.row(hit, terms)));
       markSelected(this.results, this.selected);
     } catch (error) {
-      if (this.active && generation === this.searchGeneration) clear(this.results, failure(t("Knowledge is unavailable: {0}", errorText(error)), () => this.search()));
+      if (!quiet && this.active && generation === this.searchGeneration) clear(this.results, failure(t("Knowledge is unavailable: {0}", errorText(error)), () => this.search()));
     }
   }
 
@@ -186,6 +191,15 @@ export class KnowledgePane {
     const attribution = [Array.isArray(fm.authors) ? fm.authors.filter(value => typeof value === "string").join(", ") : typeof fm.author === "string" ? fm.author : "", typeof fm.year === "number" ? String(fm.year) : typeof fm.site === "string" ? fm.site : ""].filter(Boolean).join(" · ");
     const body = h("div", { class: "markdown" });
     body.innerHTML = renderMarkdown(note.body); // renderMarkdown 已转义全部原文，只生成受控标签
+    const headings = [...body.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6")];
+    const outline = headings.length ? articleOutline(() => headings.map(heading => ({
+      level: Number(heading.tagName.slice(1)), label: heading.textContent ?? "",
+      jump: () => {
+        heading.tabIndex = -1;
+        heading.focus({ preventScroll: true });
+        heading.scrollIntoView({ block: "start" });
+      },
+    }))).element : undefined;
     const list = (title: string, items: LinksResult["outgoing"]) => h("section", {}, h("h3", {}, t("{0} ({1})", title, items.length)),
       items.length ? h("ul", {}, ...items.map(l => h("li", {}, l.note ? h("a", { href: "#", "data-note": l.note.id ?? l.note.path }, l.note.title) : h("span", { class: "muted" }, t("{0} (not found)", l.target)))))
         : h("p", { class: "muted" }, t("None")));
@@ -193,7 +207,7 @@ export class KnowledgePane {
       h("div", { class: "detail-crumbs" }, h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": t("Back to list"), onclick: async () => { if (!(await this.beforeLeave())) return; this.clearWriter(); this.selected = undefined; markSelected(this.results, undefined); this.showPlaceholder(); } }, icon("back"))),
       h("h1", { class: "reader-title" }, note.note.title),
       h("div", { class: "reader-meta" }, h("span", { class: "pill" }, kindLabel), attribution && h("span", {}, attribution), sourceUrl && h("a", { href: sourceUrl, target: "_blank", rel: "noopener noreferrer nofollow", class: "btn btn-small" }, icon("external"), t("Open source")), note.note.citekey && h("span", { class: "pill" }, note.note.citekey)),
-      body,
+      outline, body,
       links && h("footer", { class: "backlinks" }, list(t("Links to"), links.outgoing), list(t("Linked from"), links.incoming))));
     this.detail.scrollTop = 0;
     if(note.note.id && ["paper","source","idea","experiment","post"].includes(note.note.type) && !note.note.path.startsWith("life/"))void this.enableEditing(note);
@@ -221,7 +235,7 @@ export class KnowledgePane {
       title.addEventListener("input",event=>titleChanged((event as InputEvent).isComposing));
       title.addEventListener("compositionend",()=>titleChanged(false));
       title.addEventListener("keydown",event=>{if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="s"){event.preventDefault();if(!event.isComposing&&!this.saver?.error)void this.saver?.save();}});
-      oldBody.replaceWith(this.editor.root);article.insertBefore(this.saveStatus,this.editor.root);article.insertBefore(this.saveError,this.editor.root);article.insertBefore(this.conflict,this.editor.root);
+      article.querySelector(".article-outline")?.remove();oldBody.replaceWith(this.editor.root);article.insertBefore(this.saveStatus,this.editor.root);article.insertBefore(this.saveError,this.editor.root);article.insertBefore(this.conflict,this.editor.root);
       this.saveStatus.before(h("button",{type:"button",class:"btn btn-small mobile-only",onclick:()=>{this.split.classList.toggle("show-related");this.renderRelated();}},t("Related notes")));
       this.renderSave();this.recommend(context());if(saver.dirty)void saver.save();
     }catch{if(this.active&&generation===this.generation)this.detail.querySelector("article")?.append(h("p",{class:"field-hint"},t("This note is read-only here. Check its metadata or edit it in your external editor.")));}

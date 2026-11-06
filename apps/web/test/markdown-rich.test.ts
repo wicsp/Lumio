@@ -87,3 +87,9 @@ test("ASCII and Chinese wiki links share escaped labels and targets, including t
   expect(html).toContain("<code>【【code】】</code>");
   expect(html).toContain("<td><a href=\"#\" class=\"note-link\" data-note=\"Target\">Alias</a></td>");
 });
+
+test("indented lines continue paragraphs and lists; indented code needs a preceding blank line", () => {
+  expect(renderMarkdown("para\n    more")).not.toContain("<pre>");
+  expect(renderMarkdown("\t- nested item")).toBe("<ul><li>nested item</li></ul>");
+  expect(renderMarkdown("x\n\n    code\n    more\n\nafter")).toContain("<pre><code>code\nmore</code></pre>");
+});
