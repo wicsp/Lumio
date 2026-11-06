@@ -27,6 +27,10 @@ export * from "./notifications.ts";
 
 import { Actor } from "./actor.ts";
 import {
+  AssistantConversationDeleteRequest, KnowledgeDeleteRequest, TrashItem, TrashListResult, TrashPurgeRequest, TrashPurgeResult,
+  TrashRestoreRequest, TrashRestoreResult, TrashResult,
+} from "./trash.ts";
+import {
   AssistantChatRequest, AssistantChatResult, AssistantConversation, AssistantConversationDetail, AssistantEvent,
   AssistantMemoryCommandRequest, AssistantMemoryCommandResult,
   AssistantMemory, AssistantMessage, AssistantModelRequest, AssistantModelResponse, AssistantToolCall, AssistantTurn,
@@ -162,8 +166,20 @@ export const CONTRACTS = {
   "push-device-update": PushDeviceUpdate,
   "push-public-key": PushPublicKey,
   "push-test-result": PushTestResult,
+  // 删除与回收站（ADR 0038）
+  "trash-item": TrashItem,
+  "trash-list-result": TrashListResult,
+  "knowledge-delete-request": KnowledgeDeleteRequest,
+  "assistant-conversation-delete-request": AssistantConversationDeleteRequest,
+  "trash-result": TrashResult,
+  "trash-restore-request": TrashRestoreRequest,
+  "trash-restore-result": TrashRestoreResult,
+  "trash-purge-request": TrashPurgeRequest,
+  "trash-purge-result": TrashPurgeResult,
 } as const;
 
 export * from "./knowledge-authoring.ts";
 
 export * from "./knowledge-editing.ts";
+
+export * from "./trash.ts";
