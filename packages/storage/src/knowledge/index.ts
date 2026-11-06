@@ -11,3 +11,5 @@ export type { IndexOptions } from "./index/store.ts";
 export * from "./adapter.ts";
 
 export * from "./authoring.ts";
+
+export * from "./editing.ts";
