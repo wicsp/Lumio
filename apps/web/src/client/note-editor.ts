@@ -10,6 +10,7 @@ import { matchTerms, matchRanges } from "./note-matches.ts";
 import { t } from "./i18n.ts";
 import { renderMarkdown, renderInline } from "./utils/markdown.ts";
 import { footnotes, referenceTrigger, insertReference, protectedText } from "./note-text.ts";
+import { chineseQuoteInput, chineseQuoteChange } from "./note-input.ts";
 type Hit = KnowledgeReferencesResult["hits"][number];
 type ReferenceCompletion = Completion & { hit: Hit; terms: string[] };
 interface Options {
@@ -71,7 +72,7 @@ export class NoteEditor {
         this.view = new EditorView({ parent: this.editor, state: EditorState.create({ doc: options.value, extensions: [
                     this.lock.of(EditorState.readOnly.of(false)), EditorView.contentAttributes.of({ "aria-label": t("Note body"), spellcheck: "true" }),
                     EditorView.cspNonce.of(document.querySelector<HTMLMetaElement>('meta[name="lumio-style-nonce"]')?.content ?? ""),
-                    history(), markdown(), EditorView.lineWrapping, field,
+                    history(), markdown(), chineseQuoteInput, EditorView.lineWrapping, field,
                     Prec.highest(keymap.of([{ key: "Mod-s", run: () => { if (this.view.composing)
                                 return false; options.save?.(); return true; } }, { key: "Shift-Enter", run: () => this.applySelectedFootnote() }, ...completionKeymap.map(binding => ({ ...binding, run: binding.run ? ((view: EditorView) => view.composing ? false : binding.run!(view)) : undefined }))])),
                     keymap.of([...defaultKeymap, ...historyKeymap]),
@@ -120,8 +121,11 @@ export class NoteEditor {
                         if (update.docChanged)
                             queueMicrotask(() => { if (this.active)
                                 this.renderReferences(); });
-                    }), EditorView.domEventHandlers({ compositionstart: () => { options.change(this.value, this.position, true); return false; }, compositionend: () => { queueMicrotask(() => { if (this.active)
-                            options.change(this.value, this.position, false); }); return false; } }),
+                    }), EditorView.domEventHandlers({ compositionstart: () => { options.change(this.value, this.position, true); return false; }, compositionend: () => { queueMicrotask(() => { if (this.active) {
+                            const change = !this.view.state.readOnly && chineseQuoteChange(this.view.state.doc, this.position);
+                            if (change) this.view.dispatch({ changes: change, userEvent: "input.type" });
+                            options.change(this.value, this.position, false);
+                        } }); return false; } }),
                 ] }) });
         this.renderReferences();
     }
