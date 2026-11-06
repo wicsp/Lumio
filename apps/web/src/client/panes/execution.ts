@@ -229,8 +229,10 @@ export class ExecutionPane {
       const cancelling = this.cancellationRequested.has(id) && live;
       const task = job.spec.source?.task;
       // 这一轮还在等你（ADR 0030）：直接在这里回答、验收或标为已查看；旧轮次只显示原来的问题。
+      const question = h("div", { class: "markdown" });
+      question.innerHTML = renderMarkdown(job.result?.question ?? "");
       const attentionSlot = h("div", { class: "attn-slot" },
-        job.result?.question ? h("section", { class: "question" }, h("h3", {}, t("Waiting for you")), h("p", {}, job.result.question)) : null);
+        job.result?.question ? h("section", { class: "question" }, h("h3", {}, t("Waiting for you")), question) : null);
       if (task && !live) void attentionFor(this.hub, task).then(item => {
         if (!item || item.job !== job.spec.id || !this.active || generation !== this.detailGeneration) return;
         clear(attentionSlot, attentionCard(item, { client: this.client, hub: this.hub, navigate: this.navigate,

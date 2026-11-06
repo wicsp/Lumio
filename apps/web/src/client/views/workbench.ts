@@ -1,3 +1,4 @@
+import { referenceLinks } from "../reference-links.ts";
 import { executionGroups } from "../execution-groups.ts";
 import { turnGroup } from "../turn.ts";
 import type { Session } from "../api.ts";
@@ -31,6 +32,7 @@ export class WorkbenchView {
   private section: Section = "overview";
   private currentHash = "";
   private palette: CommandPalette;
+  private disposeReferenceLinks: () => void;
   private countTimer: ReturnType<typeof setInterval>;
 
   private routeGeneration = 0;
@@ -62,11 +64,9 @@ export class WorkbenchView {
     this.pane?.liveRefresh?.();
     void this.refreshCounts();
   };
-  private readonly onVisible = () => { if (document.visibilityState === "visible") this.refreshNow(); };
+  private readonly onVisible = () => { if (document.visibilityState === "visible") this.refreshNow(); else void this.pane?.beforeLeave?.(); };
   private liveTimer: ReturnType<typeof setInterval> = setInterval(() => this.refreshNow(), 15_000);
-  private readonly onUnload = (event: BeforeUnloadEvent) => {
-    if (this.pane?.dirty || document.querySelector("dialog[data-dirty=true]")) { event.preventDefault(); event.returnValue = ""; }
-  };
+  private readonly onUnload = () => { this.pane?.canLeave?.(); };
 
   private name: string;
   private account: HTMLButtonElement;
@@ -74,6 +74,7 @@ export class WorkbenchView {
   private beforeSettings = "#overview";
   /** 语言切换被推迟时，App 在下一次切换模块前重建界面；返回 true 表示已接管。 */
   constructor(root: HTMLElement, private session: Session, humans: string[], private logout: () => void, private beforeShow: () => boolean = () => false) {
+    this.disposeReferenceLinks = referenceLinks(this.main, session.client, ref => this.go("knowledge",ref));
     this.palette = new CommandPalette(session.client, (section, id, intent) => this.go(section, id, intent));
     const nav = h("nav", { class: "nav", "aria-label": t("Main navigation") });
     for (const s of SECTIONS) {
@@ -191,16 +192,15 @@ export class WorkbenchView {
 
   private async beforeLeave(): Promise<boolean> {
     if (!this.pane?.beforeLeave) return this.canLeave();
-    if (document.querySelector("dialog[data-dirty=true]") && !confirm(t("You have an unsaved form that will be lost. Continue?"))) return false;
     return this.pane.beforeLeave();
   }
 
   canLeave(): boolean {
-    if (document.querySelector("dialog[data-dirty=true]") && !confirm(t("You have an unsaved form that will be lost. Continue?"))) return false;
     return this.pane?.canLeave?.() ?? true;
   }
 
   dispose(): void {
+    this.disposeReferenceLinks();
     this.pane?.dispose?.();
     this.palette.dispose();
     clearInterval(this.countTimer); clearInterval(this.liveTimer);

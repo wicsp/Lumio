@@ -8,7 +8,8 @@ import type { KnowledgeReferencesResult, KnowledgeContext } from "@lumio/schema"
 import { h, clear, highlightedText } from "./dom.ts";
 import { matchTerms, matchRanges } from "./note-matches.ts";
 import { t } from "./i18n.ts";
-import { renderMarkdown, renderInline } from "./utils/markdown.ts";
+import { renderMarkdown, renderInline, renderMath, renderRichBlock } from "./utils/markdown.ts";
+import { richBlocks, inlineMath, escapedAt } from "./utils/markdown-extra.ts";
 import { footnotes, referenceTrigger, insertReference, protectedText } from "./note-text.ts";
 import { chineseQuoteInput, chineseQuoteChange } from "./note-input.ts";
 type Hit = KnowledgeReferencesResult["hits"][number];
@@ -17,8 +18,8 @@ interface Options {
     value: string;
     change: (text: string, position: number, composing: boolean) => void;
     context: (position: number) => void;
-    references: (query: string, position: number) => Promise<KnowledgeReferencesResult>;
-    referenceContext: (position: number) => KnowledgeContext;
+    references?: (query: string, position: number) => Promise<KnowledgeReferencesResult>;
+    referenceContext?: (position: number) => KnowledgeContext;
     open: (reference: string) => void;
     save?: () => void;
 }
@@ -34,6 +35,19 @@ class InlineWidget extends WidgetType {
 class HiddenDefinition extends WidgetType {
     toDOM(): HTMLElement { return h("div", { class: "note-definition-hidden", "aria-hidden": "true" }); }
     override get estimatedHeight(): number { return 0; }
+}
+class RichPreview extends WidgetType {
+    constructor(private html: string, private block: boolean, private label: string, private edit: (event: MouseEvent | KeyboardEvent) => void, private preview?: (anchor: HTMLElement) => void) { super(); }
+    toDOM(): HTMLElement {
+        const element: HTMLElement = h(this.block ? "div" : "span", { class: "note-rich-preview markdown", tabindex: "0", "aria-label": this.label });
+        element.innerHTML = this.html;
+        element.addEventListener("click", event => { event.preventDefault(); event.stopPropagation(); this.edit(event); });
+        element.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); event.stopPropagation(); this.edit(event); } });
+        element.addEventListener("mouseover", event => { const link = (event.target as Element).closest<HTMLElement>("[data-note]"); if (link) this.preview?.(link); });
+        element.addEventListener("focusin", event => { const link = (event.target as Element).closest<HTMLElement>("[data-note]"); if (link) this.preview?.(link); });
+        return element;
+    }
+    override ignoreEvent(): boolean { return true; }
 }
 export class NoteEditor {
     readonly root = h("section", { class: "live-note" });
@@ -78,7 +92,7 @@ export class NoteEditor {
                     keymap.of([...defaultKeymap, ...historyKeymap]),
                     autocompletion({ interactionDelay: 0, override: [async (ctx) => {
                                 const trigger = referenceTrigger(ctx.state.doc.toString(), ctx.pos);
-                                if (!trigger || this.view?.composing)
+                                if (!trigger || !options.references || !options.referenceContext || this.view?.composing)
                                     return null;
                                 const generation = ++this.queryGeneration;
                                 const terms = matchTerms(trigger.query.trim() || options.referenceContext(ctx.pos));
@@ -157,12 +171,32 @@ export class NoteEditor {
         this.view.focus();
     }
     private decorate(state: EditorState): DecorationSet {
-        const text = state.doc.toString(), model = footnotes(text), ranges: Range<Decoration>[] = [], blocked = protectedText(text), selection = state.selection.main;
-        const selected = (from: number, to: number) => selection.from <= to && selection.to >= from;
+        const text = state.doc.toString(), model = footnotes(text), ranges: Range<Decoration>[] = [], blocked = protectedText(text);
+        const selected = (from: number, to: number) => state.selection.ranges.some(selection => selection.from <= to && selection.to >= from);
         const add = (from: number, to: number, deco: Decoration) => { if (to > from)
             ranges.push(deco.range(from, to)); };
         const isBlocked = (from: number) => blocked.some(r => from >= r.from && from < r.to);
+        const blocks = richBlocks(text), formulas = inlineMath(text, blocks), previews: Array<{ from: number; to: number }> = [];
+        const formulaRanges = [...formulas, ...blocks.filter(block => block.kind === "math")];
+        const preview = (from: number, to: number, html: string, block: boolean, label: string) => {
+            if (selected(from, to) || model.definitions.some(def => from >= def.from && from < def.to)) return;
+            add(from, to, Decoration.replace({ block, widget: new RichPreview(html, block, label, event => {
+                const target = (event.target as Element).closest<HTMLElement>("[data-note]");
+                if (target) this.openReference(target.dataset.note!);
+                else this.focus(from);
+            }, anchor => this.showLink(anchor.outerHTML, from, anchor, true)) }));
+            previews.push({ from, to });
+        };
+        for (const block of blocks) preview(block.from, block.to, renderRichBlock(block, text), true, t(block.kind === "table" ? "Edit table" : "Edit formula"));
+        for (const formula of formulas) {
+            const html = renderMath(formula.tex, formula.display);
+            if (html) preview(formula.from, formula.to, html, false, t("Edit formula"));
+        }
+        const opaque = [...previews, ...formulaRanges];
+        const inPreview = (from: number, to = from + 1) => previews.some(range => from < range.to && to > range.from);
+        const inFormula = (from: number, to = from + 1) => formulaRanges.some(range => from < range.to && to > range.from);
         syntaxTree(state).iterate({ enter: node => {
+                if (opaque.some(range => node.from >= range.from && node.to <= range.to)) return false;
                 const name = node.name;
                 if (/^ATXHeading[1-6]$/.test(name))
                     ranges.push(Decoration.line({ class: "note-heading note-h" + name.at(-1) }).range(state.doc.lineAt(node.from).from));
@@ -184,19 +218,19 @@ export class NoteEditor {
                 if (["HeaderMark", "EmphasisMark", "CodeMark", "QuoteMark"].includes(name) && !selected(node.node.parent?.from ?? node.from, node.node.parent?.to ?? node.to))
                     add(node.from, node.to, Decoration.replace({}));
             } });
-        for (const m of text.matchAll(/\[\[[^\]\n]+\]\]|(?<!!)\[[^\]\n]+\]\([^\s)]+\)/g)) {
-            if (isBlocked(m.index) || selected(m.index, m.index + m[0].length) || model.definitions.some(d => m.index >= d.from && m.index < d.to))
+        for (const m of text.matchAll(/\[\[[^\]\n]+\]\]|【【[^】\n]+】】|(?<!!)\[[^\]\n]+\]\([^\s)]+\)/g)) {
+            if (escapedAt(text, m.index) || isBlocked(m.index) || inPreview(m.index) || inFormula(m.index, m.index + m[0].length) || selected(m.index, m.index + m[0].length) || model.definitions.some(d => m.index >= d.from && m.index < d.to))
                 continue;
             const from = m.index;
-            add(from, from + m[0].length, Decoration.replace({ widget: new InlineWidget(renderInline(m[0]), (view, event) => { const target = (event.target as Element).closest<HTMLElement>("[data-note]"); if ((event.metaKey || event.ctrlKey) && target)
-                    this.openReference(target.dataset.note!);
-                else {
-                    view.dispatch({ selection: { anchor: from + 2 } });
-                    view.focus();
-                } }, "note-inline-link") }));
+            const html = renderInline(m[0]);
+            add(from, from + m[0].length, Decoration.replace({ widget: new InlineWidget(html, (view, event) => {
+                const target = (event.target as Element).closest<HTMLElement>("[data-note]");
+                if (target) { this.hideCard(); this.openReference(target.dataset.note!); }
+                else { view.dispatch({ selection: { anchor: from + 2 } }); view.focus(); }
+            }, "note-inline-link", anchor => { if (anchor.querySelector("[data-note]")) this.showLink(html, from, anchor, true); }) }));
         }
         for (const ref of model.references) {
-            if (selected(ref.from, ref.to))
+            if (inPreview(ref.from) || inFormula(ref.from) || selected(ref.from, ref.to))
                 continue;
             const previous = model.references.find(r => r.to === ref.from);
             add(ref.from, ref.to, Decoration.replace({ widget: new InlineWidget(`${previous ? "," : ""}<sup><button type="button" aria-label="${t("Reference {0}", ref.number)}">${ref.number}</button></sup>`, (_view, event) => this.activateReference(ref.label, event.currentTarget as HTMLElement), "note-footnote-mark", anchor => this.showReference(ref.label, anchor)) }));
@@ -226,6 +260,18 @@ export class NoteEditor {
         const rect = (anchor ?? this.view.dom).getBoundingClientRect();
         this.card.style.left = `${Math.max(12, Math.min(rect.left, window.innerWidth - this.card.offsetWidth - 12))}px`;
         this.card.style.top = `${Math.max(12, rect.bottom + 8 + this.card.offsetHeight > window.innerHeight - 12 ? rect.top - this.card.offsetHeight - 8 : rect.bottom + 8)}px`;
+    }
+    private showLink(source: string, from: number, anchor: HTMLElement, rendered = false): void {
+        clearTimeout(this.hideCardTimer); this.hideCardTimer = undefined; this.referenceAnchor = anchor;
+        const content = h("div", {class:"markdown"}); content.innerHTML = rendered ? source : renderInline(source);
+        this.card.hidden = false;
+        clear(this.card, h("strong", {}, t("Reference")), content,
+            h("button", {type:"button",class:"btn btn-small",onclick:()=>{this.hideCard();this.focus(from+2);}}, t("Edit reference")),
+            h("button", {type:"button",class:"btn btn-small",onclick:this.hideCard}, t("Close")));
+        this.bindLinks(content); this.card.setAttribute("role","dialog"); this.card.setAttribute("aria-label",t("Reference"));
+        const rect=anchor.getBoundingClientRect();
+        this.card.style.left=`${Math.max(12,Math.min(rect.left,window.innerWidth-this.card.offsetWidth-12))}px`;
+        this.card.style.top=`${Math.max(12,rect.bottom+8+this.card.offsetHeight>window.innerHeight-12?rect.top-this.card.offsetHeight-8:rect.bottom+8)}px`;
     }
     private openReference(reference: string): void { this.options.open(this.targets.get(reference) ?? reference); }
     private bindLinks(el: HTMLElement): void { el.addEventListener("click", event => { const link = (event.target as Element).closest<HTMLElement>("[data-note]"); if (link) {
