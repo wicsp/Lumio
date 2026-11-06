@@ -38,6 +38,8 @@ export class SettingsPane {
       this.group(t("Hub"), undefined, this.hubRows),
       this.group(t("Runtimes"), t("Machines that run agents for this Hub."), this.runtimeRows),
       this.group(t("Connected agents"), t("Agents outside Lumio that can read your tasks and notes and make small changes. They can't mark tasks done, delegate, approve, or read private notes."), (this.agents = new AgentsSettings(session.client)).element),
+      this.group(t("Recently deleted"), t("Deleted tasks, projects, notes and conversations stay here for 30 days."), h("div", { class: "set-rows" },
+        h("a", { class: "set-row set-link", href: "#trash" }, h("span", { class: "set-label" }, t("Open Recently deleted")), icon("chevron")))),
       this.group(t("About"), undefined, h("div", { class: "set-rows" },
         this.row(t("Keyboard shortcuts"), h("span", { class: "set-value" }, h("kbd", {}, "⌘K"), " ", t("command menu"), " · ", h("kbd", {}, "1"), "–", h("kbd", {}, "6"), " ", t("sections"))),
         h("a", { class: "set-row set-link", href: SOURCE, target: "_blank", rel: "noopener noreferrer" },

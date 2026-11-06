@@ -364,6 +364,7 @@ select { appearance: none; padding-right: 28px; background-image: linear-gradien
 /* 详情 */
 .detail { max-width: 860px; margin: 0 auto; padding: 22px 32px 64px; }
 .detail-crumbs { display: flex; align-items: center; gap: 6px; min-height: 22px; color: var(--ink-3); font-size: var(--fs-sm); }
+.detail-crumbs .detail-more { margin-left: auto; }
 .detail-crumbs .icon { width: 13px; height: 13px; }
 .detail-crumbs > button:not(.icon-btn) { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 0; color: inherit; }
 .detail-crumbs > button:not(.icon-btn):hover { color: var(--ink); text-decoration: underline; }
@@ -531,6 +532,10 @@ div.note-rich-preview { padding:4px 0; }
 .toast { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 20px; background: var(--ink); color: var(--paper); font-size: var(--fs-sm); box-shadow: var(--shadow-pop); animation: pop .18s var(--ease); }
 .toast-ok .icon { color: var(--lumen); }
 .toast-error { background: var(--red); color: #fff; }
+.toasts { pointer-events: none; }
+.toast-action { pointer-events: auto; padding-right: 6px; }
+.toast-btn { margin-left: 6px; padding: 3px 10px; border: 0; border-radius: 14px; background: color-mix(in srgb, var(--paper) 18%, transparent); color: inherit; font-weight: 600; font-size: var(--fs-sm); }
+.toast-btn:hover { background: color-mix(in srgb, var(--paper) 28%, transparent); }
 .toast.leaving { opacity: 0; transform: translateY(4px); transition: opacity .2s, transform .2s; }
 
 /* 命令面板 */
@@ -787,7 +792,12 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 .chat-side .list-scroll { padding: 4px 6px; }
 .convo { display: flex; flex-direction: column; gap: 1px; width: 100%; padding: 7px 10px; border: 0; border-radius: var(--r-md); background: none; text-align: left; }
 .convo:hover { background: var(--hover); }
-.convo.is-selected { background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
+.convo-row { position: relative; }
+.convo-row.is-selected .convo { background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
+.convo-row .convo { padding-right: 34px; }
+.convo-delete { position: absolute; top: 50%; right: 4px; translate: 0 -50%; width: 28px; height: 28px; opacity: 0; transition: opacity .12s; }
+.convo-row:is(:hover, :focus-within) .convo-delete { opacity: 1; }
+@media (hover: none) { .convo-delete { opacity: .6; } }
 .convo strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; font-size: var(--fs-sm); }
 .convo span { color: var(--ink-4); font-size: var(--fs-xs); }
 .chat-main { display: flex; flex-direction: column; min-height: 0; }
@@ -1119,4 +1129,33 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 }
 @media (prefers-reduced-motion: reduce) {
   .side-rail ol, .side-rail-item, .side-rail-tick, .side-rail-label { transition: none; }
+}
+
+/* ───────────── 删除确认与最近删除（ADR 0038） ───────────── */
+.delete-confirm .delete-name { margin: 0; font-weight: 600; font-size: var(--fs-lg); overflow-wrap: anywhere; }
+.delete-confirm .delete-consequence { display: flex; align-items: flex-start; gap: 8px; margin: 0; color: var(--ink-2); }
+.delete-confirm .delete-consequence .icon { margin-top: 2px; color: var(--amber, var(--ink-3)); }
+.delete-confirm .muted { margin: 0; }
+.trash-link { color: var(--ink-3); }
+.trash-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.trash-page { max-width: 880px; margin: 0 auto; padding: 18px 24px 64px; }
+.trash-filters { margin-bottom: 14px; }
+.trash-list { display: flex; flex-direction: column; gap: 8px; }
+.trash-row {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 14px;
+  padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface);
+}
+.trash-kind { display: grid; place-items: center; width: 34px; height: 34px; border-radius: var(--r-md); background: var(--sunken); color: var(--ink-3); }
+.trash-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.trash-main strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; }
+.trash-main .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); }
+.trash-expiry { color: var(--ink-4); font-size: var(--fs-xs); white-space: nowrap; }
+.trash-expiry.is-soon { color: var(--red); }
+.trash-actions { display: flex; align-items: center; gap: 4px; }
+@media (max-width: 760px) {
+  .trash-page { padding: 14px 12px 48px; }
+  .trash-filters { overflow-x: auto; }
+  .trash-row { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .trash-expiry { grid-column: 2; grid-row: 2; }
+  .trash-actions { grid-column: 3; grid-row: 1 / span 2; }
 }

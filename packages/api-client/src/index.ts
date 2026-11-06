@@ -1,6 +1,7 @@
 import { Id, KnowledgeDocument, KnowledgeUpdateRequest, KnowledgeUpdateResult, KnowledgeRelatedRequest, KnowledgeRelatedResult, KnowledgeReferencesRequest, KnowledgeReferencesResult } from "@lumio/schema";
 import { KnowledgeTemplateRequest, KnowledgeTemplateResult, PaperResolveRequest, PaperResolveResult, KnowledgeCreateRequest, KnowledgeCreateResult } from "@lumio/schema";
 import { ExecutionTarget, ExecutionTargetListArgs } from "@lumio/schema";
+import { AssistantConversationDeleteRequest, KnowledgeDeleteRequest, TrashListArgs, TrashListResult, TrashPurgeRequest, TrashPurgeResult, TrashRestoreRequest, TrashRestoreResult, TrashResult } from "@lumio/schema";
 import { PushSubscriptionInput, PushDevice, PushDeviceUpdate, PushPublicKey, PushTestResult } from "@lumio/schema";
 import { AgentInfo, AgentTokenIssued, AgentTokenRequest, AgentRevokeRequest, ClientInvite, ClientInviteRequest, ClientJoin, ClientJoinRequest, RuntimeInvite, RuntimeInviteRequest } from "@lumio/schema";
 import { AssistantConfigView, AssistantConfigUpdate, AssistantToolCall, ExecutionJobListArgs, RequestId, WorkAttention, WorkCommandRequest, WorkCommandResult, PlanTemplate, type WorkCommand, WorkTask, WorkTaskDetail, WorkProject, ExecutionRoutine, ExecutionRoutineCommandRequest, ExecutionRoutineInfo,
@@ -72,6 +73,12 @@ export function createClient(options: { url: string; token?: string; language?: 
   const queryParams = (options: QueryOptions): Record<string, string> => options.includePrivate === undefined ? {} : { include_private: String(options.includePrivate) };
   return {
     knowledgeDocument(id: string) { return request(`/v2/knowledge/notes/${encodeURIComponent(validate(Id, id))}/document`, {}, KnowledgeDocument); },
+    // 删除与回收站（ADR 0038）：只有人可用。任务与项目的删除走 workCommand。
+    deleteNote(id: string, input: KnowledgeDeleteRequest) { return request(`/v2/knowledge/notes/${encodeURIComponent(validate(Id, id))}`, {}, TrashResult, validate(KnowledgeDeleteRequest, input), "DELETE"); },
+    deleteConversation(id: string, input: AssistantConversationDeleteRequest) { return request(`/v2/assistant/conversations/${validate(idOf("conv"), id)}`, {}, TrashResult, validate(AssistantConversationDeleteRequest, input), "DELETE"); },
+    trash(args: TrashListArgs = {}) { const input = validate(TrashListArgs, args); return request("/v2/trash", input.kind ? { kind: input.kind } : {}, TrashListResult); },
+    restoreTrash(id: string, input: TrashRestoreRequest) { return request(`/v2/trash/${encodeURIComponent(validate(Id, id))}/restore`, {}, TrashRestoreResult, validate(TrashRestoreRequest, input)); },
+    purgeTrash(id: string, input: TrashPurgeRequest) { return request(`/v2/trash/${encodeURIComponent(validate(Id, id))}`, {}, TrashPurgeResult, validate(TrashPurgeRequest, input), "DELETE"); },
     updateNote(id: string, input: KnowledgeUpdateRequest) { return request(`/v2/knowledge/notes/${encodeURIComponent(validate(Id, id))}/document`, {}, KnowledgeUpdateResult, validate(KnowledgeUpdateRequest, input), "PUT"); },
     relatedNotes(input: KnowledgeRelatedRequest) { return request("/v2/knowledge/related", {}, KnowledgeRelatedResult, validate(KnowledgeRelatedRequest, input)); },
     noteReferences(input: KnowledgeReferencesRequest) { return request("/v2/knowledge/references", {}, KnowledgeReferencesResult, validate(KnowledgeReferencesRequest, input)); },

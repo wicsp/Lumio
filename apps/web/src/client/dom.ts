@@ -102,6 +102,8 @@ const ICONS: Record<string, string> = {
   repeat: "M17 3l3 3-3 3M4 11V9a3 3 0 0 1 3-3h13M7 21l-3-3 3-3M20 13v2a3 3 0 0 1-3 3H4",
   edit: "M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4",
   more: "M6 12h0M12 12h0M18 12h0",
+  trash: "M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3",
+  restore: "M4 12a8 8 0 1 0 2.3-5.6M4 4v4h4",
   memory: "M12 3a6 6 0 0 0-3.5 10.9V17h7v-3.1A6 6 0 0 0 12 3zM9.5 21h5",
   lock: "M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3",
   command: "M9 6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3z",
@@ -232,11 +234,14 @@ export function autosize(area: HTMLTextAreaElement): HTMLTextAreaElement {
 
 let toastHost: HTMLElement | undefined;
 /** 短暂提示：成功操作的确认。失败信息仍留在原处，便于对照处理。 */
-export function toast(text: string, kind: "ok" | "error" = "ok"): void {
+/** 底部提示；带 action 时多一个按钮（如「撤销」），停留更久，点过一次即关闭。 */
+export function toast(text: string, kind: "ok" | "error" = "ok", action?: { label: string; run: () => void }): void {
   if (!toastHost?.isConnected) { toastHost = h("div", { class: "toasts", role: "status", "aria-live": "polite" }); document.body.append(toastHost); }
-  const item = h("div", { class: `toast toast-${kind}` }, icon(kind === "ok" ? "check" : "alert"), h("span", {}, text));
+  const leave = () => { item.classList.add("leaving"); setTimeout(() => item.remove(), 200); };
+  const item = h("div", { class: `toast toast-${kind}${action ? " toast-action" : ""}` }, icon(kind === "ok" ? "check" : "alert"), h("span", {}, text),
+    action && h("button", { type: "button", class: "toast-btn", onclick: () => { leave(); action.run(); } }, action.label));
   toastHost.append(item);
-  setTimeout(() => { item.classList.add("leaving"); setTimeout(() => item.remove(), 200); }, kind === "ok" ? 2400 : 5000);
+  setTimeout(leave, action ? 8000 : kind === "ok" ? 2400 : 5000);
 }
 
 // ───────────── 弹出菜单 ─────────────

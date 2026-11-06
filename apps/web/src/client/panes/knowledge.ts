@@ -1,5 +1,6 @@
 import { NoteEditor } from "../note-editor.ts";
 import { drafts } from "../drafts.ts";
+import { confirmDelete } from "../trash-actions.ts";
 import { NoteSave } from "../note-save.ts";
 import { writingContext } from "../note-text.ts";
 import { matchTerms } from "../note-matches.ts";
@@ -12,7 +13,7 @@ import { KnowledgeCreate } from "./knowledge-create.ts";
  */
 import { NOTE_TYPES, type NoteDetail, type LinksResult, type SearchResult } from "@lumio/schema";
 import { errorText, type Client } from "../api.ts";
-import { clear, debounce, empty, failure, h, icon, loading, openMenu, placeholder, highlightedText } from "../dom.ts";
+import { clear, debounce, empty, failure, h, icon, loading, openMenu, placeholder, highlightedText, toast } from "../dom.ts";
 import { listKeys, markSelected } from "../list-keys.ts";
 import { renderMarkdown, safeExternalUrl } from "../utils/markdown.ts";
 import { t, translated } from "../i18n.ts";
@@ -232,8 +233,37 @@ export class KnowledgePane {
       title.addEventListener("keydown",event=>{if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="s"){event.preventDefault();if(!event.isComposing&&!this.saver?.error)void this.saver?.save();}});
       oldBody.replaceWith(this.editor.root);const editor=this.editor;this.outlineEntries=()=>editor.outlineEntries();this.outline.refresh();article.insertBefore(this.saveStatus,this.editor.root);article.insertBefore(this.saveError,this.editor.root);article.insertBefore(this.conflict,this.editor.root);
       this.saveStatus.before(h("button",{type:"button",class:"btn btn-small mobile-only",onclick:()=>{this.split.classList.toggle("show-related");this.renderRelated();}},t("Related notes")));
+      article.querySelector(".detail-crumbs")?.append(this.moreButton(note.note.id!,()=>title.value.trim()||note.note.title));
       this.renderSave();this.recommend(context());if(saver.dirty)void saver.save();
     }catch{if(this.active&&generation===this.generation)this.detail.querySelector("article")?.append(h("p",{class:"field-hint"},t("This note is read-only here. Check its metadata or edit it in your external editor.")));}
+  }
+  // ───────────── 删除（ADR 0038） ─────────────
+  private moreButton(id: string, title: () => string): HTMLButtonElement {
+    const button: HTMLButtonElement = h("button", { type: "button", class: "icon-btn detail-more", title: t("More"), "aria-label": t("More"), "aria-haspopup": "menu",
+      onclick: () => openMenu(button, [{ value: "delete", label: t("Delete"), icon: icon("trash") }], value => { if (value === "delete") void this.confirmDelete(id, title()); }) },
+    icon("more"));
+    return button;
+  }
+  private async confirmDelete(id: string, title: string): Promise<void> {
+    const saver = this.saver;
+    if (!saver) return;
+    clearTimeout(this.saveTimer);
+    if (saver.dirty && (saver.error || !(await saver.save()))) { toast(t("Save or resolve your changes before deleting this note."), "error"); return; }
+    if (this.saver !== saver || !this.active) return;
+    const links = (await this.client.links(id).catch(() => undefined))?.incoming.length ?? 0;
+    if (this.saver !== saver || !this.active) return;
+    confirmDelete(this.client, {
+      title: t("Delete this note?"), name: title,
+      consequences: [t("The file moves to the vault's .trash folder."), ...(links ? [t("{0} notes link to it; those links will show as missing until it is restored.", links)] : [])],
+      run: async requestId => (await this.client.deleteNote(id, { request_id: requestId, expected_revision: saver.base.revision })).item,
+      deleted: () => {
+        this.recoveries.get(saver)?.remove();
+        this.clearWriter(); this.selected = undefined; markSelected(this.results, undefined); this.showPlaceholder();
+        history.replaceState(null, "", "#knowledge");
+        void this.search(true);
+      },
+      restored: item => { void this.search(true); void this.open(item.id, true); },
+    });
   }
   private renderSave():void{
     const saver=this.saver;if(!saver)return;

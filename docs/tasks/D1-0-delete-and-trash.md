@@ -15,7 +15,7 @@
 | D1-2 ✅ | 任务与项目的删除、恢复、彻底删除（含停止进行中的一轮、项目下任务置空与恢复挂回） | 后端（Codex） | `packages/work`、`packages/storage`、`apps/hub` |
 | D1-3 ✅ | 笔记移入 `.trash/`、恢复、彻底删除，自动提交 | 后端（Codex） | `packages/storage`、`apps/hub`（复用 Knowledge 的路径与解析规则） |
 | D1-4 ✅ | 对话删除、恢复、彻底删除（先停止生成）；回收站汇总与 30 天到期清理 | 后端（Codex） | `packages/assistant`、`packages/storage`、`apps/hub` |
-| D1-5 | Web：四处删除入口、确认框、撤销提示、「最近删除」页面 | 前端（Claude） | `packages/api-client`、`apps/web` |
+| D1-5 ✅ | Web：四处删除入口、确认框、撤销提示、「最近删除」页面 | 前端（Claude） | `packages/api-client`、`apps/web` |
 
 D1-2 到 D1-4 依赖 D1-1；D1-5 依赖 D1-2 到 D1-4 的 Hub 接口。
 
