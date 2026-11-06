@@ -1,3 +1,4 @@
+import { KNOWLEDGE_ROUTES, KnowledgeAuthoring, type PaperFetch } from "./knowledge-authoring.ts";
 import { migrateTaskModel } from "@lumio/storage";
 import { withLanguage, errorMessage, text as msg } from "./messages.ts";
 import { language } from "@lumio/platform";
@@ -33,6 +34,7 @@ import { FileKnowledgeRepository, acquireStateLease, isMigratedSource, legacyCon
 
 // Routes share authentication, authorization and logging before dispatch.
 export const ROUTES = [
+  ...KNOWLEDGE_ROUTES,
   { operation: "runtime.invite", method: "POST", pattern: /^\/v1\/runtime-invites$/ },
   { operation: "client.invite", method: "POST", pattern: /^\/v1\/client-invites$/ },
   { operation: "runtime.join", method: "POST", pattern: /^\/v1\/runtime\/join$/ },
@@ -76,6 +78,7 @@ async function startHubInstance(config: HubConfig, options: {
   routines?: RoutineOptions;
   assistantHome?: string;
   assistantFetch?: typeof fetch;
+  paperFetch?: PaperFetch;
   pushFetch?: typeof fetch;
   assistantModel?: AssistantModel;
   assistantTools?: AssistantTool[];
@@ -115,6 +118,7 @@ async function startHubInstance(config: HubConfig, options: {
         status: async () => ({ watching: false, last_full_sync: null, pending_files: 0, issues: [] }), stop: () => writes.drain(),
       };
     const watch = vaultWatch;
+    const authoring = new KnowledgeAuthoring(config, store, action => watch.exclusive(action), (path, message) => watch.issue(path, message), options.paperFetch);
     tasks = new TaskRounds(config, store, new Jobs(store, hooks), (action) => watch.exclusive(action), (path, line) => watch.issue(path, line), { ...options.tasks,
       isManaged: (path, id) => legacyControlDisabled(store.db) || isMigratedSource(store.db, path) || !!(id && modules!.workStore.task(id)) || !!options.tasks?.isManaged?.(path, id) });
     routines = new Routines(config, store, new Jobs(store, hooks), (action) => watch.exclusive(action), (path, line) => watch.issue(path, line), { ...options.routines,
@@ -132,7 +136,7 @@ async function startHubInstance(config: HubConfig, options: {
         // Logging uses route templates, so references (or secrets in a URL) cannot leak.
         const v2 = V2_ROUTES.find((route) => request.method === route.method && route.pattern.test(url.pathname));
         const route = v2 ?? ROUTES.find((route) => request.method === ("method" in route ? route.method : "GET") && route.pattern.test(url.pathname));
-        const path = v2 ? v2.path : route && (PAIRING_OPERATIONS as readonly string[]).includes(route.operation) ? `/pairing/${route.operation}` : route?.operation === "runtime.privileged.status" ? "/v1/runtime/privileged/<id>" : route?.operation === "runtime.privileged.report" ? "/v1/runtime/privileged" : route?.operation === "job.submit" || route?.operation === "jobs" ? "/v1/jobs" : route?.operation === "job.show" ? "/v1/jobs/<id>" : route?.operation === "job.cancel" ? "/v1/jobs/<id>/cancel" : route?.operation === "runtime.ack" ? "/v1/runtime/ack" : route?.operation === "runtime.results" ? "/v1/runtime/results" : route?.operation === "runtime.register" ? "/v1/runtime/register" : route?.operation === "runtime.sync" ? "/v1/runtime/sync" : route?.operation === "runtimes" ? "/v1/runtimes" : route?.operation === "routines" ? "/v1/routines" : route?.operation === "status" ? "/v1/status" : route?.operation === "health" ? "/health" : route?.operation === "search" ? "/v1/search"
+        const path = route?.operation.startsWith("knowledge.") ? `/v2/knowledge/${route.operation.split(".")[1]}` : v2 ? v2.path : route && (PAIRING_OPERATIONS as readonly string[]).includes(route.operation) ? `/pairing/${route.operation}` : route?.operation === "runtime.privileged.status" ? "/v1/runtime/privileged/<id>" : route?.operation === "runtime.privileged.report" ? "/v1/runtime/privileged" : route?.operation === "job.submit" || route?.operation === "jobs" ? "/v1/jobs" : route?.operation === "job.show" ? "/v1/jobs/<id>" : route?.operation === "job.cancel" ? "/v1/jobs/<id>/cancel" : route?.operation === "runtime.ack" ? "/v1/runtime/ack" : route?.operation === "runtime.results" ? "/v1/runtime/results" : route?.operation === "runtime.register" ? "/v1/runtime/register" : route?.operation === "runtime.sync" ? "/v1/runtime/sync" : route?.operation === "runtimes" ? "/v1/runtimes" : route?.operation === "routines" ? "/v1/routines" : route?.operation === "status" ? "/v1/status" : route?.operation === "health" ? "/health" : route?.operation === "search" ? "/v1/search"
           : route?.operation === "check" ? "/v1/check" : route?.operation === "show" ? "/v1/notes/<reference>" : route?.operation === "links" ? "/v1/notes/<reference>/links" : route?.operation === "operations" ? "/v1/operations"
             : route?.operation === "actors" ? "/v1/actors" : route?.operation === "proposals" ? "/v1/proposals"
               : route?.operation === "proposal.accept" ? "/v1/proposals/<id>/accept" : route?.operation === "proposal.reject" ? "/v1/proposals/<id>/reject" : "<unmatched>";
@@ -155,6 +159,11 @@ async function startHubInstance(config: HubConfig, options: {
             if (!identity) throw new HubError("UNAUTHENTICATED", { key: "server.a_valid_bearer_token_is_required", args: [] });
           }
           if (!route) throw new HubError("NOT_FOUND", { key: "server.endpoint_not_found", args: [] });
+          const knowledgeRoute = KNOWLEDGE_ROUTES.find(item => item.operation === route.operation);
+          if (knowledgeRoute) {
+            const response = await authoring.handle(request, knowledgeRoute.operation, identity!, decide, (options.now ?? (() => new Date()))());
+            status = response.status; return response;
+          }
           if (v2) {
             const response = await handleV2(request, v2, identity!, store, modules!, decide, (options.now ?? (() => new Date()))());
             status = response.status; return response;
