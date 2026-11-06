@@ -3,12 +3,12 @@ export { nextTurn, migrateTurn, type LegacyTurnFacts, type PlannedDelivery } fro
 import {
   WorkProject, WorkTask, WorkComment, WorkExecution, WorkTaskDetail,
   WorkCommandRequest, WorkCommandResult, TaskTurnChange, Turn, PlanTemplate, DEFAULT_PLAN_MAX_ROUNDS, textContainsCardNumber,
-  type PlanRun,
+  type PlanRun, TrashItem, TRASH_RETENTION_DAYS, TRASHED_REASON,
   type ActorRole, type ID_PREFIXES, type Job,
 } from "@lumio/schema";
 
 export class WorkError extends Error {
-  constructor(public readonly code: "INVALID" | "NOT_FOUND" | "CONFLICT" | "INTERNAL", public readonly params: { key: string; args: readonly unknown[] }) {
+  constructor(public readonly code: "INVALID" | "NOT_FOUND" | "CONFLICT" | "INTERNAL" | "FORBIDDEN", public readonly params: { key: string; args: readonly unknown[] }, public readonly reason?: string) {
     super(code); this.name = "WorkError";
   }
 }
@@ -31,6 +31,10 @@ export interface WorkStore {
   deletePlanTemplate(id: string): void;
   receipt(actor: string, request: string): { operation: string; result: WorkCommandResult } | undefined;
   putReceipt(actor: string, request: string, operation: string, result: WorkCommandResult): void;
+  trash(id: string): TrashItem | undefined;
+  trashed(): TrashItem[];
+  putTrash(item: TrashItem): void;
+  removeTrash(id: string): void;
   transaction<T>(action: () => T): T;
 }
 
@@ -46,7 +50,7 @@ export interface WorkContext {
   id(prefix: (typeof ID_PREFIXES)[keyof typeof ID_PREFIXES]): string;
   validateTarget?(target: string): void;
   dispatch?(task: WorkTask, input: string, round: number, to?: string): Job;
-  cancel?(task: string): void;
+  cancel?(task: string): string | void;
   agentForJob?(job: string): string | undefined;
 }
 
@@ -74,20 +78,26 @@ export class WorkService {
   constructor(private readonly store: WorkStore, private readonly context: WorkContext) {}
 
   project(id: string): WorkProject {
-    const value = this.store.project(id);
-    if (!value) throw new WorkError("NOT_FOUND", { key: "index.project_not_found", args: [] });
+    const trashed = this.store.trash(id);
+    const value = !trashed && this.store.project(id);
+    if (!value) throw new WorkError("NOT_FOUND", { key: "index.project_not_found", args: [] }, trashed && TRASHED_REASON);
     return WorkProject.parse(value);
   }
-  projects(): WorkProject[] { return WorkProject.array().parse(this.store.projects()); }
+  projects(): WorkProject[] {
+    const hidden = new Set(this.store.trashed().map(item => item.id));
+    return WorkProject.array().parse(this.store.projects()).filter(value => !hidden.has(value.id));
+  }
   task(id: string): WorkTask {
-    const value = this.store.task(id);
-    if (!value) throw new WorkError("NOT_FOUND", { key: "index.task_not_found", args: [] });
+    const trashed = this.store.trash(id);
+    const value = !trashed && this.store.task(id);
+    if (!value) throw new WorkError("NOT_FOUND", { key: "index.task_not_found", args: [] }, trashed && TRASHED_REASON);
     return WorkTask.parse(value);
   }
   tasks(filter: { project?: string; status?: string; query?: string } = {}): WorkTask[] {
     const query = filter.query?.trim().toLocaleLowerCase();
+    const hidden = new Set(this.store.trashed().map(item => item.id));
     return WorkTask.array().parse(this.store.tasks()).filter((task) =>
-      (!filter.project || task.project === filter.project) && (!filter.status || legacyTaskStatus(task) === filter.status)
+      !hidden.has(task.id) && (!filter.project || task.project === filter.project) && (!filter.status || legacyTaskStatus(task) === filter.status)
       && (!query || `${task.title}\n${task.description}\n${task.tags.join(" ")}`.toLocaleLowerCase().includes(query)));
   }
   detail(id: string): WorkTaskDetail {
@@ -152,17 +162,17 @@ export class WorkService {
     ].join("\n");
   }
 
-  private checkTask(task: WorkTask): void {
+  private checkTask(task: WorkTask, previous?: WorkTask): void {
     if (task.project) this.project(task.project);
-    if (task.parent) {
-      const parent = this.task(task.parent);
+    const parent = task.parent && (task.parent === previous?.parent ? this.store.task(task.parent) : this.task(task.parent));
+    if (parent) {
       if (parent.id === task.id) throw new WorkError("CONFLICT", { key: "index.a_task_cannot_be_its_own_parent", args: [] });
       if (parent.project && task.project && parent.project !== task.project) throw new WorkError("CONFLICT", { key: "index.parent_task_must_belong_to_the_same_project", args: [] });
       const seen = new Set([task.id]);
       let current: WorkTask | undefined = parent;
       while (current) {
         if (seen.has(current.id)) throw new WorkError("CONFLICT", { key: "index.parent_relationships_must_not_form_cycles", args: [] });
-        seen.add(current.id); current = current.parent ? this.task(current.parent) : undefined;
+        seen.add(current.id); current = current.parent ? this.store.task(current.parent) : undefined;
       }
     }
     if (new Set(task.dependencies).size !== task.dependencies.length) throw new WorkError("INVALID", { key: "index.dependency_tasks_must_not_be_duplicated", args: [] });
@@ -170,10 +180,13 @@ export class WorkService {
       if (id === task.id) throw new WorkError("CONFLICT", { key: "index.task_dependencies_must_not_form_cycles", args: [] });
       if (seen.has(id)) return;
       seen.add(id);
-      for (const next of this.task(id).dependencies) visit(next, seen);
+      for (const next of this.store.task(id)?.dependencies ?? []) visit(next, seen);
     };
-    for (const id of task.dependencies) visit(id, new Set());
-    if (task.outcome === "done" && task.dependencies.some((id) => this.task(id).outcome !== "done")) {
+    for (const id of task.dependencies) {
+      if (!previous?.dependencies.includes(id)) this.task(id);
+      visit(id, new Set());
+    }
+    if (task.outcome === "done" && task.dependencies.some((id) => this.store.task(id)?.outcome !== "done" && (previous?.outcome !== "done" || !previous.dependencies.includes(id)))) {
       throw new WorkError("CONFLICT", { key: "index.dependency_tasks_are_not_completed", args: [] });
     }
   }
@@ -266,13 +279,20 @@ export class WorkService {
     const previous = this.store.receipt(actor, request.request_id);
     if (!previous) return;
     if (previous.operation !== JSON.stringify(request.operation)) throw new WorkError("CONFLICT", { key: "index.request_id_was_used_for_a_different_operation", args: [] });
-    return WorkCommandResult.parse(previous.result);
+    const result = WorkCommandResult.parse(previous.result);
+    if (result.kind === "task") this.task(result.task.id);
+    if (result.kind === "project") this.project(result.project.id);
+    if (result.kind === "comment") this.task(result.comment.task);
+    return result;
   }
 
   command(input: unknown, actor: string, approval?: { by: string; proposal: string }, caller: WorkCaller = { role: "human" }): WorkCommandResult {
     const parsed = WorkCommandRequest.safeParse(input);
     if (!parsed.success) throw new WorkError("INVALID", { key: "index.invalid_work_command_parameters", args: [] });
     const request = parsed.data, serialized = JSON.stringify(request.operation);
+    if ((request.operation.op === "work.task.delete" || request.operation.op === "work.project.delete") && caller.role !== "human") {
+      throw new WorkError("FORBIDDEN", { key: "work.human_only", args: [] });
+    }
     return this.store.transaction(() => {
       const previous = this.replay(request, actor);
       if (previous) return previous;
@@ -302,7 +322,7 @@ export class WorkService {
           const current = this.task(operation.args.task);
           if (current.revision !== operation.args.expected_revision) throw new WorkError("CONFLICT", { key: "index.task_changed_reload_before_saving", args: [] });
           const task = WorkTask.parse({ ...patch(current, operation.args.patch), revision: current.revision + 1, updated: time, updated_by: actor });
-          this.checkTask(task); this.store.putTask(task);
+          this.checkTask(task, current); this.store.putTask(task);
           result = { kind: "task", task }; break;
         }
         case "work.task.comment": {
@@ -333,7 +353,7 @@ export class WorkService {
             if (job && caller.role === "human") this.context.cancel?.(task.id);
           } else if (operation.op === "work.task.finish") this.context.cancel?.(task.id);
           const updated = this.transition(task, action, actor, time);
-          this.checkTask(updated); result = { kind: "task", task: updated }; break;
+          this.checkTask(updated, task); result = { kind: "task", task: updated }; break;
         }
         case "work.task.plan.set": {
           const task = this.task(operation.args.task);
@@ -356,7 +376,7 @@ export class WorkService {
           if (comment !== undefined) this.store.putComment(WorkComment.parse({ id: this.context.id("wmsg"), task: task.id, author: actor, body: comment, created: time }));
           let updated: WorkTask;
           if (action === "finish") {
-            updated = this.transition(task, { kind: "finish", outcome: "done" }, actor, time); this.checkTask(updated);
+            updated = this.transition(task, { kind: "finish", outcome: "done" }, actor, time); this.checkTask(updated, task);
           } else if (action === "hold") updated = this.transition(task, { kind: "hand", to: "nobody", note: comment?.slice(0, 200) }, actor, time);
           else {
             const index = run.plan.stages.findIndex(value => value.id === stage), current = run.plan.stages[index];
@@ -382,10 +402,26 @@ export class WorkService {
           if (!this.planTemplates().some(value => value.id === id)) throw new WorkError("NOT_FOUND", { key: "work.template_not_found", args: [] });
           this.store.deletePlanTemplate(id); result = { kind: "removed", id }; break;
         }
-        // ADR 0038：契约已定（D1-1），删除与回收站由 D1-2 实现；在此之前明确拒绝，不做部分删除。
-        case "work.task.delete":
-        case "work.project.delete":
-          throw new WorkError("INVALID", { key: "index.invalid_work_command_parameters", args: [] });
+        case "work.task.delete": {
+          const task = this.task(operation.args.task);
+          if (task.revision !== operation.args.expected_revision) throw new WorkError("CONFLICT", { key: "index.task_changed_reload_before_saving", args: [] });
+          const stopped = this.context.cancel?.(task.id) || undefined;
+          if (task.turn.reason === "working") {
+            // Settle the round without changing the task's outcome or advancing its plan.
+            this.transition(task, { kind: "result", status: "cancelled", job: task.turn.job!, round: task.turn.round! }, actor, time);
+          } else this.store.putTask({ ...task, revision: task.revision + 1, updated: time, updated_by: actor });
+          const item = this.trashItem({ kind: "task", id: task.id, title: task.title, project: task.project, stopped_job: stopped }, actor, time);
+          result = { kind: "trashed", item }; break;
+        }
+        case "work.project.delete": {
+          const project = this.project(operation.args.project);
+          if (project.revision !== operation.args.expected_revision) throw new WorkError("CONFLICT", { key: "index.project_changed_reload_before_saving", args: [] });
+          const detached = this.store.tasks().filter(task => task.project === project.id);
+          for (const task of detached) this.store.putTask({ ...task, project: undefined, revision: task.revision + 1, updated: time, updated_by: actor });
+          this.store.putProject({ ...project, revision: project.revision + 1, updated: time, updated_by: actor });
+          const item = this.trashItem({ kind: "project", id: project.id, title: project.title, detached_tasks: detached.map(task => task.id) }, actor, time);
+          result = { kind: "trashed", item }; break;
+        }
         case "work.task.dispatch": {
           const task = this.task(operation.args.task);
           if (operation.args.expected_revision !== undefined && task.revision !== operation.args.expected_revision) throw new WorkError("CONFLICT", { key: "index.task_changed_reload_before_dispatching", args: [] });
@@ -400,20 +436,44 @@ export class WorkService {
     });
   }
 
+  private trashItem(input: Omit<TrashItem, "deleted_at" | "deleted_by" | "expires_at">, actor: string, time: string): TrashItem {
+    const item = TrashItem.parse({ ...input, deleted_by: actor, deleted_at: time,
+      expires_at: new Date(Date.parse(time) + TRASH_RETENTION_DAYS * 86_400_000).toISOString() });
+    this.store.putTrash(item);
+    return item;
+  }
+
+  restore(item: TrashItem, actor: string): string[] | undefined {
+    return this.store.transaction(() => {
+      const restored = item.detached_tasks?.filter(id => {
+        const task = this.store.task(id);
+        if (!task || task.project) return false;
+        this.store.putTask({ ...task, project: item.id, revision: task.revision + 1, updated: this.context.now().toISOString(), updated_by: actor });
+        return true;
+      });
+      this.store.removeTrash(item.id);
+      return restored;
+    });
+  }
+
   /** A terminal result appends progress and hands back exactly once; it never finishes the task. */
   applyResult(job: Job): void {
     if (!["done", "waiting_for_human", "failed", "unknown", "cancelled"].includes(job.status)) return;
     this.store.transaction(() => {
       const execution = this.store.executions().find((value) => value.job === job.spec.id);
       if (!execution || execution.applied) return;
+      const task = this.store.task(execution.task);
+      if (!task) {
+        this.store.putExecution({ ...execution, applied: true });
+        return;
+      }
       const body = [this.msg("Round ${0}: ${1}", execution.round, job.status), job.result?.report ?? "", job.result?.question ? this.msg("Question: ${0}", job.result.question) : "", job.result?.error ?? ""].filter(Boolean).join("\n\n");
       const shown = secret(body) ? this.msg("Round ${0}: ${1}\n\nReport may contain sensitive information and was not added to task discussion; use lumio job show ${2} to view it.", execution.round, job.status, job.spec.id)
         : `${body.slice(0, 3000)}${body.length > 3000 ? this.msg("\n\n… (truncated)") : ""}`;
       this.store.putComment(WorkComment.parse({ id: this.context.id("wmsg"), task: execution.task, author: job.spec.runtime,
         body: shown, created: this.context.now().toISOString() }));
       this.store.putExecution({ ...execution, applied: true });
-      const task = this.task(execution.task);
-      if (task.outcome === "open" && task.turn.reason === "working" && task.turn.job === job.spec.id) {
+      if (!this.store.trash(task.id) && task.outcome === "open" && task.turn.reason === "working" && task.turn.job === job.spec.id) {
         this.transition(task, { kind: "result", status: job.status, round: execution.round, job: job.spec.id, report: job.result?.report },
           this.context.systemActor ?? job.spec.runtime, this.context.now().toISOString());
       }

@@ -27,6 +27,7 @@ import { BusinessModules } from "./modules.ts";
 import { AssistantConfiguration } from "./assistant-config.ts";
 import { configuredModel } from "./assistant-model.ts";
 import { V2_ROUTES, handleV2 } from "./v2.ts";
+import { Trash } from "./trash.ts";
 import { WriteCoordinator } from "./coordinator.ts";
 import type { AssistantModel, AssistantTool } from "@lumio/assistant";
 import { KnowledgeService } from "@lumio/knowledge";
@@ -118,6 +119,9 @@ async function startHubInstance(config: HubConfig, options: {
         status: async () => ({ watching: false, last_full_sync: null, pending_files: 0, issues: [] }), stop: () => writes.drain(),
       };
     const watch = vaultWatch;
+    modules.trash = new Trash(config, store, modules, action => watch.exclusive(action), options.now ?? (() => new Date()), (path, message) => watch.issue(path, message));
+    await modules.trash.sweep();
+    modules.trash.start();
     const authoring = new KnowledgeAuthoring(config, store, action => watch.exclusive(action), (path, message) => watch.issue(path, message), options.paperFetch);
     tasks = new TaskRounds(config, store, new Jobs(store, hooks), (action) => watch.exclusive(action), (path, line) => watch.issue(path, line), { ...options.tasks,
       isManaged: (path, id) => legacyControlDisabled(store.db) || isMigratedSource(store.db, path) || !!(id && modules!.workStore.task(id)) || !!options.tasks?.isManaged?.(path, id) });
@@ -282,8 +286,8 @@ async function startHubInstance(config: HubConfig, options: {
     server = Bun.serve({ hostname: config.hostname, port: config.port,
       async fetch(request, server) { return webResponse(await withLanguage(language({ LUMIO_LANG: request.headers.get("Accept-Language") ?? undefined }), () => handle(request, server)), options.web?.csp); },
     });
-  } catch (cause) { modules?.stop(); await modules?.notifications.stop(); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); throw cause; }
-  return { server, store, tasks: tasks!, routines: routines!, modules: modules!, async stop() { modules?.stop(); await server.stop(true); await modules?.notifications.stop(); await modules?.artifacts.drain(); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); } };
+  } catch (cause) { modules?.stop(); await modules?.trash?.stop(); await modules?.notifications.stop(); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); throw cause; }
+  return { server, store, tasks: tasks!, routines: routines!, modules: modules!, async stop() { modules?.stop(); await server.stop(true); await modules?.trash?.stop(); await modules?.notifications.stop(); await modules?.artifacts.drain(); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); } };
 }
 
 /** One Hub or offline migration owns a state directory. OS locks disappear on crashes, without deleting lock files. */

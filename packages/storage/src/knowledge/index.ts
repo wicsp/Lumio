@@ -13,3 +13,5 @@ export * from "./adapter.ts";
 export * from "./authoring.ts";
 
 export * from "./editing.ts";
+
+export * from "./trash.ts";

@@ -29,6 +29,9 @@ export class WorkCommands {
   }
   execute(input: WorkCommandRequest, identity: Identity): WorkCommandResult {
     const request = WorkCommandRequest.parse(input), { operation } = request;
+    if ((operation.op === "work.task.delete" || operation.op === "work.project.delete") && identity.actor.role !== "human") {
+      throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: "agent-cannot-delete-or-archive" });
+    }
     const decision = this.decide(identity.actor, { operation: "work.command", command: operation.op, args: operation.args });
     if (decision.result === "deny") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: decision.reason });
     return this.store.db.transaction(() => {

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Database } from "bun:sqlite";
-import { AssistantConversation, AssistantMessage, AssistantTurn, AssistantToolCall, AssistantMemory, AssistantMemoryCommandResult, AssistantModelRequest, Timestamp, idOf } from "@lumio/schema";
-import type { AssistantStore } from "@lumio/assistant";
+import { AssistantConversation, AssistantMessage, AssistantTurn, AssistantToolCall, AssistantMemory, AssistantMemoryCommandResult, AssistantModelRequest, TrashItem, Timestamp, idOf } from "@lumio/schema";
+import { AssistantError, type AssistantStore } from "@lumio/assistant";
 import { StorageError } from "./errors.ts";
 
 /** Typed Assistant persistence; indexed ownership and lifecycle fields are committed with validated records. */
@@ -11,6 +11,8 @@ export class SqliteAssistantStore implements AssistantStore {
     db.transaction(() => db.exec(`
       CREATE TABLE IF NOT EXISTS platform_migrations(name TEXT PRIMARY KEY,applied TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS assistant_conversations(id TEXT PRIMARY KEY,owner TEXT NOT NULL,record TEXT NOT NULL CHECK(json_valid(record)));
+      CREATE TABLE IF NOT EXISTS assistant_trash(id TEXT PRIMARY KEY REFERENCES assistant_conversations(id),owner TEXT NOT NULL,record TEXT NOT NULL CHECK(json_valid(record)));
+      CREATE TABLE IF NOT EXISTS assistant_purged_requests(owner TEXT NOT NULL,request TEXT NOT NULL,PRIMARY KEY(owner,request));
       CREATE INDEX IF NOT EXISTS assistant_conversations_owner ON assistant_conversations(owner);
       CREATE TABLE IF NOT EXISTS assistant_turns(id TEXT PRIMARY KEY,conversation TEXT NOT NULL REFERENCES assistant_conversations(id),
         status TEXT NOT NULL CHECK(status IN ('running','done','failed','unknown','cancelled')),record TEXT NOT NULL CHECK(json_valid(record)));
@@ -34,6 +36,30 @@ export class SqliteAssistantStore implements AssistantStore {
     `))();
   }
   transaction<T>(action: () => T): T { return this.db.transaction(action)(); }
+  trash(id: string): TrashItem | undefined {
+    const row = this.db.query<{ record: string }, [string]>("SELECT record FROM assistant_trash WHERE id=?").get(id);
+    return row ? TrashItem.parse(JSON.parse(row.record)) : undefined;
+  }
+  trashed(owner?: string): TrashItem[] {
+    const rows = owner === undefined ? this.db.query<{ record: string }, []>("SELECT record FROM assistant_trash").all()
+      : this.db.query<{ record: string }, [string]>("SELECT record FROM assistant_trash WHERE owner=?").all(owner);
+    return rows.map(row => TrashItem.parse(JSON.parse(row.record)));
+  }
+  putTrash(item: TrashItem): void {
+    this.db.query("INSERT INTO assistant_trash VALUES (?,?,?)").run(item.id, item.deleted_by, JSON.stringify(TrashItem.parse(item)));
+  }
+  removeTrash(id: string): void { this.db.query("DELETE FROM assistant_trash WHERE id=?").run(id); }
+  purge(id: string): void {
+    this.db.query(`INSERT OR IGNORE INTO assistant_purged_requests SELECT owner,request FROM assistant_requests
+      WHERE turn IN (SELECT id FROM assistant_turns WHERE conversation=?)`).run(id);
+    for (const table of ["assistant_requests", "assistant_calls", "assistant_contexts"]) {
+      this.db.query(`DELETE FROM ${table} WHERE turn IN (SELECT id FROM assistant_turns WHERE conversation=?)`).run(id);
+    }
+    this.db.query("DELETE FROM assistant_messages WHERE conversation=?").run(id);
+    this.db.query("DELETE FROM assistant_turns WHERE conversation=?").run(id);
+    this.removeTrash(id);
+    this.db.query("DELETE FROM assistant_conversations WHERE id=?").run(id);
+  }
   conversation(id: string): AssistantConversation | undefined {
     const row = this.db.query<{ record: string }, [string]>("SELECT record FROM assistant_conversations WHERE id=?").get(id);
     return row ? AssistantConversation.parse(JSON.parse(row.record)) : undefined;
@@ -72,6 +98,9 @@ export class SqliteAssistantStore implements AssistantStore {
       .run(value.id, value.turn, value.status, JSON.stringify(value));
   }
   receipt(owner: string, request: string): { input: string; turn: string } | undefined {
+    if (this.db.query("SELECT 1 FROM assistant_purged_requests WHERE owner=? AND request=?").get(owner, request)) {
+      throw new AssistantError("NOT_FOUND", { key: "index.conversation_not_found", args: [] });
+    }
     return this.db.query<{ input: string; turn: string }, [string,string]>("SELECT input,turn FROM assistant_requests WHERE owner=? AND request=?").get(owner, request) ?? undefined;
   }
   putReceipt(owner: string, request: string, input: string, turn: string): void {

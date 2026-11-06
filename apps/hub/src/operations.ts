@@ -113,7 +113,7 @@ export async function handleOperation(request: Request, kind: "operations" | "ac
     audit(proposal.status);
     return Response.json(Proposal.parse(proposal));
   } catch (caught) {
-    const cause = caught instanceof WorkError ? new HubError(caught.code, caught.params) : caught;
+    const cause = caught instanceof WorkError ? new HubError(caught.code, caught.params, { reason: caught.reason }) : caught;
     if ((kind === "actors" || kind === "proposals") && authorization === "deny") store.audit(identity, kind, "deny");
     if (kind !== "actors" && kind !== "proposals" && !audited) audit(cause instanceof CoreError || cause instanceof HubError ? cause.code : "INTERNAL");
     if (cause instanceof CoreError && ["FILE_CHANGED", "WRITE_FAILED", "GIT_FAILED"].includes(cause.code)) {

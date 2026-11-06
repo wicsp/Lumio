@@ -1,12 +1,12 @@
 import { expect, test } from "bun:test";
-import { Job, WorkCommandResult, type HandoffPlan, type PlanTemplate, type WorkProject, type WorkTask, type WorkComment, type TaskTurnChange, type WorkExecution } from "@lumio/schema";
+import { Job, WorkCommandResult, type TrashItem, type HandoffPlan, type PlanTemplate, type WorkProject, type WorkTask, type WorkComment, type TaskTurnChange, type WorkExecution } from "@lumio/schema";
 import { WorkService, type WorkCaller, type WorkStore } from "../src/index.ts";
 
 const owner = "act_00000000000000000000000001";
 const timestamp = "2026-10-31T00:00:00Z";
 class MemoryStore implements WorkStore {
-  data: { templates: PlanTemplate[]; turns: TaskTurnChange[]; projects: WorkProject[]; tasks: WorkTask[]; comments: WorkComment[]; executions: WorkExecution[]; receipts: Record<string, { operation: string; result: WorkCommandResult }> } = {
-    templates: [], turns: [], projects: [], tasks: [], comments: [], executions: [], receipts: {},
+  data: { trash: TrashItem[]; templates: PlanTemplate[]; turns: TaskTurnChange[]; projects: WorkProject[]; tasks: WorkTask[]; comments: WorkComment[]; executions: WorkExecution[]; receipts: Record<string, { operation: string; result: WorkCommandResult }> } = {
+    trash: [], templates: [], turns: [], projects: [], tasks: [], comments: [], executions: [], receipts: {},
   };
   project(id: string) { return structuredClone(this.data.projects.find((value) => value.id === id)); }
   projects() { return structuredClone(this.data.projects); }
@@ -25,6 +25,10 @@ class MemoryStore implements WorkStore {
   deletePlanTemplate(id: string) { this.data.templates = this.data.templates.filter(value => value.id !== id); }
   receipt(actor: string, request: string) { return structuredClone(this.data.receipts[`${actor}:${request}`]); }
   putReceipt(actor: string, request: string, operation: string, result: WorkCommandResult) { this.data.receipts[`${actor}:${request}`] = { operation, result: structuredClone(result) }; }
+  trash(id: string) { return this.data.trash.find(item => item.id === id); }
+  trashed() { return this.data.trash; }
+  putTrash(item: TrashItem) { this.data.trash.push(item); }
+  removeTrash(id: string) { this.data.trash = this.data.trash.filter(item => item.id !== id); }
   transaction<T>(action: () => T): T {
     const before = structuredClone(this.data);
     try { return action(); } catch (cause) { this.data = before; throw cause; }

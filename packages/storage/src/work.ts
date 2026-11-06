@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { WorkProject, WorkTask, WorkComment, WorkExecution, TaskTurnChange, WorkCommandResult, PlanTemplate } from "@lumio/schema";
+import { WorkProject, WorkTask, WorkComment, WorkExecution, TaskTurnChange, WorkCommandResult, PlanTemplate, TrashItem } from "@lumio/schema";
 import { WorkError, type WorkStore } from "@lumio/work";
 
 
@@ -29,6 +29,8 @@ export class SqliteWorkStore implements WorkStore {
       CREATE TABLE IF NOT EXISTS work_executions (job TEXT PRIMARY KEY, task TEXT NOT NULL REFERENCES work_tasks(id),
         round INTEGER NOT NULL CHECK(round>0), input_revision INTEGER NOT NULL CHECK(input_revision>0), input_snapshot TEXT NOT NULL,
         created TEXT NOT NULL, applied INTEGER NOT NULL CHECK(applied IN (0,1)), UNIQUE(task,round));
+      CREATE TABLE IF NOT EXISTS work_trash (id TEXT PRIMARY KEY, record TEXT NOT NULL CHECK(json_valid(record)));
+      CREATE TABLE IF NOT EXISTS work_purged_tasks (id TEXT PRIMARY KEY REFERENCES work_tasks(id));
       CREATE TABLE IF NOT EXISTS work_requests (actor TEXT NOT NULL, request TEXT NOT NULL, operation TEXT NOT NULL,
         result TEXT NOT NULL CHECK(json_valid(result)), PRIMARY KEY(actor,request));
       INSERT OR IGNORE INTO platform_migrations(name,applied) VALUES ('work-1',strftime('%Y-%m-%dT%H:%M:%fZ','now'));
@@ -75,8 +77,8 @@ export class SqliteWorkStore implements WorkStore {
     return WorkTask.parse({ ...fields, schema_version: 3, type: "task", turn: JSON.parse(String(turn)), plan: plan ? JSON.parse(String(plan)) : undefined, tags: JSON.parse(String(row.tags)), references: JSON.parse(String(refs)),
       gpus: row.gpus === null ? undefined : JSON.parse(String(row.gpus)), dependencies });
   }
-  task(id: string): WorkTask | undefined { return this.readTask(this.db.query<Record<string, unknown>, [string]>("SELECT * FROM work_tasks WHERE id=?").get(id)); }
-  tasks(): WorkTask[] { return this.db.query<Record<string, unknown>, []>("SELECT * FROM work_tasks ORDER BY created,id").all().map((row) => this.readTask(row)!); }
+  task(id: string): WorkTask | undefined { return this.readTask(this.db.query<Record<string, unknown>, [string]>("SELECT * FROM work_tasks WHERE id=? AND id NOT IN (SELECT id FROM work_purged_tasks)").get(id)); }
+  tasks(): WorkTask[] { return this.db.query<Record<string, unknown>, []>("SELECT * FROM work_tasks WHERE id NOT IN (SELECT id FROM work_purged_tasks) ORDER BY created,id").all().map((row) => this.readTask(row)!); }
   putTask(input: WorkTask): void {
     const value = WorkTask.parse(input);
     this.transaction(() => {
@@ -126,6 +128,35 @@ export class SqliteWorkStore implements WorkStore {
     this.db.query("INSERT INTO work_plan_templates(id,record) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET record=excluded.record").run(value.id, JSON.stringify(value));
   }
   deletePlanTemplate(id: string): void { this.db.query("DELETE FROM work_plan_templates WHERE id=?").run(id); }
+  trash(id: string): TrashItem | undefined {
+    const row = this.db.query<{ record: string }, [string]>("SELECT record FROM work_trash WHERE id=?").get(id);
+    return row ? TrashItem.parse(JSON.parse(row.record)) : undefined;
+  }
+  trashed(): TrashItem[] {
+    return this.db.query<{ record: string }, []>("SELECT record FROM work_trash").all().map(row => TrashItem.parse(JSON.parse(row.record)));
+  }
+  putTrash(item: TrashItem): void {
+    this.db.query("INSERT INTO work_trash VALUES (?,?)").run(item.id, JSON.stringify(TrashItem.parse(item)));
+  }
+  removeTrash(id: string): void { this.db.query("DELETE FROM work_trash WHERE id=?").run(id); }
+  purge(item: TrashItem): void {
+    const { id, kind } = item;
+    this.db.query(`DELETE FROM work_requests WHERE json_extract(result,'$.kind') <> 'trashed' AND
+      (json_extract(operation,'$.args.task')=? OR json_extract(operation,'$.args.project')=?
+        OR json_extract(result,'$.task.id')=? OR json_extract(result,'$.project.id')=?)`).run(id, id, id, id);
+    if (kind === "project") this.db.query("DELETE FROM work_projects WHERE id=?").run(id);
+    else {
+      // Preserve incoming foreign keys and round associations with a scrubbed, invisible ID row.
+      for (const table of ["work_comments", "work_turns", "work_dependencies"]) this.db.query(`DELETE FROM ${table} WHERE task=?`).run(id);
+      const epoch = "1970-01-01T00:00:00.000Z";
+      this.db.query(`UPDATE work_tasks SET title='',description='',revision=1,outcome='cancelled',turn=?,plan=NULL,
+        project=NULL,parent=NULL,due=NULL,created=?,updated=?,tags='[]',refs='[]',workdir=NULL,model=NULL,gpus=NULL,
+        timeout_minutes=NULL,created_by=NULL,updated_by=NULL WHERE id=?`)
+        .run(JSON.stringify({ holder: "nobody", reason: "on_hold", since: epoch }), epoch, epoch, id);
+      this.db.query("INSERT INTO work_purged_tasks VALUES (?)").run(id);
+    }
+    this.removeTrash(id);
+  }
   receipt(actor: string, request: string): { operation: string; result: WorkCommandResult } | undefined {
     const row = this.db.query<{ operation: string; result: string }, [string, string]>("SELECT operation,result FROM work_requests WHERE actor=? AND request=?").get(actor, request);
     return row ? { operation: row.operation, result: WorkCommandResult.parse(JSON.parse(row.result)) } : undefined;
