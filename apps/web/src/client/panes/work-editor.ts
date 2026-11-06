@@ -315,7 +315,13 @@ export class WorkEditor {
 
   private editBody(): void {
     if (this.bodyDraft) return;
-    const area = autosize(h("textarea", { name: "edit-description", rows: "2", class: "work-description-input", "aria-label": t("Description"), placeholder: t("Add a description: background, approach or definition of done…") }));
+    const height = this.bodyHost.getBoundingClientRect().height;
+    const area = h("textarea", { name: "edit-description", rows: "1", class: "work-description-input", "aria-label": t("Description"), placeholder: t("Add a description: background, approach or definition of done…") });
+    // Enter without a layout jump; grow only as the user changes the content.
+    area.style.height = `${height}px`;
+    area.style.minHeight = `${height}px`;
+    area.style.maxHeight = `max(${height}px, 45vh)`;
+    area.addEventListener("input", () => { area.style.height = "auto"; area.style.height = `${area.scrollHeight}px`; });
     area.value = this.writer.description; this.bodyDraft = area;
     area.addEventListener("input", event => this.changed((event as InputEvent).isComposing));
     area.addEventListener("compositionstart", () => clearTimeout(this.timer));
@@ -331,8 +337,7 @@ export class WorkEditor {
     });
     clear(this.bodyHost, h("div", { class: "body-editor work-description-editor" }, area));
     this.disposeBodyReferences = referenceInput(area, this.client, () => this.title.value);
-    area.focus(); area.setSelectionRange(area.value.length, area.value.length);
-    area.dispatchEvent(new Event("input"));
+    area.focus({ preventScroll: true }); area.setSelectionRange(area.value.length, area.value.length);
   }
 
   /** 一轮实际会用的工作目录：任务 → 项目 → ~（ADR 0033）。 */

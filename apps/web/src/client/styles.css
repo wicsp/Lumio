@@ -391,7 +391,8 @@ select { appearance: none; padding-right: 28px; background-image: linear-gradien
 .body-editor textarea { min-height: 180px; max-height: 60vh; font-family: var(--mono); font-size: var(--fs-sm); }
 .body-editor .button-row { margin-top: 8px; }
 .body-editor .field-hint { margin-left: auto; }
-.work-description-editor textarea { min-height: 72px; max-height: 45vh; resize: none; }
+.work-description-editor textarea { display: block; min-height: 0; max-height: none; resize: none; padding: 4px 0; border: 0; border-radius: var(--r-md); background: transparent; font-family: var(--sans); font-size: var(--fs-md); line-height: 1.7; }
+.work-description-editor textarea:focus { outline: 1px solid var(--focus); box-shadow: none; }
 .work-save-status { min-height: 0; margin-top: 6px; }
 
 .conflict { display: flex; flex-direction: column; gap: 8px; margin: 0 0 14px; }
