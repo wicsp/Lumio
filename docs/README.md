@@ -2,32 +2,32 @@
 
 | 想知道 | 读这个 |
 |---|---|
-| Lumio 现在是怎么设计的、有哪些规则 | [`DESIGN.md`](DESIGN.md)（**唯一的现行设计说明**） |
+| Lumio 现在是怎么设计的、有哪些规则 | [`DESIGN.md`](DESIGN.md)（**现行设计总览**）与 [`design/`](design/) 下的分册 |
 | AI 必须遵守什么 | [`../AGENTS.md`](../AGENTS.md) |
 | 接下来要做什么 | [`tasks/README.md`](tasks/README.md)；当前：[R1-0 v0.2 上线](tasks/R1-0-v0.2-release.md)、[R2-0 v0.2.1](tasks/R2-0-language-terminal-theme.md) |
 | 四模块重构的目标与实施顺序 | [ADR 0025](adr/0025-four-module-architecture.md)（Accepted，大部分已实现）、[R0-0](tasks/R0-0-four-module-refactor.md) |
 | Web GUI 启动、配置与功能 | [工作台说明](../apps/web/README.md)、[P4-1](tasks/P4-1-web-workbench.md) |
 | 助手模型配置、显式记忆与工具权限 | [助手使用](assistant.md) |
 | 旧任务笔记切换数据库、备份与回退 | [迁移与回退](migration-v2.md) |
-| 某条规则**为什么**这样定 | `adr/` 中对应的 ADR（DESIGN.md 里每条规则都标了编号） |
+| 某条规则**为什么**这样定 | 设计文档里标注的 ADR、任务或 PR 编号 |
 | 数据格式的精确定义 | `packages/schema` |
 
 ## 现在在哪一步（2026-11-02）
 
 P0、P1、P2 全部完成（P2-1 至 P2-13，最新发布 v0.1.6），Mac 单机安装与实验室服务器执行器已人工验收。
 ADR 0025 的四模块重构已合入：业务库、显式委派、Routine、助手对话与显式记忆、可配置模型适配、JSONL/产物和完整业务备份，以及可核查的旧数据迁移。
-实现证据与交叉 review 见 [R0-0](tasks/R0-0-four-module-refactor.md)。真实数据迁移、已安装服务升级和发布单独安排；未排期的待办见 [`tasks/README.md`](tasks/README.md)，阶段表见 [`DESIGN.md`](DESIGN.md) 第 8 节。
+实现证据与交叉 review 见 [R0-0](tasks/R0-0-four-module-refactor.md)。真实数据迁移、已安装服务升级和发布单独安排；未排期的待办见 [`tasks/README.md`](tasks/README.md)，阶段表也在 [`tasks/README.md`](tasks/README.md)。
 
 ## 文档各管什么
 
 | 文档 | 写什么 | 写法 | 谁来改 |
 |---|---|---|---|
-| `DESIGN.md` | 现在是什么样 | 随时改成最新，不留历史 | Claude 起草，人类批准 |
-| `adr/` | 为什么这样决定 | 只追加；实现后定稿（ADR 0013） | Claude 起草，人类批准 |
-| `tasks/` | 一个切片要做什么、怎么验收 | 做完后保留原文 | Claude 起草 |
+| `DESIGN.md` + `design/` | 现在是什么样：总览与各模块的规则和边界 | 随时改成最新，不留历史；每个文件 ≤ 15 KB | Claude 起草，人类批准 |
+| `adr/` | 架构级决定为什么这样定 | 只为架构级决定写（ADR 0036）；只追加；实现后定稿（ADR 0013） | Claude 起草，人类批准 |
+| `tasks/` | 一个切片要做什么、怎么验收；小功能的具体需求；阶段表 | 做完后保留原文 | Claude 起草 |
 | `AGENTS.md` | AI 的硬规则 | 随时改成最新 | 人类批准 |
 
-改 ADR 的 PR 必须同时改 `DESIGN.md`（ADR 0015）。
+改 ADR 的 PR 必须同时改设计文档（ADR 0015）；反过来，小改动直接改设计文档或只写任务说明，不写 ADR（ADR 0036，判断方法见 [`DESIGN.md`](DESIGN.md) 第 5 节）。
 
 ## ADR 索引（按领域）
 
@@ -96,6 +96,7 @@ ADR 0025 的四模块重构已合入：业务库、显式委派、Routine、助�
 | 编号 | 一句话 | 状态 |
 |---|---|---|
 | [0013](adr/0013-adr-lifecycle.md) | ADR 实现之后才定稿 | Implemented |
-| [0015](adr/0015-design-doc-and-adr-domains.md) | DESIGN.md 写现行规则，ADR 只记原因；按领域打标签 | Implemented |
+| [0015](adr/0015-design-doc-and-adr-domains.md) | DESIGN.md 写现行规则，ADR 只记原因；按领域打标签 | Implemented（第 1、2 节由 0036 修订） |
+| [0036](adr/0036-adr-threshold-and-design-split.md) | 只为架构级决定写 ADR；现行设计拆成总览加分册，每个文件 ≤ 15 KB | Implemented |
 
 已删除的编号：0006、0010、0011（未实现，合并为 0014）。编号不复用。
