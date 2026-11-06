@@ -17,8 +17,6 @@ import { checkpointCommand, openPlanEditor, planProgress, stageLabel } from "../
 import { TURN_ACTION_DONE, TURN_ACTION_ICONS, TURN_ACTION_LABELS, TURN_GROUPS, TURN_GROUP_LABELS, reasonLabel, turnActionCommand, turnActions, turnGroup, turnIcon, turnText, type TurnAction } from "../turn.ts";
 import { renderMarkdown } from "../utils/markdown.ts";
 import { referenceInput } from "../reference-input.ts";
-import { writingContext, portableReference } from "../note-text.ts";
-import { NoteEditor } from "../note-editor.ts";
 import { WorkSave, type WorkDraft } from "../work-save.ts";
 import { drafts, textDraft } from "../drafts.ts";
 import type { Navigate } from "../navigation.ts";
@@ -40,12 +38,13 @@ export class WorkEditor {
   private record: EditableWork;
   private title: HTMLInputElement;
   private writer: WorkSave;
-  private editor?: NoteEditor;
+  private bodyDraft?: HTMLTextAreaElement;
+  private disposeBodyReferences?: () => void;
   private disposeReferences?: () => void;
   private store = drafts();
   private recovery: ReturnType<ReturnType<typeof drafts>["claim"]>;
   private timer?: ReturnType<typeof setTimeout>;
-  private saveStatus = h("div", { class: "note-save-status", role: "status" });
+  private saveStatus = h("div", { class: "note-save-status work-save-status", role: "status", hidden: true });
   private note = h("div", { class: "conflict", role: "alert" });
   private props = h("div", { class: "props" });
   private bodyHost = h("div", {});
@@ -82,7 +81,7 @@ export class WorkEditor {
 
     const attention = h("div", { class: "attn-slot" });
     const detail = h("div", { class: "detail" }, crumbs, h("div", { class: "detail-head" }, this.title, this.updated), attention, this.note, this.props,
-      h("div", { class: "divider" }), this.saveStatus, this.bodyHost);
+      h("div", { class: "divider" }), this.bodyHost, this.saveStatus);
     root.append(detail);
     this.renderMeta();
     this.renderProps();
@@ -105,7 +104,7 @@ export class WorkEditor {
     } else detail.append(this.projectTasks(input));
   }
 
-  dispose(): void { this.canLeave(); this.active = false; clearTimeout(this.timer); this.editor?.destroy(); this.disposeReferences?.(); }
+  dispose(): void { this.canLeave(); this.active = false; clearTimeout(this.timer); this.disposeBodyReferences?.(); this.disposeReferences?.(); }
   get dirty(): boolean { return this.writer.dirty; }
   canLeave(): boolean { this.persist(); void this.flush(); return true; }
   async beforeLeave(): Promise<boolean> { this.persist(); await this.flush(); return true; }
@@ -114,7 +113,7 @@ export class WorkEditor {
     else this.recovery.remove();
   }
   private changed(composing: boolean): void {
-    this.writer.change(this.title.value, this.editor?.value ?? this.writer.description);
+    this.writer.change(this.title.value, this.bodyDraft?.value ?? this.writer.description);
     clearTimeout(this.timer);
     if (!composing && !this.writer.error) this.timer = setTimeout(() => void this.flush(), 800);
   }
@@ -128,7 +127,8 @@ export class WorkEditor {
     if (!this.active) return;
     const changed = this.record.revision !== this.writer.base.revision;
     this.record = this.writer.base;
-    this.saveStatus.textContent = this.writer.saving ? t("Saving…") : this.writer.error ? t("Draft saved on this device") : this.writer.dirty ? t("Saving…") : t("Saved");
+    this.saveStatus.hidden = !this.writer.error && !(this.writer.dirty && !this.store.persistent);
+    this.saveStatus.textContent = this.writer.error ? t("Draft saved on this device") : "";
     if (this.writer.dirty && !this.store.persistent) this.saveStatus.textContent = t("Browser storage unavailable; keep this page open until saved.");
     if (changed) { this.renderMeta(); this.hooks.changed(); }
     if (this.writer.error) this.showFailure(this.writer.error);
@@ -300,12 +300,39 @@ export class WorkEditor {
   }
 
   private renderBody(): void {
-    this.editor = new NoteEditor({ value: this.writer.description, change: (_text, _position, composing) => this.changed(composing), context: () => {},
-      referenceContext: position => writingContext(this.title.value,this.editor!.value,position),
-      references: async (query,position) => { const result=await this.client.noteReferences({source_kind:"idea",query,context:writingContext(this.title.value,this.editor!.value,position)});return {hits:result.hits.map(hit=>({...hit,insert_text:portableReference(hit.note)}))}; },
-      open: ref => this.hooks.navigate("knowledge", ref), save: () => void this.flush() });
-    this.editor.root.addEventListener("focusout", () => void this.flush());
-    clear(this.bodyHost, this.editor.root);
+    this.disposeBodyReferences?.(); this.disposeBodyReferences = undefined;
+    this.bodyDraft = undefined;
+    const view = h("div", { class: "body-view markdown", role: "button", tabindex: "0", "aria-label": t("Description"), title: t("Click to edit the description") });
+    if (this.writer.description.trim()) view.innerHTML = renderMarkdown(this.writer.description);
+    else view.append(h("p", { class: "body-empty" }, t("Add a description: background, approach or definition of done…")));
+    view.addEventListener("click", event => {
+      if ((event.target as Element).closest("a,button") || !window.getSelection()?.isCollapsed) return;
+      this.editBody();
+    });
+    view.addEventListener("keydown", event => { if (event.target === view && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); this.editBody(); } });
+    clear(this.bodyHost, view);
+  }
+
+  private editBody(): void {
+    if (this.bodyDraft) return;
+    const area = autosize(h("textarea", { name: "edit-description", rows: "2", class: "work-description-input", "aria-label": t("Description"), placeholder: t("Add a description: background, approach or definition of done…") }));
+    area.value = this.writer.description; this.bodyDraft = area;
+    area.addEventListener("input", event => this.changed((event as InputEvent).isComposing));
+    area.addEventListener("compositionstart", () => clearTimeout(this.timer));
+    area.addEventListener("compositionend", () => this.changed(false));
+    area.addEventListener("keydown", event => {
+      if (event.isComposing) return;
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void this.flush(); }
+      if (event.key === "Escape") { event.preventDefault(); area.blur(); }
+    });
+    area.addEventListener("blur", () => {
+      if (!this.active || this.bodyDraft !== area) return;
+      this.changed(false); void this.flush(); this.renderBody();
+    });
+    clear(this.bodyHost, h("div", { class: "body-editor work-description-editor" }, area));
+    this.disposeBodyReferences = referenceInput(area, this.client, () => this.title.value);
+    area.focus(); area.setSelectionRange(area.value.length, area.value.length);
+    area.dispatchEvent(new Event("input"));
   }
 
   /** 一轮实际会用的工作目录：任务 → 项目 → ~（ADR 0033）。 */
