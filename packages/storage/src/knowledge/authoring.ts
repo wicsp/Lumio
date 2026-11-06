@@ -54,8 +54,9 @@ export class KnowledgeCreationStore {
     if (row && row.ready < 0) conflict("NOTE_RECOVERY_CONFLICT");
     if (row?.ready === 1) return KnowledgeCreateResult.parse(JSON.parse(row.result));
     if (!row) {
-      // An explicitly deleted published file cannot be recovered. Retain its receipt, release its reservation.
-      for (const pending of this.db.query<Receipt, [string]>("SELECT * FROM knowledge_creations WHERE vault=? AND ready=0 AND published=1").all(root)) {
+      // Creations are serialized, so any pending receipt here is interrupted. A missing file (deleted after publication,
+      // or never written) cannot be recovered: retain the receipt, release its path reservation.
+      for (const pending of this.db.query<Receipt, [string]>("SELECT * FROM knowledge_creations WHERE vault=? AND ready=0").all(root)) {
         try {
           if (!(await this.existing(pending.path))) this.db.query("UPDATE knowledge_creations SET ready=-1 WHERE actor=? AND request_id=?").run(pending.actor, pending.request_id);
         } catch { /* An unrelated unsafe file stays reserved for manual inspection. */ }

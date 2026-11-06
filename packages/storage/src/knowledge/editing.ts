@@ -51,7 +51,7 @@ export class KnowledgeEditingStore {
         now: Date;
         validate(bytes: Buffer): void;
         finalize(note: NoteDetail, bytes: Buffer): Promise<void>;
-        audit(note: NoteDetail): void;
+        audit(note: NoteDetail, actor: string): void;
         beforeWrite?(): Promise<void>;
     }): Promise<KnowledgeUpdateResult> {
         const request = KnowledgeUpdateRequest.parse(input), root = await realpath(this.root), fingerprint = hash(JSON.stringify({ root, id, ...request }));
@@ -87,8 +87,11 @@ export class KnowledgeEditingStore {
             const after = editKnowledgeDocument(before, request.title, request.body, hooks.now.toISOString());
             hooks.validate(after);
             const result = KnowledgeUpdateResult.parse({ ...document(row, after), request_id: request.request_id });
-            if (this.db.query("SELECT 1 FROM knowledge_edits WHERE path=? AND ready=0").get(row.path))
-                fail("SAVE_UNCERTAIN");
+            const stale = this.db.query<Receipt, [
+                string
+            ]>("SELECT * FROM knowledge_edits WHERE path=? AND ready=0").get(row.path);
+            if (stale)
+                await this.settle(stale, before, hooks);
             this.db.query("INSERT INTO knowledge_edits(actor,request_id,fingerprint,path,before,after,result) VALUES (?,?,?,?,?,?,?)").run(actor, request.request_id, fingerprint, row.path, before.toString("utf8"), after.toString("utf8"), JSON.stringify(result));
             receipt = this.db.query<Receipt, [
                 string,
@@ -125,8 +128,27 @@ export class KnowledgeEditingStore {
         }
         if (!old.equals(after))
             await hooks.finalize(result.document, after);
-        this.db.transaction(() => { hooks.audit(result.document); this.db.query("UPDATE knowledge_edits SET ready=1 WHERE actor=? AND request_id=?").run(actor, request.request_id); })();
+        this.db.transaction(() => { hooks.audit(result.document, actor); this.db.query("UPDATE knowledge_edits SET ready=1 WHERE actor=? AND request_id=?").run(actor, request.request_id); })();
         return result;
+    }
+    /**
+     * Writes are serialized, so a pending receipt seen by another request is an interrupted save whose client may be gone
+     * (reload, closed tab). Resolve it per ADR 0035 §4 instead of reserving the path forever: expected new bytes on disk
+     * complete its index, audit and receipt; original or third-party bytes end it so its own retry reports a conflict.
+     */
+    private async settle(stale: Receipt, current: Buffer, hooks: {
+        finalize(note: NoteDetail, bytes: Buffer): Promise<void>;
+        audit(note: NoteDetail, actor: string): void;
+    }): Promise<void> {
+        const after = Buffer.from(stale.after);
+        if (!current.equals(after)) {
+            this.abandon(stale.actor, stale.request_id);
+            return;
+        }
+        const result = KnowledgeUpdateResult.parse(JSON.parse(stale.result));
+        if (!Buffer.from(stale.before).equals(after))
+            await hooks.finalize(result.document, after);
+        this.db.transaction(() => { hooks.audit(result.document, stale.actor); this.db.query("UPDATE knowledge_edits SET ready=1 WHERE actor=? AND request_id=?").run(stale.actor, stale.request_id); })();
     }
     private abandon(actor: string, request: string): void { this.db.query("UPDATE knowledge_edits SET ready=-1 WHERE actor=? AND request_id=?").run(actor, request); }
 }

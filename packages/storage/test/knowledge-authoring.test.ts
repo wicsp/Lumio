@@ -66,3 +66,11 @@ test("prepared receipt with no file recovers the same allocated ID", async () =>
   const allocated = JSON.parse(db.query<{ result: string }, []>("SELECT result FROM knowledge_creations").get()!.result);
   expect(await store.create("human", input(), ctx, hooks)).toEqual(allocated);
 });
+test("an unpublished interrupted reservation does not block the title for a later request", async () => {
+  let calls = 0;
+  await expect(store.create("human", input(), ctx, { ...hooks, validate() { if (++calls === 2) throw new Error("stop before publication"); } })).rejects.toThrow();
+  const allocated = JSON.parse(db.query<{ result: string }, []>("SELECT result FROM knowledge_creations").get()!.result);
+  const next = await store.create("human", { ...input(), request_id: "after-reload-request" }, ctx, hooks);
+  expect(next.path).toBe(allocated.path); expect(next.id).not.toBe(allocated.id);
+  await expect(store.create("human", input(), ctx, hooks)).rejects.toMatchObject({ code: "NOTE_RECOVERY_CONFLICT" });
+});

@@ -63,14 +63,39 @@ test("reference context matches related notes; explicit query searches body with
     expect(matches.hits[0]!.note.title).not.toContain("backlink");
     expect(refs.hits.every(h => h.note.type !== "asset" && h.note.id !== id)).toBe(true);
 });
-test("an audit failure is recoverable, blocks competing requests and commits exactly once", async () => {
+test("an audit failure is recoverable and commits exactly once", async () => {
     const request = await input();
     await expect(store.update("human", id, request, { ...hooks(), audit() { throw new Error("audit unavailable"); } })).rejects.toThrow("audit unavailable");
     const latest = await readKnowledgeDocument(vault, id, options());
-    await expect(store.update("human", id, { ...request, request_id: "other-request-0001", expected_revision: latest.revision, body: "next" }, hooks())).rejects.toMatchObject({ code: "SAVE_UNCERTAIN" });
-    await store.update("human", id, request, hooks());
+    const result = await store.update("human", id, request, hooks());
+    expect(result.revision).toBe(latest.revision);
     expect(audits).toBe(1);
     expect((await store.update("human", id, { ...request, request_id: "other-request-0001", expected_revision: latest.revision, body: "next" }, hooks())).document.body).toBe("next");
+    expect(audits).toBe(2);
+});
+test("a later request completes an interrupted save whose client is gone, instead of locking the note", async () => {
+    const request = await input();
+    await expect(store.update("human", id, request, { ...hooks(), audit() { throw new Error("audit unavailable"); } })).rejects.toThrow("audit unavailable");
+    // The page reloaded: it reads the published bytes and saves with a new request ID.
+    const latest = await readKnowledgeDocument(vault, id, options());
+    const recovered: string[] = [];
+    const next = await store.update("human", id, { ...request, request_id: "after-reload-000001", expected_revision: latest.revision, body: "next" }, { ...hooks(), audit(_note: unknown, actor: string) { audits++; recovered.push(actor); } });
+    expect(next.document.body).toBe("next");
+    expect(recovered).toEqual(["human", "human"]);
+    // The interrupted request completed, so its own retry returns the historical receipt without writing again.
+    expect((await store.update("human", id, request, hooks())).revision).toBe(latest.revision);
+    expect((await readKnowledgeDocument(vault, id, options())).document.body).toBe("next");
+    expect(db.query<{ n: number }, []>("SELECT count(*) AS n FROM knowledge_edits WHERE ready=0").get()!.n).toBe(0);
+});
+test("an interrupted save that never published is released and its retry reports a conflict", async () => {
+    const request = await input();
+    await expect(store.update("human", id, request, { ...hooks(), async beforeWrite() { throw new Error("crash"); } })).rejects.toThrow("crash");
+    const unchanged = await readKnowledgeDocument(vault, id, options());
+    expect(unchanged.revision).toBe(request.expected_revision);
+    const next = await store.update("human", id, { ...request, request_id: "after-reload-000002", body: "next" }, hooks());
+    expect(next.document.body).toBe("next");
+    await expect(store.update("human", id, request, hooks())).rejects.toMatchObject({ code: "REVISION_CONFLICT" });
+    expect((await readKnowledgeDocument(vault, id, options())).document.body).toBe("next");
 });
 test("deletion during interrupted save releases reservation without resurrecting the file", async () => {
     const request = await input();
