@@ -1,3 +1,4 @@
+import { EDITING_ROUTES, KnowledgeEditing } from "./knowledge-editing.ts";
 import { KnowledgeCreateRequest, KnowledgeTemplateRequest, PaperResolveRequest, PaperResolveResult } from "@lumio/schema";
 import { randomBytes } from "node:crypto";
 import { CoreError, newId } from "@lumio/foundation";
@@ -11,6 +12,7 @@ import type { HubStore, Identity } from "./store.ts";
 import type { authorize } from "./authorize.ts";
 
 export const KNOWLEDGE_ROUTES = [
+  ...EDITING_ROUTES,
   { operation: "knowledge.template", method: "GET", pattern: /^\/v2\/knowledge\/templates$/ },
   { operation: "knowledge.resolve", method: "POST", pattern: /^\/v2\/knowledge\/papers\/resolve$/ },
   { operation: "knowledge.create", method: "POST", pattern: /^\/v2\/knowledge\/notes$/ },
@@ -78,9 +80,10 @@ export async function resolvePaper(input: PaperResolveRequest, fetcher: PaperFet
 
 export class KnowledgeAuthoring {
   private creations?: KnowledgeCreationStore;
+  private editing?: KnowledgeEditing;
   constructor(private config: HubConfig, private store: HubStore, private exclusive: <T>(action: () => Promise<T>) => Promise<T>,
     private issue: (path: string, message: string) => void, private fetcher?: PaperFetch) {
-    if (config.vault) this.creations = new KnowledgeCreationStore(store.db, config.vault);
+    if (config.vault) { this.creations = new KnowledgeCreationStore(store.db, config.vault); this.editing = new KnowledgeEditing(config, store, exclusive, issue); }
   }
   async handle(request: Request, operation: Operation, identity: Identity, decide: typeof authorize, now: Date): Promise<Response> {
     const decision = decide(identity.actor, { operation });
@@ -90,10 +93,11 @@ export class KnowledgeAuthoring {
     }
     if (!this.creations) throw new HubError("INVALID", { key: "knowledge.no_vault", args: [] }, { reason: "knowledge-not-configured" });
     let body: unknown;
-    if (request.method === "POST") {
+    if (request.method === "POST" || request.method === "PUT") {
       try { body = JSON.parse(await boundedText(request.body, 3_000_000)); }
       catch { throw new HubError("INVALID", { key: "knowledge.invalid", args: [] }); }
     }
+    if (EDITING_ROUTES.some(route => route.operation === operation)) return this.editing!.handle(request, operation, body, identity, now);
     if (operation === "knowledge.template") {
       const parsed = KnowledgeTemplateRequest.safeParse(Object.fromEntries(new URL(request.url).searchParams));
       if (!parsed.success) throw new HubError("INVALID", { key: "knowledge.invalid", args: [] });

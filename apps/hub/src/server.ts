@@ -2,7 +2,7 @@ import { KNOWLEDGE_ROUTES, KnowledgeAuthoring, type PaperFetch } from "./knowled
 import { migrateTaskModel } from "@lumio/storage";
 import { withLanguage, errorMessage, text as msg } from "./messages.ts";
 import { language } from "@lumio/platform";
-import { browserAllowed, browserDenied, webResponse, type HubWeb } from "./web.ts";
+import { browserAllowed, browserDenied, webResponse, webFileResponse, type HubWeb } from "./web.ts";
 import { Pairing, handlePairing } from "./pairing.ts";
 import { Privileged, handlePrivileged } from "./privileged.ts";
 import { stat } from "node:fs/promises";
@@ -150,7 +150,7 @@ async function startHubInstance(config: HubConfig, options: {
           const file = options.web?.files.get(url.pathname);
           if (file && ["GET", "HEAD"].includes(request.method)) {
             status = 200;
-            return new Response(request.method === "HEAD" ? null : typeof file.body === "string" ? file.body : Buffer.from(file.body), { headers: { "Content-Type": file.type } });
+            return webFileResponse(file, request.method, options.web!.csp);
           }
           if (url.pathname === "/" && !options.web) { status = 404; return Response.json(ApiError.parse({ error: { code: "NOT_FOUND", message: msg("server.endpoint_not_found") } }), { status }); }
           if (route?.operation === "health") identity = store.authenticate(request.headers.get("authorization"), (options.now ?? (() => new Date()))());
