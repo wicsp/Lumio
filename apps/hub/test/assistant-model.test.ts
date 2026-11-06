@@ -3,11 +3,13 @@ let previousLocale: string | undefined;
 beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
 afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { expect, test } from "bun:test";
-import { ChatCompletionsModel, configuredModel, modelConfiguration } from "../src/assistant-model.ts";
+import { ChatCompletionsModel, configuredModel, modelConfiguration, modelRequestOptions } from "../src/assistant-model.ts";
+import { AssistantConfiguration } from "../src/assistant-config.ts";
+import { errorMessage, withLanguage } from "../src/messages.ts";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AssistantChatResult } from "@lumio/schema";
+import { AssistantChatResult, AssistantConversationDetail, AssistantEvent, toolName } from "@lumio/schema";
 import { startHub } from "../src/server.ts";
 import { HubStore } from "../src/store.ts";
 import { readConfig } from "../src/config.ts";
@@ -103,4 +105,106 @@ test("configured Hub uses a local compatible model service without injected mode
     expect(result.turn.status).toBe("done"); expect(result.messages.at(-1)?.content).toBe("本地合成回答");
     expect(await chat(input)).toEqual(result); expect(requests).toBe(1);
   } finally { await hub?.stop(); await provider.stop(true); await rm(temp, { recursive: true, force: true }); }
+});
+
+test("DeepSeek non-thinking mode is scoped to its official host, including config verification", async () => {
+  const home = await mkdtemp(join(tmpdir(), "lumio-deepseek-config-"));
+  try {
+    for (const base_url of ["https://api.deepseek.com", "https://api.deepseek.com/v1/", "https://api.deepseek.com/beta"]) {
+      expect(modelRequestOptions(base_url)).toEqual({ thinking: { type: "disabled" } });
+      const manager = new AssistantConfiguration({ home, fetch: fake((_url, init) => {
+        const body = JSON.parse(String(init?.body));
+        expect(body.thinking).toEqual({ type: "disabled" }); expect(body.stream).toBe(false);
+        return Response.json({ choices: [{ message: { role: "assistant", content: "Synthetic ping" } }] });
+      }) });
+      await manager.update({ base_url, model: "deepseek-flash", api_key: "synthetic-token" });
+    }
+    for (const baseUrl of ["https://api.deepseek.com.example.invalid/v1", "https://example.invalid/api.deepseek.com", "http://127.0.0.1:1/v1"]) {
+      expect(modelRequestOptions(baseUrl)).toEqual({});
+      const model = new ChatCompletionsModel({ baseUrl, model: "deepseek-flash", credential: () => undefined }, fake((_url, init) => {
+        expect(JSON.parse(String(init?.body))).not.toHaveProperty("thinking");
+        return Response.json({ choices: [{ finish_reason: "stop", message: { role: "assistant", content: "Synthetic reply" } }] });
+      }));
+      await model.complete(input, { token() {} });
+    }
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+for (const [status, reason, english, chinese] of [
+  [400, "request", "format", "格式"], [422, "request", "parameters", "参数"],
+  [401, "auth", "API key", "密钥"], [403, "auth", "permissions", "权限"],
+  [402, "balance", "balance", "余额"], [404, "endpoint", "not found", "不存在"],
+  [429, "rate_limit", "rate limit", "限流"], [408, "timeout", "timed out", "超时"],
+  [413, "size", "too large", "过大"], [500, "unavailable", "unavailable", "不可用"],
+  [503, "unavailable", "unavailable", "不可用"], [504, "timeout", "timed out", "超时"],
+  [302, "rejected", "rejected", "拒绝"], [409, "rejected", "rejected", "拒绝"],
+] as const) test(`HTTP ${status} gives actionable localized errors without exposing provider data or retrying`, async () => {
+  let attempts = 0, cancelled = false;
+  const model = new ChatCompletionsModel(config(), fake(() => {
+    attempts++;
+    return new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode("synthetic-private-body synthetic-token")); }, cancel() { cancelled = true; } }),
+      { status, statusText: "synthetic-private-status" });
+  }));
+  const cause = await model.complete(input, { token() {} }).catch(cause => cause);
+  expect(cause).toMatchObject({ code: "INVALID", params: { key: `assistant-model.http.${reason}`, args: [status] } });
+  for (const [locale, guidance] of [["en", english], ["zh", chinese]] as const) {
+    const message = withLanguage(locale, () => errorMessage(cause));
+    expect(message).toContain(`HTTP ${status}`); expect(message).toContain(guidance);
+    expect(message).not.toContain("synthetic-private"); expect(message).not.toContain("synthetic-token");
+  }
+  expect(attempts).toBe(1); expect(cancelled).toBe(true);
+});
+
+test("DeepSeek completes tool continuations and saved conversation history; HTTP errors reach JSON, history and NDJSON", async () => {
+  const temp = await mkdtemp(join(tmpdir(), "lumio-deepseek-hub-"));
+  let hub: Awaited<ReturnType<typeof startHub>> | undefined, calls = 0, failureStatus: number | undefined;
+  const model = () => new ChatCompletionsModel({ baseUrl: "https://api.deepseek.com", model: "deepseek-flash", credential: () => "synthetic-key" }, fake((_url, init) => {
+    calls++;
+    const body = JSON.parse(String(init?.body));
+    // Faithful regression: without the explicit toggle, a continuation without
+    // reasoning_content is rejected by DeepSeek's default thinking mode.
+    if (body.thinking?.type !== "disabled" && body.messages.some((message: { role: string }) => message.role === "assistant")) {
+      return Response.json({ error: { message: "The reasoning_content in the thinking mode must be passed back to the API." } }, { status: 400 });
+    }
+    if (failureStatus) return new Response("synthetic-private-provider-error", { status: failureStatus });
+    expect(body.tools.some((tool: { function: { name: string } }) => tool.function.name === toolName("work.task.list"))).toBe(true);
+    if (body.messages.at(-1).role === "user") {
+      return streamed(chunk({ tool_calls: [{ index: 0, id: "synthetic-provider-call", type: "function", function: { name: toolName("work.task.list"), arguments: "{}" } }] }, "tool_calls") + "data: [DONE]\n\n");
+    }
+    const last = body.messages.at(-1), prior = body.messages.at(-2);
+    expect(last.role).toBe("tool"); expect(last.tool_call_id).toBe(prior.tool_calls[0].id);
+    expect(JSON.parse(last.content)).toEqual([]);
+    return Response.json({ choices: [{ finish_reason: "stop", message: { role: "assistant", content: "Synthetic task list is empty." } }] });
+  }));
+  try {
+    const store = await HubStore.open(temp); store.createActor("synthetic-owner", "human");
+    const token = store.createToken("synthetic-owner", "synthetic-owner"); store.close();
+    const start = () => startHub({ ...readConfig({ HOME: temp, LUMIO_STATE_DIR: temp }), port: 0 }, { log() {}, assistantModel: model() });
+    hub = await start();
+    const chat = async (request_id: string, conversation?: string, stream = false, locale = "zh") => fetch(`http://127.0.0.1:${hub!.server.port}/v2/assistant/chat`, {
+      method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "Accept-Language": locale,
+        ...(stream ? { Accept: "application/x-ndjson" } : {}) },
+      body: JSON.stringify({ request_id, message: "Synthetic task query", ...(conversation ? { conversation } : {}) }),
+    });
+    const first = AssistantChatResult.parse(await (await chat("synthetic-deepseek-first")).json());
+    expect(first.turn.status).toBe("done"); expect(first.messages.at(-1)?.content).toBe("Synthetic task list is empty.");
+    expect(first.messages.some(message => message.role === "tool")).toBe(true); expect(calls).toBe(2);
+    // An adapter memory cache cannot repair persisted history after a restart.
+    await hub.stop(); hub = await start();
+    const second = AssistantChatResult.parse(await (await chat("synthetic-deepseek-next", first.conversation.id)).json());
+    expect(second.turn.status).toBe("done"); expect(calls).toBe(4);
+    failureStatus = 429;
+    const failed = AssistantChatResult.parse(await (await chat("synthetic-deepseek-failed", first.conversation.id)).json());
+    expect(failed.turn.status).toBe("failed"); expect(failed.turn.error).toContain("HTTP 429"); expect(failed.turn.error).toContain("限流");
+    const detailResponse = await fetch(`http://127.0.0.1:${hub.server.port}/v2/assistant/conversations/${first.conversation.id}`, { headers: { Authorization: `Bearer ${token}` } });
+    const detail = AssistantConversationDetail.parse(await detailResponse.json());
+    expect(detail.turns.find(turn => turn.id === failed.turn.id)?.error).toBe(failed.turn.error);
+    failureStatus = 402;
+    const stream = await chat("synthetic-deepseek-stream-failed", undefined, true, "en");
+    const events = (await stream.text()).trim().split("\n").map(line => AssistantEvent.parse(JSON.parse(line)));
+    const error = events.find(event => event.type === "error");
+    expect(error?.type).toBe("error");
+    if (error?.type === "error") { expect(error.error).toContain("HTTP 402"); expect(error.error).toContain("balance"); }
+    expect(JSON.stringify(events)).not.toContain("synthetic-private-provider-error"); expect(calls).toBe(6);
+  } finally { await hub?.stop(); await rm(temp, { recursive: true, force: true }); }
 });
