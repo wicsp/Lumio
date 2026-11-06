@@ -28,6 +28,28 @@ const object = (value: unknown): Record<string, unknown> => {
 interface Call { id: string; name: string; arguments: string }
 const MAX_BYTES = 4 * 1024 * 1024;
 
+/** The persisted model contract has no reasoning channel. DeepSeek enables thinking by
+ * default and requires that channel on tool continuations, so request non-thinking
+ * mode explicitly. Match the official host, never a model name on another provider.
+ * https://api-docs.deepseek.com/guides/thinking_mode/ */
+export function modelRequestOptions(baseUrl: string): { thinking?: { type: "disabled" } } {
+  return new URL(baseUrl).hostname === "api.deepseek.com" ? { thinking: { type: "disabled" } } : {};
+}
+
+function rejected(status: number): AssistantError {
+  const reason = status === 401 || status === 403 ? "auth"
+    : status === 402 ? "balance"
+    : status === 404 ? "endpoint"
+    : status === 429 ? "rate_limit"
+    : status === 408 || status === 504 ? "timeout"
+    : status === 413 ? "size"
+    : status === 400 || status === 422 ? "request"
+    : status >= 500 ? "unavailable" : "rejected";
+  // Only a numeric status and local guidance cross the boundary. Provider error
+  // bodies/status text can contain credentials or echoed private request content.
+  return new AssistantError("INVALID", { key: `assistant-model.http.${reason}`, args: [status] });
+}
+
 /** HTTP stays in the Hub adapter. No provider, model, tool or retries are enabled implicitly. */
 export class ChatCompletionsModel implements AssistantModel {
   constructor(private readonly config: ModelConfiguration, private readonly fetcher: typeof fetch = fetch) {}
@@ -39,7 +61,7 @@ export class ChatCompletionsModel implements AssistantModel {
       const key = this.config.credential();
       response = await this.fetcher(`${this.config.baseUrl}/chat/completions`, { method: "POST", redirect: "error", signal,
         headers: { "Content-Type": "application/json", Accept: "text/event-stream", ...(key ? { Authorization: `Bearer ${key}` } : {}) },
-        body: JSON.stringify({ model: input.model ?? this.config.model, stream: true,
+        body: JSON.stringify({ model: input.model ?? this.config.model, stream: true, ...modelRequestOptions(this.config.baseUrl),
           messages: input.messages.map(message => ({ role: message.role, content: message.content,
             ...(message.tool_call_id ? { tool_call_id: message.tool_call_id } : {}),
             ...(message.tool_calls?.length ? { tool_calls: message.tool_calls.map(call => ({ id: call.id, type: "function", function: { name: call.name, arguments: JSON.stringify(call.args) } })) } : {}),
@@ -47,7 +69,7 @@ export class ChatCompletionsModel implements AssistantModel {
           ...(input.tools.length ? { tools: input.tools.map(tool => ({ type: "function", function: { name: tool.name, description: tool.description, parameters: tool.input_schema } })) } : {}),
         }),
       });
-      if (!response.ok) throw new AssistantError("INVALID", response.status === 401 || response.status === 403 ? { key: "assistant-model.model_service_denied_authorization_check_runtime_credentials", args: [] } : { key: "assistant-model.model_service_rejected_the_request_check_url_model_and_service_statu", args: [] });
+      if (!response.ok) throw rejected(response.status);
       if (!response.body) throw invalid();
       const reader = response.body.getReader(), decoder = new TextDecoder("utf-8", { fatal: true });
       let bytes = 0;
