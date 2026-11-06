@@ -48,7 +48,7 @@ export class KnowledgeEditing {
                         this.issue(note.note.path, msg("knowledge.commit_failed"));
                         throw cause;
                     } },
-                audit: note => this.store.audit(identity, operation, "allow", undefined, `updated:${note.note.id}`)
+                audit: (note, actor) => this.store.audit(identity, operation, "allow", undefined, actor === identity.actor.id ? `updated:${note.note.id}` : `recovered:${note.note.id}:${actor}`)
             }));
             return Response.json(result);
         }
