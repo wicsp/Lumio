@@ -13,7 +13,7 @@ import type { Navigate } from "../navigation.ts";
 import { referenceInput } from "../reference-input.ts";
 import { drafts, textDraft } from "../drafts.ts";
 import { t, translated } from "../i18n.ts";
-import { MessageNavigation } from "../message-navigation.ts";
+import { MessageRail } from "../side-rail.ts";
 
 const TURN_LABEL: Record<string, string> = translated({ running: "Still working", done: "Done", failed: "Didn't finish", unknown: "Result unknown — check before retrying", cancelled: "Cancelled" });
 const SUGGESTIONS = ["Help me prioritize what to work on today", "How should I organize this week's experiment results?", "Draft an outline for the rebuttal"];
@@ -30,7 +30,7 @@ export class AssistantPane {
   private notice = h("div", { role: "status" });
   private dock: HTMLElement;
   private composer: HTMLFormElement;
-  private messageNav: MessageNavigation;
+  private messageNav: MessageRail;
   private scrollOnResume = false;
   private segChat = h("button", { type: "button", "aria-pressed": "true", onclick: () => this.switchMode("chat") }, t("Chat"));
   private segMemory = h("button", { type: "button", "aria-pressed": "false", onclick: () => this.switchMode("memory") }, t("Memory"));
@@ -53,12 +53,12 @@ export class AssistantPane {
     this.text.addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); this.composer.requestSubmit(); } });
     this.dock = h("div", { class: "chat-dock" }, this.notice, this.composer);
     this.scroller.append(this.messages);
-    this.messageNav = new MessageNavigation(this.scroller, this.messages, ".msg-user");
+    this.messageNav = new MessageRail(this.scroller, this.messages, ".msg-user", t("Jump to a message"), (index, excerpt) => t("Message {0}: {1}", index + 1, excerpt));
     this.layout.append(
       h("aside", { class: "chat-side" },
         h("div", { class: "list-tools" }, h("button", { type: "button", class: "btn", onclick: () => this.newConversation() }, icon("plus"), t("New chat"))),
         this.conversations),
-      h("section", { class: "chat-main" }, h("div", { class: "message-layout" }, this.messageNav.element, this.scroller), this.dock));
+      h("section", { class: "chat-main" }, h("div", { class: "message-layout" }, this.scroller, this.messageNav.element), this.dock));
     root.append(
       h("header", { class: "bar" },
         h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": t("Conversations"), onclick: () => this.layout.classList.toggle("show-side") }, icon("assistant")),

@@ -16,7 +16,8 @@ import { clear, debounce, empty, failure, h, icon, loading, openMenu, placeholde
 import { listKeys, markSelected } from "../list-keys.ts";
 import { renderMarkdown, safeExternalUrl } from "../utils/markdown.ts";
 import { t, translated } from "../i18n.ts";
-import { articleOutline } from "../article-outline.ts";
+import { renderedOutline } from "../article-outline.ts";
+import { SideRail, type RailEntry } from "../side-rail.ts";
 
 const TYPE_LABEL: Record<string, string> = translated({ paper: "Paper", idea: "Idea", experiment: "Experiment", source: "Source", post: "Post", asset: "Asset", project: "Old project", task: "Old task", routine: "Old routine" });
 const LEGACY = new Set(["project", "task", "routine"]);
@@ -25,6 +26,8 @@ export class KnowledgePane {
   private split = h("div", { class: "split" });
   private results = h("div", { class: "list-scroll" });
   private detail = h("section", { class: "detail-pane", "aria-live": "polite" });
+  private outlineEntries: () => RailEntry[] = () => [];
+  private outline = new SideRail(this.detail, () => this.outlineEntries(), t("Article outline"), "outline");
   private query = h("input", { type: "search", name: "q", placeholder: t("Title, text, author, citekey"), autocomplete: "off" });
   private type = "";
   private includePrivate = false;
@@ -72,7 +75,7 @@ export class KnowledgePane {
       h("div", { class: "list-pane" },
         h("div", { class: "list-tools", role: "search" }, h("label", { class: "search-box" }, icon("search"), this.query), this.typeButton, this.privateButton),
         this.results, this.related),
-      this.detail);
+      h("div", { class: "rail-host" }, this.detail, this.outline.element));
     this.renderFilters();
     this.showPlaceholder();
     this.unbindKeys = listKeys(this.results, id => void this.open(id));
@@ -95,8 +98,8 @@ export class KnowledgePane {
     this.creator=new KnowledgeCreate(this.client,result=>{this.creator=undefined;this.query.value="";this.type="";this.renderFilters();void this.search();void this.read(result.id);},this.detail,context=>this.recommend(context),ref=>void this.open(ref),()=>{this.clearWriter();this.showPlaceholder();},()=>{this.split.classList.toggle("show-related");this.renderRelated();});
     this.creator.open();
   }
-  private clearWriter():void{this.persist();clearTimeout(this.saveTimer);clearTimeout(this.relatedTimer);this.relatedGeneration++;this.contextKey="";this.relatedTerms=[];this.linksRevision="";this.split.classList.remove("show-related");this.relatedHits=[];this.related.hidden=true;clear(this.related);this.editor?.destroy();this.editor=undefined;this.saver=undefined;this.creator?.dispose();this.creator=undefined;}
-  dispose():void{this.clearWriter();this.active=false;this.generation++;this.searchGeneration++;this.unbindKeys();}
+  private clearWriter():void{this.persist();this.outlineEntries=()=>[];this.outline.refresh();clearTimeout(this.saveTimer);clearTimeout(this.relatedTimer);this.relatedGeneration++;this.contextKey="";this.relatedTerms=[];this.linksRevision="";this.split.classList.remove("show-related");this.relatedHits=[];this.related.hidden=true;clear(this.related);this.editor?.destroy();this.editor=undefined;this.saver=undefined;this.creator?.dispose();this.creator=undefined;}
+  dispose():void{this.clearWriter();this.outline.dispose();this.active=false;this.generation++;this.searchGeneration++;this.unbindKeys();}
   async open(reference: string, reload = false): Promise<void> {
     if (!reload && reference === this.selected && this.detail.querySelector(".reader")) return;
     if (!(await this.beforeLeave()) || !this.active) return;
@@ -191,15 +194,6 @@ export class KnowledgePane {
     const attribution = [Array.isArray(fm.authors) ? fm.authors.filter(value => typeof value === "string").join(", ") : typeof fm.author === "string" ? fm.author : "", typeof fm.year === "number" ? String(fm.year) : typeof fm.site === "string" ? fm.site : ""].filter(Boolean).join(" · ");
     const body = h("div", { class: "markdown" });
     body.innerHTML = renderMarkdown(note.body); // renderMarkdown 已转义全部原文，只生成受控标签
-    const headings = [...body.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6")];
-    const outline = headings.length ? articleOutline(() => headings.map(heading => ({
-      level: Number(heading.tagName.slice(1)), label: heading.textContent ?? "",
-      jump: () => {
-        heading.tabIndex = -1;
-        heading.focus({ preventScroll: true });
-        heading.scrollIntoView({ block: "start" });
-      },
-    }))).element : undefined;
     const list = (title: string, items: LinksResult["outgoing"]) => h("section", {}, h("h3", {}, t("{0} ({1})", title, items.length)),
       items.length ? h("ul", {}, ...items.map(l => h("li", {}, l.note ? h("a", { href: "#", "data-note": l.note.id ?? l.note.path }, l.note.title) : h("span", { class: "muted" }, t("{0} (not found)", l.target)))))
         : h("p", { class: "muted" }, t("None")));
@@ -207,9 +201,10 @@ export class KnowledgePane {
       h("div", { class: "detail-crumbs" }, h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": t("Back to list"), onclick: async () => { if (!(await this.beforeLeave())) return; this.clearWriter(); this.selected = undefined; markSelected(this.results, undefined); this.showPlaceholder(); } }, icon("back"))),
       h("h1", { class: "reader-title" }, note.note.title),
       h("div", { class: "reader-meta" }, h("span", { class: "pill" }, kindLabel), attribution && h("span", {}, attribution), sourceUrl && h("a", { href: sourceUrl, target: "_blank", rel: "noopener noreferrer nofollow", class: "btn btn-small" }, icon("external"), t("Open source")), note.note.citekey && h("span", { class: "pill" }, note.note.citekey)),
-      outline, body,
+      body,
       links && h("footer", { class: "backlinks" }, list(t("Links to"), links.outgoing), list(t("Linked from"), links.incoming))));
     this.detail.scrollTop = 0;
+    this.outlineEntries = () => renderedOutline(this.detail, body); this.outline.refresh();
     if(note.note.id && ["paper","source","idea","experiment","post"].includes(note.note.type) && !note.note.path.startsWith("life/"))void this.enableEditing(note);
     else this.detail.querySelector("article")?.append(h("p",{class:"field-hint"},t("This note is read-only here. Check its metadata or edit it in your external editor.")));
   }
@@ -229,13 +224,13 @@ export class KnowledgePane {
       this.linksRevision=doc.revision;
       const context=()=>writingContext(title.value,this.editor?.value??doc.document.body,this.editor?.position??0);
       this.editor=new NoteEditor({value:saver.body,change:(text,position,composing)=>{this.saver!.change(title.value,text);clearTimeout(this.saveTimer);if(!composing&&!this.saver!.error)this.saveTimer=setTimeout(()=>void this.saver?.save(),800);this.recommend(writingContext(title.value,text,position));},context:()=>this.recommend(context()),
-        referenceContext:position=>writingContext(title.value,this.editor!.value,position),references:(query,position)=>this.client.noteReferences({source_id:note.note.id!,query,context:writingContext(title.value,this.editor!.value,position)}),open:ref=>void this.open(this.resolveReference(ref)),save:()=>{clearTimeout(this.saveTimer);if(!this.saver?.error)void this.saver?.save();}});
+        referenceContext:position=>writingContext(title.value,this.editor!.value,position),references:(query,position)=>this.client.noteReferences({source_id:note.note.id!,query,context:writingContext(title.value,this.editor!.value,position)}),open:ref=>void this.open(this.resolveReference(ref)),save:()=>{clearTimeout(this.saveTimer);if(!this.saver?.error)void this.saver?.save();},outlineChanged:()=>this.outline.refresh()});
       const titleChanged=(composing:boolean)=>{this.saver!.change(title.value,this.editor!.value);clearTimeout(this.saveTimer);if(!composing&&!this.saver!.error)this.saveTimer=setTimeout(()=>void this.saver?.save(),800);this.recommend(context());};
       title.addEventListener("compositionstart",()=>clearTimeout(this.saveTimer));
       title.addEventListener("input",event=>titleChanged((event as InputEvent).isComposing));
       title.addEventListener("compositionend",()=>titleChanged(false));
       title.addEventListener("keydown",event=>{if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="s"){event.preventDefault();if(!event.isComposing&&!this.saver?.error)void this.saver?.save();}});
-      article.querySelector(".article-outline")?.remove();oldBody.replaceWith(this.editor.root);article.insertBefore(this.saveStatus,this.editor.root);article.insertBefore(this.saveError,this.editor.root);article.insertBefore(this.conflict,this.editor.root);
+      oldBody.replaceWith(this.editor.root);const editor=this.editor;this.outlineEntries=()=>editor.outlineEntries();this.outline.refresh();article.insertBefore(this.saveStatus,this.editor.root);article.insertBefore(this.saveError,this.editor.root);article.insertBefore(this.conflict,this.editor.root);
       this.saveStatus.before(h("button",{type:"button",class:"btn btn-small mobile-only",onclick:()=>{this.split.classList.toggle("show-related");this.renderRelated();}},t("Related notes")));
       this.renderSave();this.recommend(context());if(saver.dirty)void saver.save();
     }catch{if(this.active&&generation===this.generation)this.detail.querySelector("article")?.append(h("p",{class:"field-hint"},t("This note is read-only here. Check its metadata or edit it in your external editor.")));}

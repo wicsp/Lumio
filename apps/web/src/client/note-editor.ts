@@ -12,7 +12,8 @@ import { renderMarkdown, renderInline, renderMath, renderRichBlock } from "./uti
 import { richBlocks, inlineMath, escapedAt } from "./utils/markdown-extra.ts";
 import { footnotes, referenceTrigger, insertReference, protectedText } from "./note-text.ts";
 import { chineseQuoteInput, chineseQuoteChange } from "./note-input.ts";
-import { articleOutline, markdownHeadings, mayHaveHeadings } from "./article-outline.ts";
+import { OUTLINE_DEPTH, markdownHeadings, mayHaveHeadings } from "./article-outline.ts";
+import type { RailEntry } from "./side-rail.ts";
 type Hit = KnowledgeReferencesResult["hits"][number];
 type ReferenceCompletion = Completion & { hit: Hit; terms: string[] };
 interface Options {
@@ -23,6 +24,8 @@ interface Options {
     referenceContext?: (position: number) => KnowledgeContext;
     open: (reference: string) => void;
     save?: () => void;
+    /** Called (debounced) after the text changes so an outline can rebuild. */
+    outlineChanged?: () => void;
 }
 class InlineWidget extends WidgetType {
     constructor(private html: string, private activate: (view: EditorView, event: MouseEvent) => void, private className = "", private preview?: (anchor: HTMLElement) => void) { super(); }
@@ -58,12 +61,7 @@ export class NoteEditor {
     private card = h("aside", { class: "note-reference-card", hidden: true });
     private help = h("div", { class: "note-reference-help", hidden: true, role: "status" });
     private message = h("span", {});
-    private outline = articleOutline(() => markdownHeadings(this.value).map(({ level, label, position }) => ({
-        level, label, jump: () => {
-            this.view.dispatch({ selection: { anchor: position }, effects: EditorView.scrollIntoView(position, { y: "start", yMargin: 44 }) });
-            this.view.focus();
-        },
-    })), () => !!this.view && mayHaveHeadings(this.value));
+    private outlineTimer?: ReturnType<typeof setTimeout>;
     private lock = new Compartment();
     private active = true;
     private callbackMuted = false;
@@ -81,7 +79,7 @@ export class NoteEditor {
     };
     private cardKey = (event: KeyboardEvent) => { if (event.key === "Escape") this.hideCard(); };
     constructor(private options: Options) {
-        this.root.append(this.outline.element, this.editor, this.help, this.card, this.refs);
+        this.root.append(this.editor, this.help, this.card, this.refs);
         document.addEventListener("pointermove", this.dismissCard);
         document.addEventListener("pointerdown", this.dismissCard);
         document.addEventListener("keydown", this.cardKey);
@@ -142,7 +140,7 @@ export class NoteEditor {
                         if (update.docChanged)
                             queueMicrotask(() => { if (this.active) {
                                 this.renderReferences();
-                                this.outline.refresh();
+                                if (options.outlineChanged) { clearTimeout(this.outlineTimer); this.outlineTimer = setTimeout(() => { if (this.active) options.outlineChanged!(); }, 250); }
                             } });
                     }), EditorView.domEventHandlers({ compositionstart: () => { options.change(this.value, this.position, true); return false; }, compositionend: () => { queueMicrotask(() => { if (this.active) {
                             const change = !this.view.state.readOnly && chineseQuoteChange(this.view.state.doc, this.position);
@@ -151,16 +149,28 @@ export class NoteEditor {
                         } }); return false; } }),
                 ] }) });
         this.renderReferences();
-        this.outline.refresh();
+    }
+    /** Headings down to ###, positioned from CodeMirror's layout so off-screen lines work too. */
+    outlineEntries(): RailEntry[] {
+        if (!mayHaveHeadings(this.value)) return [];
+        return markdownHeadings(this.value).filter(heading => heading.level <= OUTLINE_DEPTH).map(({ level, label, position }) => ({
+            level, label,
+            top: () => this.view.documentTop + this.view.lineBlockAt(Math.min(position, this.view.state.doc.length)).top,
+            jump: () => {
+                const anchor = Math.min(position, this.view.state.doc.length);
+                this.view.dispatch({ selection: { anchor }, effects: EditorView.scrollIntoView(anchor, { y: "start", yMargin: 16 }) });
+                this.view.contentDOM.focus({ preventScroll: true });
+            },
+        }));
     }
     get value(): string { return this.view.state.doc.toString(); }
     get position(): number { return this.view.state.selection.main.head; }
     setValue(text: string): void { if (text === this.value)
-        return; this.callbackMuted = true; this.view.dispatch({ changes: { from: 0, to: this.view.state.doc.length, insert: text }, selection: { anchor: 0 } }); this.callbackMuted = false; this.outline.refresh(); }
+        return; this.callbackMuted = true; this.view.dispatch({ changes: { from: 0, to: this.view.state.doc.length, insert: text }, selection: { anchor: 0 } }); this.callbackMuted = false; this.options.outlineChanged?.(); }
     setReadOnly(locked: boolean): void { this.view.dispatch({ effects: this.lock.reconfigure(EditorState.readOnly.of(locked)) }); }
     focus(position = this.position): void { this.view.dispatch({ selection: { anchor: position }, effects: EditorView.scrollIntoView(position) }); this.view.focus(); }
     destroy(): void {
-        this.active = false; this.queryGeneration++; this.hideCard(); this.view.destroy();
+        this.active = false; clearTimeout(this.outlineTimer); this.queryGeneration++; this.hideCard(); this.view.destroy();
         document.removeEventListener("pointermove", this.dismissCard);
         document.removeEventListener("pointerdown", this.dismissCard);
         document.removeEventListener("keydown", this.cardKey);

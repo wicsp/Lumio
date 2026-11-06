@@ -49,7 +49,7 @@ export class WorkPane {
     this.query.addEventListener("keydown", event => { if (event.key === "Escape" && this.query.value) { this.query.value = ""; void this.load(); } });
     root.append(
       h("header", { class: "bar" },
-        h("h1", { class: "bar-title" }, t("Projects & tasks")),
+        h("h1", { class: "bar-title" }, t("Work")),
         h("div", { class: "segmented", role: "group", "aria-label": t("View") },
           h("button", { type: "button", "aria-pressed": String(mode === "tasks"), onclick: () => navigate("work", "tasks") }, t("Tasks")),
           h("button", { type: "button", "aria-pressed": String(mode === "projects"), onclick: () => navigate("work", "projects") }, t("Projects"))),
@@ -111,9 +111,11 @@ export class WorkPane {
   }
 
   private pickProjectFilter(): void {
+    // Finished projects stay out of the filter (unless one is the current filter, so it can be seen and cleared).
+    const choices = this.projects.filter(p => p.status !== "done" || p.id === this.projectFilter);
     openMenu(this.projectButton, [{ value: "", label: t("All projects"), selected: !this.projectFilter },
-      ...this.projects.map(p => ({ value: p.id, label: p.title, icon: icon("folder"), selected: this.projectFilter === p.id }))],
-      value => { this.projectFilter = value; this.renderFilters(); void this.load(); }, { filter: this.projects.length > 6, placeholder: t("Find a project") });
+      ...choices.map(p => ({ value: p.id, label: p.title, icon: icon("folder"), selected: this.projectFilter === p.id }))],
+      value => { this.projectFilter = value; this.renderFilters(); void this.load(); }, { filter: choices.length > 6, placeholder: t("Find a project") });
   }
 
   private async load(quiet = false): Promise<void> {

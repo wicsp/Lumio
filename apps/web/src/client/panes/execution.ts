@@ -145,10 +145,11 @@ export class ExecutionPane {
         clear(this.list, ...routines.map(info => this.routineRow(info)));
         markSelected(this.list, this.selected);
       } else {
-        const runtimes = await this.client.runtimes();
+        const [runtimes, running] = await Promise.all([this.client.runtimes(), this.client.jobs("running").catch(() => [] as Job[])]);
         if (!this.active || generation !== this.listGeneration) return;
         if (!runtimes.length) { clear(this.list, empty(t("No runtimes connected. Run lumio runtime add in a configured terminal to add a device."))); return; }
-        clear(this.list, ...runtimes.map(runtime => this.deviceCard(runtime)));
+        clear(this.list, ...runtimes.map(runtime => this.deviceCard(runtime,
+          running.filter(job => job.spec.runtime === runtime.actor || job.spec.runtime === runtime.registration.name).length)));
       }
     } catch (cause) {
       if (this.active && generation === this.listGeneration && !quiet) clear(this.list, failure(errorText(cause), () => this.load()));
@@ -173,15 +174,25 @@ export class ExecutionPane {
       h("span", { class: "row-meta" }, h("span", { class: "cron" }, r.schedule)));
   }
 
-  private deviceCard(runtime: RuntimeInfo): HTMLElement {
+  /** One horizontal row per device: who it is and its state on the left, its engines as copyable targets, then tags. */
+  private deviceCard(runtime: RuntimeInfo, running: number): HTMLElement {
     const reg = runtime.registration;
-    return h("article", { class: "card" },
-      h("div", { class: "card-head" }, icon("device"), h("strong", {}, reg.name), h("span", { class: `pill ${runtime.online ? "pill-green" : ""}` }, runtime.online ? t("Online") : t("Offline"))),
-      h("p", { class: "muted" }, t("Last seen {0} · up to {1} at a time", ago(runtime.last_seen), reg.max_concurrent)),
-      reg.engines.length
-        ? h("ul", {}, ...reg.engines.map(engine => h("li", {}, icon("bot"), h("span", {}, engine.name), h("span", { class: "mono" }, `${engine.version}${engine.sandbox === "os" ? "，系统隔离" : ""}`))))
-        : h("p", { class: "muted" }, t("No engines registered")),
-      reg.tags.length > 0 && h("div", { class: "button-row" }, ...reg.tags.map(tag => h("span", { class: "pill" }, tag))));
+    const meta = [t("Last seen {0}", ago(runtime.last_seen)), t("Up to {0} at a time", reg.max_concurrent), running ? t("{0} running", running) : ""].filter(Boolean).join(" · ");
+    return h("article", { class: "card device-card" },
+      h("div", { class: "device-main" },
+        h("span", { class: `device-icon${runtime.online ? " is-online" : ""}` }, icon("device")),
+        h("div", { class: "device-text" },
+          h("div", { class: "device-name" }, h("strong", {}, reg.name), h("span", { class: `pill ${runtime.online ? "pill-green" : ""}` }, runtime.online ? t("Online") : t("Offline"))),
+          h("p", { class: "muted" }, meta))),
+      h("div", { class: "device-engines" },
+        ...(reg.engines.length ? reg.engines.map(engine => {
+          const target = `${engine.name}@${reg.name}`;
+          return h("button", { type: "button", class: "engine-chip", title: t("Copy delegation target {0}", target),
+            onclick: () => void navigator.clipboard?.writeText(target).then(() => toast(t("Copied {0}", target))) },
+          icon("bot"), h("span", { class: "engine-name" }, engine.name), h("span", { class: "mono" }, engine.version),
+          engine.sandbox === "os" && h("span", { class: "pill" }, t("OS sandbox")), icon("copy"));
+        }) : [h("span", { class: "muted" }, t("No engines registered"))])),
+      reg.tags.length > 0 && h("div", { class: "device-tags" }, ...reg.tags.map(tag => h("span", { class: "pill" }, tag))));
   }
 
   // ───────────── 运行详情 ─────────────

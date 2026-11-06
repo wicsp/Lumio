@@ -14,7 +14,7 @@ import { autosize, clear, failure, field, h, icon, openDialog, openMenu, select,
 import { ago, dateInputValue, dueLabel, isoFromDateInput } from "../format.ts";
 import { PROJECT_LABELS } from "../labels.ts";
 import { checkpointCommand, openPlanEditor, planProgress, stageLabel } from "../plan.ts";
-import { MessageNavigation } from "../message-navigation.ts";
+import { MessageRail } from "../side-rail.ts";
 import { TURN_ACTION_DONE, TURN_ACTION_ICONS, TURN_ACTION_LABELS, TURN_GROUPS, TURN_GROUP_LABELS, reasonLabel, turnActionCommand, turnActions, turnGroup, turnIcon, turnText, type TurnAction } from "../turn.ts";
 import { renderMarkdown } from "../utils/markdown.ts";
 import { referenceInput } from "../reference-input.ts";
@@ -51,7 +51,7 @@ export class WorkEditor {
   private props = h("div", { class: "props" });
   private bodyHost = h("div", {});
   private commentDraft?: HTMLTextAreaElement;
-  private messageNav?: MessageNavigation;
+  private messageNav?: MessageRail;
   private busy = false;
   private active = true;
   private showAdvanced = false;
@@ -514,8 +514,8 @@ export class WorkEditor {
     items.sort((a, b) => a.at.localeCompare(b.at) || a.order - b.order);
 
     const list = h("div", { class: "timeline" }, ...items.map(item => item.node()));
-    this.messageNav = new MessageNavigation(this.root, list, ".comment");
-    this.root.before(this.messageNav.element);
+    this.messageNav = new MessageRail(this.root, list, ".comment", t("Jump to a message"), (index, excerpt) => t("Message {0}: {1}", index + 1, excerpt));
+    this.root.after(this.messageNav.element);
     const count = h("span", { class: "count" }, input.comments.length || "");
     const text = autosize(h("textarea", { name: "comment", rows: "1", placeholder: t("Add thoughts, feedback, or questions for the next round…"), "aria-label": t("Discussion") }));
     this.commentDraft = text;

@@ -61,7 +61,7 @@ export class CommandPalette {
       ...THEMES.filter(([key]) => key !== themeChoice()).map(([key, label, name]) => ({ group: t("Settings"), label: `${t("Theme")}: ${t(label)}`, icon: icon(name), run: () => setTheme(key) })),
       ...LANGS.filter(([key]) => key !== lang()).map(([key, label]) => ({ group: t("Settings"), label: `${t("Language")}: ${label}`, icon: icon("globe"), run: () => setLang(key) })),
       { group: t("Go to"), label: t("Today"), hint: "1", icon: icon("home"), run: go("overview") },
-      { group: t("Go to"), label: t("Projects & tasks"), hint: "2", icon: icon("work"), run: go("work") },
+      { group: t("Go to"), label: t("Work"), hint: "2", icon: icon("work"), run: go("work") },
       { group: t("Go to"), label: t("Knowledge"), hint: "3", icon: icon("knowledge"), run: go("knowledge") },
       { group: t("Go to"), label: t("Execution"), hint: "4", icon: icon("execution"), run: go("execution") },
       { group: t("Go to"), label: t("Assistant"), hint: "5", icon: icon("assistant"), run: go("assistant") },
