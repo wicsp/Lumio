@@ -1,3 +1,4 @@
+import { KnowledgeTemplateRequest, KnowledgeTemplateResult, PaperResolveRequest, PaperResolveResult, KnowledgeCreateRequest, KnowledgeCreateResult } from "@lumio/schema";
 import { ExecutionTarget, ExecutionTargetListArgs } from "@lumio/schema";
 import { PushSubscriptionInput, PushDevice, PushDeviceUpdate, PushPublicKey, PushTestResult } from "@lumio/schema";
 import { AgentInfo, AgentTokenIssued, AgentTokenRequest, AgentRevokeRequest, ClientInvite, ClientInviteRequest, ClientJoin, ClientJoinRequest, RuntimeInvite, RuntimeInviteRequest } from "@lumio/schema";
@@ -69,6 +70,9 @@ export function createClient(options: { url: string; token?: string; language?: 
   }
   const queryParams = (options: QueryOptions): Record<string, string> => options.includePrivate === undefined ? {} : { include_private: String(options.includePrivate) };
   return {
+    knowledgeTemplate(input: KnowledgeTemplateRequest) { return request("/v2/knowledge/templates", validate(KnowledgeTemplateRequest, input), KnowledgeTemplateResult); },
+    resolvePaper(input: PaperResolveRequest) { return request("/v2/knowledge/papers/resolve", {}, PaperResolveResult, validate(PaperResolveRequest, input)); },
+    createNote(input: KnowledgeCreateRequest) { return request("/v2/knowledge/notes", {}, KnowledgeCreateResult, validate(KnowledgeCreateRequest, input)); },
     pushKey() { return request("/v2/notifications/push/key", {}, PushPublicKey); },
     pushDevices() { return request("/v2/notifications/push/devices", {}, PushDevice.array()); },
     subscribePush(input: PushSubscriptionInput) { return request("/v2/notifications/push/devices", {}, PushDevice, validate(PushSubscriptionInput, input)); },
