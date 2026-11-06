@@ -1,6 +1,7 @@
 import { NoteEditor } from "../note-editor.ts";
 import { NoteSave } from "../note-save.ts";
 import { writingContext } from "../note-text.ts";
+import { matchTerms } from "../note-matches.ts";
 import type { KnowledgeContext, KnowledgeDocument, KnowledgeRelatedResult } from "@lumio/schema";
 import { KnowledgeCreate } from "./knowledge-create.ts";
 /**
@@ -10,7 +11,7 @@ import { KnowledgeCreate } from "./knowledge-create.ts";
  */
 import { NOTE_TYPES, type NoteDetail, type LinksResult, type SearchResult } from "@lumio/schema";
 import { errorText, type Client } from "../api.ts";
-import { clear, debounce, empty, failure, h, icon, loading, openMenu, placeholder } from "../dom.ts";
+import { clear, debounce, empty, failure, h, icon, loading, openMenu, placeholder, highlightedText } from "../dom.ts";
 import { listKeys, markSelected } from "../list-keys.ts";
 import { renderMarkdown, safeExternalUrl } from "../utils/markdown.ts";
 import { t, translated } from "../i18n.ts";
@@ -40,6 +41,7 @@ export class KnowledgePane {
   private relatedGeneration=0;
   private related=h("section",{class:"related-notes",hidden:true});
   private relatedHits:KnowledgeRelatedResult["hits"]=[];
+  private relatedTerms:string[]=[];
   private relatedExpanded=false;
   private contextKey="";
   private linksRevision="";
@@ -88,7 +90,7 @@ export class KnowledgePane {
     this.creator=new KnowledgeCreate(this.client,result=>{this.creator=undefined;this.query.value="";this.type="";this.renderFilters();void this.search();void this.read(result.id);},this.detail,context=>this.recommend(context),ref=>void this.open(ref),()=>{this.clearWriter();this.showPlaceholder();},()=>{this.split.classList.toggle("show-related");this.renderRelated();});
     this.creator.open();
   }
-  private clearWriter():void{clearTimeout(this.saveTimer);clearTimeout(this.relatedTimer);this.relatedGeneration++;this.contextKey="";this.linksRevision="";this.split.classList.remove("show-related");this.relatedHits=[];this.related.hidden=true;clear(this.related);this.editor?.destroy();this.editor=undefined;this.saver=undefined;this.creator?.dispose();this.creator=undefined;}
+  private clearWriter():void{clearTimeout(this.saveTimer);clearTimeout(this.relatedTimer);this.relatedGeneration++;this.contextKey="";this.relatedTerms=[];this.linksRevision="";this.split.classList.remove("show-related");this.relatedHits=[];this.related.hidden=true;clear(this.related);this.editor?.destroy();this.editor=undefined;this.saver=undefined;this.creator?.dispose();this.creator=undefined;}
   dispose():void{this.clearWriter();this.active=false;this.generation++;this.searchGeneration++;this.unbindKeys();}
   async open(reference:string):Promise<void>{if(!(await this.beforeLeave())||!this.active)return;this.clearWriter();await this.read(reference);}
   liveRefresh():void{if(!this.dirty)void this.search();}
@@ -135,19 +137,20 @@ export class KnowledgePane {
       if (!this.active || generation !== this.searchGeneration || includePrivate !== this.includePrivate) return;
       const hits = this.type ? result.hits : result.hits.filter(hit => !LEGACY.has(hit.note.type));
       if (!hits.length) { clear(this.results, empty(this.query.value.trim() ? t("No matching notes.") : t("No notes yet."))); return; }
-      clear(this.results, ...hits.map(hit => this.row(hit)));
+      const terms = matchTerms(result.query);
+      clear(this.results, ...hits.map(hit => this.row(hit, terms)));
       markSelected(this.results, this.selected);
     } catch (error) {
       if (this.active && generation === this.searchGeneration) clear(this.results, failure(t("Knowledge is unavailable: {0}", errorText(error)), () => this.search()));
     }
   }
 
-  private row(hit: SearchResult["hits"][number]): HTMLElement {
+  private row(hit: SearchResult["hits"][number], terms: string[]): HTMLElement {
     const id = hit.note.id ?? hit.note.path;
     return h("div", { class: "row", "data-id": id, role: "button", tabindex: "0", onclick: () => void this.open(id),
       onkeydown: (event: Event) => { if ((event as KeyboardEvent).key === "Enter") void this.open(id); } },
       h("span", { class: "type-tag" }, TYPE_LABEL[hit.note.type] ?? hit.note.type),
-      h("span", { class: "row-main" }, h("span", { class: "row-title" }, hit.note.title), hit.snippet && h("span", { class: "row-sub" }, hit.snippet)));
+      h("span", { class: "row-main" }, h("span", { class: "row-title" }, highlightedText(hit.note.title, terms)), hit.snippet && h("span", { class: "row-sub" }, highlightedText(hit.snippet, terms))));
   }
 
   private async read(reference: string): Promise<void> {
@@ -203,7 +206,7 @@ export class KnowledgePane {
       this.linksRevision=doc.revision;
       const context=()=>writingContext(title.value,this.editor?.value??doc.document.body,this.editor?.position??0);
       this.editor=new NoteEditor({value:doc.document.body,change:(text,position,composing)=>{this.saver!.change(title.value,text);clearTimeout(this.saveTimer);if(!composing&&!this.saver!.error)this.saveTimer=setTimeout(()=>void this.saver?.save(),800);this.recommend(writingContext(title.value,text,position));},context:()=>this.recommend(context()),
-        references:(query,position)=>this.client.noteReferences({source_id:note.note.id!,query,context:writingContext(title.value,this.editor!.value,position)}),open:ref=>void this.open(this.resolveReference(ref)),save:()=>{clearTimeout(this.saveTimer);if(!this.saver?.error)void this.saver?.save();}});
+        referenceContext:position=>writingContext(title.value,this.editor!.value,position),references:(query,position)=>this.client.noteReferences({source_id:note.note.id!,query,context:writingContext(title.value,this.editor!.value,position)}),open:ref=>void this.open(this.resolveReference(ref)),save:()=>{clearTimeout(this.saveTimer);if(!this.saver?.error)void this.saver?.save();}});
       const titleChanged=(composing:boolean)=>{this.saver!.change(title.value,this.editor!.value);clearTimeout(this.saveTimer);if(!composing&&!this.saver!.error)this.saveTimer=setTimeout(()=>void this.saver?.save(),800);this.recommend(context());};
       title.addEventListener("compositionstart",()=>clearTimeout(this.saveTimer));
       title.addEventListener("input",event=>titleChanged((event as InputEvent).isComposing));
@@ -246,12 +249,12 @@ export class KnowledgePane {
   private recommend(context:KnowledgeContext):void{
     const key=JSON.stringify(context);if(this.contextKey===key)return;this.contextKey=key;
     clearTimeout(this.relatedTimer);const generation=++this.relatedGeneration;const id=this.saver?.base.document.note.id;
-    this.relatedTimer=setTimeout(async()=>{try{const result=await this.client.relatedNotes({...context,...(id?{exclude_id:id}:{})});if(!this.active||generation!==this.relatedGeneration)return;this.relatedHits=result.hits;this.renderRelated();}catch{if(this.active&&generation===this.relatedGeneration){this.relatedHits=[];this.renderRelated();}}},400);
+    this.relatedTimer=setTimeout(async()=>{try{const result=await this.client.relatedNotes({...context,...(id?{exclude_id:id}:{})});if(!this.active||generation!==this.relatedGeneration)return;this.relatedHits=result.hits;this.relatedTerms=matchTerms(context);this.renderRelated();}catch{if(this.active&&generation===this.relatedGeneration){this.relatedHits=[];this.relatedTerms=[];this.renderRelated();}}},400);
   }
   private renderRelated():void{
     this.related.hidden=!this.relatedHits.length&&!this.split.classList.contains("show-related");clear(this.related);if(this.related.hidden)return;
     this.related.append(h("div",{class:"related-heading"},h("strong",{},t("Related notes")),h("button",{type:"button",class:"btn btn-small mobile-only",onclick:()=>{this.split.classList.remove("show-related");this.renderRelated();}},t("Back to note"))));
-    for(const hit of this.relatedHits.slice(0,this.relatedExpanded?5:3))this.related.append(h("button",{type:"button",class:"related-row",title:hit.note.title,onclick:()=>{this.split.classList.remove("show-related");void this.open(hit.note.id??hit.note.path);}},h("span",{class:"row-title"},hit.note.title),h("span",{class:"related-snippet"},hit.snippet||t("Title match"))));
+    for(const hit of this.relatedHits.slice(0,this.relatedExpanded?5:3))this.related.append(h("button",{type:"button",class:"related-row",title:hit.note.title,onclick:()=>{this.split.classList.remove("show-related");void this.open(hit.note.id??hit.note.path);}},h("span",{class:"row-title"},highlightedText(hit.note.title,this.relatedTerms)),h("span",{class:"related-snippet"},hit.snippet?highlightedText(hit.snippet,this.relatedTerms):t("Title match"))));
     if(this.relatedHits.length>3)this.related.append(h("button",{type:"button",class:"btn btn-quiet",onclick:()=>{this.relatedExpanded=!this.relatedExpanded;this.renderRelated();}},this.relatedExpanded?t("Show fewer"):t("Show all {0}",this.relatedHits.length)));
 
   }

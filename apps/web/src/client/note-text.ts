@@ -44,11 +44,11 @@ export function referenceTrigger(text: string, position: number): {
     to: number;
     query: string;
 } | undefined {
-    const start = text.lastIndexOf("[[", position);
+    const start = Math.max(text.lastIndexOf("[[", position), text.lastIndexOf("【【", position));
     if (start < 0 || position < start + 2 || position - start > 202)
         return;
     const query = text.slice(start + 2, position);
-    if (/[\]\n]/.test(query) || protectedText(text).some(r => start >= r.from && start < r.to))
+    if (/[\]】\n]/.test(query) || protectedText(text).some(r => start >= r.from && start < r.to))
         return;
     let slashes = 0;
     for (let i = start - 1; i >= 0 && text[i] === "\\"; i--)
@@ -125,7 +125,7 @@ export function insertReference(text: string, trigger: {
     }[];
     cursor: number;
 } {
-    const to = text.slice(trigger.to, trigger.to + 2) === "]]" ? trigger.to + 2 : trigger.to;
+    const to = ["]]", "】】"].includes(text.slice(trigger.to, trigger.to + 2)) ? trigger.to + 2 : trigger.to;
     if (!asFootnote)
         return { changes: [{ from: trigger.from, to, insert: link }], cursor: trigger.from + link.length };
     const model = footnotes(text), reuse = model.definitions.find(d => /^lumio-ref-[0-9A-HJKMNP-TV-Z]{26}$/.test(d.label) && d.text === link && model.definitions.filter(other => other.label === d.label).length === 1);

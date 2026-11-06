@@ -7,7 +7,7 @@ import { NoteDraft, importEmptyFields, type NoteFields } from "../knowledge-draf
 import { NoteEditor } from "../note-editor.ts";
 import { writingContext } from "../note-text.ts";
 export class KnowledgeCreate {
- private state=new NoteDraft();private kind:KnowledgeNoteKind="paper";private generation=0;private importing=false;private ready=false;private opened=false;
+ private state=new NoteDraft();private kind:KnowledgeNoteKind="idea";private generation=0;private importing=false;private ready=false;private opened=false;
  private form=h("form",{class:"form-stack knowledge-form",id:newRequestId("note-form")});
  private fields=h("div",{class:"form-stack"});private typeCards=h("div",{class:"note-types",role:"group","aria-label":t("Note type")});
  private error=h("div",{role:"alert"});private importNotice=h("div",{role:"status"});private editor?:NoteEditor;
@@ -15,7 +15,7 @@ export class KnowledgeCreate {
  constructor(private client:Client,private onSaved:(result:KnowledgeCreateResult)=>void,private host:HTMLElement,private contextChanged:(context:KnowledgeContext)=>void,private openNote:(ref:string)=>void,private cancel:()=>void,private showRelated:()=>void){}
  open():void{
   if(this.opened)return;this.opened=true;
-  this.editor=new NoteEditor({value:"",change:(body)=>{this.state.changed=true;this.capture(body);this.context();},context:()=>this.context(),references:(query,position)=>this.client.noteReferences({source_kind:this.kind,query,context:writingContext(this.title(),this.editor!.value,position)}),open:this.openNote,save:()=>void this.submit()});
+  this.editor=new NoteEditor({value:"",change:(body)=>{this.state.changed=true;this.capture(body);this.context();},context:()=>this.context(),referenceContext:position=>writingContext(this.title(),this.editor!.value,position),references:(query,position)=>this.client.noteReferences({source_kind:this.kind,query,context:writingContext(this.title(),this.editor!.value,position)}),open:this.openNote,save:()=>void this.submit()});
   this.form.append(this.typeCards,this.fields,h("button",{type:"button",class:"btn btn-small mobile-only",onclick:this.showRelated},t("Related notes")),this.editor.root,this.error,h("div",{class:"note-create-actions"},h("button",{type:"button",class:"btn",onclick:()=>{if(this.canLeave())this.cancel();}},t("Cancel")),this.save));
   clear(this.host,h("article",{class:"reader note-author"},h("h1",{},t("New note")),this.form));
   this.form.addEventListener("invalid",event=>(event.target as Element).closest("details")?.setAttribute("open",""),true);
@@ -35,7 +35,7 @@ export class KnowledgeCreate {
   }catch(cause){if(this.opened&&generation===this.generation)clear(this.error,failure(errorText(cause),()=>void this.loadTemplates()));}
  }
  private capture(body=this.editor?.value??""):NoteFields{const values:NoteFields={body};for(const control of this.fields.querySelectorAll<HTMLInputElement|HTMLTextAreaElement|HTMLSelectElement>("[name]"))values[control.name]=control.value;this.state.set(this.kind,values);return values;}
- private renderTypes():void{const types:Array<[KnowledgeNoteKind,string,string]>=[["paper",t("Paper"),"knowledge"],["video",t("Video"),"play"],["web",t("Web page"),"globe"],["idea",t("Idea"),"memory"]];clear(this.typeCards,...types.map(([kind,label,glyph])=>h("button",{type:"button",class:"note-type","aria-pressed":String(kind===this.kind),onclick:()=>this.switchType(kind)},icon(glyph),label)));}
+ private renderTypes():void{const types:Array<[KnowledgeNoteKind,string,string]>=[["idea",t("Idea"),"memory"],["paper",t("Paper"),"knowledge"],["video",t("Video"),"play"],["web",t("Web page"),"globe"]];clear(this.typeCards,...types.map(([kind,label,glyph])=>h("button",{type:"button",class:"note-type","aria-pressed":String(kind===this.kind),onclick:()=>this.switchType(kind)},icon(glyph),label)));}
  private switchType(kind:KnowledgeNoteKind):void{if(kind===this.kind||!this.ready||this.state.pending||this.state.saving)return;this.capture();this.generation++;this.importing=false;this.kind=kind;this.renderTypes();this.renderFields();this.editor!.setValue(this.state.fields.get(kind)?.body??"");clear(this.error);this.controls(false);this.context();}
   private renderFields(): void {
     const draft = this.state.fields.get(this.kind) ?? {};

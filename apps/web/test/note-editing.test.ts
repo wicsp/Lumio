@@ -8,6 +8,18 @@ test("context at a mid-paragraph completion retains the following sentence", () 
     expect(writingContext("", text, 20).focus).toBe("Earlier evidence  and the following sentence.");
 });
 const id = "idea_00000000000000000000000004";
+test("Chinese and ASCII bracket pairs share completion, context and replacement behavior", () => {
+    for (const [open,close] of [["【【","】】"],["[[","]]"]]) {
+        const text=`Sentence ${open}中文${close} after`,position=13;
+        const trigger=referenceTrigger(text,position)!;
+        expect(trigger.query).toBe("中文");
+        expect(writingContext("",text,position).focus).toBe(`Sentence ${close} after`);
+        const result=insertReference(text,trigger,"[[Target|标题]]",false);
+        expect(result.changes).toEqual([{from:9,to:15,insert:"[[Target|标题]]"}]);
+        expect(referenceTrigger("`"+open+"中文`",5)).toBeUndefined();
+        for(const prefix of ["<!-- ","```\n","\\"])expect(referenceTrigger(prefix+open+"中文",prefix.length+4)).toBeUndefined();
+    }
+});
 function document(body = "before", revision = "a".repeat(64)): KnowledgeDocument { return { revision, document: { note: { id, type: "idea", title: "Title", path: "research/ideas/Note.md" }, body, frontmatter: {} } }; }
 test("reference trigger preserves context and excludes fences, inline code and escaped brackets", () => {
     expect(referenceTrigger("Paragraph [[", 12)?.query).toBe("");
