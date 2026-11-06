@@ -1,4 +1,5 @@
 import { t } from "./i18n.ts";
+import { matchRanges } from "./note-matches.ts";
 /**
  * DOM 与界面基础件：动态文本一律走 textContent，不拼接 HTML。
  * 所有样式来自 styles.css（CSP 不允许内联 style 属性；需要的尺寸用 CSSOM 设置）。
@@ -30,6 +31,18 @@ export function append(el: Element, ...children: Child[]): void {
 export function clear(el: Element, ...children: Child[]): void {
   el.replaceChildren();
   append(el, ...children);
+}
+
+/** Search text always remains text, including HTML-like input. */
+export function highlightedText(text: string, terms: readonly string[]): DocumentFragment {
+  const fragment = document.createDocumentFragment();
+  let at = 0;
+  for (const [from, to] of matchRanges(text, terms)) {
+    fragment.append(text.slice(at, from), h("mark", { class: "note-match" }, text.slice(from, to)));
+    at = to;
+  }
+  fragment.append(text.slice(at));
+  return fragment;
 }
 
 // ───────────── 状态占位 ─────────────

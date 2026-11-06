@@ -11,3 +11,7 @@ export * from "./layout.ts";
 export * from "./create.ts";
 export * from "./paper.ts";
 export * from "./service.ts";
+
+export * from "./authoring.ts";
+
+export * from "./editing.ts";

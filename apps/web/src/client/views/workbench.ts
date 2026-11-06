@@ -33,9 +33,11 @@ export class WorkbenchView {
   private palette: CommandPalette;
   private countTimer: ReturnType<typeof setInterval>;
 
-  private readonly onRoute = () => {
-    if (!this.canLeave()) { history.pushState(null, "", this.currentHash || "#overview"); return; }
-    const route = this.readRoute();
+  private routeGeneration = 0;
+  private readonly onRoute = async () => {
+    const generation=++this.routeGeneration, route=this.readRoute();
+    if (!(await this.beforeLeave())) { if(generation===this.routeGeneration) history.pushState(null, "", this.currentHash || "#overview"); return; }
+    if(generation!==this.routeGeneration)return;
     if (route.section === this.section && route.id && this.pane?.open) { this.currentHash = location.hash; this.pane.open(route.id); return; }
     this.show(route.section, route.id);
   };
@@ -113,7 +115,8 @@ export class WorkbenchView {
     try { return { section: known, ...(raw ? { id: decodeURIComponent(raw) } : {}) }; } catch { return { section: known }; }
   }
 
-  private go(section: Section, id?: string, intent?: string): void {
+  private async go(section: Section, id?: string, intent?: string): Promise<void> {
+    const generation=++this.routeGeneration;
     if (section === this.section && this.pane) {
       if (!id) { if (intent) this.pane.intent?.(intent); return; }
       if (this.pane.open) {
@@ -123,7 +126,7 @@ export class WorkbenchView {
         return;
       }
     }
-    if (!this.canLeave()) return;
+    if (!(await this.beforeLeave()) || generation!==this.routeGeneration) return;
     history.pushState(null, "", `#${section}${id ? `/${encodeURIComponent(id)}` : ""}`);
     this.show(section, id, intent);
   }
@@ -185,6 +188,12 @@ export class WorkbenchView {
   }
 
   get dirty(): boolean { return !!this.pane?.dirty || !!document.querySelector("dialog[data-dirty=true]"); }
+
+  private async beforeLeave(): Promise<boolean> {
+    if (!this.pane?.beforeLeave) return this.canLeave();
+    if (document.querySelector("dialog[data-dirty=true]") && !confirm(t("You have an unsaved form that will be lost. Continue?"))) return false;
+    return this.pane.beforeLeave();
+  }
 
   canLeave(): boolean {
     if (document.querySelector("dialog[data-dirty=true]") && !confirm(t("You have an unsaved form that will be lost. Continue?"))) return false;

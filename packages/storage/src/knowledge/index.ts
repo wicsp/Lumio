@@ -9,3 +9,7 @@ export * from "./index/query.ts";
 export { updateIndex } from "./index/store.ts";
 export type { IndexOptions } from "./index/store.ts";
 export * from "./adapter.ts";
+
+export * from "./authoring.ts";
+
+export * from "./editing.ts";
