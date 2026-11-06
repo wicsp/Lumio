@@ -18,7 +18,7 @@ import { SettingsPane } from "../panes/settings-page.ts";
 /** short：窄屏底栏的短名；没有 short 的模块不进底栏，从今日页和提醒进入（ADR 0028）。 */
 export const SECTIONS: Array<{ key: Exclude<Section, "settings">; label: string; short?: string; icon: string; key2: string }> = [
   { key: "overview", label: "Today", short: "Today", icon: "home", key2: "1" },
-  { key: "work", label: "Projects & tasks", short: "Tasks", icon: "work", key2: "2" },
+  { key: "work", label: "Work", short: "Work", icon: "work", key2: "2" },
   { key: "knowledge", label: "Knowledge", short: "Knowledge", icon: "knowledge", key2: "3" },
   { key: "execution", label: "Execution", icon: "execution", key2: "4" },
   { key: "assistant", label: "Assistant", short: "Assistant", icon: "assistant", key2: "5" },

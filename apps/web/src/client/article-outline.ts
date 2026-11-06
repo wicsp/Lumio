@@ -1,6 +1,8 @@
 import { commonmarkLanguage } from "@codemirror/lang-markdown";
-import { clear, h } from "./dom.ts";
-import { t } from "./i18n.ts";
+import { scrollToTarget, type RailEntry } from "./side-rail.ts";
+
+/** Headings deeper than ### stay out of the outline. */
+export const OUTLINE_DEPTH = 3;
 
 export function markdownHeadings(source: string): Array<{ level: number; label: string; position: number }> {
   const headings: ReturnType<typeof markdownHeadings> = [];
@@ -16,27 +18,19 @@ export function markdownHeadings(source: string): Array<{ level: number; label: 
   return headings;
 }
 
-/** Cheap pre-check run on every edit; the full parse only happens when the outline is opened. */
+/** Cheap pre-check run on every edit; the full parse only happens when it may find something. */
 export function mayHaveHeadings(source: string): boolean {
   return /^ {0,3}#{1,6}[ \t]+\S/m.test(source) || /\S[^\n]*\n {0,3}(?:=+|-+)[ \t]*$/m.test(source);
 }
 
-type OutlineEntry = { level: number; label: string; jump(): void };
-
-/** A collapsed outline that stays out of the way (hidden) while the article has no headings. */
-export function articleOutline(entries: () => OutlineEntry[], available: () => boolean = () => true): { element: HTMLDetailsElement; refresh(): void } {
-  const list = h("ol", {});
-  const element = h("details", { class: "article-outline" }, h("summary", {}, t("Article outline")), list);
-  const refresh = () => {
-    element.hidden = !available();
-    if (element.hidden) { element.open = false; return; }
-    if (!element.open) return;
-    const items = entries();
-    clear(list, ...items.map(({ level, label, jump }) => h("li", { "data-level": level },
-      h("button", { type: "button", onclick: () => { element.open = false; jump(); } }, label))),
-    !items.length && h("li", { class: "muted" }, t("No headings yet.")));
-  };
-  element.addEventListener("toggle", refresh);
-  refresh();
-  return { element, refresh };
+/**
+ * Outline entries for rendered Markdown. renderMarkdown shifts heading tags down one level (# → h2),
+ * so the Markdown level is the tag level minus one.
+ */
+export function renderedOutline(scroller: HTMLElement, body: HTMLElement): RailEntry[] {
+  return [...body.querySelectorAll<HTMLElement>("h2, h3, h4")].map(heading => ({
+    level: Number(heading.tagName.slice(1)) - 1, label: heading.textContent?.trim() ?? "",
+    top: () => heading.getBoundingClientRect().top,
+    jump: () => scrollToTarget(scroller, heading, 12),
+  })).filter(entry => entry.label && entry.level <= OUTLINE_DEPTH);
 }
