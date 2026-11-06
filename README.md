@@ -5,7 +5,7 @@
 - 数据**不在本仓库**：知识正文在独立 vault（Markdown + frontmatter）；项目/任务、执行与助手状态在 SQLite；过程记录与产物用 JSONL/文件。
 - 本仓库只放代码：TypeScript monorepo，运行在 [Bun](https://bun.com) 上。
 
-先读：[`docs/DESIGN.md`](docs/DESIGN.md)（现行设计）→ [`AGENTS.md`](AGENTS.md)（AI 的规则）；文档导航见 [`docs/README.md`](docs/README.md)
+先读：[`docs/DESIGN.md`](docs/DESIGN.md)（现行设计总览，分册在 [`docs/design/`](docs/design/)）→ [`AGENTS.md`](AGENTS.md)（AI 的规则）；文档导航见 [`docs/README.md`](docs/README.md)
 
 ## 目录
 
