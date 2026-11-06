@@ -43,9 +43,9 @@ KaTeX 提供成熟的 LaTeX 解析，内置类型，无需额外类型包。原�
 
 ## 本地交付
 
-- 已安装 `0.2.1-dev.editor6.20261106`，Hub `/health` 与静态资源确认通过，仍在 `http://127.0.0.1:7420` 试用。
-- 原 `editor5` 程序及业务备份位于 `~/.local/share/lumio/backups/local-editor6-20261106`，备份校验通过。
-- 组合包保留原有 DeepSeek 修复 `9443d35`，源代码临时组合后逐字节恢复；此修复不混入本 PR。二进制 SHA-256：`e092ddbbebf97bcfe78f9296cbb93a8f8cab705cbba2eab6710007684d69f557`。
+- 紧凑说明修复后已安装 `0.2.1-dev.editor7.20261106`，Hub `/health` 确认通过，仍在 `http://127.0.0.1:7420` 试用。
+- 原 `editor6` 程序及业务备份位于 `~/.local/share/lumio/backups/local-editor7-20261106`，备份校验通过；之前的 editor5 备份仍保留。
+- 组合包保留原有 DeepSeek 修复 `9443d35`，类型检查及 40 项回归通过，源代码临时组合后逐字节恢复；此修复不混入本 PR。二进制 SHA-256：`f463f1568fdecbcccf77bf7a7c3507715187d0d6d0a10ab458d170ca8de1f45d`。
 
 ## 依赖与范围
 
