@@ -391,6 +391,9 @@ select { appearance: none; padding-right: 28px; background-image: linear-gradien
 .body-editor textarea { min-height: 180px; max-height: 60vh; font-family: var(--mono); font-size: var(--fs-sm); }
 .body-editor .button-row { margin-top: 8px; }
 .body-editor .field-hint { margin-left: auto; }
+.work-description-editor textarea { display: block; min-height: 0; max-height: none; resize: none; padding: 4px 0; border: 0; border-radius: var(--r-md); background: transparent; font-family: var(--sans); font-size: var(--fs-md); line-height: 1.7; }
+.work-description-editor textarea:focus { outline: 1px solid var(--focus); box-shadow: none; }
+.work-save-status { min-height: 0; margin-top: 6px; }
 
 .conflict { display: flex; flex-direction: column; gap: 8px; margin: 0 0 14px; }
 
@@ -425,8 +428,21 @@ select { appearance: none; padding-right: 28px; background-image: linear-gradien
 .markdown code { padding: .1em .35em; border-radius: 4px; background: var(--sunken); }
 .markdown pre { padding: 12px 14px; border-radius: var(--r-md); background: var(--sunken); overflow-x: auto; line-height: 1.55; }
 .markdown pre code { padding: 0; background: none; }
-.markdown table { border-collapse: collapse; display: block; overflow-x: auto; }
+.markdown-table { max-width:100%; overflow-x:auto; overscroll-behavior:contain; margin:.7em 0; }
+.markdown table { border-collapse: collapse; min-width:100%; }
 .markdown th, .markdown td { padding: 5px 10px; border: 1px solid var(--line); }
+.markdown th { background:var(--sunken); font-weight:600; text-align:left; }
+.markdown .align-left { text-align:left; }
+.markdown .align-center { text-align:center; }
+.markdown .align-right { text-align:right; }
+.markdown math { color:inherit; font-size:1.05em; }
+.math-display { display:block; max-width:100%; overflow-x:auto; overscroll-behavior:contain; padding:10px 2px; margin:.7em 0; }
+.math-display math { display:block; width:max-content; min-width:100%; }
+.math-inline { white-space:nowrap; }
+.note-rich-preview { cursor:text; }
+div.note-rich-preview { padding:4px 0; }
+.note-rich-preview .markdown-table { cursor:text; }
+.note-rich-preview:focus-visible,.markdown-table:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
 .markdown hr { border: 0; border-top: 1px solid var(--line); }
 .markdown a[data-note] { color: var(--ink); text-decoration: underline; text-decoration-color: var(--lumen); text-decoration-thickness: 2px; text-underline-offset: 3px; }
 
@@ -719,6 +735,8 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 .msg-assistant .brand-mark::after { inset: 6px; }
 .msg-tool { margin-left: 36px; color: var(--ink-3); font-size: var(--fs-sm); }
 .stream-text { white-space: pre-wrap; line-height: 1.7; }
+.stream-text.markdown { white-space:normal; }
+.attn-question.markdown { white-space:normal; }
 .stream-text.streaming::after { content: ""; display: inline-block; width: 7px; height: 1em; margin-left: 2px; vertical-align: -2px; background: var(--ink-2); animation: blink 1s steps(2) infinite; }
 @keyframes blink { 50% { opacity: 0; } }
 .tool-status { margin-top: 6px; color: var(--ink-3); font-size: var(--fs-sm); }
@@ -967,3 +985,14 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
  .live-note .cm-content { min-height:240px; }
  .related-notes { max-height:70%; }
 }
+
+/* Content stays in place while focus and save status change. */
+.work-title { min-height: 2.4rem; }
+.note-save-status { min-height: 1.5rem; }
+.detail .live-note { margin: 0; }
+
+.reference-suggestions { position:fixed; z-index:120; max-height:300px; overflow:auto; padding:6px; border:1px solid var(--line); border-radius:10px; background:var(--paper); color:var(--ink); box-shadow:0 8px 30px #0003; }
+.reference-option { display:block; text-align:left; width:100%; padding:8px; border:0; background:transparent; color:inherit; border-radius:6px; }
+.reference-option[aria-selected=true] { background:var(--surface); outline:1px solid var(--lumen); }
+.reference-option small { display:block; margin-top:4px; opacity:.7; line-height:1.4; }
+.reference-excerpt { white-space:pre-wrap; max-height:8rem; overflow:auto; }

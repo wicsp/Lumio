@@ -7,6 +7,13 @@ export type Lang = "en" | "zh";
 const KEY = "lumio.web.lang";
 
 export const ZH: Record<string, string> = {
+  "Draft saved on this device": "草稿已保存在此设备",
+  "Browser storage unavailable; keep this page open until saved.": "浏览器无法保留草稿，请保持页面打开，直到保存完成。",
+  "Open note": "打开笔记",
+  "Edit reference": "编辑引用",
+  "Table": "表格",
+  "Edit table": "编辑表格",
+  "Edit formula": "编辑公式",
   "Insert superscript reference": "插入上标引用",
   "Remove unused footnote": "删除未使用脚注",
   "Path reference": "路径引用",

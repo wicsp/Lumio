@@ -1,7 +1,7 @@
 /**
  * 任务 / 项目详情。
  * - 属性：点一下就改，立即带 revision 保存；冲突时不覆盖，提示载入最新内容。
- * - 标题、正文、讨论各自独立保存；正文默认显示渲染结果，点击进入编辑。
+ * - 标题与正文实时编辑、串行自动保存；讨论保留草稿，显式发布。
  * - 任务没有状态和负责人（ADR 0032）：显示「轮到谁」，用交回 / 完成 / 取消 / 重新打开改变它。
  * - 委派是单独的明确动作；一轮成功也不会自动完成任务。有交接计划时，下一轮交给计划里写明的 agent。
  * - 讨论、轮次和交接记录按时间合并成一条时间线。
@@ -16,7 +16,9 @@ import { PROJECT_LABELS } from "../labels.ts";
 import { checkpointCommand, openPlanEditor, planProgress, stageLabel } from "../plan.ts";
 import { TURN_ACTION_DONE, TURN_ACTION_ICONS, TURN_ACTION_LABELS, TURN_GROUPS, TURN_GROUP_LABELS, reasonLabel, turnActionCommand, turnActions, turnGroup, turnIcon, turnText, type TurnAction } from "../turn.ts";
 import { renderMarkdown } from "../utils/markdown.ts";
-import { InlineTitle } from "../inline-title.ts";
+import { referenceInput } from "../reference-input.ts";
+import { WorkSave, type WorkDraft } from "../work-save.ts";
+import { drafts, textDraft } from "../drafts.ts";
 import type { Navigate } from "../navigation.ts";
 import { t, tParts } from "../i18n.ts";
 
@@ -34,11 +36,18 @@ export interface EditorHooks {
 
 export class WorkEditor {
   private record: EditableWork;
-  private title: InlineTitle;
+  private title: HTMLInputElement;
+  private writer: WorkSave;
+  private bodyDraft?: HTMLTextAreaElement;
+  private disposeBodyReferences?: () => void;
+  private disposeReferences?: () => void;
+  private store = drafts();
+  private recovery: ReturnType<ReturnType<typeof drafts>["claim"]>;
+  private timer?: ReturnType<typeof setTimeout>;
+  private saveStatus = h("div", { class: "note-save-status work-save-status", role: "status", hidden: true });
   private note = h("div", { class: "conflict", role: "alert" });
   private props = h("div", { class: "props" });
   private bodyHost = h("div", {});
-  private bodyDraft?: HTMLTextAreaElement;
   private commentDraft?: HTMLTextAreaElement;
   private busy = false;
   private active = true;
@@ -48,7 +57,18 @@ export class WorkEditor {
   constructor(private root: HTMLElement, private client: Client, private hub: HubExtras, input: WorkProject | WorkTaskDetail, private projects: WorkProject[], private hooks: EditorHooks) {
     this.record = "task" in input ? input.task : input;
     const isTask = this.record.type === "task";
-    this.title = new InlineTitle(this.record.title, title => this.saveTitle(title));
+    this.recovery = this.store.claim(`work:${this.record.id}`);
+    this.writer = new WorkSave(this.record, client, () => this.saved());
+    const draft = this.recovery.read<WorkDraft>();
+    if (draft?.base?.id === this.record.id && typeof draft.title === "string" && typeof draft.description === "string") {
+      this.writer.base = draft.base; this.writer.title = draft.title; this.writer.description = draft.description; this.writer.pending = draft.pending; this.writer.properties = draft.properties ?? {};
+    }
+    this.title = h("input", { class: "reader-title note-title work-title", "aria-label": t("Title"), maxlength: 500, value: this.writer.title });
+    this.title.addEventListener("input", event => this.changed((event as InputEvent).isComposing));
+    this.title.addEventListener("compositionstart", () => clearTimeout(this.timer));
+    this.title.addEventListener("compositionend", () => this.changed(false));
+    this.title.addEventListener("blur", () => void this.flush());
+    this.title.addEventListener("keydown", event => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") { event.preventDefault(); if (!event.isComposing) void this.flush(); } });
     const rec = this.record;
     const project = rec.type === "task" && rec.project ? projects.find(p => p.id === rec.project) : undefined;
     this.showAdvanced = rec.type === "task" && !!(rec.workdir || rec.model || rec.timeout_minutes || project?.workdir);
@@ -60,12 +80,14 @@ export class WorkEditor {
         isTask && h("button", { type: "button", class: "btn btn-primary btn-small", onclick: () => void this.dispatch() }, icon("play"), t("Delegate"))));
 
     const attention = h("div", { class: "attn-slot" });
-    const detail = h("div", { class: "detail" }, crumbs, h("div", { class: "detail-head" }, this.title.element, this.updated), attention, this.note, this.props,
-      h("div", { class: "divider" }), this.bodyHost);
+    const detail = h("div", { class: "detail" }, crumbs, h("div", { class: "detail-head" }, this.title, this.updated), attention, this.note, this.props,
+      h("div", { class: "divider" }), this.bodyHost, this.saveStatus);
     root.append(detail);
     this.renderMeta();
     this.renderProps();
     this.renderBody();
+    this.saved();
+    if (this.writer.dirty) void this.flush();
     if ("task" in input) {
       // 这个任务需要你处理时（ADR 0030），把卡片放在标题下面。
       void attentionFor(hub, input.task.id).then(item => {
@@ -82,13 +104,35 @@ export class WorkEditor {
     } else detail.append(this.projectTasks(input));
   }
 
-  dispose(): void { this.active = false; }
-  get dirty(): boolean {
-    return this.title.dirty || (!!this.bodyDraft && this.bodyDraft.value !== this.record.description) || !!this.commentDraft?.value.trim();
+  dispose(): void { this.canLeave(); this.active = false; clearTimeout(this.timer); this.disposeBodyReferences?.(); this.disposeReferences?.(); }
+  get dirty(): boolean { return this.writer.dirty; }
+  canLeave(): boolean { this.persist(); void this.flush(); return true; }
+  async beforeLeave(): Promise<boolean> { this.persist(); await this.flush(); return true; }
+  private persist(): void {
+    if (this.writer.dirty) this.recovery.write(this.writer.snapshot);
+    else this.recovery.remove();
   }
-  canLeave(): boolean {
-    if (this.busy) return false;
-    return !this.dirty || confirm(t("You have unsaved changes that will be lost. Leave anyway?"));
+  private changed(composing: boolean): void {
+    this.writer.change(this.title.value, this.bodyDraft?.value ?? this.writer.description);
+    clearTimeout(this.timer);
+    if (!composing && !this.writer.error) this.timer = setTimeout(() => void this.flush(), 800);
+  }
+  private async flush(): Promise<boolean> {
+    clearTimeout(this.timer);
+    if (this.busy || this.writer.error) return !this.writer.dirty;
+    return this.writer.save();
+  }
+  private saved(): void {
+    this.persist();
+    if (!this.active) return;
+    const changed = this.record.revision !== this.writer.base.revision;
+    this.record = this.writer.base;
+    this.saveStatus.hidden = !this.writer.error && !(this.writer.dirty && !this.store.persistent);
+    this.saveStatus.textContent = this.writer.error ? t("Draft saved on this device") : "";
+    if (this.writer.dirty && !this.store.persistent) this.saveStatus.textContent = t("Browser storage unavailable; keep this page open until saved.");
+    if (changed) { this.renderMeta(); this.hooks.changed(); }
+    if (this.writer.error) this.showFailure(this.writer.error);
+    else clear(this.note);
   }
 
   private renderMeta(): void {
@@ -149,17 +193,21 @@ export class WorkEditor {
 
   private textInput(key: string, value: string | undefined, placeholder: string, type = "text"): HTMLInputElement {
     const input = h("input", { class: "prop-input", name: `prop-${key}`, type, placeholder, autocomplete: "off", ...(type === "number" ? { min: "1", step: "1" } : {}) });
-    input.value = value ?? "";
+    input.value = key in this.writer.properties ? String(this.writer.properties[key] ?? "") : value ?? "";
     const commit = () => {
       const raw = input.value.trim();
       const next = !raw ? null : type === "number" ? Number(raw) : raw;
-      if (type === "number" && next !== null && (!Number.isInteger(next) || (next as number) < 1)) { toast(t("Enter a whole number of minutes"), "error"); input.value = value ?? ""; return; }
-      void this.patch({ [key]: next }, input, t("Saved"));
+      if (type === "number" && next !== null && (!Number.isInteger(next) || (next as number) < 1)) { this.writer.property(key, raw); this.writer.error = {code:"INVALID",message:t("Enter a whole number of minutes")}; this.saved(); return; }
+      this.writer.property(key, next);
+      clearTimeout(this.timer); this.timer = setTimeout(() => void this.flush(), 800);
     };
-    input.addEventListener("change", commit);
+    input.addEventListener("input", event => { commit(); if ((event as InputEvent).isComposing) clearTimeout(this.timer); });
+    input.addEventListener("compositionstart", () => clearTimeout(this.timer));
+    input.addEventListener("compositionend", commit);
+    input.addEventListener("blur", () => { commit(); void this.flush(); });
     input.addEventListener("keydown", event => {
       if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); input.blur(); }
-      if (event.key === "Escape") { input.value = value ?? ""; input.blur(); }
+      if (event.key === "Escape") input.blur();
     });
     return input;
   }
@@ -180,7 +228,7 @@ export class WorkEditor {
 
   /** 交回 / 完成 / 取消 / 重新打开。交给外部要先说明在等什么；完成或取消会停掉正在进行的一轮。 */
   private async turnAction(action: TurnAction, control: HTMLElement): Promise<void> {
-    if (this.busy || this.record.type !== "task") return;
+    if (this.busy || this.record.type !== "task" || !(await this.flush())) return;
     let note: string | undefined;
     if (action === "external") {
       note = prompt(t("What are you waiting for?"))?.trim();
@@ -197,7 +245,7 @@ export class WorkEditor {
   }
 
   private async patch(patch: Record<string, unknown>, control: HTMLElement, done: string): Promise<void> {
-    if (this.busy) return;
+    if (this.busy || !(await this.flush())) return;
     const request = workPatchCommand(this.record, patch);
     if (!request) return;
     this.setBusy(true); control.classList.add("prop-saving");
@@ -218,89 +266,78 @@ export class WorkEditor {
     const result = await this.client.workCommand(request);
     if (result.kind !== "task" && result.kind !== "project") throw new Error("unexpected result");
     this.record = result.kind === "task" ? result.task : result.project;
+    this.writer.accept(this.record);
     this.renderMeta();
     this.hooks.changed();
   }
 
-  private setBusy(value: boolean): void { this.busy = value; this.title.setBusy(value); }
+  private setBusy(value: boolean): void { this.busy = value; if (!value && this.writer.dirty && !this.writer.error) this.timer = setTimeout(() => void this.flush(), 0); }
 
   private showFailure(cause: unknown): void {
-    const text = isConflict(cause) ? t("This was updated somewhere else, and your changes didn't overwrite it. Download your draft, then load the latest version.") : t("{0} Your changes are still on the page; if the connection dropped, check whether they were saved.", errorText(cause));
-    clear(this.note, failure(text), h("div", { class: "button-row" },
+    const conflict = isConflict(cause);
+    clear(this.note, failure(conflict ? t("The note changed elsewhere. Your draft is kept.") : errorText(cause)), h("div", { class: "button-row" },
       h("button", { type: "button", class: "btn btn-small", onclick: () => this.exportDraft() }, icon("download"), t("Download draft")),
-      h("button", { type: "button", class: "btn btn-small", onclick: () => {
-        if (!this.dirty || confirm(t("Loading the latest version discards your unsaved changes. Continue?"))) {
-          if (this.bodyDraft) this.bodyDraft.value = this.record.description;
-          if (this.commentDraft) this.commentDraft.value = "";
-          this.title.discard();
-          this.hooks.reload();
-        }
-      } }, icon("refresh"), t("Load latest"))));
-    this.note.scrollIntoView({ block: "nearest" });
+      h("button", { type: "button", class: "btn btn-small", onclick: async () => {
+        if (!conflict) { await this.writer.save(); return; }
+        try {
+          const latest = this.record.type === "task" ? (await this.client.workTask(this.record.id)).task : await this.client.workProject(this.record.id);
+          if (!this.active) return;
+          const comparison = h("section", { class: "note-conflict" }, h("h3", {}, t("Latest saved version")), h("strong", {}, latest.title), h("pre", {}, latest.description),
+            h("p", {}, t("Merge any changes into your draft below, then resume saving.")),
+            h("button", { type: "button", class: "btn", onclick: () => { this.writer.rebase(latest); void this.writer.save(); } }, t("I have merged; resume saving")));
+          this.note.append(comparison);
+        } catch (error) { this.note.append(failure(errorText(error))); }
+      } }, conflict ? t("Compare saved version") : t("Retry same save"))));
   }
 
   private exportDraft(): void {
     const r = this.record;
     const fields = r.type === "task" ? t("Turn: {0}\nProject: {1}\nWorking directory: {2}\nModel: {3}\nTime limit: {4}", turnText(r), r.project ?? "", r.workdir ?? "", r.model ?? "", r.timeout_minutes ?? "") : t("Status: {0}\nGoal: {1}", r.status, r.goal ?? "");
-    const blob = new Blob([t("# {0}\n\n{1}\n\n---\n{2}\n\nUnposted comment:\n{3}", this.title.value, this.bodyDraft?.value ?? r.description, fields, this.commentDraft?.value ?? "")], { type: "text/markdown;charset=utf-8" });
+    const blob = new Blob([t("# {0}\n\n{1}\n\n---\n{2}\n\nUnposted comment:\n{3}", this.title.value, this.writer.description, fields, this.commentDraft?.value ?? "")], { type: "text/markdown;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     h("a", { href: url, download: `lumio-draft-${r.id}.md` }).click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  private async saveTitle(title: string): Promise<string> {
-    this.setBusy(true);
-    try {
-      const request = workPatchCommand(this.record, { title });
-      if (request) await this.commit(request);
-      toast(t("Title saved"));
-      return this.record.title;
-    } catch (cause) { this.showFailure(cause); throw cause; }
-    finally { this.setBusy(false); }
-  }
-
-  // ───────────── 正文 ─────────────
-
   private renderBody(): void {
-    if (this.bodyDraft) { this.renderBodyEditor(this.bodyDraft.value); return; }
-    const has = this.record.description.trim().length > 0;
-    const view = h("div", { class: "body-view markdown", role: "button", tabindex: "0", title: t("Click to edit the description") });
-    if (has) view.innerHTML = renderMarkdown(this.record.description); // renderMarkdown 已转义全部原文
+    this.disposeBodyReferences?.(); this.disposeBodyReferences = undefined;
+    this.bodyDraft = undefined;
+    const view = h("div", { class: "body-view markdown", role: "button", tabindex: "0", "aria-label": t("Description"), title: t("Click to edit the description") });
+    if (this.writer.description.trim()) view.innerHTML = renderMarkdown(this.writer.description);
     else view.append(h("p", { class: "body-empty" }, t("Add a description: background, approach or definition of done…")));
-    view.addEventListener("click", event => { if (!(event.target as Element).closest("a")) this.renderBodyEditor(this.record.description); });
-    view.addEventListener("keydown", event => { if (event.key === "Enter" && event.target === view) { event.preventDefault(); this.renderBodyEditor(this.record.description); } });
+    view.addEventListener("click", event => {
+      if ((event.target as Element).closest("a,button") || !window.getSelection()?.isCollapsed) return;
+      this.editBody();
+    });
+    view.addEventListener("keydown", event => { if (event.target === view && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); this.editBody(); } });
     clear(this.bodyHost, view);
   }
 
-  private renderBodyEditor(value: string): void {
-    const area = this.bodyDraft ?? autosize(h("textarea", { name: "edit-description", placeholder: t("Markdown supported"), "aria-label": t("Description") }));
-    area.value = value;
-    this.bodyDraft = area;
-    const save = h("button", { type: "button", class: "btn btn-primary btn-small", onclick: () => void this.saveBody() }, t("Save"), h("kbd", {}, "⌘↵"));
-    const cancel = h("button", { type: "button", class: "btn btn-quiet btn-small", onclick: () => {
-      if (area.value === this.record.description || confirm(t("Discard changes to the description?"))) { this.bodyDraft = undefined; this.renderBody(); }
-    } }, t("Cancel"));
-    area.onkeydown = event => {
-      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); void this.saveBody(); }
-      if (event.key === "Escape") { event.preventDefault(); cancel.click(); }
-    };
-    clear(this.bodyHost, h("div", { class: "body-editor" }, area, h("div", { class: "button-row" }, save, cancel, h("span", { class: "field-hint" }, t("Markdown · Esc to cancel")))));
-    area.focus();
-  }
-
-  private async saveBody(): Promise<void> {
-    if (this.busy || !this.bodyDraft) return;
-    const description = this.bodyDraft.value;
-    if (description === this.record.description) { this.bodyDraft = undefined; this.renderBody(); return; }
-    this.setBusy(true);
-    try {
-      const request = workPatchCommand(this.record, { description });
-      if (request) await this.commit(request);
-      this.bodyDraft = undefined;
-      this.renderBody();
-      toast(t("Description saved"));
-    } catch (cause) { this.showFailure(cause); }
-    finally { this.setBusy(false); }
+  private editBody(): void {
+    if (this.bodyDraft) return;
+    const height = this.bodyHost.getBoundingClientRect().height;
+    const area = h("textarea", { name: "edit-description", rows: "1", class: "work-description-input", "aria-label": t("Description"), placeholder: t("Add a description: background, approach or definition of done…") });
+    // Enter without a layout jump; grow only as the user changes the content.
+    area.style.height = `${height}px`;
+    area.style.minHeight = `${height}px`;
+    area.style.maxHeight = `max(${height}px, 45vh)`;
+    area.addEventListener("input", () => { area.style.height = "auto"; area.style.height = `${area.scrollHeight}px`; });
+    area.value = this.writer.description; this.bodyDraft = area;
+    area.addEventListener("input", event => this.changed((event as InputEvent).isComposing));
+    area.addEventListener("compositionstart", () => clearTimeout(this.timer));
+    area.addEventListener("compositionend", () => this.changed(false));
+    area.addEventListener("keydown", event => {
+      if (event.isComposing) return;
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void this.flush(); }
+      if (event.key === "Escape") { event.preventDefault(); area.blur(); }
+    });
+    area.addEventListener("blur", () => {
+      if (!this.active || this.bodyDraft !== area) return;
+      this.changed(false); void this.flush(); this.renderBody();
+    });
+    clear(this.bodyHost, h("div", { class: "body-editor work-description-editor" }, area));
+    this.disposeBodyReferences = referenceInput(area, this.client, () => this.title.value);
+    area.focus({ preventScroll: true }); area.setSelectionRange(area.value.length, area.value.length);
   }
 
   /** 一轮实际会用的工作目录：任务 → 项目 → ~（ADR 0033）。 */
@@ -346,7 +383,7 @@ export class WorkEditor {
 
   private async dispatch(): Promise<void> {
     if (this.record.type !== "task" || this.busy) return;
-    if (this.dirty) { clear(this.note, failure(t("Save or cancel your edits before dispatching this round."))); this.note.scrollIntoView({ block: "nearest" }); return; }
+    if (!(await this.flush())) return;
     const task = this.record;
     if (task.outcome !== "open") { toast(t("Reopen the task before delegating it."), "error"); return; }
     if (task.turn.reason === "working") { toast(t("{0} is still working on this task.", task.turn.holder), "error"); return; }
@@ -450,6 +487,8 @@ export class WorkEditor {
     const count = h("span", { class: "count" }, input.comments.length || "");
     const text = autosize(h("textarea", { name: "comment", rows: "1", placeholder: t("Add thoughts, feedback, or questions for the next round…"), "aria-label": t("Discussion") }));
     this.commentDraft = text;
+    this.disposeReferences = referenceInput(text, this.client, () => this.title.value);
+    const captureComment = textDraft(text, `comment:${input.task.id}`);
     const error = h("div", { role: "alert" });
     const submit = h("button", { type: "submit", class: "btn btn-primary btn-small" }, t("Comment"));
     // 评论并交给 agent 继续：评论与委派在同一事务（ADR 0030）；继续的是计划当前步骤或上一轮的 agent。
@@ -460,13 +499,13 @@ export class WorkEditor {
     let requestId = newRequestId(), previous = "";
     onward?.addEventListener("click", async () => {
       if (this.busy || !text.value.trim()) { text.focus(); return; }
-      if (this.record.type !== "task") return;
+      if (this.record.type !== "task" || !(await this.flush())) return;
       this.setBusy(true); onward.disabled = submit.disabled = true; clear(error);
       if (previous && previous !== `continue\n${text.value}`) requestId = newRequestId();
       previous = `continue\n${text.value}`;
       try {
         await this.client.workCommand(answerCommand(this.record, undefined, text.value, requestId));
-        text.value = ""; this.commentDraft = undefined;
+        text.value = ""; captureComment(); this.commentDraft = undefined;
         toast(t("Dispatched to {0}", next!));
         this.hooks.changed(); this.hooks.reload();
       } catch (cause) {

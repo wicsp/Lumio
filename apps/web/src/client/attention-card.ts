@@ -10,8 +10,10 @@ import { agentStages, checkpointCommand, type CheckpointAction } from "./plan.ts
 import { finishCommand, handCommand } from "./turn.ts";
 import { autosize, clear, failure, h, icon, openMenu, select, toast } from "./dom.ts";
 import { ago } from "./format.ts";
+import { textDraft } from "./drafts.ts";
 import { t } from "./i18n.ts";
 import type { Navigate } from "./navigation.ts";
+import { renderMarkdown } from "./utils/markdown.ts";
 
 export interface AttentionContext {
   client: Client;
@@ -56,6 +58,7 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
   // 回答框：等你回答时直接显示；验收与失败时点按钮后展开。
   const composer = (button: string, required: boolean, placeholder: string) => {
     const text = autosize(h("textarea", { rows: "2", placeholder, "aria-label": placeholder }));
+    const capture = textDraft(text, `answer:${item.task}:${item.round}`);
     const chip = h("button", { type: "button", class: "attn-target", title: t("Change who continues") }, icon("bot"), h("span", {}, ""));
     const renderChip = () => { (chip.lastChild as HTMLElement).textContent = planned ? t("Continue with the plan's agent") : target ? t("Continue with {0}", target) : t("Choose who continues"); };
     if (planned) chip.disabled = true;
@@ -81,6 +84,7 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
         const task = await currentTask();
         await ctx.client.workCommand(answer ? answerCommand(task, target, answer, requestId)
           : { request_id: requestId, operation: { op: "work.task.dispatch", args: { task: task.id, ...(target ? { to: target } : {}), expected_revision: task.revision } } });
+        text.value = ""; capture();
         const who = target ?? item.agent ?? t("the agent");
         toast(t("Dispatched to {0}", who));
         return t("Sent. {0} is continuing.", who);
@@ -116,6 +120,7 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
         if (!stages.length) { clear(error, failure(t("This task no longer has a plan. Refresh and try again."))); return; }
         const to = select("back-to", stages.map(value => [value.id, t("{0} ({1})", value.id, value.agent)] as [string, string]), stages.at(-2)?.id ?? stages[0]!.id);
         const text = autosize(h("textarea", { rows: "2", placeholder: t("What should change?"), "aria-label": t("What should change?") }));
+        textDraft(text, `checkpoint:${item.task}:${stage}`);
         const send = h("button", { type: "submit", class: "btn btn-primary btn-small" }, icon("undo"), t("Send back"));
         const form = h("form", { class: "attn-composer" }, text, h("div", { class: "attn-composer-foot" }, h("label", { class: "attn-back" }, t("Back to"), to), send));
         form.addEventListener("submit", event => {
@@ -130,11 +135,16 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
   };
 
   let body: Node | null = null;
+  const question = (source: string) => {
+    const content = h("div", { class: "attn-question markdown" });
+    content.innerHTML = renderMarkdown(source);
+    return content;
+  };
   if (item.kind === "question") {
     const answer = composer(t("Answer and continue"), true, t("Your answer…"));
-    body = h("div", { class: "attn-body" }, h("p", { class: "attn-question" }, item.question ?? t("The agent is waiting for your input.")), answer.form);
+    body = h("div", { class: "attn-body" }, question(item.question ?? t("The agent is waiting for your input.")), answer.form);
   } else {
-    if (item.prompt) body = h("p", { class: "attn-question" }, item.prompt);
+    if (item.prompt) body = question(item.prompt);
     else if (item.summary) body = h("p", { class: "attn-summary" }, item.summary);
     if (item.kind === "review" && (item.prompt || item.stage === "end")) checkpoint(item.stage!);
     else if (item.kind === "review") {

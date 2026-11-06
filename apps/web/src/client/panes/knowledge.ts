@@ -1,4 +1,5 @@
 import { NoteEditor } from "../note-editor.ts";
+import { drafts } from "../drafts.ts";
 import { NoteSave } from "../note-save.ts";
 import { writingContext } from "../note-text.ts";
 import { matchTerms } from "../note-matches.ts";
@@ -36,6 +37,8 @@ export class KnowledgePane {
   private creator?: KnowledgeCreate;
   private editor?: NoteEditor;
   private saver?: NoteSave;
+  private store = drafts();
+  private recoveries = new WeakMap<NoteSave, ReturnType<ReturnType<typeof drafts>["claim"]>>();
   private saveTimer?: ReturnType<typeof setTimeout>;
   private relatedTimer?: ReturnType<typeof setTimeout>;
   private relatedGeneration=0;
@@ -77,21 +80,21 @@ export class KnowledgePane {
   }
 
   get dirty():boolean{return !!this.creator?.dirty||!!this.saver?.dirty;}
-  canLeave():boolean{return this.saver?.dirty?false:(this.creator?.canLeave()??true);}
-  async beforeLeave():Promise<boolean>{
-    // A failed or conflicting save keeps the draft on screen; leaving then needs explicit confirmation, never a silent dead end.
-    if(this.saver?.dirty&&(this.saver.error||!(await this.saver.save()))&&!confirm(t("You have unsaved changes. Close anyway?")))return false;
-    return this.creator?.canLeave()??true;
+  canLeave():boolean{this.persist();if(!this.saver?.error)void this.saver?.save();return this.creator?.canLeave()??true;}
+  async beforeLeave():Promise<boolean>{this.persist();if(this.saver?.dirty&&!this.saver.error)await this.saver.save();return this.creator?.canLeave()??true;}
+  private persist(saver=this.saver):void{
+    if(!saver)return;
+    const recovery=this.recoveries.get(saver);
+    if(saver.dirty)recovery?.write({base:saver.base,title:saver.title,body:saver.body,pending:saver.pending});else recovery?.remove();
   }
   intent(name:string):void{if(name==="new")void this.startNew();}
   private async startNew():Promise<void>{
-    if(this.creator?.dirty)return;
     if(!(await this.beforeLeave())||!this.active)return;
     this.clearWriter();this.selected=undefined;this.generation++;this.split.classList.add("has-detail");
     this.creator=new KnowledgeCreate(this.client,result=>{this.creator=undefined;this.query.value="";this.type="";this.renderFilters();void this.search();void this.read(result.id);},this.detail,context=>this.recommend(context),ref=>void this.open(ref),()=>{this.clearWriter();this.showPlaceholder();},()=>{this.split.classList.toggle("show-related");this.renderRelated();});
     this.creator.open();
   }
-  private clearWriter():void{clearTimeout(this.saveTimer);clearTimeout(this.relatedTimer);this.relatedGeneration++;this.contextKey="";this.relatedTerms=[];this.linksRevision="";this.split.classList.remove("show-related");this.relatedHits=[];this.related.hidden=true;clear(this.related);this.editor?.destroy();this.editor=undefined;this.saver=undefined;this.creator?.dispose();this.creator=undefined;}
+  private clearWriter():void{this.persist();clearTimeout(this.saveTimer);clearTimeout(this.relatedTimer);this.relatedGeneration++;this.contextKey="";this.relatedTerms=[];this.linksRevision="";this.split.classList.remove("show-related");this.relatedHits=[];this.related.hidden=true;clear(this.related);this.editor?.destroy();this.editor=undefined;this.saver=undefined;this.creator?.dispose();this.creator=undefined;}
   dispose():void{this.clearWriter();this.active=false;this.generation++;this.searchGeneration++;this.unbindKeys();}
   async open(reference:string):Promise<void>{if(!(await this.beforeLeave())||!this.active)return;this.clearWriter();await this.read(reference);}
   liveRefresh():void{if(!this.dirty)void this.search();}
@@ -203,10 +206,15 @@ export class KnowledgePane {
       const article=this.detail.querySelector("article")!;const oldBody=article.querySelector(".markdown")!;const oldTitle=article.querySelector("h1")!;
       const title=h("input",{class:"reader-title note-title",value:doc.document.note.title,maxlength:500,"aria-label":t("Title")});oldTitle.replaceWith(title);
       this.conflict=h("section",{class:"note-conflict",hidden:true});this.saveError=h("div",{class:"note-save-error"});this.saveStatus=h("div",{class:"note-save-status",role:"status"});
-      this.saver=new NoteSave(doc,this.client,()=>{if(this.active&&generation===this.generation)this.renderSave();});
+      const saver=new NoteSave(doc,this.client,()=>{this.persist(saver);if(this.active&&generation===this.generation&&this.saver===saver)this.renderSave();});this.saver=saver;
+      const recovery=this.store.claim(`note:${note.note.id}`);this.recoveries.set(saver,recovery);
+      const draft=recovery.read<{base:KnowledgeDocument;title:string;body:string;pending?:NoteSave["pending"]}>();
+      if(draft&&draft.base?.document?.note?.id===note.note.id&&typeof draft.title==="string"&&typeof draft.body==="string"){
+        saver.base=draft.base;saver.title=draft.title;saver.body=draft.body;saver.pending=draft.pending;title.value=saver.title;
+      }
       this.linksRevision=doc.revision;
       const context=()=>writingContext(title.value,this.editor?.value??doc.document.body,this.editor?.position??0);
-      this.editor=new NoteEditor({value:doc.document.body,change:(text,position,composing)=>{this.saver!.change(title.value,text);clearTimeout(this.saveTimer);if(!composing&&!this.saver!.error)this.saveTimer=setTimeout(()=>void this.saver?.save(),800);this.recommend(writingContext(title.value,text,position));},context:()=>this.recommend(context()),
+      this.editor=new NoteEditor({value:saver.body,change:(text,position,composing)=>{this.saver!.change(title.value,text);clearTimeout(this.saveTimer);if(!composing&&!this.saver!.error)this.saveTimer=setTimeout(()=>void this.saver?.save(),800);this.recommend(writingContext(title.value,text,position));},context:()=>this.recommend(context()),
         referenceContext:position=>writingContext(title.value,this.editor!.value,position),references:(query,position)=>this.client.noteReferences({source_id:note.note.id!,query,context:writingContext(title.value,this.editor!.value,position)}),open:ref=>void this.open(this.resolveReference(ref)),save:()=>{clearTimeout(this.saveTimer);if(!this.saver?.error)void this.saver?.save();}});
       const titleChanged=(composing:boolean)=>{this.saver!.change(title.value,this.editor!.value);clearTimeout(this.saveTimer);if(!composing&&!this.saver!.error)this.saveTimer=setTimeout(()=>void this.saver?.save(),800);this.recommend(context());};
       title.addEventListener("compositionstart",()=>clearTimeout(this.saveTimer));
@@ -215,12 +223,13 @@ export class KnowledgePane {
       title.addEventListener("keydown",event=>{if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="s"){event.preventDefault();if(!event.isComposing&&!this.saver?.error)void this.saver?.save();}});
       oldBody.replaceWith(this.editor.root);article.insertBefore(this.saveStatus,this.editor.root);article.insertBefore(this.saveError,this.editor.root);article.insertBefore(this.conflict,this.editor.root);
       this.saveStatus.before(h("button",{type:"button",class:"btn btn-small mobile-only",onclick:()=>{this.split.classList.toggle("show-related");this.renderRelated();}},t("Related notes")));
-      this.renderSave();this.recommend(context());
+      this.renderSave();this.recommend(context());if(saver.dirty)void saver.save();
     }catch{if(this.active&&generation===this.generation)this.detail.querySelector("article")?.append(h("p",{class:"field-hint"},t("This note is read-only here. Check its metadata or edit it in your external editor.")));}
   }
   private renderSave():void{
     const saver=this.saver;if(!saver)return;
-    this.saveStatus.textContent=saver.saving?t("Saving…"):saver.error?t("Save needs attention"):saver.dirty?t("Unsaved changes"):t("Saved");
+    this.saveStatus.textContent=saver.saving?t("Saving…"):saver.error?t("Draft saved on this device"):saver.dirty?t("Unsaved changes"):t("Saved");
+    if(saver.dirty&&!this.store.persistent)this.saveStatus.textContent=t("Browser storage unavailable; keep this page open until saved.");
     if(!saver.saving&&!saver.error&&!saver.dirty&&saver.base.revision!==this.linksRevision){this.linksRevision=saver.base.revision;void this.refreshLinks(saver);void this.search();}
     clear(this.saveError);if(!saver.error)return;
     const conflict=(saver.error as {reason?:string}).reason==="revision_conflict";

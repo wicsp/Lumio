@@ -6,6 +6,7 @@ import { h, loading, toast } from "./dom.ts";
 import { ConnectView } from "./views/connect.ts";
 import { WorkbenchView } from "./views/workbench.ts";
 import { onLang, t } from "./i18n.ts";
+import { prepareDrafts, useDrafts } from "./drafts.ts";
 
 export class App {
   private session?: Session;
@@ -33,6 +34,7 @@ export class App {
     this.generation++; this.view?.dispose(); this.view = undefined;
     this.pending?.close(); this.pending = undefined; this.session?.close(); this.session = undefined; this.login = undefined;
     document.querySelectorAll<HTMLDialogElement>("dialog").forEach(dialog => { dialog.close(); dialog.remove(); });
+    useDrafts();
     this.root.replaceChildren();
   }
   /** 语言切换（ADR 0028）：没有未保存内容时立即重建界面；有则提示，并在下一次切换模块前重建，不丢草稿。 */
@@ -75,7 +77,9 @@ export class App {
     this.login = restoring ? { token, remember } : undefined;
     try {
       const actors = await session.client.actors();
+      const draftStore = await prepareDrafts(token);
       if (generation !== this.generation) { session.close(); return; }
+      useDrafts(draftStore);
       let warning: string | undefined;
       let actualRemember = remember;
       if (!restoring) {

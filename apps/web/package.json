@@ -16,6 +16,7 @@
     "@codemirror/state": "^6.7.6",
     "@codemirror/view": "^6.43.15",
     "@lumio/api-client": "workspace:*",
-    "@lumio/schema": "workspace:*"
+    "@lumio/schema": "workspace:*",
+    "katex": "0.19.1"
   }
 }

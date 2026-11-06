@@ -78,6 +78,7 @@ export class WorkPane {
       || [...this.detail.querySelectorAll("textarea")].some(area => area.value.trim());
     if (this.selected && this.editor && !this.editor.dirty && !focused && !this.detail.querySelector(".is-busy")) void this.open(this.selected, true);
   }
+  beforeLeave(): Promise<boolean> { return this.editor?.beforeLeave() ?? Promise.resolve(true); }
   canLeave(): boolean { return this.editor?.canLeave() ?? true; }
   intent(name: string): void {
     if (name === "new") { if (this.mode !== "tasks") this.switchMode("tasks"); this.create(); }
@@ -225,7 +226,7 @@ export class WorkPane {
 
   async open(id: string, quiet = false): Promise<void> {
     if (!quiet && id === this.selected && this.editor) return;
-    if (!quiet && !this.canLeave()) return;
+    if (!quiet && !(await this.beforeLeave())) return;
     if (id.startsWith("prj_") !== (this.mode === "projects")) { this.switchMode(id.startsWith("prj_") ? "projects" : "tasks", id); return; }
     const generation = ++this.detailGeneration;
     this.selected = id; markSelected(this.list, id);
@@ -269,9 +270,9 @@ export class WorkPane {
       isTask ? null : field(t("Working directory"), workdir, t("Tasks in this project run here unless they set their own.")),
       field(t("Description"), description), error);
     const save = h("button", { type: "submit", form: formId, class: "btn btn-primary" }, isTask ? t("Create task") : t("Create project"), h("kbd", {}, "⌘↵"));
-    const dialog = openDialog(isTask ? t("New task") : t("New project"), form, [save]);
+    const dialog = openDialog(isTask ? t("New task") : t("New project"), form, [save], { draftKey: `new-${isTask ? "task" : "project"}:${preset ?? ""}` });
     form.addEventListener("keydown", event => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); form.requestSubmit(); } });
-    let pending = false, prior = "", requestId = newRequestId();
+    let pending = false, prior = dialog.dataset.previous ?? "", requestId = dialog.dataset.requestId ?? newRequestId();
     form.addEventListener("submit", async event => {
       event.preventDefault();
       if (pending) return;
@@ -279,7 +280,7 @@ export class WorkPane {
       // 同样的内容重试时复用 request_id，Hub 据此去重；内容变了才换新的。
       const key = JSON.stringify([title.value, description.value, project.value, goal.value, workdir.value]);
       if (prior && key !== prior) requestId = newRequestId();
-      prior = key;
+      prior = key; dialog.dataset.previous = prior; dialog.dataset.requestId = requestId;
       try {
         const request = isTask
           ? taskCreateCommand({ title: title.value, description: description.value, project: project.value || undefined }, requestId)

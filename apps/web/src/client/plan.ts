@@ -7,6 +7,7 @@ import { DEFAULT_PLAN_MAX_ROUNDS, HandoffPlan, type PlanStage, type PlanTemplate
 import { errorText, isConflict, type Client } from "./api.ts";
 import { engineTargets, newRequestId } from "./commands.ts";
 import { autosize, clear, failure, field, h, icon, openDialog, select, toast } from "./dom.ts";
+import { drafts } from "./drafts.ts";
 import { t } from "./i18n.ts";
 
 type Task = Pick<WorkTask, "id" | "revision">;
@@ -98,22 +99,27 @@ export async function openPlanEditor(client: Client, task: WorkTask, saved: () =
     client.runtimes().then(engineTargets).catch(() => []),
     client.workPlanTemplates().catch(() => [] as PlanTemplate[]),
   ]);
+  const store = drafts(), draftKey = `plan:${task.id}`;
+  const draft = store.read<{stages:DraftStage[];rounds:string;from:string}>(draftKey);
   const agents = [...new Set([...targets.map(target => target.target), ...(task.plan ? agentStages(task.plan.plan).map(stage => stage.agent) : [])])];
   let stages: DraftStage[] = task.plan ? task.plan.plan.stages.map(toDraft) : [
     { kind: "agent", id: "implement", agent: agents[0] ?? "", instruction: "", back_to: "", prompt: "" },
   ];
-  const maxRounds = h("input", { type: "number", min: "1", max: "30", step: "1", name: "max-rounds", value: String(task.plan?.plan.max_rounds ?? DEFAULT_PLAN_MAX_ROUNDS) });
+  if (Array.isArray(draft?.stages)) stages = draft.stages;
+  const maxRounds = h("input", { type: "number", min: "1", max: "30", step: "1", name: "max-rounds", value: draft?.rounds ?? String(task.plan?.plan.max_rounds ?? DEFAULT_PLAN_MAX_ROUNDS) });
   const list = h("ol", { class: "plan-edit-list" });
   const from = select("plan-from", [], task.plan && task.plan.stage !== "end" ? task.plan.stage : undefined);
   const error = h("div", { role: "alert" });
   const datalist = h("datalist", { id: "plan-agents" }, ...agents.map(agent => h("option", { value: agent })));
-  let dirty = false;
+  let dirty = !!draft;
+  const persist = () => { if (dirty) store.write(draftKey, {stages, rounds:maxRounds.value, from:from.value}); };
 
   const nextId = (base: string) => { let n = 1; while (stages.some(stage => stage.id === `${base}${n > 1 ? `-${n}` : ""}`)) n++; return `${base}${n > 1 ? `-${n}` : ""}`; };
   const render = () => {
     clear(list, ...stages.map((stage, index) => {
-      const set = <K extends keyof DraftStage>(key: K, value: DraftStage[K]) => { stage[key] = value; dirty = true; dialog.dataset.dirty = "true"; };
+      const set = <K extends keyof DraftStage>(key: K, value: DraftStage[K]) => { stage[key] = value; dirty = true; dialog.dataset.dirty = "true"; persist(); };
       const id = h("input", { class: "plan-id", name: `stage-${index}-id`, value: stage.id, "aria-label": t("Step ID"), autocomplete: "off", spellcheck: "false" });
+      id.addEventListener("input", () => set("id", id.value));
       id.addEventListener("change", () => { set("id", id.value.trim().toLowerCase()); render(); });
       const move = (delta: number) => { const target = index + delta; if (target < 0 || target >= stages.length) return; [stages[index], stages[target]] = [stages[target]!, stages[index]!]; dirty = true; render(); };
       const tools = h("div", { class: "plan-edit-tools" },
@@ -149,6 +155,7 @@ export async function openPlanEditor(client: Client, task: WorkTask, saved: () =
     const keep = from.value;
     clear(from, ...options.map(([value, label]) => h("option", { value }, label)));
     if (options.some(([value]) => value === keep)) from.value = keep;
+    persist();
   };
 
   const plan = (): HandoffPlan | undefined => {
@@ -208,6 +215,10 @@ export async function openPlanEditor(client: Client, task: WorkTask, saved: () =
   const clearPlan = task.plan ? h("button", { type: "button", class: "btn btn-quiet", onclick: () => void commit(null) }, t("Remove plan")) : null;
   const dialog = openDialog(task.plan ? t("Edit handoff plan") : t("Add a handoff plan"), form, [saveTemplate, ...(clearPlan ? [clearPlan] : []), submit], { wide: true });
   render();
+  if (draft?.from) from.value = draft.from;
+  form.addEventListener("input", () => { dirty = true; persist(); });
+  form.addEventListener("change", () => { dirty = true; persist(); });
+  dialog.addEventListener("close", () => { if (dialog.dataset.dirty === "false") store.remove(draftKey); else persist(); });
 
   let pending = false, requestId = newRequestId(), previous = "";
   const commit = async (value: HandoffPlan | null) => {

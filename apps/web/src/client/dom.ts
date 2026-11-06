@@ -1,3 +1,4 @@
+import { drafts } from "./drafts.ts";
 import { t } from "./i18n.ts";
 import { matchRanges } from "./note-matches.ts";
 /**
@@ -161,19 +162,46 @@ export function statusIcon(status: string): SVGSVGElement {
 
 // ───────────── 对话框 ─────────────
 
-/** 原生 <dialog>，关闭后自动移除；有未保存输入时关闭前确认。 */
-export function openDialog(title: string, body: Node, actions: Node[], options: { wide?: boolean } = {}): HTMLDialogElement {
-  const confirmClose = () => dialog.dataset.dirty !== "true" || confirm(t("You have unsaved changes. Close anyway?"));
+/** 原生对话框；内容草稿按账户与用途恢复，关闭不触发提交。 */
+export function openDialog(title: string, body: Node, actions: Node[], options: { wide?: boolean; draftKey?: string } = {}): HTMLDialogElement {
   const dialog = h("dialog", { class: `dialog${options.wide ? " dialog-wide" : ""}`, "aria-label": title },
     h("header", { class: "dialog-head" }, h("h2", {}, title),
-      h("button", { type: "button", class: "icon-btn", "aria-label": t("Close"), onclick: () => { if (confirmClose()) dialog.close(); } }, icon("close"))),
+      h("button", { type: "button", class: "icon-btn", "aria-label": t("Close"), onclick: () => { dialog.close(); } }, icon("close"))),
     h("div", { class: "dialog-body" }, body),
     h("footer", { class: "dialog-foot" },
-      h("button", { type: "button", class: "btn btn-quiet", onclick: () => { if (confirmClose()) dialog.close(); } }, t("Cancel")), ...actions));
+      h("button", { type: "button", class: "btn btn-quiet", onclick: () => { dialog.close(); } }, t("Close")), ...actions));
   dialog.addEventListener("input", () => { dialog.dataset.dirty = "true"; });
-  dialog.addEventListener("cancel", event => { if (!confirmClose()) event.preventDefault(); });
-  dialog.addEventListener("click", event => { if (event.target === dialog && confirmClose()) dialog.close(); });
-  dialog.addEventListener("close", () => dialog.remove());
+  dialog.addEventListener("click", event => { if (event.target === dialog) dialog.close(); });
+  const store = drafts(), key = options.draftKey ? `form:${options.draftKey}` : undefined;
+  type FormDraft = { fields: Record<string, { value: string; checked: boolean }>; requestId?: string; previous?: string };
+  const saved = key ? store.read<FormDraft>(key) : undefined;
+  if (saved?.requestId) dialog.dataset.requestId = saved.requestId;
+  if (saved?.previous) dialog.dataset.previous = saved.previous;
+  const restored = new Set<string>();
+  const controls = () => [...dialog.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input[name],textarea[name],select[name]")]
+    .filter(el => !["password", "file", "hidden"].includes(el.type) && !/token|secret|credential|api.?key/i.test(el.name));
+  const restore = () => {
+    for (const control of controls()) {
+      if (restored.has(control.name)) continue;
+      restored.add(control.name);
+      const value = saved?.fields?.[control.name];
+      if (!value || typeof value.value !== "string") continue;
+      control.value = value.value;
+      if (control instanceof HTMLInputElement) control.checked = value.checked;
+      control.dispatchEvent(new Event("input", { bubbles: true }));
+      control.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  };
+  const capture = () => {
+    if (!key || dialog.dataset.dirty !== "true") return;
+    store.write(key, { fields: Object.fromEntries(controls().map(control => [control.name, { value: control.value, checked: control instanceof HTMLInputElement && control.checked }])), requestId: dialog.dataset.requestId, previous: dialog.dataset.previous });
+  };
+  dialog.addEventListener("input", capture);
+  dialog.addEventListener("change", () => { dialog.dataset.dirty = "true"; capture(); });
+  dialog.addEventListener("submit", capture);
+  const observer = new MutationObserver(restore);
+  if (key) { observer.observe(dialog, { childList: true, subtree: true }); queueMicrotask(restore); }
+  dialog.addEventListener("close", () => { if (key && dialog.dataset.dirty === "false") store.remove(key); else capture(); observer.disconnect(); dialog.remove(); });
   document.body.append(dialog);
   dialog.showModal();
   return dialog;

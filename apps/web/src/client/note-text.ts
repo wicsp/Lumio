@@ -139,3 +139,10 @@ export function insertReference(text: string, trigger: {
     }
     return { changes, cursor: trigger.from + mark.length };
 }
+
+/** Work/threads have no vault directory: use a stable ID, or a vault-root path. */
+export function portableReference(note: {id?: string;path:string;title:string}): string {
+    const target=note.id??note.path;
+    const label=note.title.replace(/[\[\]【】|\r\n]/g," ").trim()||target;
+    return note.id ? `[[${target}|${label}]]` : `[${label}](${note.path.split("/").map(part=>encodeURIComponent(part).replace(/[()]/g,char=>`%${char.charCodeAt(0).toString(16)}`)).join("/")})`;
+}

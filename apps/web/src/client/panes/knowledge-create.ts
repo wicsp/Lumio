@@ -3,10 +3,12 @@ import { errorText, type Client } from "../api.ts";
 import { clear, failure, field, h, icon, loading, select, toast } from "../dom.ts";
 import { newRequestId } from "../commands.ts";
 import { lang, t } from "../i18n.ts";
+import { drafts } from "../drafts.ts";
 import { NoteDraft, importEmptyFields, type NoteFields } from "../knowledge-draft.ts";
 import { NoteEditor } from "../note-editor.ts";
 import { writingContext } from "../note-text.ts";
 export class KnowledgeCreate {
+ private store=drafts();
  private state=new NoteDraft();private kind:KnowledgeNoteKind="idea";private generation=0;private importing=false;private ready=false;private opened=false;
  private form=h("form",{class:"form-stack knowledge-form",id:newRequestId("note-form")});
  private fields=h("div",{class:"form-stack"});private typeCards=h("div",{class:"note-types",role:"group","aria-label":t("Note type")});
@@ -15,28 +17,31 @@ export class KnowledgeCreate {
  constructor(private client:Client,private onSaved:(result:KnowledgeCreateResult)=>void,private host:HTMLElement,private contextChanged:(context:KnowledgeContext)=>void,private openNote:(ref:string)=>void,private cancel:()=>void,private showRelated:()=>void){}
  open():void{
   if(this.opened)return;this.opened=true;
-  this.editor=new NoteEditor({value:"",change:(body)=>{this.state.changed=true;this.capture(body);this.context();},context:()=>this.context(),referenceContext:position=>writingContext(this.title(),this.editor!.value,position),references:(query,position)=>this.client.noteReferences({source_kind:this.kind,query,context:writingContext(this.title(),this.editor!.value,position)}),open:this.openNote,save:()=>void this.submit()});
-  this.form.append(this.typeCards,this.fields,h("button",{type:"button",class:"btn btn-small mobile-only",onclick:this.showRelated},t("Related notes")),this.editor.root,this.error,h("div",{class:"note-create-actions"},h("button",{type:"button",class:"btn",onclick:()=>{if(this.canLeave())this.cancel();}},t("Cancel")),this.save));
+  const draft=this.store.read<{kind:KnowledgeNoteKind;fields:Array<[KnowledgeNoteKind,NoteFields]>;pending?:NoteDraft["pending"]}>("knowledge:new");
+  if(draft&&["idea","paper","video","web"].includes(draft.kind)&&Array.isArray(draft.fields)){this.kind=draft.kind;for(const [kind,fields] of draft.fields)this.state.set(kind,fields);this.state.pending=draft.pending;this.state.changed=true;}
+  this.editor=new NoteEditor({value:this.state.fields.get(this.kind)?.body??"",change:(body)=>{this.state.changed=true;this.capture(body);this.context();},context:()=>this.context(),referenceContext:position=>writingContext(this.title(),this.editor!.value,position),references:(query,position)=>this.client.noteReferences({source_kind:this.kind,query,context:writingContext(this.title(),this.editor!.value,position)}),open:this.openNote,save:()=>void this.submit()});
+  this.form.append(this.typeCards,this.fields,h("button",{type:"button",class:"btn btn-small mobile-only",onclick:this.showRelated},t("Related notes")),this.editor.root,this.error,h("div",{class:"note-create-actions"},h("button",{type:"button",class:"btn",onclick:()=>{if(this.canLeave())this.cancel();}},t("Close")),this.save));
   clear(this.host,h("article",{class:"reader note-author"},h("h1",{},t("New note")),this.form));
   this.form.addEventListener("invalid",event=>(event.target as Element).closest("details")?.setAttribute("open",""),true);
   this.form.addEventListener("input",event=>{if((event.target as HTMLInputElement).name==="authors"){const f=this.form.querySelector<HTMLInputElement>("[name=firstAuthorFamily]");if(f)f.value="";}this.state.changed=true;this.capture();this.context();});
   this.form.addEventListener("submit",event=>{event.preventDefault();void this.submit();});this.renderFields();this.renderTypes();void this.loadTemplates();
  }
- dispose():void{this.opened=false;this.generation++;this.editor?.destroy();}
+ dispose():void{this.persist();this.opened=false;this.generation++;this.editor?.destroy();}
  get hasPending():boolean{return !!this.state.pending;}
  get dirty():boolean{return this.opened&&(this.state.changed||!!this.state.pending||this.state.saving);}
- canLeave():boolean{return !this.state.saving&&(!this.dirty||confirm(t("You have unsaved changes. Close anyway?")));}
+ canLeave():boolean{this.capture();return true;}
+ private persist():void{if(this.state.changed||this.state.pending)this.store.write("knowledge:new",{kind:this.kind,fields:[...this.state.fields],pending:this.state.pending});}
  private title():string{return this.fields.querySelector<HTMLInputElement>("[name=title]")?.value??"";}
  private context():void{if(this.editor)this.contextChanged(writingContext(this.title(),this.editor.value,this.editor.position));}
  private async loadTemplates():Promise<void>{
   const generation=this.generation;clear(this.error,loading(t("Preparing note templates…")));this.controls(true);
   try{const templates=await Promise.all((["paper","video","web","idea"] as const).map(kind=>this.client.knowledgeTemplate({kind,locale:lang()})));if(!this.opened||generation!==this.generation)return;
-   for(const template of templates)this.state.set(template.kind,{body:template.body});this.ready=true;this.renderFields();this.editor!.setValue(this.state.fields.get(this.kind)!.body!);clear(this.error);this.controls(false);this.context();
+   for(const template of templates)if(!this.state.fields.has(template.kind))this.state.set(template.kind,{body:template.body});this.ready=true;this.renderFields();this.editor!.setValue(this.state.fields.get(this.kind)!.body!);clear(this.error);this.controls(!!this.state.pending);this.context();
   }catch(cause){if(this.opened&&generation===this.generation)clear(this.error,failure(errorText(cause),()=>void this.loadTemplates()));}
  }
- private capture(body=this.editor?.value??""):NoteFields{const values:NoteFields={body};for(const control of this.fields.querySelectorAll<HTMLInputElement|HTMLTextAreaElement|HTMLSelectElement>("[name]"))values[control.name]=control.value;this.state.set(this.kind,values);return values;}
+ private capture(body=this.editor?.value??""):NoteFields{const values:NoteFields={body};for(const control of this.fields.querySelectorAll<HTMLInputElement|HTMLTextAreaElement|HTMLSelectElement>("[name]"))values[control.name]=control.value;this.state.set(this.kind,values);this.persist();return values;}
  private renderTypes():void{const types:Array<[KnowledgeNoteKind,string,string]>=[["idea",t("Idea"),"memory"],["paper",t("Paper"),"knowledge"],["video",t("Video"),"play"],["web",t("Web page"),"globe"]];clear(this.typeCards,...types.map(([kind,label,glyph])=>h("button",{type:"button",class:"note-type","aria-pressed":String(kind===this.kind),onclick:()=>this.switchType(kind)},icon(glyph),label)));}
- private switchType(kind:KnowledgeNoteKind):void{if(kind===this.kind||!this.ready||this.state.pending||this.state.saving)return;this.capture();this.generation++;this.importing=false;this.kind=kind;this.renderTypes();this.renderFields();this.editor!.setValue(this.state.fields.get(kind)?.body??"");clear(this.error);this.controls(false);this.context();}
+ private switchType(kind:KnowledgeNoteKind):void{if(kind===this.kind||!this.ready||this.state.pending||this.state.saving)return;this.capture();this.generation++;this.importing=false;this.kind=kind;this.persist();this.renderTypes();this.renderFields();this.editor!.setValue(this.state.fields.get(kind)?.body??"");clear(this.error);this.controls(false);this.context();}
   private renderFields(): void {
     const draft = this.state.fields.get(this.kind) ?? {};
     const input = (name: string, type = "text", required = false) => h("input", { type, name, required, value: draft[name] ?? "", autocomplete: "off", ...(name === "title" ? { maxlength: 500 } : {}), ...(type === "number" ? { min: 1000, max: 9999, step: 1 } : {}) });
@@ -81,8 +86,8 @@ export class KnowledgeCreate {
  private async submit():Promise<void>{
   if(!this.ready||this.state.saving||this.importing)return;if(!this.state.pending&&!this.form.reportValidity())return;
   let request;try{request=this.state.begin(this.kind,this.capture(),newRequestId("note"));}catch{clear(this.error,failure(t("Check the title, authors, year and links before saving.")));return;}
-  const generation=this.generation;this.controls(true);clear(this.error);
-  try{const result=await this.client.createNote(request);if(!this.opened||generation!==this.generation)return;this.state.saving=false;this.state.pending=undefined;this.state.changed=false;this.dispose();toast(t("Note created"));this.onSaved(result);}
-  catch(cause){if(!this.opened||generation!==this.generation)return;this.state.failed(cause);this.controls(!!this.state.pending);clear(this.error,failure(errorText(cause)),this.state.pending?h("div",{},h("p",{class:"muted"},t("Your draft is kept. Retry the same save to check whether it succeeded; this will not create a second note.")),h("button",{type:"button",class:"btn",onclick:()=>{if(!confirm(t("Check whether the earlier note exists first. Start a separate save with this draft?")))return;this.state.pending=undefined;this.controls(false);clear(this.error);}},t("Continue as a new save"))):null);}
+  const generation=this.generation;this.persist();this.controls(true);clear(this.error);
+  try{const result=await this.client.createNote(request);if(!this.opened||generation!==this.generation)return;this.state.saving=false;this.state.pending=undefined;this.state.changed=false;this.store.remove("knowledge:new");this.dispose();toast(t("Note created"));this.onSaved(result);}
+  catch(cause){if(!this.opened||generation!==this.generation)return;this.state.failed(cause);this.persist();this.controls(!!this.state.pending);clear(this.error,failure(errorText(cause)),this.state.pending?h("div",{},h("p",{class:"muted"},t("Your draft is kept. Retry the same save to check whether it succeeded; this will not create a second note.")),h("button",{type:"button",class:"btn",onclick:()=>{if(!confirm(t("Check whether the earlier note exists first. Start a separate save with this draft?")))return;this.state.pending=undefined;this.controls(false);clear(this.error);}},t("Continue as a new save"))):null);}
  }
 }

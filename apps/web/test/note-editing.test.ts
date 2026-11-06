@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { footnotes, insertReference, referenceTrigger, writingContext } from "../src/client/note-text.ts";
+import { footnotes, insertReference, portableReference, referenceTrigger, writingContext } from "../src/client/note-text.ts";
 import { NoteSave } from "../src/client/note-save.ts";
 import type { KnowledgeDocument, KnowledgeUpdateRequest, KnowledgeUpdateResult } from "@lumio/schema";
 test("context at a mid-paragraph completion retains the following sentence", () => {
@@ -90,4 +90,12 @@ test("external version after response stops continuation and retains draft", asy
     expect((saver.error as {
         reason: string;
     }).reason).toBe("revision_conflict");
+});
+
+test("thread references use stable note IDs and safe labels without a vault-relative directory", () => {
+    expect(portableReference({id,path:"research/ideas/name.md",title:"Long [title] | 【alias】"})).toBe(`[[${id}|Long  title     alias]]`);
+    expect(portableReference({path:"research/ideas/NoID.md",title:"No ID"})).toBe("[No ID](research/ideas/NoID.md)");
+    const draft="Before 【【中文】】 after",trigger=referenceTrigger(draft,11)!;
+    const result=insertReference(draft,trigger,portableReference({id,path:"unused.md",title:"Note"}),false);
+    expect(result.changes[0]!.from).toBe(7);expect(result.changes[0]!.to).toBe(13);
 });

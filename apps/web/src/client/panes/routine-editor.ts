@@ -5,7 +5,7 @@ import { clear, empty, failure, field, h, loading, openDialog, select } from "..
 import { t } from "../i18n.ts";
 
 export async function editRoutine(owner:HTMLElement,client:Client,changed:()=>void,routine?:ExecutionRoutine):Promise<void>{
-  const wait=h("div",{},loading(t("Reading runtime capabilities…")));const dialog=openDialog(routine?t("Edit routine"):t("New routine"),wait,[]);
+  const wait=h("div",{},loading(t("Reading runtime capabilities…")));const dialog=openDialog(routine?t("Edit routine"):t("New routine"),wait,[],{draftKey:`routine:${routine?.id??"new"}`});
   try{
     const targets=engineTargets(await client.runtimes());if(!owner.isConnected){dialog.close();return;}
     if(routine&&!targets.some(target=>target.target===routine.assignee))targets.push({target:routine.assignee,label:t("{0} (current target)", routine.assignee),online:false});
@@ -22,17 +22,17 @@ export async function editRoutine(owner:HTMLElement,client:Client,changed:()=>vo
       !targets.length&&empty(t("Connect a device with a registered engine first.")),message);
     const save=h("button",{type:"submit",form:formId,class:"btn btn-primary",disabled:!targets.length},t("Save routine"));
     clear(wait,form);dialog.querySelector(".dialog-foot")!.append(save);
-    let pending=false,requestId=newRequestId(),previous="";
+    let pending=false,requestId=dialog.dataset.requestId??newRequestId(),previous=dialog.dataset.previous??"";
     form.addEventListener("submit",async event=>{
       event.preventDefault();if(pending)return;
       const draft:RoutineDraft={title:title.value,description:description.value,schedule:schedule.value,timezone:timezone.value,assignee:target.value,context:context.value as RoutineDraft["context"],workdir:workdir.value,timeout_minutes:timeout.value};
-      const key=JSON.stringify([draft,status.value]);if(previous&&previous!==key)requestId=newRequestId();previous=key;
+      const key=JSON.stringify([draft,status.value]);if(previous&&previous!==key)requestId=newRequestId();previous=key;dialog.dataset.previous=previous;dialog.dataset.requestId=requestId;
       let request=routine?routineUpdateCommand(routine,draft,requestId):routineCreateCommand(draft,requestId);
       if(routine){if(!request&&status.value===routine.status){dialog.close();return;}request??={request_id:requestId,operation:{op:"execution.routine.update",args:{routine:routine.id,expected_revision:routine.revision,patch:{status:status.value as ExecutionRoutine["status"]}}}};
         if(request.operation.op==="execution.routine.update"&&status.value!==routine.status)request.operation.args.patch.status=status.value as ExecutionRoutine["status"];
       }else if(request?.operation.op==="execution.routine.create")request.operation.args.status=status.value as ExecutionRoutine["status"];
       if(!request)return;pending=true;save.disabled=true;clear(message);
-      try{await client.executionCommand(request);dialog.close();if(owner.isConnected)changed();}
+      try{await client.executionCommand(request);dialog.dataset.dirty="false";dialog.close();if(owner.isConnected)changed();}
       catch(cause){clear(message,failure(isConflict(cause)?t("This routine has a newer version. Your changes are still here — copy them, then close and refresh."):t("{0} Your input is kept; if the connection dropped, refresh to check whether it was saved.", errorText(cause))));}
       finally{pending=false;save.disabled=false;}
     });title.focus();

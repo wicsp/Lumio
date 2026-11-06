@@ -41,6 +41,7 @@ ADR 0025 的四模块重构已合入：业务库、显式委派、Routine、助�
 | [0027](adr/0027-v0.2-rollout.md) | v0.2 上线：一个程序、Hub 提供 Web 与 PWA、助手模型配置、旧任务笔记直接退役 | Accepted |
 | [0028](adr/0028-language-terminal-theme.md) | 界面语言（默认英文、中文环境用中文）、终端输出样式、Web 主题切换 | Accepted |
 | [0035](adr/0035-live-note-editing-and-related-notes.md) | 笔记实时预览编辑、相关推荐、`[[` 候选与上标脚注 | Accepted |
+| [0037](adr/0037-content-autosave-and-local-drafts.md) | 内容自动保存与按账户隔离的浏览器恢复副本 | Accepted |
 
 **工程基础**
 | 编号 | 一句话 | 状态 |
