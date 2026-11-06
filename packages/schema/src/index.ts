@@ -1,3 +1,4 @@
+import { KnowledgeDocument, KnowledgeUpdateRequest, KnowledgeUpdateResult, KnowledgeContext, KnowledgeRelatedRequest, KnowledgeRelatedResult, KnowledgeReferencesRequest, KnowledgeReferencesResult } from "./knowledge-editing.ts";
 /**
  * @lumio/schema —— Lumio 的契约，唯一事实来源（ADR 0003）。
  *
@@ -53,6 +54,15 @@ import { CheckResult, LinksResult, NoteDetail, SearchResult } from "./query.ts";
 import { KnowledgeTemplateRequest, KnowledgeTemplateResult, PaperResolveRequest, PaperResolveResult, KnowledgeCreateRequest, KnowledgeCreateResult } from "./knowledge-authoring.ts";
 
 export const CONTRACTS = {
+  "knowledge-document": KnowledgeDocument,
+  "knowledge-update-request": KnowledgeUpdateRequest,
+  "knowledge-update-result": KnowledgeUpdateResult,
+  "knowledge-context": KnowledgeContext,
+  "knowledge-related-request": KnowledgeRelatedRequest,
+  "knowledge-related-result": KnowledgeRelatedResult,
+  "knowledge-references-request": KnowledgeReferencesRequest,
+  "knowledge-references-result": KnowledgeReferencesResult,
+
   "knowledge-template-request": KnowledgeTemplateRequest,
   "knowledge-template-result": KnowledgeTemplateResult,
   "paper-resolve-request": PaperResolveRequest,
@@ -155,3 +165,5 @@ export const CONTRACTS = {
 } as const;
 
 export * from "./knowledge-authoring.ts";
+
+export * from "./knowledge-editing.ts";

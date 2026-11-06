@@ -1,0 +1,23 @@
+/** ADR 0035, approved including the task-specific Codex authorship override. */
+import { z } from "zod";
+import { Id, RequestId } from "./common.ts";
+import { NoteDetail, NoteRef } from "./query.ts";
+import { KnowledgeNoteKind } from "./knowledge-authoring.ts";
+export const KnowledgeRevision = z.string().regex(/^[a-f0-9]{64}$/);
+export const KnowledgeDocument = z.strictObject({ document: NoteDetail, revision: KnowledgeRevision });
+export const KnowledgeUpdateRequest = z.strictObject({ request_id: RequestId, expected_revision: KnowledgeRevision, title: z.string().trim().min(1).max(500), body: z.string().max(500000) });
+export const KnowledgeUpdateResult = KnowledgeDocument.extend({ request_id: RequestId });
+export const KnowledgeContext = z.strictObject({ title: z.string().max(500), text: z.string().max(20000), focus: z.string().max(4000) });
+export const KnowledgeRelatedRequest = KnowledgeContext.extend({ exclude_id: Id.optional() });
+export const KnowledgeRelatedHit = z.strictObject({ note: NoteRef, snippet: z.string().max(200) });
+export const KnowledgeRelatedResult = z.strictObject({ method: z.literal("lexical"), hits: z.array(KnowledgeRelatedHit).max(5) });
+export const KnowledgeReferencesRequest = z.strictObject({ source_id: Id.optional(), source_kind: KnowledgeNoteKind.optional(), query: z.string().trim().max(200), context: KnowledgeContext.optional() }).refine(v => !!v.source_id !== !!v.source_kind, "Specify one source").refine(v => !!v.query || !!v.context, "Empty queries need context");
+export const KnowledgeReferencesResult = z.strictObject({ hits: z.array(KnowledgeRelatedHit.extend({ insert_text: z.string().min(1).max(10000) })).max(10) });
+export type KnowledgeDocument = z.infer<typeof KnowledgeDocument>;
+export type KnowledgeUpdateRequest = z.infer<typeof KnowledgeUpdateRequest>;
+export type KnowledgeUpdateResult = z.infer<typeof KnowledgeUpdateResult>;
+export type KnowledgeContext = z.infer<typeof KnowledgeContext>;
+export type KnowledgeRelatedRequest = z.infer<typeof KnowledgeRelatedRequest>;
+export type KnowledgeRelatedResult = z.infer<typeof KnowledgeRelatedResult>;
+export type KnowledgeReferencesRequest = z.infer<typeof KnowledgeReferencesRequest>;
+export type KnowledgeReferencesResult = z.infer<typeof KnowledgeReferencesResult>;
