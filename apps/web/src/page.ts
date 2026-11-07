@@ -60,8 +60,10 @@ export const MANIFEST = {
   theme_color: "#1c2220",
   icons: [
     { src: "/assets/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
-    { src: "/assets/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any maskable" },
-    { src: "/assets/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any maskable" },
+    { src: "/assets/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+    { src: "/assets/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+    { src: "/assets/icon-maskable-192.png", sizes: "192x192", type: "image/png", purpose: "maskable" },
+    { src: "/assets/icon-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
   ],
 };
 
@@ -77,6 +79,8 @@ export function webFiles(assets: WebAssets, options: PageOptions): Map<string, W
     ["/assets/icon.svg", { body: ICON_SVG, type: "image/svg+xml" }],
     ["/assets/icon-192.png", { body: iconPng(192), type: "image/png" }],
     ["/assets/icon-512.png", { body: iconPng(512), type: "image/png" }],
-    ["/assets/apple-touch-icon.png", { body: iconPng(180), type: "image/png" }],
+    ["/assets/icon-maskable-192.png", { body: iconPng(192, { maskable: true }), type: "image/png" }],
+    ["/assets/icon-maskable-512.png", { body: iconPng(512, { maskable: true }), type: "image/png" }],
+    ["/assets/apple-touch-icon.png", { body: iconPng(180, { maskable: true }), type: "image/png" }],
   ]);
 }

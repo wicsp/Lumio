@@ -50,14 +50,34 @@ describe("icons", () => {
       expect(Array.from(png.subarray(0, 8))).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
       const view = new DataView(png.buffer, png.byteOffset);
       expect([view.getUint32(16), view.getUint32(20), png[24], png[25]]).toEqual([size, size, 8, 6]);
-      // 解出像素：太阳是暖黄，地平线是米白，角落是夜色，全部不透明。
+      // 解出像素：太阳是暖黄，地平线是米白，普通安装图标的角落透明。
       const idatLength = view.getUint32(33);
       const raw = inflateSync(png.subarray(41, 41 + idatLength));
       const pixel = (x: number, y: number) => Array.from(raw.subarray(y * (size * 4 + 1) + 1 + x * 4, y * (size * 4 + 1) + 5 + x * 4));
       const at = (u: number, v: number) => pixel(Math.floor((u * size) / 100), Math.floor((v * size) / 100));
       expect(at(50, 55)).toEqual([0xff, 0xb5, 0x47, 255]);
       expect(at(50, 61)).toEqual([0xf4, 0xf1, 0xea, 255]);
-      expect(pixel(0, 0)).toEqual([0x1b, 0x1d, 0x2a, 255]);
+      expect(pixel(0, 0)).toEqual([0, 0, 0, 0]);
+    }
+  });
+  test("manifest separates rounded desktop icons from opaque maskable icons", () => {
+    const files = webFiles(assets, { apiBase: "" });
+    const pngIcons = MANIFEST.icons.filter(icon => icon.type === "image/png");
+    expect(new Set(pngIcons.map(icon => icon.purpose))).toEqual(new Set(["any", "maskable"]));
+    for (const icon of pngIcons) {
+      const size = Number(icon.sizes.split("x")[0]);
+      const png = files.get(icon.src)!.body as Uint8Array;
+      const view = new DataView(png.buffer, png.byteOffset);
+      const raw = inflateSync(png.subarray(41, 41 + view.getUint32(33)));
+      const alpha = (x: number, y: number) => raw[y * (size * 4 + 1) + 4 + x * 4];
+      for (const x of [0, size - 1]) for (const y of [0, size - 1]) {
+        expect(alpha(x, y)).toBe(icon.purpose === "maskable" ? 255 : 0);
+      }
+      expect(alpha(Math.floor(size / 2), 0)).toBe(255);
+      expect(alpha(Math.floor(size / 2), Math.floor(size / 2))).toBe(255);
+      const alphas = Array.from({ length: size * size }, (_, i) => alpha(i % size, Math.floor(i / size))!);
+      if (icon.purpose === "maskable") expect(alphas.every(value => value === 255)).toBe(true);
+      else expect(alphas.some(value => value > 0 && value < 255)).toBe(true);
     }
   });
 });
