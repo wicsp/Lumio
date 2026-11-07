@@ -44,18 +44,20 @@ describe("files", () => {
 });
 
 describe("icons", () => {
-  test("PNG icons are valid RGBA images of the requested size with the lamp in the centre", () => {
+  test("PNG icons are valid RGBA images of the requested size with the pixel sunrise", () => {
     for (const size of [180, 192, 512]) {
       const png = iconPng(size);
       expect(Array.from(png.subarray(0, 8))).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
       const view = new DataView(png.buffer, png.byteOffset);
       expect([view.getUint32(16), view.getUint32(20), png[24], png[25]]).toEqual([size, size, 8, 6]);
-      // 解出像素：中心是灯光黄，角落是石墨色，全部不透明。
+      // 解出像素：太阳是暖黄，地平线是米白，角落是夜色，全部不透明。
       const idatLength = view.getUint32(33);
       const raw = inflateSync(png.subarray(41, 41 + idatLength));
       const pixel = (x: number, y: number) => Array.from(raw.subarray(y * (size * 4 + 1) + 1 + x * 4, y * (size * 4 + 1) + 5 + x * 4));
-      expect(pixel(size >> 1, size >> 1)).toEqual([0xf2, 0xb7, 0x05, 255]);
-      expect(pixel(0, 0)).toEqual([0x1c, 0x22, 0x20, 255]);
+      const at = (u: number, v: number) => pixel(Math.floor((u * size) / 100), Math.floor((v * size) / 100));
+      expect(at(50, 55)).toEqual([0xff, 0xb5, 0x47, 255]);
+      expect(at(50, 61)).toEqual([0xf4, 0xf1, 0xea, 255]);
+      expect(pixel(0, 0)).toEqual([0x1b, 0x1d, 0x2a, 255]);
     }
   });
 });
