@@ -41,6 +41,7 @@ export class KnowledgePane {
   private selected?: string;
   private creator?: KnowledgeCreate;
   private editor?: NoteEditor;
+  private titleResize?: ResizeObserver;
   private saver?: NoteSave;
   private store = drafts();
   private recoveries = new WeakMap<NoteSave, ReturnType<ReturnType<typeof drafts>["claim"]>>();
@@ -99,7 +100,7 @@ export class KnowledgePane {
     this.creator=new KnowledgeCreate(this.client,result=>{this.creator=undefined;this.query.value="";this.type="";this.renderFilters();void this.search();void this.read(result.id);},this.detail,context=>this.recommend(context),ref=>void this.open(ref),()=>{this.clearWriter();this.showPlaceholder();},()=>{this.split.classList.toggle("show-related");this.renderRelated();});
     this.creator.open();
   }
-  private clearWriter():void{this.persist();this.outlineEntries=()=>[];this.outline.refresh();clearTimeout(this.saveTimer);clearTimeout(this.relatedTimer);this.relatedGeneration++;this.contextKey="";this.relatedTerms=[];this.linksRevision="";this.split.classList.remove("show-related");this.relatedHits=[];this.related.hidden=true;clear(this.related);this.editor?.destroy();this.editor=undefined;this.saver=undefined;this.creator?.dispose();this.creator=undefined;}
+  private clearWriter():void{this.persist();this.titleResize?.disconnect();this.titleResize=undefined;this.outlineEntries=()=>[];this.outline.refresh();clearTimeout(this.saveTimer);clearTimeout(this.relatedTimer);this.relatedGeneration++;this.contextKey="";this.relatedTerms=[];this.linksRevision="";this.split.classList.remove("show-related");this.relatedHits=[];this.related.hidden=true;clear(this.related);this.editor?.destroy();this.editor=undefined;this.saver=undefined;this.creator?.dispose();this.creator=undefined;}
   dispose():void{this.clearWriter();this.outline.dispose();this.active=false;this.generation++;this.searchGeneration++;this.unbindKeys();}
   async open(reference: string, reload = false): Promise<void> {
     if (!reload && reference === this.selected && this.detail.querySelector(".reader")) return;
@@ -214,7 +215,12 @@ export class KnowledgePane {
     try{
       const doc=await this.client.knowledgeDocument(note.note.id!);if(!this.active||generation!==this.generation)return;
       const article=this.detail.querySelector("article")!;const oldBody=article.querySelector(".markdown")!;const oldTitle=article.querySelector("h1")!;
-      const title=h("input",{class:"reader-title note-title",value:doc.document.note.title,maxlength:500,"aria-label":t("Title")});oldTitle.replaceWith(title);
+      const title=h("textarea",{class:"reader-title note-title",rows:"1",maxlength:500,"aria-label":t("Title")});
+      title.value=doc.document.note.title;
+      oldTitle.replaceWith(title);
+      const fitTitle=()=>{title.style.height="auto";title.style.height=`${title.scrollHeight}px`;};
+      this.titleResize=new ResizeObserver(fitTitle);
+      this.titleResize.observe(title);
       this.conflict=h("section",{class:"note-conflict",hidden:true});this.saveError=h("div",{class:"note-save-error"});this.saveStatus=h("div",{class:"note-save-status",role:"status"});
       const saver=new NoteSave(doc,this.client,()=>{this.persist(saver);if(this.active&&generation===this.generation&&this.saver===saver)this.renderSave();});this.saver=saver;
       const recovery=this.store.claim(`note:${note.note.id}`);this.recoveries.set(saver,recovery);
@@ -226,11 +232,22 @@ export class KnowledgePane {
       const context=()=>writingContext(title.value,this.editor?.value??doc.document.body,this.editor?.position??0);
       this.editor=new NoteEditor({value:saver.body,change:(text,position,composing)=>{this.saver!.change(title.value,text);clearTimeout(this.saveTimer);if(!composing&&!this.saver!.error)this.saveTimer=setTimeout(()=>void this.saver?.save(),800);this.recommend(writingContext(title.value,text,position));},context:()=>this.recommend(context()),
         referenceContext:position=>writingContext(title.value,this.editor!.value,position),references:(query,position)=>this.client.noteReferences({source_id:note.note.id!,query,context:writingContext(title.value,this.editor!.value,position)}),open:ref=>void this.open(this.resolveReference(ref)),save:()=>{clearTimeout(this.saveTimer);if(!this.saver?.error)void this.saver?.save();},outlineChanged:()=>this.outline.refresh()});
-      const titleChanged=(composing:boolean)=>{this.saver!.change(title.value,this.editor!.value);clearTimeout(this.saveTimer);if(!composing&&!this.saver!.error)this.saveTimer=setTimeout(()=>void this.saver?.save(),800);this.recommend(context());};
+      const titleChanged=(composing:boolean)=>{
+        if(!composing&&/[\r\n]/.test(title.value))title.value=title.value.replace(/[\r\n]+/g," ");
+        fitTitle();
+        this.saver!.change(title.value,this.editor!.value);
+        clearTimeout(this.saveTimer);
+        if(!composing&&!this.saver!.error)this.saveTimer=setTimeout(()=>void this.saver?.save(),800);
+        this.recommend(context());
+      };
       title.addEventListener("compositionstart",()=>clearTimeout(this.saveTimer));
       title.addEventListener("input",event=>titleChanged((event as InputEvent).isComposing));
       title.addEventListener("compositionend",()=>titleChanged(false));
-      title.addEventListener("keydown",event=>{if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="s"){event.preventDefault();if(!event.isComposing&&!this.saver?.error)void this.saver?.save();}});
+      title.addEventListener("keydown",event=>{
+        if(event.isComposing)return;
+        if(event.key==="Enter"){event.preventDefault();title.blur();}
+        if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="s"){event.preventDefault();if(!this.saver?.error)void this.saver?.save();}
+      });
       oldBody.replaceWith(this.editor.root);const editor=this.editor;this.outlineEntries=()=>editor.outlineEntries();this.outline.refresh();article.insertBefore(this.saveStatus,this.editor.root);article.insertBefore(this.saveError,this.editor.root);article.insertBefore(this.conflict,this.editor.root);
       this.saveStatus.before(h("button",{type:"button",class:"btn btn-small mobile-only",onclick:()=>{this.split.classList.toggle("show-related");this.renderRelated();}},t("Related notes")));
       article.querySelector(".detail-crumbs")?.append(this.moreButton(note.note.id!,()=>title.value.trim()||note.note.title));
