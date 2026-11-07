@@ -7,7 +7,6 @@ import { deflateSync } from "node:zlib";
 
 type Rgb = readonly [number, number, number];
 const NIGHT: Rgb = [0x1b, 0x1d, 0x2a], SUN: Rgb = [0xff, 0xb5, 0x47], CREAM: Rgb = [0xf4, 0xf1, 0xea];
-const CORNER_RADIUS = 23;
 
 /** 像素块：x、y、宽、高、颜色、不透明度。后画的盖住先画的。 */
 const BLOCKS: ReadonlyArray<readonly [number, number, number, number, Rgb, number]> = [
@@ -19,7 +18,7 @@ const BLOCKS: ReadonlyArray<readonly [number, number, number, number, Rgb, numbe
 
 const hex = (c: Rgb) => "#" + c.map((v) => v.toString(16).padStart(2, "0")).join("");
 export const ICON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" shape-rendering="crispEdges">'
-  + `<rect width="100" height="100" rx="${CORNER_RADIUS}" fill="${hex(NIGHT)}" shape-rendering="geometricPrecision"/>`
+  + `<rect width="100" height="100" rx="23" fill="${hex(NIGHT)}" shape-rendering="geometricPrecision"/>`
   + BLOCKS.map(([x, y, w, h, c, a]) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${hex(c)}"${a < 1 ? ` fill-opacity="${a}"` : ""}/>`).join("")
   + "</svg>";
 
@@ -53,10 +52,10 @@ function chunk(type: string, data: Uint8Array): Uint8Array {
 }
 
 /**
- * 普通安装图标与 SVG 一样带透明圆角；maskable 与 apple-touch-icon 保持满版，由系统裁切。
+ * 满版正方形图标（可用作 maskable 与 apple-touch-icon）：不画圆角，由系统裁切。
  * 图形都落在中心半径 0.4 边长的 maskable 安全区内。每个像素 4×4 超采样，边缘平滑。
  */
-export function iconPng(size: number, options: { maskable?: boolean } = {}): Uint8Array {
+export function iconPng(size: number): Uint8Array {
   const raw = new Uint8Array(size * (size * 4 + 1));
   const S = 4, scale = 100 / size;
   for (let y = 0; y < size; y++) {
@@ -64,19 +63,13 @@ export function iconPng(size: number, options: { maskable?: boolean } = {}): Uin
     raw[row] = 0; // filter: none
     for (let x = 0; x < size; x++) {
       const sum = [0, 0, 0];
-      let covered = 0;
       for (let sy = 0; sy < S; sy++) for (let sx = 0; sx < S; sx++) {
-        const u = (x + (sx + 0.5) / S) * scale, v = (y + (sy + 0.5) / S) * scale;
-        const dx = Math.max(CORNER_RADIUS - u, 0, u - (100 - CORNER_RADIUS));
-        const dy = Math.max(CORNER_RADIUS - v, 0, v - (100 - CORNER_RADIUS));
-        if (!options.maskable && dx * dx + dy * dy > CORNER_RADIUS * CORNER_RADIUS) continue;
-        const c = colorAt(u, v);
-        covered++;
+        const c = colorAt((x + (sx + 0.5) / S) * scale, (y + (sy + 0.5) / S) * scale);
         for (let k = 0; k < 3; k++) sum[k]! += c[k]!;
       }
       const i = row + 1 + x * 4;
-      for (let k = 0; k < 3; k++) raw[i + k] = covered ? Math.round(sum[k]! / covered) : 0;
-      raw[i + 3] = Math.round(255 * covered / (S * S));
+      for (let k = 0; k < 3; k++) raw[i + k] = Math.round(sum[k]! / (S * S));
+      raw[i + 3] = 255;
     }
   }
   const header = new Uint8Array(13);
