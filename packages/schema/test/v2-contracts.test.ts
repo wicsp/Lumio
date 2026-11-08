@@ -173,6 +173,7 @@ describe("Work contracts", () => {
 
   test("WorkTaskDetail aggregates", () => {
     const detail = WorkTaskDetail.parse({
+      dependents: [], children: [],
       task: {
         schema_version: 3,
         type: "task",

@@ -70,17 +70,24 @@ export class SqliteWorkStore implements WorkStore {
       JSON.stringify(value.tags), value.goal ?? null, value.repo ?? null, value.deadline ?? null, value.created_by ?? null, value.updated_by ?? null, value.workdir ?? null);
   }
 
-  private readTask(row: Record<string, unknown> | null): WorkTask | undefined {
+  private readTask(row: Record<string, unknown> | null, batchDependencies?: Map<string, string[]>): WorkTask | undefined {
     if (!row) return;
     const { refs, turn, plan, ...fields } = Object.fromEntries(Object.entries(row).filter(([, value]) => value !== null));
-    const dependencies = this.db.query<{ dependency: string }, [string]>("SELECT dependency FROM work_dependencies WHERE task=? ORDER BY rowid").all(String(row.id)).map((value) => value.dependency);
+    const dependencies = batchDependencies?.get(String(row.id)) ?? (batchDependencies ? [] : this.db.query<{ dependency: string }, [string]>("SELECT dependency FROM work_dependencies WHERE task=? ORDER BY rowid").all(String(row.id)).map((value) => value.dependency));
     return WorkTask.parse({ ...fields, schema_version: 3, type: "task", turn: JSON.parse(String(turn)), plan: plan ? JSON.parse(String(plan)) : undefined, tags: JSON.parse(String(row.tags)), references: JSON.parse(String(refs)),
       gpus: row.gpus === null ? undefined : JSON.parse(String(row.gpus)), dependencies });
   }
   task(id: string): WorkTask | undefined { return this.readTask(this.db.query<Record<string, unknown>, [string]>("SELECT * FROM work_tasks WHERE id=? AND id NOT IN (SELECT id FROM work_purged_tasks)").get(id)); }
-  tasks(): WorkTask[] { return this.db.query<Record<string, unknown>, []>("SELECT * FROM work_tasks WHERE id NOT IN (SELECT id FROM work_purged_tasks) ORDER BY created,id").all().map((row) => this.readTask(row)!); }
+  tasks(): WorkTask[] {
+    const dependencies = new Map<string, string[]>();
+    for (const row of this.db.query<{ task: string; dependency: string }, []>("SELECT task,dependency FROM work_dependencies ORDER BY rowid").all()) {
+      const ids = dependencies.get(row.task) ?? []; ids.push(row.dependency); dependencies.set(row.task, ids);
+    }
+    return this.db.query<Record<string, unknown>, []>("SELECT * FROM work_tasks WHERE id NOT IN (SELECT id FROM work_purged_tasks) ORDER BY created,id")
+      .all().map(row => this.readTask(row, dependencies)!);
+  }
   putTask(input: WorkTask): void {
-    const value = WorkTask.parse(input);
+    const { blocked_by: _derived, ...value } = WorkTask.parse(input);
     this.transaction(() => {
       this.db.query(`INSERT INTO work_tasks(id,title,description,revision,outcome,turn,plan,project,parent,due,created,updated,tags,refs,workdir,model,gpus,timeout_minutes,created_by,updated_by)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
@@ -162,7 +169,12 @@ export class SqliteWorkStore implements WorkStore {
     return row ? { operation: row.operation, result: WorkCommandResult.parse(JSON.parse(row.result)) } : undefined;
   }
   putReceipt(actor: string, request: string, operation: string, result: WorkCommandResult): void {
-    this.db.query("INSERT INTO work_requests(actor,request,operation,result) VALUES (?,?,?,?)").run(actor, request, operation, JSON.stringify(WorkCommandResult.parse(result)));
+    const parsed = WorkCommandResult.parse(result);
+    if (parsed.kind === "task") {
+      const { blocked_by: _derived, ...task } = parsed.task;
+      parsed.task = task;
+    }
+    this.db.query("INSERT INTO work_requests(actor,request,operation,result) VALUES (?,?,?,?)").run(actor, request, operation, JSON.stringify(parsed));
   }
 }
 

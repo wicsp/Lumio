@@ -3,7 +3,7 @@ export { nextTurn, migrateTurn, type LegacyTurnFacts, type PlannedDelivery } fro
 import {
   WorkProject, WorkTask, WorkComment, WorkExecution, WorkTaskDetail,
   WorkCommandRequest, WorkCommandResult, TaskTurnChange, Turn, PlanTemplate, DEFAULT_PLAN_MAX_ROUNDS, textContainsCardNumber,
-  type PlanRun, TrashItem, TRASH_RETENTION_DAYS, TRASHED_REASON,
+  type WorkTaskListArgs, type PlanRun, TrashItem, TRASH_RETENTION_DAYS, TRASHED_REASON,
   type ActorRole, type ID_PREFIXES, type Job,
 } from "@lumio/schema";
 
@@ -91,17 +91,31 @@ export class WorkService {
     const trashed = this.store.trash(id);
     const value = !trashed && this.store.task(id);
     if (!value) throw new WorkError("NOT_FOUND", { key: "index.task_not_found", args: [] }, trashed && TRASHED_REASON);
-    return WorkTask.parse(value);
+    return this.withReadiness(WorkTask.parse(value));
   }
-  tasks(filter: { project?: string; status?: string; query?: string } = {}): WorkTask[] {
+  /** Batch reads build one visible-task map; no per-task dependency lookups. */
+  tasks(filter: WorkTaskListArgs = {}): WorkTask[] {
     const query = filter.query?.trim().toLocaleLowerCase();
     const hidden = new Set(this.store.trashed().map(item => item.id));
-    return WorkTask.array().parse(this.store.tasks()).filter((task) =>
-      !hidden.has(task.id) && (!filter.project || task.project === filter.project) && (!filter.status || legacyTaskStatus(task) === filter.status)
+    const visible = WorkTask.array().parse(this.store.tasks()).filter(task => !hidden.has(task.id));
+    const byId = new Map(visible.map(task => [task.id, task]));
+    return visible.map(task => this.withReadiness(task, id => byId.get(id))).filter(task =>
+      (!filter.project || task.project === filter.project) && (!filter.status || legacyTaskStatus(task) === filter.status)
+      && (!filter.tag || task.tags.includes(filter.tag)) && (!filter.parent || task.parent === filter.parent)
+      && (!filter.readiness || (task.outcome === "open" && (filter.readiness === "blocked" ? task.blocked_by!.length > 0 : task.blocked_by!.length === 0)))
       && (!query || `${task.title}\n${task.description}\n${task.tags.join(" ")}`.toLocaleLowerCase().includes(query)));
   }
+  private withReadiness(task: WorkTask, lookup = (id: string) => this.store.trash(id) ? undefined : this.store.task(id)): WorkTask {
+    return { ...task, blocked_by: task.dependencies.filter(id => lookup(id)?.outcome === "open") };
+  }
+  private requireReady(task: WorkTask, ids = this.withReadiness(task).blocked_by!): void {
+    if (ids.length) throw new WorkError("CONFLICT", { key: "work.blocked_dependencies", args: [ids.map(id => `${id}: ${this.store.task(id)!.title}`).join(", ")] });
+  }
   detail(id: string): WorkTaskDetail {
-    return WorkTaskDetail.parse({ task: this.task(id), comments: this.store.comments(id), executions: this.store.executions(id), turns: this.store.turns(id) });
+    const task = this.task(id), visible = this.tasks();
+    return WorkTaskDetail.parse({ task, dependents: visible.filter(value => value.dependencies.includes(id)).map(value => value.id),
+      children: visible.filter(value => value.parent === id).map(value => value.id),
+      comments: this.store.comments(id), executions: this.store.executions(id), turns: this.store.turns(id) });
   }
   planTemplates(): PlanTemplate[] { return PlanTemplate.array().parse(this.store.planTemplates()); }
 
@@ -186,9 +200,8 @@ export class WorkService {
       if (!previous?.dependencies.includes(id)) this.task(id);
       visit(id, new Set());
     }
-    if (task.outcome === "done" && task.dependencies.some((id) => this.store.task(id)?.outcome !== "done" && (previous?.outcome !== "done" || !previous.dependencies.includes(id)))) {
-      throw new WorkError("CONFLICT", { key: "index.dependency_tasks_are_not_completed", args: [] });
-    }
+    if (task.outcome === "done") this.requireReady(task, this.withReadiness(task).blocked_by!
+      .filter(id => previous?.outcome !== "done" || !previous.dependencies.includes(id)));
   }
 
   /** Freeze the observed version and implicit previous agent before presenting a proposal. */
@@ -233,7 +246,7 @@ export class WorkService {
     if (task.outcome !== "open" || task.turn.holder === "nobody" || (task.turn.reason === "working" && !automatic)) {
       throw new WorkError("CONFLICT", { key: "index.task_is_done_cancelled_or_paused", args: [] });
     }
-    if (task.dependencies.some(id => this.task(id).outcome !== "done")) throw new WorkError("CONFLICT", { key: "index.dependency_tasks_are_not_completed", args: [] });
+    this.requireReady(task);
     const executions = this.store.executions(task.id);
     if (executions.some(execution => !execution.applied)) throw new WorkError("CONFLICT", { key: "index.this_task_already_has_a_running_round_or_pending_result", args: [] });
     const to = this.taskTarget(task, explicit);
@@ -283,7 +296,7 @@ export class WorkService {
     if (result.kind === "task") this.task(result.task.id);
     if (result.kind === "project") this.project(result.project.id);
     if (result.kind === "comment") this.task(result.comment.task);
-    return result;
+    return result.kind === "task" ? { ...result, task: this.withReadiness(result.task) } : result;
   }
 
   command(input: unknown, actor: string, approval?: { by: string; proposal: string }, caller: WorkCaller = { role: "human" }): WorkCommandResult {
@@ -432,7 +445,7 @@ export class WorkService {
       }
       result = WorkCommandResult.parse(result);
       this.store.putReceipt(actor, request.request_id, serialized, result);
-      return result;
+      return result.kind === "task" ? { ...result, task: this.withReadiness(result.task) } : result;
     });
   }
 

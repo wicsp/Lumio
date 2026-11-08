@@ -2,6 +2,7 @@ import { CAPABILITIES } from "@lumio/schema";
 
 /** Executable spellings shared by command parsing, --help and generated skill documentation. */
 export const WORK_OPTIONS = {
+  ready: { type: "boolean" }, blocked: { type: "boolean" }, tag: { type: "string" },
   query: { type: "string" }, json: { type: "boolean" }, legacy: { type: "boolean" }, to: { type: "string" }, description: { type: "string" },
   file: { type: "string" }, status: { type: "string" }, project: { type: "string" }, parent: { type: "string" },
   depends: { type: "string" }, due: { type: "string" }, workdir: { type: "string" }, model: { type: "string" }, gpus: { type: "string" },
@@ -21,7 +22,7 @@ export const COMMANDS: CommandDefinition[] = [
   def("targets", "", ["online"], "execution.target.list"), def("attention", "", [], "work.attention.list"),
   def("task new", "<title>", [...body, ...taskFields, ...write], "work.task.create", { aliases: ["task create"] }),
   def("task update", "<id>", ["patch", "revision", ...body, ...taskFields, ...write], "work.task.update"),
-  def("task list", "", ["project", "status", "turn", "query"], "work.task.list"), def("task show", "<id>", ["legacy"], "work.task.show"),
+  def("task list", "", ["project", "status", "turn", "query", "ready", "blocked", "tag", "parent"], "work.task.list"), def("task show", "<id>", ["legacy"], "work.task.show"),
   def("task edit", "<id>", ["file", "revision", ...write]),
   def("task continue", "<id>", ["to", "comment", "revision", "legacy", ...write]),
   def("task hand", "<id>", ["to", "note", "revision", ...write], "work.task.hand", { required: ["to"] }),
@@ -60,7 +61,7 @@ export const COMMANDS: CommandDefinition[] = [
   def("hub migrate apply", "", ["vault", "plan", "backup", "runtimes-prepared"], undefined, { required: ["vault", "plan", "backup", "runtimes-prepared"] }),
   def("hub migrate retire", "", ["vault"], undefined, { required: ["vault"] }), def("hub migrate sources"), def("hub migrate source", "<id>", ["output"], undefined, { required: ["output"] }), def("hub migrate task-v3"),
 ];
-const booleans = new Set(["json", "help", "online", "legacy", "include-private", "dry-run", "resume", "stream", "notes", "server", "yes", "retire-legacy", "runtimes-prepared", "api-key-stdin", "skip-check", "uninstall"]);
+const booleans = new Set(["ready", "blocked", "json", "help", "online", "legacy", "include-private", "dry-run", "resume", "stream", "notes", "server", "yes", "retire-legacy", "runtimes-prepared", "api-key-stdin", "skip-check", "uninstall"]);
 export function commandUsage(command: CommandDefinition, json = true): string {
   return [command.path, command.positional, ...(command.options ?? []).map(name => {
     const option = `--${name}${booleans.has(name) ? "" : ` <${name}>`}`;

@@ -4,7 +4,7 @@ import { ExecutionTarget, ExecutionTargetListArgs } from "@lumio/schema";
 import { AssistantConversationDeleteRequest, KnowledgeDeleteRequest, TrashListArgs, TrashListResult, TrashPurgeRequest, TrashPurgeResult, TrashRestoreRequest, TrashRestoreResult, TrashResult } from "@lumio/schema";
 import { PushSubscriptionInput, PushDevice, PushDeviceUpdate, PushPublicKey, PushTestResult } from "@lumio/schema";
 import { AgentInfo, AgentTokenIssued, AgentTokenRequest, AgentRevokeRequest, ClientInvite, ClientInviteRequest, ClientJoin, ClientJoinRequest, RuntimeInvite, RuntimeInviteRequest } from "@lumio/schema";
-import { AssistantConfigView, AssistantConfigUpdate, AssistantToolCall, ExecutionJobListArgs, RequestId, WorkAttention, WorkCommandRequest, WorkCommandResult, PlanTemplate, type WorkCommand, WorkTask, WorkTaskDetail, WorkProject, ExecutionRoutine, ExecutionRoutineCommandRequest, ExecutionRoutineInfo,
+import { AssistantConfigView, AssistantConfigUpdate, AssistantToolCall, ExecutionJobListArgs, RequestId, WorkTaskListArgs, WorkAttention, WorkCommandRequest, WorkCommandResult, PlanTemplate, type WorkCommand, WorkTask, WorkTaskDetail, WorkProject, ExecutionRoutine, ExecutionRoutineCommandRequest, ExecutionRoutineInfo,
   ProjectStatus, AssistantMemory, AssistantMemoryCommandRequest, AssistantMemoryCommandResult, AssistantChatRequest, AssistantChatResult, AssistantConversation, AssistantConversationDetail, AssistantEvent, StoredArtifact, idOf } from "@lumio/schema";
 import { JobRun, Job, JobSpec, JobStatus, RoutineInfo, RuntimeName, RuntimeInfo, Actor, OperationRequest, OperationResult, Proposal, ProposalStatus, ApiError, CheckResult, LinksResult, NoteDetail, SearchResult, type ApiErrorCode, type NoteRef } from "@lumio/schema";
 
@@ -114,9 +114,11 @@ export function createClient(options: { url: string; token?: string; language?: 
     deleteWorkPlanTemplate(template: string, request_id: string) {
       return request("/v2/work/commands", {}, WorkCommandResult, validate(WorkCommandRequest, { request_id, operation: { op: "work.plan_template.delete", args: { template } } }));
     },
-    workTasks(filter: { project?: string; status?: string; query?: string } = {}) {
-      return request("/v2/work/tasks", { ...(filter.project ? { project: validate(idOf("prj"), filter.project) } : {}),
-        ...(filter.status ? { status: filter.status } : {}), ...(filter.query ? { q: filter.query } : {}) }, WorkTask.array());
+    workTasks(filter: Omit<WorkTaskListArgs, "status"> & { status?: string } = {}) {
+      const input = validate(WorkTaskListArgs, filter);
+      return request("/v2/work/tasks", Object.fromEntries(Object.entries(input)
+        .filter((entry): entry is [string, string] => entry[1] !== undefined)
+        .map(([key, value]) => [key === "query" ? "q" : key, value])), WorkTask.array());
     },
     workTask(id: string) { return request(`/v2/work/tasks/${validate(idOf("task"), id)}`, {}, WorkTaskDetail); },
     workProjects(filter: { status?: string } = {}) { return request("/v2/work/projects", filter.status ? { status: validate(ProjectStatus, filter.status) } : {}, WorkProject.array()); },

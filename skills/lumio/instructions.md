@@ -39,7 +39,11 @@ Before delegation or setting a plan, run `lumio targets --json` and use a return
 
 ## Working with tasks and rounds
 
-Use `task list` and `project list` to find work, then `task show` for discussion and execution rounds. Use `job show` for a round's report. Use `attention` to find questions, results awaiting review and failed rounds that need the user. You can explain pending proposals but only the user decides them.
+Before claiming work, run `lumio task list --ready --json` and `project list`, then read `task show` for prerequisites, dependents, children, discussion and execution rounds. Ready means an open task with no blocking prerequisites; it does not grant permission to start a round. Use `task list --blocked`, `--tag <tag>` or `--parent <task-id>` to inspect structure. Cancelled or deleted prerequisites do not block; restoring an open prerequisite blocks again.
+
+When you discover an ordering relationship, propose `lumio task update <task-id> --depends <id1,id2> --revision <observed-revision> --json` under the existing proposal rules. Explain the suggested structure and get the user's agreement before submitting changes to someone else's tasks. `--depends` replaces the entire dependency list, so preserve existing prerequisites. Do not change another task's parent, project, dependencies or tags on your own. Structure edits use the existing update permission and proposal rules; this workflow does not add a new approval API.
+
+Use `task show` for discussion and execution rounds. Use `job show` for a round's report. Use `attention` to find questions, results awaiting review and failed rounds that need the user. You can explain pending proposals but only the user decides them.
 
 When a round needs clarification, ask one clear question inside `<lumio-question>...</lumio-question>` and end the round. Report completed work under Result / Changes / Validation. A successful round is evidence for the user to review; do not declare the task complete.
 
