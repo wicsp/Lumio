@@ -1243,3 +1243,6 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
   .split.is-graph-view.has-detail { grid-template-columns: minmax(0, 1fr); }
   .is-graph-view.has-detail > .knowledge-graph-view { display: none; }
 }
+
+/* Align prerequisite icons with their action label. */
+.dep-list > .text-btn { display: inline-flex; align-items: center; gap: 4px; min-height: 24px; white-space: nowrap; }

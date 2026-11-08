@@ -90,7 +90,7 @@ export class WorkPane {
   private canRefreshDetail(): boolean {
     return !this.root.hidden && !!this.editor && !this.editor.dirty && !this.editor.isBusy
       && !this.detailLayout.contains(document.activeElement)
-      && ![...this.detailLayout.querySelectorAll("textarea")].some(area => area.value.trim())
+      && !this.editor.hasUnsentComment
       && !this.detailLayout.querySelector(".is-busy");
   }
   beforeLeave(): Promise<boolean> { return this.editor?.beforeLeave() ?? Promise.resolve(true); }
@@ -261,7 +261,11 @@ export class WorkPane {
     try {
       const object = id.startsWith("task_") ? await this.client.workTask(id) : await this.client.workProject(id);
       if (!this.active || generation !== this.detailGeneration) return;
-      if (live && (!this.canRefreshDetail() || JSON.stringify(object) === JSON.stringify(this.displayed))) return;
+      if (live && !this.canRefreshDetail()) return;
+      if (live && JSON.stringify(object) === JSON.stringify(this.displayed)) {
+        if ("task" in object) void this.editor?.refreshRelatedTasks(() => this.canRefreshDetail());
+        return;
+      }
       const scroll = this.detail.scrollTop;
       this.editor?.dispose();
       this.clearDock();
