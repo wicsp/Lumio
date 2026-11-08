@@ -1,6 +1,7 @@
 import { language, renderMessage, type Language } from "@lumio/platform";
 
 export const en = {
+  "work.blocked_dependencies": (tasks: unknown) => `Unfinished prerequisites: ${String(tasks)}`,
   "help.usage": "Usage",
   "targets.offline": (targets: unknown) => `Offline targets (execution waits until they reconnect): ${String(targets)}`,
   "targets.usage": "Usage: lumio targets [--online] [--json]",
@@ -758,6 +759,7 @@ ${String(p0)}${String(p1)}`,
   "Run tailscale serve status to check": "Run tailscale serve status to check",
 };
 export const zh: typeof en = {
+  "work.blocked_dependencies": (tasks: unknown) => `前置未完成：${String(tasks)}`,
   "help.usage": "用法",
   "targets.offline": (targets: unknown) => `离线目标（上线后开始执行）：${String(targets)}`,
   "targets.usage": "用法：lumio targets [--online] [--json]",

@@ -45,6 +45,9 @@ export const KnowledgeShowArgs = z.strictObject({ ref: NoteReference });
 export const KnowledgeLinksArgs = z.strictObject({ ref: NoteReference });
 
 export const WorkTaskListArgs = z.strictObject({
+  readiness: z.enum(["ready", "blocked"]).optional(),
+  tag: z.string().min(1).optional(),
+  parent: idOf("task").optional(),
   project: idOf("prj").optional(),
   status: TaskStatus.optional(),
   query: z.string().min(1).optional().describe("Substring of title or description"),
@@ -84,9 +87,9 @@ export const CAPABILITIES = [
   define({ name: "knowledge.note.links", kind: "read", args: KnowledgeLinksArgs, result: LinksResult,
     summary: { en: "List a note's outgoing and incoming links.", zh: "列出一篇笔记的出链与反链。" } }),
   define({ name: "work.task.list", kind: "read", args: WorkTaskListArgs, result: z.array(WorkTask),
-    summary: { en: "List the user's tasks, optionally by project, status or text.", zh: "列出用户的任务，可按项目、状态或文字筛选。" } }),
+    summary: { en: "List tasks with derived blocked_by; filter by readiness (ready or blocked), tag, parent, project, status or text.", zh: "列出任务与推导的 blocked_by，可按可开工/被阻塞、标签、父任务、项目、状态或文字筛选。" } }),
   define({ name: "work.task.show", kind: "read", args: WorkTaskShowArgs, result: WorkTaskDetail,
-    summary: { en: "Show a task with its discussion and execution rounds.", zh: "查看一个任务及其讨论和执行轮次。" } }),
+    summary: { en: "Show a task with derived blocked_by, dependents, children, discussion and execution rounds.", zh: "查看任务及推导的 blocked_by、后续任务、子任务、讨论和执行轮次。" } }),
   define({ name: "work.attention.list", kind: "read", args: WorkAttentionListArgs, result: z.array(WorkAttention),
     summary: { en: "List what needs the user now: questions from agents, finished rounds awaiting review, and failed rounds.", zh: "列出现在需要用户处理的事：agent 的提问、等待验收的结果、失败的轮次。" } }),
   define({ name: "work.project.list", kind: "read", args: WorkProjectListArgs, result: z.array(WorkProject),

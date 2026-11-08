@@ -4,6 +4,7 @@ const locale = new AsyncLocalStorage<Language>();
 export const withLanguage = <T>(lang: Language, action: () => T): T => locale.run(lang, action);
 
 export const en = {
+  "work.blocked_dependencies": (tasks: unknown) => `Unfinished prerequisites: ${String(tasks)}`,
   "editing.invalid": "Check the note title, content and version, then retry.",
   "editing.revision_conflict": "This note changed elsewhere. Your draft is kept; compare it with the latest saved version before continuing.",
   "editing.request_conflict": "This request ID was already used for a different edit. Keep the draft and check the earlier save.",
@@ -833,6 +834,7 @@ ${String(p0)}${String(p1)}`,
   "Run tailscale serve status to check": "Run tailscale serve status to check",
 };
 export const zh: typeof en = {
+  "work.blocked_dependencies": (tasks: unknown) => `前置未完成：${String(tasks)}`,
   "editing.invalid": "请检查笔记标题、正文和版本后重试。",
   "editing.revision_conflict": "笔记已在其他地方修改。草稿已保留，请与最新保存版本比较后继续。",
   "editing.request_conflict": "这个请求编号已用于不同的修改。请保留草稿并核对之前的保存。",

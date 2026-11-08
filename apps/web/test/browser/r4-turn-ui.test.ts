@@ -93,11 +93,11 @@ describe("R4-8", () => {
     const { continueTarget } = await import("../../src/client/panes/work-editor.ts");
     const base = task({ holder: "human", reason: "review", since: at, round: 1, job: JOB });
     const turns = [{ task: ID, at, by: "act_01JABCDEFGHJKMNPQRSTVWXYZ0", from: base.turn, to: { holder: "codex@macsp", reason: "working" as const, since: at, round: 1, job: JOB } }];
-    expect(continueTarget({ task: base, comments: [], executions: [], turns })).toBe("codex@macsp");
-    expect(continueTarget({ task: { ...base, turn: { holder: "nobody", reason: "on_hold", since: at } }, comments: [], executions: [], turns })).toBeUndefined();
+    expect(continueTarget({ task: base, dependents: [], children: [], comments: [], executions: [], turns })).toBe("codex@macsp");
+    expect(continueTarget({ task: { ...base, turn: { holder: "nobody", reason: "on_hold", since: at } }, dependents: [], children: [], comments: [], executions: [], turns })).toBeUndefined();
     const plan = { plan: { stages: [{ kind: "agent" as const, id: "review", agent: "claude-code@macsp", instruction: "Review" }] }, approved: { at, by: "act_01JABCDEFGHJKMNPQRSTVWXYZ0" }, stage: "review", rounds: 1 };
-    expect(continueTarget({ task: { ...base, plan }, comments: [], executions: [], turns })).toBe("claude-code@macsp");
-    expect(continueTarget({ task: { ...base, plan: { ...plan, stage: "end" } }, comments: [], executions: [], turns })).toBeUndefined();
+    expect(continueTarget({ task: { ...base, plan }, dependents: [], children: [], comments: [], executions: [], turns })).toBe("claude-code@macsp");
+    expect(continueTarget({ task: { ...base, plan: { ...plan, stage: "end" } }, dependents: [], children: [], comments: [], executions: [], turns })).toBeUndefined();
   });
   test("new projects can carry a working directory", async () => {
     const { projectCreateCommand } = await import("../../src/client/commands.ts");

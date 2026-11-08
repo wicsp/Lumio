@@ -23,8 +23,8 @@ Always add `--json`. Each successful command returns one JSON value matching its
 | knowledge.note.search | `lumio search <query> [--type <type>] [--limit <limit>] [--include-private] [--vault <vault>] --json` | Search the user's notes (papers, ideas, sources). Snippets are short; read a hit with knowledge.note.show. |
 | knowledge.note.show | `lumio show <ref> [--include-private] [--vault <vault>] --json` | Read one note in full. |
 | knowledge.note.links | `lumio links <ref> [--include-private] [--vault <vault>] --json` | List a note's outgoing and incoming links. |
-| work.task.list | `lumio task list [--project <project>] [--status <status>] [--turn <turn>] [--query <query>] --json` | List the user's tasks, optionally by project, status or text. |
-| work.task.show | `lumio task show <id> [--legacy] --json` | Show a task with its discussion and execution rounds. |
+| work.task.list | `lumio task list [--project <project>] [--status <status>] [--turn <turn>] [--query <query>] --json` | List tasks with derived blocked_by; filter by readiness (ready or blocked), tag, parent, project, status or text. |
+| work.task.show | `lumio task show <id> [--legacy] --json` | Show a task with derived blocked_by, dependents, children, discussion and execution rounds. |
 | work.attention.list | `lumio attention --json` | List what needs the user now: questions from agents, finished rounds awaiting review, and failed rounds. |
 | work.project.list | `lumio project list [--status <status>] --json` | List projects. |
 | work.project.show | `lumio project show <id> --json` | Show one project. |
