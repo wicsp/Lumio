@@ -1,6 +1,6 @@
 # 0039 任务结构与可开工状态：依赖推导、分组约定、AI 可维护
 
-- 状态：Proposed
+- 状态：Accepted（2026-11-08 人类批准，含第 1 节不新增实体、第 3 节已取消/删除的前置不阻塞）
 - 日期：2026-11-08
 - 领域：数据 | AI 协作与权限
 - 影响：契约向后兼容的新增：`WorkTask.blocked_by`（读取时推导）、`WorkTaskDetail.dependents` / `children`、

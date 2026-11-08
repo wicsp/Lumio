@@ -1,6 +1,6 @@
 # T1-0 任务结构与可开工状态
 
-依据：[ADR 0039](../adr/0039-task-structure-and-readiness.md)（**Proposed，等人类批准后才能动 `packages/schema`**）。
+依据：[ADR 0039](../adr/0039-task-structure-and-readiness.md)（Accepted，2026-11-08 人类批准；T1-1 契约按本文与 ADR 第 2–4 节实现即可）。
 必读：`docs/DESIGN.md`、`docs/design/work.md`、`web.md`、`security.md`。
 
 ## 目标
