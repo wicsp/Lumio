@@ -1,0 +1,343 @@
+{
+  "date": "2026-11-08T07:32:08.371Z",
+  "root": "$SPIKE_ROOT",
+  "checks": {
+    "codex_exec": {
+      "code": 0,
+      "methods": [
+        "thread.started",
+        "turn.started",
+        "item.completed",
+        "turn.completed"
+      ],
+      "usage": {
+        "input_tokens": 17988,
+        "cached_input_tokens": 12288,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 5,
+        "reasoning_output_tokens": 0
+      },
+      "threadCreated": true
+    },
+    "codex_exec_resume": {
+      "code": 0,
+      "methods": [
+        "thread.started",
+        "item.completed",
+        "turn.started",
+        "item.completed",
+        "turn.completed"
+      ],
+      "usage": {
+        "input_tokens": 40316,
+        "cached_input_tokens": 20352,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 12,
+        "reasoning_output_tokens": 0
+      },
+      "codewordReturned": true
+    },
+    "codex_exec_persisted_contexts": [
+      {
+        "model": "gpt-6.1-sol",
+        "effort": "low",
+        "approval_policy": "never",
+        "sandbox_policy": {
+          "type": "read-only"
+        }
+      },
+      {
+        "model": "gpt-6.1-terra",
+        "effort": "medium",
+        "approval_policy": "never",
+        "sandbox_policy": {
+          "type": "read-only"
+        }
+      }
+    ],
+    "pi_print": {
+      "code": 0,
+      "types": [
+        "session",
+        "agent_start",
+        "turn_start",
+        "message_start",
+        "message_end",
+        "message_update",
+        "turn_end",
+        "agent_end",
+        "agent_settled"
+      ],
+      "assistantMessages": [
+        {
+          "model": "deepseek-flash",
+          "provider": "deepseek",
+          "stopReason": "stop",
+          "usage": {
+            "input": 256,
+            "output": 22,
+            "cacheRead": 256,
+            "cacheWrite": 0,
+            "reasoning": 20,
+            "totalTokens": 534,
+            "cost": {
+              "input": 7.68e-05,
+              "output": 2.6399999999999998e-05,
+              "cacheRead": 1.536e-06,
+              "cacheWrite": 0,
+              "total": 0.00010473599999999998
+            }
+          }
+        }
+      ],
+      "session": {
+        "type": {
+          "type": "string",
+          "length": 7
+        },
+        "version": 3,
+        "id": {
+          "type": "string",
+          "length": 36
+        },
+        "timestamp": {
+          "type": "string",
+          "length": 24
+        },
+        "cwd": {
+          "type": "string",
+          "length": 89
+        }
+      }
+    },
+    "pi_resume_model_thinking": {
+      "code": 0,
+      "types": [
+        "session",
+        "agent_start",
+        "turn_start",
+        "message_start",
+        "message_end",
+        "message_update",
+        "turn_end",
+        "agent_end",
+        "agent_settled"
+      ],
+      "assistantMessages": [
+        {
+          "model": "deepseek-v4-pro",
+          "provider": "deepseek",
+          "stopReason": "stop",
+          "usage": {
+            "input": 66,
+            "output": 145,
+            "cacheRead": 512,
+            "cacheWrite": 0,
+            "reasoning": 140,
+            "totalTokens": 723,
+            "cost": {
+              "input": 8.712e-05,
+              "output": 0.0005742000000000001,
+              "cacheRead": 2.2528e-05,
+              "cacheWrite": 0,
+              "total": 0.000683848
+            }
+          }
+        }
+      ],
+      "session": {
+        "type": {
+          "type": "string",
+          "length": 7
+        },
+        "version": 3,
+        "id": {
+          "type": "string",
+          "length": 36
+        },
+        "timestamp": {
+          "type": "string",
+          "length": 24
+        },
+        "cwd": {
+          "type": "string",
+          "length": 89
+        }
+      },
+      "codewordReturned": true
+    },
+    "pi_rpc_resumed_state": {
+      "success": true,
+      "model": "deepseek-v4-pro",
+      "provider": "deepseek",
+      "thinkingLevel": "high"
+    },
+    "pi_persisted_model_thinking": [
+      {
+        "type": "model_change",
+        "id": "75ddccbf",
+        "parentId": null,
+        "timestamp": "2026-11-08T07:32:24.347Z",
+        "provider": "deepseek",
+        "modelId": "deepseek-flash"
+      },
+      {
+        "type": "thinking_level_change",
+        "id": "f45c5f02",
+        "parentId": "75ddccbf",
+        "timestamp": "2026-11-08T07:32:24.347Z",
+        "thinkingLevel": "low"
+      }
+    ],
+    "claude_deepseek_tool_round": {
+      "code": 0,
+      "stderrBytes": 81,
+      "type": "result",
+      "subtype": "success",
+      "isError": false,
+      "usage": {
+        "input_tokens": 872,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 640,
+        "output_tokens": 92,
+        "output_tokens_details": {
+          "thinking_tokens": 0
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 0,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "",
+        "iterations": [],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "modelUsage": {
+        "deepseek-flash": {
+          "inputTokens": 872,
+          "outputTokens": 92,
+          "cacheReadInputTokens": 640,
+          "cacheCreationInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 0.005456000000000001,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 0,
+          "canonicalModel": "deepseek-flash",
+          "provider": "firstParty",
+          "costBasis": "unknown"
+        }
+      },
+      "sessionCreated": true,
+      "fixtureReturned": true,
+      "eventTypes": [
+        "result"
+      ]
+    },
+    "claude_resume_model_effort": {
+      "code": 0,
+      "isError": false,
+      "subtype": "success",
+      "usage": {
+        "input_tokens": 903,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "output_tokens": 23,
+        "output_tokens_details": {
+          "thinking_tokens": 0
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 0,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "",
+        "iterations": [],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "modelUsage": {
+        "deepseek-flash": {
+          "inputTokens": 872,
+          "outputTokens": 92,
+          "thinkingTokens": 0,
+          "cacheReadInputTokens": 640,
+          "cacheCreationInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 0.005456000000000001,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000
+        },
+        "deepseek-v4-pro": {
+          "inputTokens": 903,
+          "outputTokens": 23,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 0.004072,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 0,
+          "canonicalModel": "deepseek-v4-pro",
+          "provider": "firstParty",
+          "costBasis": "unknown"
+        }
+      },
+      "sameSession": true
+    },
+    "claude_persisted_wire_params": [
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "adaptive",
+          "display": "omitted"
+        },
+        "output_config": {
+          "effort": "low"
+        }
+      },
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "adaptive",
+          "display": "omitted"
+        },
+        "output_config": {
+          "effort": "low"
+        }
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "thinking": {
+          "type": "adaptive",
+          "display": "omitted"
+        },
+        "output_config": {
+          "effort": "high"
+        }
+      }
+    ],
+    "claude_tool_items": [
+      {
+        "type": "tool_use",
+        "name": "Read"
+      },
+      {
+        "type": "tool_result"
+      },
+      {
+        "type": "tool_use",
+        "name": "Read"
+      }
+    ]
+  }
+}
