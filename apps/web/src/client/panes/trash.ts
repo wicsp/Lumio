@@ -30,7 +30,10 @@ export class TrashPane {
       } }, t(label)));
     }
     root.append(
-      h("header", { class: "bar" }, h("h1", { class: "bar-title" }, t("Recently deleted"), h("span", { class: "bar-meta hide-narrow" }, t("Kept for 30 days"))),
+      // 入口在设置的「数据」分类里（PR #120），返回键回到那里。
+      h("header", { class: "bar" },
+        h("button", { type: "button", class: "icon-btn", title: t("Back"), "aria-label": t("Back"), onclick: () => this.navigate("settings", "data") }, icon("back")),
+        h("h1", { class: "bar-title" }, t("Recently deleted"), h("span", { class: "bar-meta hide-narrow" }, t("Kept for 30 days"))),
         h("span", { class: "bar-spacer" }),
         h("button", { type: "button", class: "icon-btn", title: t("Refresh"), "aria-label": t("Refresh"), onclick: () => void this.load() }, icon("refresh"))),
       h("div", { class: "trash-scroll" }, h("div", { class: "trash-page" }, h("div", { class: "trash-filters" }, seg), this.list)));

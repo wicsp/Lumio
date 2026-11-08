@@ -1211,7 +1211,6 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 .delete-confirm .delete-consequence { display: flex; align-items: flex-start; gap: 8px; margin: 0; color: var(--ink-2); }
 .delete-confirm .delete-consequence .icon { margin-top: 2px; color: var(--amber, var(--ink-3)); }
 .delete-confirm .muted { margin: 0; }
-.trash-link { color: var(--ink-3); }
 .trash-scroll { flex: 1; min-height: 0; overflow-y: auto; }
 .trash-page { max-width: 880px; margin: 0 auto; padding: 18px 24px 64px; }
 .trash-filters { margin-bottom: 14px; }
