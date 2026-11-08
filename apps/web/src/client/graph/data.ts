@@ -1,7 +1,7 @@
 /**
  * 图的数据：把任务或笔记链接整理成节点与边。只读现有接口（任务列表、单篇笔记的链接），不新增契约。
  */
-import type { LinksResult, NoteRef, WorkTask } from "@lumio/schema";
+import type { KnowledgeGraph, LinksResult, NoteRef, WorkTask } from "@lumio/schema";
 import type { Edge } from "./layout.ts";
 import type { DagNode, NetNode } from "./view.ts";
 
@@ -73,4 +73,20 @@ export async function noteGraph(start: string, depth: 1 | 2, links: (reference: 
     await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, worker));
   }
   return { nodes: [...nodes.values()], edges: [...edges.values()].filter(([a, b]) => a !== b), truncated };
+}
+
+export const MAX_KNOWLEDGE_NODES = 300;
+/** Rank before clipping, so hubs win over islands; edge counts also determine node size. */
+export function knowledgeGraphData(graph: KnowledgeGraph, hideIsolated = false, limit = MAX_KNOWLEDGE_NODES): { nodes: NetNode[]; edges: Edge[]; total: number; truncated: boolean } {
+  const degree = new Map<string, number>();
+  for (const edge of graph.edges) {
+    degree.set(edge.from, (degree.get(edge.from) ?? 0) + edge.count);
+    degree.set(edge.to, (degree.get(edge.to) ?? 0) + edge.count);
+  }
+  const candidates = graph.nodes.filter(note => !hideIsolated || (degree.get(note.path) ?? 0) > 0)
+    .sort((a, b) => (degree.get(b.path) ?? 0) - (degree.get(a.path) ?? 0) || a.path.localeCompare(b.path));
+  const nodes = candidates.slice(0, limit).map(note => ({ id: note.path, label: note.title, kind: note.type, weight: degree.get(note.path) ?? 0 }));
+  const shown = new Set(nodes.map(note => note.id));
+  return { nodes, edges: graph.edges.filter(edge => shown.has(edge.from) && shown.has(edge.to)).map(edge => [edge.from, edge.to]),
+    total: candidates.length, truncated: candidates.length > limit };
 }

@@ -72,6 +72,26 @@ test("startup fills offline notes and updates the index before watching", async 
   expect(status.last_full_sync).toBe(new Date(clock.now()).toISOString());
 });
 
+test("fs.watch ignores missing filenames and still processes string and Buffer paths", async () => {
+  const emitter = Object.assign(new EventEmitter(), { close() {} }) as FSWatcher;
+  const processed: string[] = [];
+  const hub = await start({
+    watch: ((_root: string, _options: unknown, listener: (event: string, name: string | Buffer | null) => void) => {
+      emitter.on("change", listener); return emitter;
+    }) as typeof watch,
+    onProcess: (path) => processed.push(path),
+  });
+  for (const name of [null, undefined]) expect(() => emitter.emit("change", "rename", name)).not.toThrow();
+  await tick(2000); expect(processed).toEqual([]); expect(indexedPaths()).toEqual([]);
+  const paths = ["research/ideas/string.md", "research/ideas/buffer.md"];
+  for (const path of paths) await cp(fixture, join(vault, path));
+  emitter.emit("change", "change", paths[0]);
+  emitter.emit("change", "rename", Buffer.from(paths[1]!));
+  await tick(2000);
+  expect(processed).toEqual(paths); expect(indexedPaths()).toEqual([...paths].sort());
+  expect((await hub.status()).watching).toBe(true); expect((await hub.status()).issues).toEqual([]);
+});
+
 test("five rapid edits debounce once, and a self-write event processes without a second write", async () => {
   let processed = 0, written = 0;
   const hub = await start({ onProcess: () => { processed++; }, syncOptions: {

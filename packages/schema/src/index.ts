@@ -7,6 +7,7 @@ import { KnowledgeDocument, KnowledgeUpdateRequest, KnowledgeUpdateResult, Knowl
  * 其他语言使用 `bun run schema:export` 生成的 JSON Schema，不得手写对应类型。
  */
 export * from "./common.ts";
+export * from "./knowledge-graph.ts";
 export * from "./entities.ts";
 export * from "./job.ts";
 export * from "./query.ts";
@@ -58,9 +59,14 @@ import { CheckResult, LinksResult, NoteDetail, SearchResult } from "./query.ts";
 /** 需要导出为 JSON Schema 的全部契约，键名即输出文件名。 */
 import { KnowledgeTemplateRequest, KnowledgeTemplateResult, PaperResolveRequest, PaperResolveResult, KnowledgeCreateRequest, KnowledgeCreateResult } from "./knowledge-authoring.ts";
 
+import { KnowledgeGraphArgs, KnowledgeGraph, KnowledgeGraphEdge } from "./knowledge-graph.ts";
+
 export const CONTRACTS = {
   "ai-connection": AIConnection, "ai-connection-input": AIConnectionInput, "ai-profile": AIProfile, "ai-profile-input": AIProfileInput, "ai-usage-binding": AIUsageBinding, "ai-configuration": AIConfiguration, "ai-model": AIModel, "ai-runtime": AIRuntime,
   "native-session": NativeSession, "native-runtime-view": NativeRuntimeView, "native-approval": NativeApproval, "native-action": NativeAction, "native-create": NativeCreate, "native-event": NativeEventData, "native-event-record": NativeEventRecord, "native-runtime-command": NativeRuntimeCommand, "native-runtime-message": NativeRuntimeMessage, "native-mcp-request": NativeMCPRequest, "native-mcp-result": NativeMCPResult,
+  "knowledge-graph-args": KnowledgeGraphArgs,
+  "knowledge-graph": KnowledgeGraph,
+  "knowledge-graph-edge": KnowledgeGraphEdge,
   "knowledge-document": KnowledgeDocument,
   "knowledge-update-request": KnowledgeUpdateRequest,
   "knowledge-update-result": KnowledgeUpdateResult,

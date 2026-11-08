@@ -1,3 +1,4 @@
+import { KnowledgeGraphView } from "../graph/knowledge.ts";
 import { NoteEditor } from "../note-editor.ts";
 import { drafts } from "../drafts.ts";
 import { confirmDelete } from "../trash-actions.ts";
@@ -26,6 +27,13 @@ const TYPE_LABEL: Record<string, string> = translated({ paper: "Paper", idea: "I
 const LEGACY = new Set(["project", "task", "routine"]);
 
 export class KnowledgePane {
+  private graphMode = false;
+  private graphHost = h("section", { class: "knowledge-graph-view", "aria-label": t("Knowledge graph"), hidden: true });
+  private graphView?: KnowledgeGraphView;
+  private listButton = h("button", { type: "button", "aria-pressed": "true" }, t("List"));
+  private graphButton = h("button", { type: "button", "aria-pressed": "false" }, t("Graph view"));
+  private listPane = h("div", { class: "list-pane" });
+  private filterHost = h("div", { class: "list-tools", role: "search" });
   private split = h("div", { class: "split" });
   private results = h("div", { class: "list-scroll" });
   private detail = h("section", { class: "detail-pane", "aria-live": "polite" });
@@ -61,6 +69,10 @@ export class KnowledgePane {
   private unbindKeys: () => void;
 
   constructor(root: HTMLElement, private client: Client, initialReference?: string) {
+    this.listButton.addEventListener("click", () => this.setGraphMode(false));
+    this.graphButton.addEventListener("click", () => this.setGraphMode(true));
+    this.filterHost.append(h("label", { class: "search-box" }, icon("search"), this.query), this.typeButton, this.privateButton);
+    this.graphView = new KnowledgeGraphView(this.graphHost, this.client, reference => void this.open(reference));
     this.typeButton.addEventListener("click", () => this.pickType());
     this.privateButton.addEventListener("click", () => this.togglePrivate());
     this.query.addEventListener("input", debounce(() => void this.search(), 220));
@@ -70,15 +82,13 @@ export class KnowledgePane {
     });
     root.append(
       h("header", { class: "bar" }, h("h1", { class: "bar-title" }, t("Knowledge"), h("span", { class: "bar-meta hide-narrow" }, t("Capture papers, sources and ideas"))),
+        h("div", { class: "segmented", role: "group", "aria-label": t("Knowledge view") }, this.listButton, this.graphButton),
         h("span", { class: "bar-spacer" }),
         h("button", { type: "button", class: "btn btn-primary", onclick: () => this.intent("new") }, icon("plus"), t("New note")),
         h("button", { type: "button", class: "icon-btn", title: t("Refresh"), "aria-label": t("Refresh"), onclick: () => { void this.search(); if (this.selected) void this.open(this.selected, true); } }, icon("refresh"))),
       this.split);
-    this.split.append(
-      h("div", { class: "list-pane" },
-        h("div", { class: "list-tools", role: "search" }, h("label", { class: "search-box" }, icon("search"), this.query), this.typeButton, this.privateButton),
-        this.results, this.related),
-      h("div", { class: "rail-host" }, this.detail, this.outline.element));
+    this.listPane.append(this.filterHost, this.results, this.related);
+    this.split.append(this.listPane, this.graphHost, h("div", { class: "rail-host" }, this.detail, this.outline.element));
     this.renderFilters();
     this.showPlaceholder();
     this.unbindKeys = listKeys(this.results, id => void this.open(id));
@@ -102,13 +112,22 @@ export class KnowledgePane {
     this.creator.open();
   }
   private clearWriter():void{this.persist();this.outlineEntries=()=>[];this.outline.refresh();clearTimeout(this.saveTimer);clearTimeout(this.relatedTimer);this.relatedGeneration++;this.contextKey="";this.relatedTerms=[];this.linksRevision="";this.split.classList.remove("show-related");this.relatedHits=[];this.related.hidden=true;clear(this.related);this.editor?.destroy();this.editor=undefined;this.saver=undefined;this.creator?.dispose();this.creator=undefined;}
-  dispose():void{this.clearWriter();this.outline.dispose();this.active=false;this.generation++;this.searchGeneration++;this.unbindKeys();}
+  dispose():void{this.graphView?.dispose();this.clearWriter();this.outline.dispose();this.active=false;this.generation++;this.searchGeneration++;this.unbindKeys();}
   async open(reference: string, reload = false): Promise<void> {
     if (!reload && reference === this.selected && this.detail.querySelector(".reader")) return;
     if (!(await this.beforeLeave()) || !this.active) return;
     await this.read(reference);
   }
   liveRefresh():void{if(!this.dirty)void this.search(true);}
+  private setGraphMode(graph: boolean): void {
+    this.graphMode = graph;
+    this.graphHost.hidden = !graph;
+    this.split.classList.toggle("is-graph-view", graph);
+    this.listButton.setAttribute("aria-pressed", String(!graph)); this.graphButton.setAttribute("aria-pressed", String(graph));
+    this.query.closest<HTMLElement>(".search-box")!.hidden = graph;
+    if (graph) this.graphHost.prepend(this.filterHost); else { this.graphView?.cancel(); this.listPane.prepend(this.filterHost); }
+    void this.search();
+  }
 
   private renderFilters(): void {
     clear(this.typeButton, icon("down"), this.type ? TYPE_LABEL[this.type] ?? this.type : t("All types"));
@@ -144,6 +163,11 @@ export class KnowledgePane {
   }
 
   private async search(quiet = false): Promise<void> {
+    if (this.graphMode) {
+      this.searchGeneration++;
+      await this.graphView?.load({ include_private: this.includePrivate, ...(this.type ? { type: this.type as (typeof NOTE_TYPES)[number] } : {}), include_legacy: LEGACY.has(this.type) }, quiet);
+      return;
+    }
     const generation = ++this.searchGeneration;
     const includePrivate = this.includePrivate;
     if (!this.results.childElementCount) clear(this.results, loading());

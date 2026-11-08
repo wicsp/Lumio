@@ -8,7 +8,7 @@
 
 ## 启动
 
-安装后打开 Hub 地址（单机默认为 `http://127.0.0.1:7420`）。源码开发在仓库根目录运行（Bun 1.4.x）：
+安装后打开 Hub 地址（单机默认为 `http://127.0.0.1:7420`）。源码开发在仓库根目录运行（Bun 版本以根目录 `package.json` 的 `packageManager` 为准）：
 
 ```sh
 bun apps/cli/src/main.ts hub serve

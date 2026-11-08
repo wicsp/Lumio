@@ -122,8 +122,7 @@ code, pre, kbd { font-family: var(--mono); font-size: 0.92em; }
   min-height: 0; overflow-y: auto;
 }
 .brand { display: flex; align-items: center; gap: 9px; padding: 6px 8px 14px; font-weight: 650; font-size: 16px; letter-spacing: -0.02em; }
-.brand-mark { position: relative; width: 20px; height: 20px; border-radius: 50%; background: var(--ink); flex: none; }
-.brand-mark::after { content: ""; position: absolute; inset: 5px; border-radius: 50%; background: var(--lumen); box-shadow: 0 0 8px 1px var(--lumen); }
+.brand-mark { width: 20px; height: 20px; background: url("/assets/icon.svg") center / contain no-repeat; flex: none; }
 .brand-sub { margin-left: auto; color: var(--ink-4); font-weight: 400; font-size: var(--fs-xs); }
 .sidebar-toggle { margin-left: auto; }
 .sidebar-toggle .icon { rotate: 180deg; }
@@ -818,7 +817,6 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 .msg-user { align-self: flex-end; max-width: 80%; padding: 9px 14px; border-radius: 16px 16px 4px 16px; background: var(--sunken); white-space: pre-wrap; overflow-wrap: anywhere; }
 .msg-assistant { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 12px; }
 .msg-assistant .brand-mark { width: 22px; height: 22px; margin-top: 2px; }
-.msg-assistant .brand-mark::after { inset: 6px; }
 .msg-tool { margin-left: 36px; color: var(--ink-3); font-size: var(--fs-sm); }
 .stream-text { white-space: pre-wrap; line-height: 1.7; }
 .stream-text.markdown { white-space:normal; }
@@ -1171,19 +1169,6 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
   .trash-actions { grid-column: 3; grid-row: 1 / span 2; }
 }
 
-/* Native assistant controls share the conversation's existing composer surface. */
-.native-panel { border:1px solid var(--line); border-radius:var(--r-md); padding:12px; margin-bottom:10px; max-height:38vh; overflow:auto; font-size:var(--fs-sm); }
-.native-status { margin-bottom:8px; color:var(--ink-2); }
-.native-panel .button-row { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
-.native-panel select { max-width:100%; min-width:0; }
-.native-panel pre { white-space:pre-wrap; overflow-wrap:anywhere; font:var(--fs-sm)/1.5 var(--mono); }
-.native-panel .native-approval { border-left:3px solid var(--lumen); margin-top:10px; padding:10px; background:var(--sunken); }
-.native-history details { margin-top:8px; }
-.native-history summary { cursor:pointer; color:var(--ink-3); }
-.native-code { display:inline-block; padding:6px 10px; user-select:all; }
-.native-panel .check-field { display:flex; align-items:center; gap:8px; padding:8px 0; }
-.composer-foot select { max-width:240px; min-width:0; }
-@media(max-width:600px) { .native-panel { max-height:32vh; padding:8px; } .composer-foot { flex-wrap:wrap; } .composer-foot select { max-width:160px; } }
 /* ───────────── 图（ADR 0039 T1-5、笔记关系图） ───────────── */
 .segmented-small button { height: 24px; padding: 0 8px; font-size: var(--fs-xs); }
 .graph-frame { overflow: hidden; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--sunken); }
@@ -1241,3 +1226,37 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 .graph-toolbar { display: flex; align-items: center; gap: 12px; }
 .graph-empty { padding: 32px; text-align: center; }
 .dialog-graph { width: min(960px, calc(100vw - 32px)); }
+
+/* Whole-vault graph shares the note reader without squeezing a large graph into a list column. */
+.knowledge-graph-view { flex: 1; min-width: 0; padding: 16px 20px; overflow: auto; }
+.split.is-graph-view { grid-template-columns: minmax(0, 1fr); }
+.split.is-graph-view.has-detail { grid-template-columns: minmax(320px, 1fr) minmax(0, 1fr); }
+.is-graph-view > .list-pane, .is-graph-view:not(.has-detail) > .rail-host { display: none; }
+.knowledge-graph-view .list-tools { padding: 0 0 12px; }
+.knowledge-graph-view .search-box[hidden] { display: none; }
+.knowledge-graph-canvas { min-height: 320px; }
+.knowledge-graph-canvas .graph-net { width: 100%; max-height: 75dvh; }
+.graph-islands { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-3); font-size: var(--fs-sm); }
+.is-graph-view.has-detail > .knowledge-graph-view { flex: 1; min-width: 320px; }
+.is-graph-view.has-detail > .rail-host { flex: 1; min-width: 0; }
+@media (max-width: 760px) {
+  .split.is-graph-view.has-detail { grid-template-columns: minmax(0, 1fr); }
+  .is-graph-view.has-detail > .knowledge-graph-view { display: none; }
+}
+
+/* Align prerequisite icons with their action label. */
+.dep-list > .text-btn { display: inline-flex; align-items: center; gap: 4px; min-height: 24px; white-space: nowrap; }
+
+/* Native assistant controls share the conversation's existing composer surface. */
+.native-panel { border:1px solid var(--line); border-radius:var(--r-md); padding:12px; margin-bottom:10px; max-height:38vh; overflow:auto; font-size:var(--fs-sm); }
+.native-status { margin-bottom:8px; color:var(--ink-2); }
+.native-panel .button-row { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+.native-panel select { max-width:100%; min-width:0; }
+.native-panel pre { white-space:pre-wrap; overflow-wrap:anywhere; font:var(--fs-sm)/1.5 var(--mono); }
+.native-panel .native-approval { border-left:3px solid var(--lumen); margin-top:10px; padding:10px; background:var(--sunken); }
+.native-history details { margin-top:8px; }
+.native-history summary { cursor:pointer; color:var(--ink-3); }
+.native-code { display:inline-block; padding:6px 10px; user-select:all; }
+.native-panel .check-field { display:flex; align-items:center; gap:8px; padding:8px 0; }
+.composer-foot select { max-width:240px; min-width:0; }
+@media(max-width:600px) { .native-panel { max-height:32vh; padding:8px; } .composer-foot { flex-wrap:wrap; } .composer-foot select { max-width:160px; } }

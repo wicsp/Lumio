@@ -1,6 +1,7 @@
 import {AIConfigurationService} from "./ai-config.ts";
 import {NativeAssistant} from "./native-assistant.ts";
 import {SqliteAIStore} from "@lumio/storage";
+import { KnowledgeService } from "@lumio/knowledge";
 import type { Trash } from "./trash.ts";
 import { validateTarget } from "./targets.ts";
 import { Notifications } from "./notifications.ts";
@@ -12,7 +13,7 @@ import { CoreError, newId } from "@lumio/foundation";
 import { parseAssignee, type WorkCommandResult, type AgentRun, type WorkTask } from "@lumio/schema";
 import { WorkService } from "@lumio/work";
 import { AssistantService, type AssistantModel, type AssistantTool } from "@lumio/assistant";
-import { SqliteWorkStore, SqliteAssistantStore, SqliteRoutineStore, SqliteArtifacts } from "@lumio/storage";
+import { FileKnowledgeRepository, SqliteWorkStore, SqliteAssistantStore, SqliteRoutineStore, SqliteArtifacts } from "@lumio/storage";
 import { ExecutionRoutines } from "@lumio/execution";
 import type { HubConfig } from "./config.ts";
 import type { HubStore, Identity } from "./store.ts";
@@ -28,6 +29,7 @@ import { workdirInVault } from "./execution-policy.ts";
 export class BusinessModules {
   readonly ai:AIConfigurationService;
   readonly native:NativeAssistant;
+  readonly knowledge?: KnowledgeService;
   readonly notifications: Notifications;
   readonly workStore: SqliteWorkStore;
   readonly work: WorkService;
@@ -47,6 +49,7 @@ export class BusinessModules {
     authorize?: typeof authorize; now?: () => Date; assistantModel?: AssistantModel; assistantTools?: AssistantTool[]; pushFetch?: typeof fetch;
   } = {}) {
     const now = options.now ?? (() => new Date());
+    if (config.vault) this.knowledge = new KnowledgeService(new FileKnowledgeRepository(config.vault, { stateDir: config.stateDir }));
     const id = (prefix: Parameters<typeof newId>[0]) => newId(prefix, now(), randomBytes);
     const jobs = new Jobs(store);
     this.artifacts = new SqliteArtifacts(store.db, join(config.stateDir, "files"));

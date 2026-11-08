@@ -154,7 +154,7 @@ export async function startVaultWatch(config: { vault: string; stateDir: string;
     await updateIndex(config.vault, { stateDir: config.stateDir });
     lastFullSync = new Date(clock.now()).toISOString();
     watcher = (options.watch ?? watch)(config.vault, { recursive: true }, (_event, name) => {
-      if (name !== null) notify(name.toString());
+      if (name !== null && name !== undefined) notify(name.toString());
     });
     watcher.on("error", () => { watching = false; report("", msg("watch.skip_vault_file_watcher_failed")); });
     watching = true;

@@ -36,7 +36,7 @@ macOS 同样支持配对，使用 `io.lumio.runtime` launchd 服务，日志在�
 
 以下保留执行器模板安装方法。Hub 与 vault 可以在另一台机器，执行器不需要 vault。
 
-1. 在 Linux 服务器用 Bun 1.3.x 构建：`bun run --cwd apps/runtime build`。
+1. 在 Linux 服务器用根目录 `package.json` 的 `packageManager` 指定的 Bun 版本构建：`bun run --cwd apps/runtime build`。
    将 `apps/runtime/dist/lumio-runtime` 放到 `~/.local/bin/lumio-runtime`。
 2. 在 Hub 所在机器创建独立身份和令牌（令牌只显示一次）：
    ```sh
