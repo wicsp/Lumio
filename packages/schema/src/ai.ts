@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { idOf, Timestamp, Revision, RequestId, RuntimeName } from "./common.ts";
-/** ADR 0040/0041: shared model configuration; credentials never appear in a view. */
+/** ADR 0041/0042: shared model configuration; credentials never appear in a view. */
 export const AIConnectionKind = z.enum(["codex-account", "openai-compatible", "deepseek", "doubao"]);
 export const AIConnection = z.strictObject({ id: idOf("aic"), owner: idOf("act"), name: z.string().trim().min(1).max(100), kind: AIConnectionKind,
     host: z.union([z.literal("hub"), RuntimeName]), base_url: z.string().url().optional(), api_key_set: z.boolean(), revision: Revision, created: Timestamp, updated: Timestamp });

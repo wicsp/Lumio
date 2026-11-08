@@ -38,3 +38,14 @@ test("DeepSeek reasoning and encrypted state survive a tool continuation without
     expect(requests[1]?.messages[1]?.encrypted_content).toBe("SYNTHETIC_ENCRYPTED");
     expect(tokens).toEqual(["SYNTHETIC_DONE"]);
 });
+
+test("an active API profile keeps its endpoint and credential snapshot during connection edits",async()=>{
+ const db=new Database(":memory:"),ai=new AIConfigurationService(new SqliteAIStore(db));
+ try{const c=ai.connection(owner,{name:"Synthetic",kind:"openai-compatible",host:"hub",base_url:"https://first.example.test/v1",api_key:"SYNTHETIC_FIRST_KEY"});const p=ai.profile(owner,{name:"Synthetic",connection:c.id,engine:"lumio",model:"synthetic-model",thinking:"default"});
+ const requests:{url:string;authorization:string|null}[]=[];const original=globalThis.fetch;let selected:ReturnType<AIConfigurationService["model"]>;
+ try{globalThis.fetch=(async(url:unknown,init:RequestInit)=>{requests.push({url:String(url),authorization:new Headers(init.headers).get("authorization")});return Response.json({choices:[{finish_reason:"stop",message:{role:"assistant",content:"SYNTHETIC_DONE"}}]});}) as typeof fetch;selected=ai.model(owner,p.id);}finally{globalThis.fetch=original;}
+ ai.connection(owner,{name:"Changed",kind:"openai-compatible",host:"hub",base_url:"https://second.example.test/v1",api_key:"SYNTHETIC_SECOND_KEY"},c.id);
+ await selected.model.complete({messages:[{role:"user",content:"Synthetic"}],tools:[]},{token:()=>{}});
+ expect(requests).toEqual([{url:"https://first.example.test/v1/chat/completions",authorization:"Bearer SYNTHETIC_FIRST_KEY"}]);
+ }finally{db.close();}
+});

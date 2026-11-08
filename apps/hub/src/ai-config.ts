@@ -58,6 +58,6 @@ export class AIConfigurationService {
     get(owner: string, id: string) { const profile = this.store.profile(id), connection = profile ? this.store.connection(profile.connection) : undefined; if (!profile || profile.owner !== owner || !connection || connection.owner !== owner)
         throw fail(); return { profile, connection }; }
     model(owner: string, id: string) { const { profile, connection } = this.get(owner, id); if (profile.engine !== "lumio" || !connection.base_url)
-        throw fail(); return { model: new ChatCompletionsModel({ baseUrl: connection.base_url, model: profile.model, credential: () => this.store.secret(connection.id) }), settings: { model: profile.model, thinking: profile.thinking, reasoning_effort: profile.effort } }; }
+        throw fail(); const key=this.store.secret(connection.id); return { model: new ChatCompletionsModel({ baseUrl: connection.base_url, model: profile.model, credential: () => key }), settings: { model: profile.model, thinking: profile.thinking, reasoning_effort: profile.effort } }; }
     models(id: string, owner: string): AIModel[] { const { connection, profile } = this.get(owner, id); return [{ id: profile.model, efforts: connection.kind === "deepseek" ? ["low", "high", "max"] : [] }]; }
 }

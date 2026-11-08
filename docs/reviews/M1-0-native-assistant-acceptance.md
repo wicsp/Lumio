@@ -1,6 +1,6 @@
 # M1-0 原生 Assistant 实现与本地验收
 
-日期：2026-11-08。分支：`codex/v0-ai-session-spike`。从已提交的 main `4dba5ca` 合入 T1 后继续；没有改动另一会话的工作树。
+日期：2026-11-08。分支：`codex/v0-ai-session-spike`。从已提交的 main `4dba5ca` 合入 T1 后继续，并合入试用期间前进的 `2e99c3e`（保留另一会话的前端/图谱改动）；没有改动另一会话的工作树。
 
 ## 交付
 
@@ -9,13 +9,13 @@
 - 两条认证 HTTP 通道、持久 outbox、序号去重、逐轮配置交付记录；受理未知不自动重发。原生审批在 Hub 一次消费，绑定原实例。
 - 固定沙箱与 OS 读取外边界、最小环境、账户指纹、工具集合验证；会话范围 MCP 凭据、普通 agent 授权、写入回执去重。未知结果冻结并要求核查，关闭终态不被迟到旧事件重新打开。
 - 对话彻底删除清理 Hub 原生负载，迟到事件经 ID tombstone 确认，不拖断其他 Session；未核查 unknown 不可彻底删除。
-- ADR 0040/0041、设计分册、Bun 1.4.x 规则和 CI 1.4.4 同批修改。生成契约由 `schema:export` 导出，无手改生成物。
+- ADR 0041/0042、设计分册、Bun 1.4.x 规则和 CI 1.4.4 同批修改。生成契约由 `schema:export` 导出，无手改生成物。
 
 ## 验证与证据
 
 - `bun install --frozen-lockfile --ignore-scripts`：117 installs / 108 packages，无变更、无新增依赖。
 - `bun run schema:export`：新 AI/原生契约与既有契约全部导出成功。
-- 合成原生集成：连续两轮、模型切换、请求幂等、所有者边界、实例审批、NO_ACK 未知冻结且调用一次、MCP 范围与写回执、停止后核查、状态丢失拒绝恢复、连接 revision 改变拒绝裸续接、删除和迟到事件。
+- 合成原生集成：连续两轮、模型切换、请求幂等、所有者边界、实例审批、NO_ACK 未知冻结且调用一次、MCP 范围与写回执、停止后核查、状态丢失拒绝恢复、连接 revision 改变拒绝裸续接、运行中 API 地址/凭据快照不受连接编辑影响、删除和迟到事件。
 - OS 反向验证：拒读合成 vault、凭据、相邻 Session 与 symlink 指向的目录；父进程退出后监督范围仍能停止已观察到的命令，不以此宣称绝对消除所有外部副作用。
 - `LUMIO_NATIVE_LIVE=1 bun test scripts/native-assistant.test.ts -t 'official Codex:'`：真实官方客户端 **1 pass / 0 fail**。同 thread 记住并回忆合成词、跨进程完整配置恢复、实际调用合成 Hub 的 `work.task.list` MCP。只在一次性 fixture 中临时使用现有认证，目录在 finally 清理；正式试用不复制认证。
 - `bun run apps/cli/src/build-binary.ts --version 0.2.0-native-trial ...`：编译和 macOS 签名成功，实际程序版本核对通过。
@@ -30,7 +30,7 @@
 
 ## 最终交付记录
 
-- Bun 1.4.4 的完整 `bun run check`：**1252 pass、4 skip、0 fail**，158 个文件；TypeScript 与依赖边界通过。四个 skip 为显式 opt-in 的官方 Codex、联网来源及终端交互用例；官方 Codex 已另行实跑通过。
-- macOS 签名验证通过；本地最后构建 SHA-256：`1007d4507d35e6798aab8e4bc8e0b7a811e7afad08c88f209b563fa6ddeb65e3`。
+- Bun 1.4.4 的完整 `bun run check`：**1267 pass、4 skip、0 fail**，160 个文件；TypeScript 与依赖边界通过。四个 skip 为显式 opt-in 的官方 Codex、联网来源及终端交互用例；官方 Codex 已另行实跑通过。
+- macOS 签名验证通过；本地最后构建 SHA-256：`b5a7056b9d98d2ea99511b751ba56c931f3ad4728408cb2f45fc35fe218a8cf2`。
 - 试用 Runtime 在线、隔离级别 macos-seatbelt；两个合成任务；官方账号由用户在页面完成登录。
 - 推送分支 `codex/v0-ai-session-spike`；ADR 保持 Accepted，PR 保持 Draft，是否合并由用户试用后决定。

@@ -1,6 +1,6 @@
 # 原生 Codex Assistant 本地试用
 
-本切片对应 ADR 0040/0041、任务 M1-0。程序版本 `0.2.0-native-trial`，Bun 1.4.4，macOS，Codex CLI **0.166.0**；尚未合并或发布。
+本切片对应 ADR 0041/0042、任务 M1-0。程序版本 `0.2.0-native-trial`，Bun 1.4.4，macOS，Codex CLI **0.166.0**；尚未合并或发布。
 
 ## 打开与登录
 

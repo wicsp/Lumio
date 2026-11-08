@@ -46,9 +46,10 @@ export function workPatchCommand(record: WorkTask | WorkProject, patch: Record<s
     : { request_id: requestId, operation: { op: "work.project.update", args: { project: record.id, expected_revision: record.revision, patch: changed } } } as WorkCommandRequest;
 }
 
-export function taskCreateCommand(input: { title: string; description?: string; project?: string }, requestId = newRequestId()): WorkCommandRequest {
+export function taskCreateCommand(input: { title: string; description?: string; project?: string; parent?: string }, requestId = newRequestId()): WorkCommandRequest {
   return { request_id: requestId, operation: { op: "work.task.create", args: {
-    title: input.title.trim(), ...(input.description ? { description: input.description } : {}), ...(input.project ? { project: input.project } : {}) } } };
+    title: input.title.trim(), ...(input.description ? { description: input.description } : {}), ...(input.project ? { project: input.project } : {}),
+    ...(input.parent ? { parent: input.parent } : {}) } } };
 }
 
 export function projectCreateCommand(input: { title: string; description?: string; goal?: string; workdir?: string }, requestId = newRequestId()): WorkCommandRequest {
