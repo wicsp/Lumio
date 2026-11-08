@@ -31,6 +31,7 @@
   例外是内置助手在 human 拥有的对话里经 Hub 进程内的工具读取，每次显示在对话中并记入审计（ADR 0029）；
   `human` 令牌须显式加 `--include-private`。`refs.bib`、报告等不得引用私密实体（ADR 0012、0014）。
 - **局限**：不经过 Hub、直接读文件的 AI 拦不住，需要在 agent 的沙箱配置里排除 `life/`。
+- 全库知识图谱（ADR 0040，K3）只授予 human 读取，agent / runtime 即使请求公开内容也拒绝，不注册为 agent 或助手工具；私密仍须显式开启。
 - v2 Work 与执行读取支持 human / agent；agent 写入按本文「AI 协作与权限」一节授权。Assistant 的外部 HTTP 入口只对 human 开放；搜索来源与私密规则继续适用。
 
 ## 安全

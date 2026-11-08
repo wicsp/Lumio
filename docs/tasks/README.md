@@ -64,7 +64,7 @@
 | [R4-7](R4-0-workflows-delegation-push.md#r4-7-验收用-lumio-开发-lumio) | 验收：用 Lumio 开发 Lumio | 人类 + Claude | R4-1 至 R4-6 |
 | [R4-8](R4-8-acceptance-fixes.md) | 验收反馈修复：项目工作目录、提议撤回、执行目标查询、CLI/skill 文档、Web 体验（ADR 0033） | Claude + Codex | R4-7 |
 | [T1-1 至 T1-5](T1-0-task-structure-and-readiness.md) | 任务结构与可开工状态：被阻塞推导、依赖/父任务/标签编辑、按可开工筛选、项目依赖图（ADR 0039） | Claude + Codex | — |
-| [K3-1 至 K3-3](K3-0-knowledge-graph.md) | 全库知识图谱：一次读出链接图的 Hub 接口与 Web 图谱视图（ADR 0040，Proposed） | Claude + Codex | — |
+| [K3-1 至 K3-3](K3-0-knowledge-graph.md) | 全库知识图谱：一次读出链接图的 Hub 接口与 Web 图谱视图（ADR 0040，Implemented） | Claude + Codex | 完成 |
 
 P1 的设计决定见 ADR 0014、0016、0017、0018；P2 见 ADR 0019、0020、0021、0022 与修订后的 ADR 0005；契约见 `packages/schema/src/` 中的 `query.ts`、`actor.ts`、`operation.ts`、`proposal.ts`、`api.ts`。
 

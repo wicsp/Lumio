@@ -1,5 +1,5 @@
 import { text as msg } from "./messages.ts";
-import { AgentInfo, AgentTokenRequest, AgentRevokeRequest, AssistantChatRequest, WorkCommandRequest, ExecutionRoutineCommandRequest, RequestId, AssistantToolCall, capability, ExecutionRoutine, PlanTemplate, type AssistantEvent, KnowledgeDeleteRequest, AssistantConversationDeleteRequest, TrashListArgs, TrashPurgeRequest, TrashRestoreRequest } from "@lumio/schema";
+import { KnowledgeGraph, KnowledgeGraphArgs, AgentInfo, AgentTokenRequest, AgentRevokeRequest, AssistantChatRequest, WorkCommandRequest, ExecutionRoutineCommandRequest, RequestId, AssistantToolCall, capability, ExecutionRoutine, PlanTemplate, type AssistantEvent, KnowledgeDeleteRequest, AssistantConversationDeleteRequest, TrashListArgs, TrashPurgeRequest, TrashRestoreRequest } from "@lumio/schema";
 import { AssistantError } from "@lumio/assistant";
 import { WorkError } from "@lumio/work";
 import type { BusinessModules } from "./modules.ts";
@@ -9,6 +9,7 @@ import type { authorize } from "./authorize.ts";
 import { handleArtifacts } from "./artifacts.ts";
 
 export const V2_ROUTES = [
+  { operation: "knowledge.graph", method: "GET", pattern: /^\/v2\/knowledge\/graph$/, path: "/v2/knowledge/graph" },
   { operation: "knowledge.delete", method: "DELETE", pattern: /^\/v2\/knowledge\/notes\/([a-z]+_[0-9A-HJKMNP-TV-Z]{26})$/, path: "/v2/knowledge/notes/<id>" },
   { operation: "assistant.delete", method: "DELETE", pattern: /^\/v2\/assistant\/conversations\/(conv_[0-9A-HJKMNP-TV-Z]{26})$/, path: "/v2/assistant/conversations/<id>" },
   { operation: "trash.list", method: "GET", pattern: /^\/v2\/trash$/, path: "/v2/trash" },
@@ -64,12 +65,20 @@ export function moduleError(cause: unknown): HubError | undefined {
 export async function handleV2(request: Request, route: V2Route, identity: Identity, store: HubStore,
   modules: BusinessModules, decide: typeof authorize, now = new Date()): Promise<Response> {
   let decision = decide(identity.actor, { operation: route.operation,
-    includePrivate: route.operation === "execution.read" && new URL(request.url).searchParams.get("include_private") === "true" });
+    includePrivate: ["execution.read", "knowledge.graph"].includes(route.operation) && new URL(request.url).searchParams.get("include_private") === "true" });
   let execution = "applied";
   let audited = false;
   try {
     if (decision.result !== "allow") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: decision.result === "deny" ? decision.reason : msg("v2.approval_required") });
     const url = new URL(request.url), id = route.pattern.exec(url.pathname)?.[1];
+    if (route.operation === "knowledge.graph") {
+      if (identity.actor.role !== "human") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] });
+      const raw = Object.fromEntries([...url.searchParams].map(([key, value]) => [key, value === "true" ? true : value === "false" ? false : value]));
+      const args = KnowledgeGraphArgs.safeParse(raw);
+      if (!args.success) throw new HubError("INVALID", { key: "capability.invalid", args: [] });
+      if (!modules.knowledge) throw new HubError("INVALID", { key: "server.no_knowledge_directory_configured_work_and_execution_are_available_i", args: [] });
+      return Response.json(KnowledgeGraph.parse(await modules.knowledge.graph({ includePrivate: args.data.include_private, includeLegacy: args.data.include_legacy, type: args.data.type })), { headers: { "Cache-Control": "no-store" } });
+    }
     if (route.operation === "knowledge.delete" || route.operation === "assistant.delete" || route.operation.startsWith("trash.")) {
       if (identity.actor.role !== "human") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] });
       const trash = modules.trash;

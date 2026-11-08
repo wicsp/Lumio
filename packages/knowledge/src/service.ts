@@ -1,4 +1,4 @@
-import { CheckResult, LinksResult, NoteDetail, SearchResult, type NoteRef } from "@lumio/schema";
+import { CheckResult, KnowledgeGraph, LinksResult, NoteDetail, SearchResult, type NoteRef } from "@lumio/schema";
 import { CoreError } from "@lumio/foundation";
 import type { FillContext } from "./fill.ts";
 import { renderIdea, type NewNote } from "./create.ts";
@@ -8,7 +8,9 @@ import { parsePaperInput } from "./paper-input.ts";
 import { isPrivateType } from "./layout.ts";
 
 export interface KnowledgeQueryOptions { includePrivate?: boolean; type?: NoteRef["type"]; limit?: number }
+export interface KnowledgeGraphOptions extends KnowledgeQueryOptions { includeLegacy?: boolean }
 export interface KnowledgeRepository {
+  graph(options: KnowledgeGraphOptions): Promise<KnowledgeGraph>;
   search(query: string, options: KnowledgeQueryOptions): Promise<SearchResult>;
   show(reference: string, options: KnowledgeQueryOptions): Promise<NoteDetail>;
   links(reference: string, options: KnowledgeQueryOptions): Promise<LinksResult>;
@@ -44,6 +46,14 @@ export class KnowledgeService {
   async links(reference: string, options: KnowledgeQueryOptions = {}): Promise<LinksResult> {
     const result = LinksResult.parse(await this.repository.links(reference, options));
     this.visible([result.note, ...result.outgoing.flatMap((link) => link.note ? [link.note] : []), ...result.incoming.map((link) => link.note)], options);
+    return result;
+  }
+  async graph(options: KnowledgeGraphOptions = {}): Promise<KnowledgeGraph> {
+    const result = KnowledgeGraph.parse(await this.repository.graph(options));
+    this.visible(result.nodes, options);
+    if (result.nodes.some(note => (options.type && note.type !== options.type) || (!options.includeLegacy && ["task", "project", "routine"].includes(note.type)))) {
+      throw new CoreError("INVALID_QUERY_RESULT", { key: "service.query_returned_an_invisible_knowledge_entry", args: [] });
+    }
     return result;
   }
   async check(options: KnowledgeQueryOptions = {}): Promise<CheckResult> {

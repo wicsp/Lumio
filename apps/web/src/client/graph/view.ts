@@ -2,7 +2,7 @@
  * 图的 SVG 渲染：依赖图（分层、自左向右）与关系图（力导向）。只用浏览器自带的 SVG，不加载外部资源。
  * 节点可点击 / 回车打开；滚轮缩放、拖动平移；颜色全部来自 CSS 变量，跟随主题。
  */
-import { forceLayout, layeredLayout, type Edge } from "./layout.ts";
+import { forceLayout, layeredLayout, type Edge, type Point } from "./layout.ts";
 
 const SVG = "http://www.w3.org/2000/svg";
 function s<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number> = {}, ...children: Array<Node | string | null | undefined | false>): SVGElementTagNameMap[K] {
@@ -130,12 +130,12 @@ function highlight(svg: SVGSVGElement, id?: string): void {
 
 // ───────────── 关系图 ─────────────
 
-export interface NetNode { id: string; label: string; kind: string; center?: boolean; distance?: number }
+export interface NetNode { id: string; label: string; kind: string; center?: boolean; distance?: number; weight?: number }
 
 /** 力导向关系图（笔记链接）。边 from → to 表示 from 的正文链接到 to。 */
-export function relationGraph(nodes: readonly NetNode[], edges: readonly Edge[], open: (id: string) => void, size = { width: 680, height: 460 }): SVGSVGElement {
+export function relationGraph(nodes: readonly NetNode[], edges: readonly Edge[], open: (id: string) => void, size = { width: 680, height: 460 }, positions?: Map<string, Point>): SVGSVGElement {
   const center = nodes.find(n => n.center)?.id;
-  const pos = forceLayout(nodes.map(n => n.id), edges, { ...size, center });
+  const pos = positions ?? forceLayout(nodes.map(n => n.id), edges, { ...size, center });
   const degree = new Map<string, number>();
   for (const [a, b] of edges) { degree.set(a, (degree.get(a) ?? 0) + 1); degree.set(b, (degree.get(b) ?? 0) + 1); }
   const marker = `garrow-${++markerSeq}`;
@@ -143,7 +143,8 @@ export function relationGraph(nodes: readonly NetNode[], edges: readonly Edge[],
   svg.style.aspectRatio = `${size.width} / ${size.height}`;
   const known = new Set(nodes.map(n => n.id));
   const edgeLayer = s("g", { class: "gedges" });
-  const radius = (id: string, isCenter?: boolean) => isCenter ? 10 : Math.min(9, 4.5 + Math.sqrt(degree.get(id) ?? 0));
+  const weights = new Map(nodes.map(node => [node.id, node.weight]));
+  const radius = (id: string, isCenter?: boolean) => isCenter ? 10 : Math.min(weights.get(id) === undefined ? 9 : 18, 4.5 + Math.sqrt(weights.get(id) ?? degree.get(id) ?? 0));
   for (const [from, to] of edges) {
     if (!known.has(from) || !known.has(to) || from === to) continue;
     const a = pos.get(from)!, b = pos.get(to)!, d = Math.max(1, Math.hypot(b.x - a.x, b.y - a.y));
