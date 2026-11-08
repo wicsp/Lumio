@@ -28,7 +28,7 @@ export class AssistantPane {
   private messages = h("div", { class: "messages", role: "log", "aria-label": t("Conversation messages") });
   private text = autosize(h("textarea", { name: "chat-message", rows: "1", placeholder: t("Ask anything, or think through the next step…"), "aria-label": t("Message") }));
   private profiles:AIProfile[]=[];
-  private profile=h("select",{"aria-label":t("AI profile")},h("option",{value:""},t("Existing API configuration")));
+  private profile=h("select",{"aria-label":t("AI profile")},h("option",{value:""},t("Default assistant model")));
   private native!:NativeSessionPanel;
   private nativeReady=true;
   private model = h("input", { name: "chat-model", class: "model-input", placeholder: t("Default model"), title: t("Applies to this message only; doesn't change the service or permissions"), autocomplete: "off" });

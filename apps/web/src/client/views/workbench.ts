@@ -139,7 +139,8 @@ export class WorkbenchView {
   private async go(section: Section, id?: string, intent?: string): Promise<void> {
     const generation = ++this.routeGeneration;
     if (section === "work" && !id) id = intent === "new-project" ? "projects" : intent === "new" ? "tasks" : this.workMode;
-    if (section === this.section && !intent && (!id || (section === "work" && id === this.workMode))) return;
+    // 设置页的二级菜单也走路由（#settings/<分类>），回到分类列表时 id 为空，不能提前返回。
+    if (section === this.section && section !== "settings" && !intent && (!id || (section === "work" && id === this.workMode))) return;
     if (!(await this.beforeLeave()) || generation !== this.routeGeneration) return;
     const hash = `#${section}${id ? `/${encodeURIComponent(id)}` : ""}`;
     if (location.hash !== hash) history.pushState(null, "", hash);
@@ -182,7 +183,7 @@ export class WorkbenchView {
       mounted.target.hidden = false;
       // Returning to a retained module: keep its state, but catch up with changes made elsewhere meanwhile.
       if (previous !== mounted) { mounted.pane.resume?.(); mounted.pane.liveRefresh?.(); }
-      if (id) mounted.pane.open?.(id);
+      if (id || section === "settings") mounted.pane.open?.(id ?? "");
     }
     this.current = mounted;
     if (intent) mounted.pane.intent?.(intent);
@@ -196,7 +197,7 @@ export class WorkbenchView {
     const changed = () => void this.refreshCounts();
     let pane: Pane;
     if (section === "overview") pane = new OverviewPane(target, client, this.session.hub, navigate, this.name, changed);
-    else if (section === "settings") pane = new SettingsPane(target, this.session, this.name, () => void this.signOut(), () => this.leaveSettings());
+    else if (section === "settings") pane = new SettingsPane(target, this.session, this.name, () => void this.signOut(), () => this.leaveSettings(), sub => void this.go("settings", sub), id);
     else if (section === "knowledge") pane = new KnowledgePane(target, client, id);
     else if (section === "work") pane = new WorkPane(target, client, this.session.hub, this.workMode, id, navigate, changed);
     else if (section === "execution") pane = new ExecutionPane(target, client, this.session.hub, id, navigate, changed);

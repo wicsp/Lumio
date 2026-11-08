@@ -1,4 +1,3 @@
-import {AISettings} from "./ai-settings.ts";
 /**
  * 设置页「助手模型」（ADR 0027 第 4 节、0029 第 7 节）。
  * 密钥只写不读；保存前默认先测试连接，失败不保存；保存后 Hub 立即使用，不需要重启。
@@ -30,16 +29,14 @@ export function configProblem(cause: unknown): string {
 export class AssistantSettings {
   readonly element = h("div", { class: "set-rows" });
   private active = true;
-  private legacy=h("div",{class:"set-rows"});
-  private profiles?:AISettings;
+  /** AI Profile 出现后（ADR 0041），这里只管「对话没选 Profile 时」使用的默认 API。 */
+  private legacy = this.element;
 
   constructor(private hub: HubExtras) {
-    if(hub.ai){this.profiles=new AISettings(hub.ai);this.element.append(this.profiles.element,h("details",{},h("summary",{},t("Existing API configuration")),this.legacy));}
-    else this.element.append(this.legacy);
     clear(this.legacy, h("p", { class: "set-empty" }, t("Loading…")));
     void this.load();
   }
-  dispose(): void { this.active = false;this.profiles?.dispose(); }
+  dispose(): void { this.active = false; }
 
   private async load(): Promise<void> {
     try {
