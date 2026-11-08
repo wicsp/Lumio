@@ -127,11 +127,7 @@ export class WorkEditor {
       this.detailInput = input;
       detail.append(this.relations);
       this.renderRelations();
-      void client.workTasks().then(tasks => {
-        if (!this.active) return;
-        this.allTasks = tasks; this.byId = new Map(tasks.map(task => [task.id, task]));
-        this.renderProps(); this.renderRelations();
-      }).catch(() => { /* 标题暂时显示为 ID；编辑仍可用 */ });
+      void this.refreshRelatedTasks();
       detail.append(this.timeline(input));
       if (input.task.references.length) detail.append(h("section", { class: "section" },
         h("div", { class: "section-head" }, h("h3", {}, t("References")), h("span", { class: "count" }, input.task.references.length)),
@@ -142,6 +138,16 @@ export class WorkEditor {
   dispose(): void { this.canLeave(); this.active = false; this.titleResize?.disconnect(); clearTimeout(this.timer); this.disposeBodyReferences?.(); this.disposeReferences?.(); this.messageNav?.dispose(); }
   get dirty(): boolean { return this.writer.dirty; }
   get isBusy(): boolean { return this.busy; }
+  get hasUnsentComment(): boolean { return !!this.commentDraft?.value.trim(); }
+  /** Related task outcomes/titles can change while this task's own revision stays the same. */
+  async refreshRelatedTasks(canApply = () => true): Promise<void> {
+    try {
+      const tasks = await this.client.workTasks();
+      if (!this.active || !canApply() || JSON.stringify(tasks) === JSON.stringify(this.allTasks)) return;
+      this.allTasks = tasks; this.byId = new Map(tasks.map(task => [task.id, task]));
+      this.renderProps(); this.renderRelations();
+    } catch { /* Keep the last visible relationship facts until the next refresh. */ }
+  }
   canLeave(): boolean { this.persist(); void this.flush(); return true; }
   async beforeLeave(): Promise<boolean> { this.persist(); await this.flush(); return true; }
   private persist(): void {
