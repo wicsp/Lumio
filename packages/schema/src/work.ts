@@ -147,6 +147,7 @@ export const WorkTask = z
     project: idOf("prj").optional(),
     parent: idOf("task").optional(),
     dependencies: z.array(idOf("task")),
+    blocked_by: z.array(idOf("task")).optional().describe("读取时推导，不存储，不可提交；缺失与 [] 等价（ADR 0039）"),
     references: z.array(ResourceRef),
     due: Timestamp.optional(),
     ...RunConfigShape,
@@ -172,6 +173,8 @@ export const TaskTurnChange = z.strictObject({
 /** `GET` 单个任务（v3）：任务、讨论、轮次、交接记录。界面按时间合并成时间线。 */
 export const WorkTaskDetail = z.strictObject({
   task: WorkTask,
+  dependents: z.array(idOf("task")).describe("依赖本任务且不在回收站中的直接后续任务"),
+  children: z.array(idOf("task")).describe("不在回收站中的直接子任务"),
   comments: z.array(WorkComment),
   executions: z.array(WorkExecution),
   turns: z.array(TaskTurnChange),

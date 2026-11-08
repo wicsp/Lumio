@@ -96,7 +96,7 @@ test("selftest enforces deadlines, continues checks, cancels unfinished database
       const job = Job.parse({ spec: { protocol_version: 2, id: `job_${String(sequence).padStart(26, "0")}`, runtime: "act_00000000000000000000000001", lease: "synthetic_lease_123456", source: { task: task.id, round: sequence }, run: { kind: "agent", engine: "pi", prompt: task.description }, workdir: "~", timeout_seconds: 1, created: date }, status: "running" });
       jobs.set(job.spec.id, job); return Response.json({ kind: "job", job });
     }
-    if (u.pathname.startsWith("/v2/work/tasks/")) return Response.json({ task, executions: [], comments: [], turns: [] });
+    if (u.pathname.startsWith("/v2/work/tasks/")) return Response.json({ task, dependents: [], children: [], executions: [], comments: [], turns: [] });
     const id = u.pathname.split("/")[3]!;
     if (u.pathname.endsWith("/cancel")) cancelled++;
     return Response.json(jobs.get(id));

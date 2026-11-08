@@ -57,7 +57,7 @@ test("task new and update send every execution field; continue sends its comment
   const task = { schema_version: 3, type: "task", id, title: "Synthetic", description: "", revision: 1, outcome: "open", turn: { holder: "human", reason: "todo", since: at }, tags: [], dependencies: [], references: [], created: at, updated: at };
   const requests: { operation: { op: string; args: Record<string, unknown> } }[] = [];
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
-    if (request.method === "GET") return Response.json({ task, comments: [], executions: [], turns: [] });
+    if (request.method === "GET") return Response.json({ task, dependents: [], children: [], comments: [], executions: [], turns: [] });
     const body = await request.json() as typeof requests[number]; requests.push(body);
     return Response.json(body.operation.op === "work.task.dispatch" ? { kind: "proposal", proposal: "prop_00000000000000000000000001" } : { kind: "task", task });
   } });

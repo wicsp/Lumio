@@ -3,7 +3,7 @@ import { cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promi
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Actor, ApiError, AssistantChatResult, AssistantConfigView, AssistantToolCall, CAPABILITIES, WorkAttention,
-  WorkCommandResult, WorkTaskDetail, Job, toolName } from "@lumio/schema";
+  WorkCommandResult, WorkTask, WorkTaskDetail, Job, toolName } from "@lumio/schema";
 import type { AssistantModel } from "@lumio/assistant";
 import { startHub } from "../src/server.ts";
 import { readConfig } from "../src/config.ts";
@@ -432,4 +432,38 @@ test("attention membership comes only from turn even when the latest execution s
   await command("work.task.hand", { task: created.id, expected_revision: hub.modules.work.task(created.id).revision, to: "external", note: "Synthetic external wait" });
   expect(await client().workAttention()).toEqual([]);
   expect(hub.modules.work.detail(created.id).executions.at(-1)!.applied).toBe(true);
+});
+
+test("T1 readiness reaches HTTP, agent and assistant capabilities; deletion, restoration and purge unblock safely", async () => {
+  const seed = await Bun.file(new URL("../../../fixtures/work/readiness.json", import.meta.url)).json();
+  const a = await task({ title: seed.title }), child = await task({ title: "Synthetic blocked child", dependencies: [a.id], parent: a.id, tags: seed.tags });
+  expect(child.blocked_by).toEqual([a.id]);
+  const schema = WorkTask.array();
+  const query = `readiness=blocked&tag=infra&parent=${a.id}&q=blocked`;
+  expect(await checked(`/v2/work/tasks?${query}`, schema)).toMatchObject([{ id: child.id, blocked_by: [a.id] }]);
+  expect((await client().workTask(a.id))).toMatchObject({ dependents: [child.id], children: [child.id] });
+  const identity = hub.store.authenticate(`Bearer ${agent}`)!;
+  expect((await hub.modules.capabilities.execute("work.task.list", { readiness: "blocked", tag: "infra", parent: a.id }, identity)).result).toMatchObject([{ id: child.id, blocked_by: [a.id] }]);
+  const tool = hub.modules.capabilities.tools().find(value => value.capability === "work.task.show")!;
+  const assistant = hub.store.assistantActor(), owner = hub.store.authenticate(`Bearer ${human}`)!.actor.id;
+  expect(await tool.execute({ task: child.id }, { actor: assistant.id, owner, request: requestId(), signal: new AbortController().signal })).toMatchObject({ task: { blocked_by: [a.id] } });
+  for (const language of ["en", "zh-CN"]) {
+    const response = await fetch(url() + "/v2/work/commands", { method: "POST", headers: { Authorization: `Bearer ${human}`, "Content-Type": "application/json", "Accept-Language": language },
+      body: JSON.stringify({ request_id: requestId(), operation: { op: "work.task.dispatch", args: { task: child.id, to: "pi@server" } } }) });
+    expect(response.status).toBe(409);
+    const error = ApiError.parse(await response.json()).error;
+    expect(error.message).toContain(a.id); expect(error.message).toContain(a.title);
+    expect(error.message).toContain(language === "en" ? "Unfinished prerequisites" : "前置未完成");
+  }
+  expect(await client().workAttention()).toEqual([]);
+  await command("work.task.delete", { task: a.id, expected_revision: 1 });
+  expect((await client().workTask(child.id)).task.blocked_by).toEqual([]);
+  expect((await api(`/v2/trash/${a.id}/restore`, { request_id: requestId() })).status).toBe(200);
+  expect((await client().workTask(child.id)).task.blocked_by).toEqual([a.id]);
+  await command("work.task.delete", { task: a.id, expected_revision: 2 });
+  expect((await api(`/v2/trash/${a.id}`, { request_id: requestId() }, human, "DELETE")).status).toBe(200);
+  expect((await client().workTask(child.id)).task).toMatchObject({ dependencies: [a.id], blocked_by: [] });
+  expect((await checked("/v2/work/tasks?readiness=ready", schema))).toMatchObject([{ id: child.id }]);
+  await dispatch(child.id);
+  await command("work.task.finish", { task: child.id, expected_revision: 2, outcome: "done" });
 });

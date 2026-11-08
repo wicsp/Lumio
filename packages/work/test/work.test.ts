@@ -412,3 +412,73 @@ test("plan rounds start at zero independently of the task's historical round num
   deliver(f, task.id);
   expect(f.service.task(task.id)).toMatchObject({ plan: { stage: "approve", rounds: 2 }, turn: { holder: "human", reason: "review" } });
 });
+
+test("readiness is derived in all read and command results; filtering is batched and composable", async () => {
+  const seed = await Bun.file(new URL("../../../fixtures/work/readiness.json", import.meta.url)).json();
+  const f = fixture(), a = f.create(seed.title), b = f.create("Second prerequisite"), parent = f.create("Parent");
+  const project = f.command("work.project.create", { title: "Synthetic project" });
+  if (project.kind !== "project") throw new Error("project expected");
+  const args = { title: "Synthetic blocked child", dependencies: [b.id, a.id], parent: parent.id, tags: seed.tags, project: project.project.id };
+  const created = f.command("work.task.create", args, "synthetic-readiness-create");
+  if (created.kind !== "task") throw new Error("task expected");
+  const child = created.task;
+  expect(child.blocked_by).toEqual([b.id, a.id]);
+  expect(f.service.task(child.id).blocked_by).toEqual([b.id, a.id]);
+  expect(f.service.detail(child.id).task.blocked_by).toEqual([b.id, a.id]);
+  expect(f.service.detail(parent.id).children).toEqual([child.id]);
+  expect(f.service.detail(a.id).dependents).toEqual([child.id]);
+  const original = f.store.task.bind(f.store); let singleReads = 0, batchReads = 0;
+  const batch = f.store.tasks.bind(f.store);
+  f.store.task = id => { singleReads++; return original(id); };
+  f.store.tasks = () => { batchReads++; return batch(); };
+  expect(f.service.tasks({ readiness: "blocked", tag: "infra", parent: parent.id, project: project.project.id, query: "BLOCKED" }).map(task => task.id)).toEqual([child.id]);
+  expect(singleReads).toBe(0); expect(batchReads).toBe(1);
+  for (const filter of [{ tag: "inf" }, { parent: a.id }, { query: "absent" }]) expect(f.service.tasks(filter)).toEqual([]);
+  expect(f.service.tasks({ readiness: "ready" }).map(task => task.id)).not.toContain(child.id);
+  for (const op of ["work.task.dispatch", "work.task.finish"]) {
+    try {
+      f.command(op, { task: child.id, ...(op.endsWith("dispatch") ? { to: "pi@server" } : { expected_revision: child.revision, outcome: "done" }) });
+      throw new Error("expected conflict");
+    } catch (error) {
+      const failure = error as { code: string; params: { key: string; args: string[] } };
+      expect(failure.code).toBe("CONFLICT"); expect(failure.params.key).toBe("work.blocked_dependencies");
+      expect(failure.params.args[0]).toContain(`${b.id}: ${b.title}`);
+      expect(failure.params.args[0]).toContain(`${a.id}: ${a.title}`);
+    }
+  }
+  for (const task of [a, b]) f.command("work.task.finish", { task: task.id, expected_revision: task.revision, outcome: "done" });
+  expect(f.service.tasks({ readiness: "ready", parent: parent.id }).map(task => task.id)).toEqual([child.id]);
+  expect(f.service.tasks({ readiness: "blocked" })).toEqual([]);
+  expect(f.command("work.task.create", args, "synthetic-readiness-create")).toMatchObject({ task: { blocked_by: [] } });
+  expect(f.service.tasks({ readiness: "ready" }).map(task => task.id)).not.toContain(a.id);
+  f.command("work.task.finish", { task: child.id, expected_revision: child.revision, outcome: "done" });
+  f.command("work.task.reopen", { task: a.id, expected_revision: 2 });
+  expect(f.service.tasks({ readiness: "blocked" })).toEqual([]); // closed children are not blocked tasks
+});
+
+for (const change of ["cancelled", "trashed", "purged"] as const) test(`${change} prerequisites allow dispatch and completion; restoring open prerequisites blocks again`, async () => {
+  const seed = await Bun.file(new URL("../../../fixtures/work/readiness.json", import.meta.url)).json();
+  const f = fixture(), a = f.create(seed.title), b = f.create("Synthetic dependent", { dependencies: [a.id], parent: a.id });
+  if (change === "cancelled") f.command("work.task.finish", { task: a.id, expected_revision: 1, outcome: "cancelled" });
+  else {
+    const deleted = f.command("work.task.delete", { task: a.id, expected_revision: 1 });
+    if (deleted.kind !== "trashed") throw new Error("trash expected");
+    expect(f.service.task(b.id).blocked_by).toEqual([]);
+    f.service.restore(deleted.item, owner);
+    expect(f.service.task(b.id).blocked_by).toEqual([a.id]);
+    f.command("work.task.delete", { task: a.id, expected_revision: 2 });
+    if (change === "purged") { f.store.data.tasks = f.store.data.tasks.filter(task => task.id !== a.id); f.store.removeTrash(a.id); }
+  }
+  expect(f.service.detail(b.id).task).toMatchObject({ blocked_by: [], dependencies: [a.id], parent: a.id });
+  f.command("work.task.dispatch", { task: b.id, to: "pi@server" });
+  f.command("work.task.finish", { task: b.id, expected_revision: 2, outcome: "done" });
+  expect(f.service.task(b.id).outcome).toBe("done");
+});
+
+test("reverse relationships exclude trash and parent alone never implies a dependency", () => {
+  const f = fixture(), a = f.create("Synthetic parent"), child = f.create("Synthetic child", { parent: a.id }), dependent = f.create("Synthetic dependent", { dependencies: [a.id] });
+  expect(child.blocked_by).toEqual([]);
+  f.command("work.task.delete", { task: child.id, expected_revision: 1 });
+  f.command("work.task.delete", { task: dependent.id, expected_revision: 1 });
+  expect(f.service.detail(a.id)).toMatchObject({ children: [], dependents: [] });
+});

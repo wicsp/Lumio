@@ -40,7 +40,7 @@ describe("three questions: outcome, turn, history (ADR 0032 §1–2)", () => {
   test("history records each hand-over, append-only", () => {
     const change = { task: TASK, at: NOW, by: ACT, from: turn("codex@mac", "working", { round: 1 }), to: turn("human", "review", { round: 1, job: JOB }) };
     expect(TaskTurnChange.safeParse(change).success).toBe(true);
-    expect(WorkTaskDetail.safeParse({ task: task(), comments: [], executions: [], turns: [change] }).success).toBe(true);
+    expect(WorkTaskDetail.safeParse({ task: task(), dependents: [], children: [], comments: [], executions: [], turns: [change] }).success).toBe(true);
   });
 });
 

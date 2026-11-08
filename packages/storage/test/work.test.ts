@@ -74,3 +74,33 @@ test("plan templates survive adapter reopen, overwrite in place, delete and tran
     store = new SqliteWorkStore(db); expect(store.planTemplates()).toEqual([]);
   } finally { db.close(); }
 });
+
+test("derived readiness is never persisted; SQLite purge preserves dangling dependencies and readable details", async () => {
+  const seed = await Bun.file(new URL("../../../fixtures/work/readiness.json", import.meta.url)).json();
+  const db = new Database(":memory:");
+  try {
+    const f = fixture(db), store = new SqliteWorkStore(db);
+    const a = f.command("work.task.create", { title: seed.title });
+    if (a.kind !== "task") throw new Error("task expected");
+    const b = f.command("work.task.create", { title: "Synthetic dependent", dependencies: [a.task.id], parent: a.task.id });
+    if (b.kind !== "task") throw new Error("task expected");
+    expect(b.task.blocked_by).toEqual([a.task.id]);
+    store.putTask(b.task);
+    store.putReceipt(actor, "synthetic-derived-receipt", "{}", b);
+    expect(store.task(b.task.id)?.blocked_by).toBeUndefined();
+    expect(JSON.stringify(db.query("SELECT * FROM work_requests").all())).not.toContain("blocked_by");
+    expect(JSON.stringify(db.query("SELECT * FROM work_tasks").all())).not.toContain("blocked_by");
+    const deleted = f.command("work.task.delete", { task: a.task.id, expected_revision: 1 });
+    if (deleted.kind !== "trashed") throw new Error("trash expected");
+    expect(f.service.detail(b.task.id).task.blocked_by).toEqual([]);
+    f.service.restore(deleted.item, actor);
+    expect(f.service.task(b.task.id).blocked_by).toEqual([a.task.id]);
+    const again = f.command("work.task.delete", { task: a.task.id, expected_revision: 2 });
+    if (again.kind !== "trashed") throw new Error("trash expected");
+    store.purge(again.item);
+    expect(store.task(a.task.id)).toBeUndefined();
+    expect(f.service.detail(b.task.id).task).toMatchObject({ dependencies: [a.task.id], parent: a.task.id, blocked_by: [] });
+    f.command("work.task.finish", { task: b.task.id, expected_revision: 1, outcome: "done" });
+    expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
+  } finally { db.close(); }
+});

@@ -74,7 +74,7 @@ test("ADR 0032 §8 migration covers every row and latest-round case, backs up da
     const task = store.task(id("task", n + 1))!;
     expect(task).toMatchObject({ schema_version: 3, outcome, turn: { holder, reason }, revision: 5 });
     expect("status" in task || "assignee" in task).toBe(false);
-    const detail = WorkTaskDetail.parse({ task, comments: store.comments(task.id), executions: store.executions(task.id), turns: store.turns(task.id) });
+    const detail = WorkTaskDetail.parse({ task, dependents: [], children: [], comments: store.comments(task.id), executions: store.executions(task.id), turns: store.turns(task.id) });
     expect(detail.turns).toHaveLength(1); expect(TaskTurnChange.parse(detail.turns[0]).by).toBe(by);
   });
   const before = db.serialize();
