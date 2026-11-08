@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { ApiClientError, createClient } from "@lumio/api-client";
-import { HandoffPlan, WorkCommandRequest, idOf, type WorkCommandResult } from "@lumio/schema";
+import { HandoffPlan, WorkCommandRequest, idOf, type WorkCommandResult, type WorkTask, type WorkTaskDetail } from "@lumio/schema";
 import { hubCredentials } from "./config.ts";
 
 import { WORK_OPTIONS as options } from "./command-definitions.ts";
@@ -18,6 +18,7 @@ export async function runWork(kind: "task" | "project", args: string[], log: (li
   if (kind === "task" && args.includes("--legacy")) return;
   const { values, positionals } = parseArgs({ args, allowPositionals: true, strict: true, options });
   const [action, reference, ...rest] = positionals;
+  if (values.ready && values.blocked) throw new Error(msg("work.readiness_exclusive"));
   if (!action || !["new", "create", "list", "show", "update", "edit", "status", "assign", "comment", "continue", "hand", "finish", "cancel", "reopen", "ack", "plan", "checkpoint"].includes(action)) {
     if (kind === "task") return;
     throw new Error(usage());
@@ -50,7 +51,8 @@ export async function runWork(kind: "task" | "project", args: string[], log: (li
         const projects = await client.workProjects({ status: values.status });
         if (values.json) emit(projects); else for (const project of projects) log(`${project.id}  ${project.status}  ${project.title}`);
       } else {
-        const tasks = await client.workTasks({ project: values.project, status: values.status, query: values.query });
+        const tasks = await client.workTasks({ project: values.project, status: values.status, query: values.query,
+          readiness: values.ready ? "ready" : values.blocked ? "blocked" : undefined, tag: values.tag, parent: values.parent });
         const groups = ["me", "agents", "external", "hold"] as const;
         if (values.turn && !groups.includes(values.turn as typeof groups[number])) throw new Error(msg("work.invalid_turn"));
         const group = (task: typeof tasks[number]) => task.turn.holder === "human" ? "me" : task.turn.holder === "external" ? "external" : task.turn.holder === "nobody" ? "hold" : "agents";
@@ -59,7 +61,10 @@ export async function runWork(kind: "task" | "project", args: string[], log: (li
           const rows = filtered.filter(task => group(task) === key);
           if (!rows.length) continue;
           log(msg(`work.turn.${key}`));
-          for (const task of rows) log(`${task.id}  ${task.outcome}  ${task.turn.holder} (${task.turn.reason})  ${task.title}`);
+          for (const task of rows) {
+            const blocked = taskBlockedLabel(task);
+            log(`${task.id}  ${task.outcome}  ${task.turn.holder} (${task.turn.reason})  ${task.title}${blocked ? `  ${blocked}` : ""}`);
+          }
         }
       }
       return 0;
@@ -78,11 +83,15 @@ export async function runWork(kind: "task" | "project", args: string[], log: (li
       return 0;
     }
     if (kind === "task" && !idOf("task").safeParse(reference).success && ["show", "continue"].includes(action)) return;
-    const current = kind === "task" ? (await client.workTask(reference)).task : await client.workProject(reference);
+    const taskDetail = kind === "task" ? await client.workTask(reference) : undefined;
+    const current = taskDetail?.task ?? await client.workProject(reference);
     resolved = true;
     if (action === "show") {
-      const detail = kind === "task" ? await client.workTask(reference) : current;
-      if (values.json) emit(detail); else log(`${current.id}  ${current.type === "task" ? `${current.outcome} / ${current.turn.holder} (${current.turn.reason})` : current.status}  ${current.title}\n\n${current.description}${kind === "task" ? `\n\n${JSON.stringify(detail, null, 2)}` : ""}`);
+      if (values.json) emit(taskDetail ?? current);
+      else {
+        const relations = taskDetail ? `\n\n${formatTaskRelations(taskDetail, await client.workTasks())}\n\n${JSON.stringify(taskDetail, null, 2)}` : "";
+        log(`${current.id}  ${current.type === "task" ? `${current.outcome} / ${current.turn.holder} (${current.turn.reason})` : current.status}  ${current.title}\n\n${current.description}${relations}`);
+      }
       return 0;
     }
     if (action === "continue" && kind === "task") {
@@ -176,4 +185,19 @@ export async function runAttention(args: string[], log: (line: string) => void):
   else if (!items.length) log(msg("attention.empty"));
   else for (const item of items) log(`${item.task}  ${msg(`attention.${item.kind}`)}  ${item.title}\n${item.question ?? item.summary ?? ""}`);
   return 0;
+}
+
+/** Dependency facts are layered over the existing turn; piped output stays plain text. */
+export function taskBlockedLabel(task: WorkTask, terminal = process.stdout.isTTY === true && process.env.TERM !== "dumb"): string {
+  const count = task.outcome === "open" ? task.blocked_by?.length ?? 0 : 0;
+  return count ? `${terminal ? "⛓ " : ""}${msg("work.waiting_for", count)}` : "";
+}
+
+export function formatTaskRelations(detail: WorkTaskDetail, visible: WorkTask[]): string {
+  const tasks = new Map(visible.map(task => [task.id, task]));
+  const section = (key: string, ids: string[]) => [msg(key), ...(ids.length ? ids.map(id => {
+    const task = tasks.get(id);
+    return task ? `  ${id}  ${task.title} (${msg(`work.outcome.${task.outcome}`)})` : `  ${id}  ${msg("work.deleted_task")}`;
+  }) : [`  ${msg("tasks.none")}`])].join("\n");
+  return [section("work.prerequisites", detail.task.dependencies), section("work.dependents", detail.dependents), section("work.children", detail.children)].join("\n\n");
 }
