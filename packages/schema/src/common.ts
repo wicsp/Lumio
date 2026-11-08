@@ -2,6 +2,9 @@ import { z } from "zod";
 
 /** 每类实体的 ID 前缀。ID 形如 `pap_01J9Z3...`（前缀 + ULID）。 */
 export const ID_PREFIXES = {
+  ai_connection: "aic",
+  ai_profile: "aip",
+  ai_session: "ais",
   paper: "pap",
   idea: "idea",
   project: "prj",

@@ -1,0 +1,10 @@
+{
+  "date": "2026-11-08T07:27:01.411Z",
+  "checks": {
+    "blocked": {
+      "reason": "ARK_API_KEY and an enabled ARK_MODEL are required",
+      "credentialAvailable": false,
+      "modelConfigured": false
+    }
+  }
+}

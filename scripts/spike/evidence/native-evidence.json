@@ -1,0 +1,1431 @@
+{
+  "date": "2026-11-08T07:19:25.501Z",
+  "root": "$SPIKE_ROOT",
+  "version": "codex-cli 0.166.0",
+  "checks": {
+    "account": {
+      "type": "chatgpt",
+      "requiresOpenaiAuth": true
+    },
+    "models": [
+      {
+        "id": "gpt-6.1-sol",
+        "model": "gpt-6.1-sol",
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ]
+      },
+      {
+        "id": "gpt-6-astra",
+        "model": "gpt-6-astra",
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ]
+      },
+      {
+        "id": "gpt-6.1-terra",
+        "model": "gpt-6.1-terra",
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ]
+      },
+      {
+        "id": "gpt-6-sol",
+        "model": "gpt-6-sol",
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ]
+      },
+      {
+        "id": "gpt-6-luna",
+        "model": "gpt-6-luna",
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      {
+        "id": "gpt-5.6-sol",
+        "model": "gpt-5.6-sol",
+        "defaultEffort": "low",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ]
+      },
+      {
+        "id": "gpt-5.6-terra",
+        "model": "gpt-5.6-terra",
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ]
+      },
+      {
+        "id": "gpt-5.6-luna",
+        "model": "gpt-5.6-luna",
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      }
+    ],
+    "create_and_precedence": {
+      "model": "gpt-6.1-sol",
+      "reasoningEffort": null,
+      "approvalPolicy": "on-request",
+      "approvalsReviewer": "user",
+      "sandbox": {
+        "type": "workspaceWrite",
+        "writableRoots": [],
+        "networkAccess": false,
+        "excludeTmpdirEnvVar": true,
+        "excludeSlashTmp": true
+      },
+      "threadStatus": {
+        "type": "idle"
+      }
+    },
+    "round_one": {
+      "status": "completed",
+      "error": null
+    },
+    "round_two_model_switch": {
+      "status": "completed",
+      "error": null
+    },
+    "read": {
+      "found": true,
+      "status": {
+        "type": "idle"
+      }
+    },
+    "history": {
+      "turns": 2,
+      "statuses": [
+        "completed",
+        "completed"
+      ],
+      "retainedCodeword": true,
+      "secondTurnAssistantCodewordConfirmed": true
+    },
+    "settings_events": [
+      {
+        "threadId": "01a1ba06-c059-70b3-ad3b-0514f25f1162",
+        "threadSettings": {
+          "disabledPluginIds": [],
+          "cwd": "$SPIKE_ROOT/workspace",
+          "approvalPolicy": "on-request",
+          "approvalsReviewer": "user",
+          "sandboxPolicy": {
+            "type": "workspaceWrite",
+            "writableRoots": [],
+            "networkAccess": false,
+            "excludeTmpdirEnvVar": true,
+            "excludeSlashTmp": true
+          },
+          "activePermissionProfile": null,
+          "model": "gpt-6.1-sol",
+          "modelProvider": "openai",
+          "serviceTier": null,
+          "effort": "low",
+          "summary": "concise",
+          "collaborationMode": {
+            "mode": "default",
+            "settings": {
+              "model": "gpt-6.1-sol",
+              "reasoning_effort": "low",
+              "developer_instructions": null
+            }
+          },
+          "multiAgentMode": "explicitRequestOnly",
+          "personality": null
+        }
+      },
+      {
+        "threadId": "01a1ba06-c059-70b3-ad3b-0514f25f1162",
+        "threadSettings": {
+          "disabledPluginIds": [],
+          "cwd": "$SPIKE_ROOT/workspace",
+          "approvalPolicy": "on-request",
+          "approvalsReviewer": "user",
+          "sandboxPolicy": {
+            "type": "workspaceWrite",
+            "writableRoots": [],
+            "networkAccess": false,
+            "excludeTmpdirEnvVar": true,
+            "excludeSlashTmp": true
+          },
+          "activePermissionProfile": null,
+          "model": "gpt-6.1-terra",
+          "modelProvider": "openai",
+          "serviceTier": null,
+          "effort": "medium",
+          "summary": "concise",
+          "collaborationMode": {
+            "mode": "default",
+            "settings": {
+              "model": "gpt-6.1-terra",
+              "reasoning_effort": "medium",
+              "developer_instructions": null
+            }
+          },
+          "multiAgentMode": "explicitRequestOnly",
+          "personality": null
+        }
+      }
+    ],
+    "approval_round": {
+      "status": "completed",
+      "error": null
+    },
+    "approval_marker": {
+      "written": true,
+      "correct": true
+    },
+    "interrupt_ack": {},
+    "interrupted_round": {
+      "status": "interrupted",
+      "error": null,
+      "startedMarker": true,
+      "finishedMarker": false
+    },
+    "compact_ack": {},
+    "compact_completed": true,
+    "resume_same_process": {
+      "model": "gpt-6.1-sol",
+      "reasoningEffort": "low",
+      "approvalPolicy": "on-request",
+      "approvalsReviewer": "user",
+      "sandbox": {
+        "type": "workspaceWrite",
+        "writableRoots": [],
+        "networkAccess": false,
+        "excludeTmpdirEnvVar": true,
+        "excludeSlashTmp": true
+      },
+      "threadStatus": {
+        "type": "idle"
+      }
+    },
+    "post_interrupt_round": {
+      "status": "completed",
+      "error": null
+    },
+    "two_threads_parallel": [
+      {
+        "status": "completed",
+        "error": null
+      },
+      {
+        "status": "completed",
+        "error": null
+      }
+    ],
+    "two_thread_identity": {
+      "distinct": true,
+      "firstReadable": true,
+      "secondReadable": true
+    },
+    "resume_after_process_kill": {
+      "model": "gpt-6.1-sol",
+      "reasoningEffort": "low",
+      "approvalPolicy": "on-request",
+      "approvalsReviewer": "user",
+      "sandbox": {
+        "type": "workspaceWrite",
+        "writableRoots": [],
+        "networkAccess": false,
+        "excludeTmpdirEnvVar": false,
+        "excludeSlashTmp": false
+      },
+      "threadStatus": {
+        "type": "idle"
+      }
+    },
+    "round_after_process_kill": {
+      "status": "completed",
+      "error": null
+    },
+    "crash_before_kill": {
+      "startedMarker": true,
+      "finishedMarker": false
+    },
+    "crash_recovery": {
+      "turnStatus": "interrupted",
+      "items": [
+        {
+          "type": "userMessage"
+        },
+        {
+          "type": "agentMessage"
+        }
+      ],
+      "startedMarker": true,
+      "finishedMarker": false
+    },
+    "crash_marker_after_original_command_deadline": {
+      "finishedMarker": true
+    },
+    "resume_without_replay": {
+      "status": "completed",
+      "error": null
+    }
+  },
+  "trace": [
+    {
+      "method": "remoteControl/status/changed"
+    },
+    {
+      "method": "account/updated"
+    },
+    {
+      "method": "thread/started"
+    },
+    {
+      "method": "thread/settings/updated"
+    },
+    {
+      "method": "thread/status/changed"
+    },
+    {
+      "method": "turn/started",
+      "turnStatus": "inProgress"
+    },
+    {
+      "method": "item/started",
+      "itemType": "userMessage"
+    },
+    {
+      "method": "item/completed",
+      "itemType": "userMessage"
+    },
+    {
+      "method": "item/started",
+      "itemType": "agentMessage"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "turn/moderationMetadata"
+    },
+    {
+      "method": "item/completed",
+      "itemType": "agentMessage"
+    },
+    {
+      "method": "thread/tokenUsage/updated"
+    },
+    {
+      "method": "account/rateLimits/updated"
+    },
+    {
+      "method": "thread/readState/changed"
+    },
+    {
+      "method": "thread/status/changed"
+    },
+    {
+      "method": "turn/completed",
+      "turnStatus": "completed"
+    },
+    {
+      "method": "thread/settings/updated"
+    },
+    {
+      "method": "thread/status/changed"
+    },
+    {
+      "method": "turn/started",
+      "turnStatus": "inProgress"
+    },
+    {
+      "method": "item/started",
+      "itemType": "userMessage"
+    },
+    {
+      "method": "item/completed",
+      "itemType": "userMessage"
+    },
+    {
+      "method": "item/started",
+      "itemType": "agentMessage"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "turn/moderationMetadata"
+    },
+    {
+      "method": "item/completed",
+      "itemType": "agentMessage"
+    },
+    {
+      "method": "thread/tokenUsage/updated"
+    },
+    {
+      "method": "account/rateLimits/updated"
+    },
+    {
+      "method": "thread/readState/changed"
+    },
+    {
+      "method": "thread/status/changed"
+    },
+    {
+      "method": "turn/completed",
+      "turnStatus": "completed"
+    },
+    {
+      "method": "thread/settings/updated"
+    },
+    {
+      "method": "thread/status/changed"
+    },
+    {
+      "method": "turn/started",
+      "turnStatus": "inProgress"
+    },
+    {
+      "method": "item/started",
+      "itemType": "userMessage"
+    },
+    {
+      "method": "item/completed",
+      "itemType": "userMessage"
+    },
+    {
+      "method": "item/started",
+      "itemType": "reasoning"
+    },
+    {
+      "method": "item/reasoning/summaryPartAdded"
+    },
+    {
+      "method": "item/reasoning/summaryTextDelta"
+    },
+    {
+      "method": "item/completed",
+      "itemType": "reasoning"
+    },
+    {
+      "method": "item/started",
+      "itemType": "agentMessage"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/completed",
+      "itemType": "agentMessage"
+    },
+    {
+      "method": "turn/moderationMetadata"
+    },
+    {
+      "method": "thread/status/changed"
+    },
+    {
+      "method": "item/started",
+      "itemType": "commandExecution"
+    },
+    {
+      "method": "item/commandExecution/requestApproval"
+    },
+    {
+      "method": "serverRequest/resolved"
+    },
+    {
+      "method": "thread/status/changed"
+    },
+    {
+      "method": "thread/tokenUsage/updated"
+    },
+    {
+      "method": "account/rateLimits/updated"
+    },
+    {
+      "method": "item/completed",
+      "itemType": "commandExecution"
+    },
+    {
+      "method": "item/started",
+      "itemType": "reasoning"
+    },
+    {
+      "method": "item/reasoning/summaryPartAdded"
+    },
+    {
+      "method": "item/reasoning/summaryTextDelta"
+    },
+    {
+      "method": "item/completed",
+      "itemType": "reasoning"
+    },
+    {
+      "method": "turn/moderationMetadata"
+    },
+    {
+      "method": "thread/tokenUsage/updated"
+    },
+    {
+      "method": "account/rateLimits/updated"
+    },
+    {
+      "method": "item/started",
+      "itemType": "agentMessage"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "turn/moderationMetadata"
+    },
+    {
+      "method": "item/completed",
+      "itemType": "agentMessage"
+    },
+    {
+      "method": "thread/tokenUsage/updated"
+    },
+    {
+      "method": "account/rateLimits/updated"
+    },
+    {
+      "method": "thread/readState/changed"
+    },
+    {
+      "method": "thread/status/changed"
+    },
+    {
+      "method": "turn/completed",
+      "turnStatus": "completed"
+    },
+    {
+      "method": "thread/status/changed"
+    },
+    {
+      "method": "turn/started",
+      "turnStatus": "inProgress"
+    },
+    {
+      "method": "item/started",
+      "itemType": "userMessage"
+    },
+    {
+      "method": "item/completed",
+      "itemType": "userMessage"
+    },
+    {
+      "method": "item/started",
+      "itemType": "agentMessage"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/completed",
+      "itemType": "agentMessage"
+    },
+    {
+      "method": "turn/moderationMetadata"
+    },
+    {
+      "method": "thread/tokenUsage/updated"
+    },
+    {
+      "method": "account/rateLimits/updated"
+    },
+    {
+      "method": "thread/status/changed"
+    },
+    {
+      "method": "turn/completed",
+      "turnStatus": "interrupted"
+    },
+    {
+      "method": "thread/status/changed"
+    },
+    {
+      "method": "turn/started",
+      "turnStatus": "inProgress"
+    },
+    {
+      "method": "item/started",
+      "itemType": "contextCompaction"
+    },
+    {
+      "method": "thread/tokenUsage/updated"
+    },
+    {
+      "method": "account/rateLimits/updated"
+    },
+    {
+      "method": "item/completed",
+      "itemType": "contextCompaction"
+    },
+    {
+      "method": "thread/status/changed"
+    },
+    {
+      "method": "turn/completed",
+      "turnStatus": "completed"
+    },
+    {
+      "method": "thread/goal/cleared"
+    },
+    {
+      "method": "thread/status/changed"
+    },
+    {
+      "method": "turn/started",
+      "turnStatus": "inProgress"
+    },
+    {
+      "method": "item/started",
+      "itemType": "userMessage"
+    },
+    {
+      "method": "item/completed",
+      "itemType": "userMessage"
+    },
+    {
+      "method": "item/started",
+      "itemType": "agentMessage"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "turn/moderationMetadata"
+    },
+    {
+      "method": "item/completed",
+      "itemType": "agentMessage"
+    },
+    {
+      "method": "thread/tokenUsage/updated"
+    },
+    {
+      "method": "account/rateLimits/updated"
+    },
+    {
+      "method": "thread/readState/changed"
+    },
+    {
+      "method": "thread/status/changed"
+    },
+    {
+      "method": "turn/completed",
+      "turnStatus": "completed"
+    },
+    {
+      "method": "thread/started"
+    },
+    {
+      "method": "thread/settings/updated"
+    },
+    {
+      "method": "thread/status/changed"
+    },
+    {
+      "method": "turn/started",
+      "turnStatus": "inProgress"
+    },
+    {
+      "method": "thread/status/changed"
+    },
+    {
+      "method": "turn/started",
+      "turnStatus": "inProgress"
+    },
+    {
+      "method": "item/started",
+      "itemType": "userMessage"
+    },
+    {
+      "method": "item/completed",
+      "itemType": "userMessage"
+    },
+    {
+      "method": "item/started",
+      "itemType": "agentMessage"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "turn/moderationMetadata"
+    },
+    {
+      "method": "item/completed",
+      "itemType": "agentMessage"
+    },
+    {
+      "method": "item/started",
+      "itemType": "userMessage"
+    },
+    {
+      "method": "item/completed",
+      "itemType": "userMessage"
+    },
+    {
+      "method": "thread/tokenUsage/updated"
+    },
+    {
+      "method": "account/rateLimits/updated"
+    },
+    {
+      "method": "thread/readState/changed"
+    },
+    {
+      "method": "thread/status/changed"
+    },
+    {
+      "method": "turn/completed",
+      "turnStatus": "completed"
+    },
+    {
+      "method": "item/started",
+      "itemType": "agentMessage"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "turn/moderationMetadata"
+    },
+    {
+      "method": "item/completed",
+      "itemType": "agentMessage"
+    },
+    {
+      "method": "thread/tokenUsage/updated"
+    },
+    {
+      "method": "account/rateLimits/updated"
+    },
+    {
+      "method": "thread/readState/changed"
+    },
+    {
+      "method": "thread/status/changed"
+    },
+    {
+      "method": "turn/completed",
+      "turnStatus": "completed"
+    },
+    {
+      "method": "remoteControl/status/changed"
+    },
+    {
+      "method": "thread/status/changed"
+    },
+    {
+      "method": "thread/tokenUsage/updated"
+    },
+    {
+      "method": "thread/goal/cleared"
+    },
+    {
+      "method": "thread/status/changed"
+    },
+    {
+      "method": "turn/started",
+      "turnStatus": "inProgress"
+    },
+    {
+      "method": "account/updated"
+    },
+    {
+      "method": "item/started",
+      "itemType": "userMessage"
+    },
+    {
+      "method": "item/completed",
+      "itemType": "userMessage"
+    },
+    {
+      "method": "item/started",
+      "itemType": "agentMessage"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "turn/moderationMetadata"
+    },
+    {
+      "method": "item/completed",
+      "itemType": "agentMessage"
+    },
+    {
+      "method": "thread/tokenUsage/updated"
+    },
+    {
+      "method": "account/rateLimits/updated"
+    },
+    {
+      "method": "thread/readState/changed"
+    },
+    {
+      "method": "thread/status/changed"
+    },
+    {
+      "method": "turn/completed",
+      "turnStatus": "completed"
+    },
+    {
+      "method": "thread/status/changed"
+    },
+    {
+      "method": "turn/started",
+      "turnStatus": "inProgress"
+    },
+    {
+      "method": "item/started",
+      "itemType": "userMessage"
+    },
+    {
+      "method": "item/completed",
+      "itemType": "userMessage"
+    },
+    {
+      "method": "item/started",
+      "itemType": "agentMessage"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/completed",
+      "itemType": "agentMessage"
+    },
+    {
+      "method": "turn/moderationMetadata"
+    },
+    {
+      "method": "remoteControl/status/changed"
+    },
+    {
+      "method": "thread/status/changed"
+    },
+    {
+      "method": "thread/tokenUsage/updated"
+    },
+    {
+      "method": "thread/goal/cleared"
+    },
+    {
+      "method": "account/updated"
+    },
+    {
+      "method": "thread/status/changed"
+    },
+    {
+      "method": "turn/started",
+      "turnStatus": "inProgress"
+    },
+    {
+      "method": "item/started",
+      "itemType": "userMessage"
+    },
+    {
+      "method": "item/completed",
+      "itemType": "userMessage"
+    },
+    {
+      "method": "item/started",
+      "itemType": "agentMessage"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "item/agentMessage/delta"
+    },
+    {
+      "method": "turn/moderationMetadata"
+    },
+    {
+      "method": "item/completed",
+      "itemType": "agentMessage"
+    },
+    {
+      "method": "thread/tokenUsage/updated"
+    },
+    {
+      "method": "account/rateLimits/updated"
+    },
+    {
+      "method": "thread/readState/changed"
+    },
+    {
+      "method": "thread/status/changed"
+    },
+    {
+      "method": "turn/completed",
+      "turnStatus": "completed"
+    }
+  ],
+  "observedMethods": [
+    "remoteControl/status/changed",
+    "account/updated",
+    "thread/started",
+    "thread/settings/updated",
+    "thread/status/changed",
+    "turn/started",
+    "item/started",
+    "item/completed",
+    "item/agentMessage/delta",
+    "turn/moderationMetadata",
+    "thread/tokenUsage/updated",
+    "account/rateLimits/updated",
+    "thread/readState/changed",
+    "turn/completed",
+    "item/reasoning/summaryPartAdded",
+    "item/reasoning/summaryTextDelta",
+    "item/commandExecution/requestApproval",
+    "serverRequest/resolved",
+    "thread/goal/cleared"
+  ],
+  "itemTypes": [
+    "userMessage",
+    "agentMessage",
+    "reasoning",
+    "commandExecution",
+    "contextCompaction"
+  ],
+  "approval": [
+    {
+      "method": "item/commandExecution/requestApproval",
+      "paramKeys": [
+        "kind",
+        "threadId",
+        "turnId",
+        "itemId",
+        "startedAtMs",
+        "environmentId",
+        "reason",
+        "command",
+        "cwd",
+        "commandActions",
+        "proposedExecpolicyAmendment",
+        "availableDecisions"
+      ],
+      "command": "${TEST_SHELL} -lc 'printf V0_APPROVED > $SPIKE_ROOT/outside/approval-marker.txt'",
+      "decision": "accept",
+      "requestShape": {
+        "kind": {
+          "type": "string",
+          "length": 7
+        },
+        "threadId": {
+          "type": "string",
+          "length": 36
+        },
+        "turnId": {
+          "type": "string",
+          "length": 36
+        },
+        "itemId": {
+          "type": "string",
+          "length": 41
+        },
+        "startedAtMs": 1794122377013,
+        "environmentId": {
+          "type": "string",
+          "length": 5
+        },
+        "reason": {
+          "type": "string",
+          "length": 66
+        },
+        "command": {
+          "type": "string",
+          "length": 174
+        },
+        "cwd": {
+          "type": "string",
+          "length": 91
+        },
+        "commandActions": [
+          {
+            "type": {
+              "type": "string",
+              "length": 7
+            },
+            "command": {
+              "type": "string",
+              "length": 130
+            }
+          }
+        ],
+        "proposedExecpolicyAmendment": [
+          {
+            "type": "string",
+            "length": 37
+          },
+          {
+            "type": "string",
+            "length": 3
+          },
+          {
+            "type": "string",
+            "length": 130
+          }
+        ],
+        "availableDecisions": [
+          {
+            "type": "string",
+            "length": 6
+          },
+          {
+            "acceptWithExecpolicyAmendment": {
+              "execpolicy_amendment": [
+                {
+                  "type": "string",
+                  "length": 37
+                },
+                {
+                  "type": "string",
+                  "length": 3
+                },
+                {
+                  "type": "string",
+                  "length": 130
+                }
+              ]
+            }
+          },
+          {
+            "type": "string",
+            "length": 6
+          }
+        ]
+      },
+      "heldMs": 65002
+    }
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 18660,
+        "inputTokens": 18655,
+        "cachedInputTokens": 12032,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 5,
+        "reasoningOutputTokens": 0
+      },
+      "last": {
+        "totalTokens": 18660,
+        "inputTokens": 18655,
+        "cachedInputTokens": 12032,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 5,
+        "reasoningOutputTokens": 0
+      },
+      "modelContextWindow": 475000
+    },
+    {
+      "total": {
+        "totalTokens": 41670,
+        "inputTokens": 41656,
+        "cachedInputTokens": 19968,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 14,
+        "reasoningOutputTokens": 0
+      },
+      "last": {
+        "totalTokens": 23010,
+        "inputTokens": 23001,
+        "cachedInputTokens": 7936,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 9,
+        "reasoningOutputTokens": 0
+      },
+      "modelContextWindow": 475000
+    },
+    {
+      "total": {
+        "totalTokens": 69306,
+        "inputTokens": 69153,
+        "cachedInputTokens": 38400,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 153,
+        "reasoningOutputTokens": 23
+      },
+      "last": {
+        "totalTokens": 27636,
+        "inputTokens": 27497,
+        "cachedInputTokens": 18432,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 139,
+        "reasoningOutputTokens": 23
+      },
+      "modelContextWindow": 475000
+    },
+    {
+      "total": {
+        "totalTokens": 97011,
+        "inputTokens": 96817,
+        "cachedInputTokens": 65920,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 194,
+        "reasoningOutputTokens": 32
+      },
+      "last": {
+        "totalTokens": 27705,
+        "inputTokens": 27664,
+        "cachedInputTokens": 27520,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 41,
+        "reasoningOutputTokens": 9
+      },
+      "modelContextWindow": 475000
+    },
+    {
+      "total": {
+        "totalTokens": 124778,
+        "inputTokens": 124579,
+        "cachedInputTokens": 93568,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 199,
+        "reasoningOutputTokens": 32
+      },
+      "last": {
+        "totalTokens": 27767,
+        "inputTokens": 27762,
+        "cachedInputTokens": 27648,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 5,
+        "reasoningOutputTokens": 0
+      },
+      "modelContextWindow": 475000
+    },
+    {
+      "total": {
+        "totalTokens": 124778,
+        "inputTokens": 124579,
+        "cachedInputTokens": 93568,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 199,
+        "reasoningOutputTokens": 32
+      },
+      "last": {
+        "totalTokens": 27767,
+        "inputTokens": 27762,
+        "cachedInputTokens": 27648,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 5,
+        "reasoningOutputTokens": 0
+      },
+      "modelContextWindow": 475000
+    },
+    {
+      "total": {
+        "totalTokens": 124778,
+        "inputTokens": 124579,
+        "cachedInputTokens": 93568,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 199,
+        "reasoningOutputTokens": 32
+      },
+      "last": {
+        "totalTokens": 24016,
+        "inputTokens": 0,
+        "cachedInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 0,
+        "reasoningOutputTokens": 0
+      },
+      "modelContextWindow": 475000
+    },
+    {
+      "total": {
+        "totalTokens": 146098,
+        "inputTokens": 145892,
+        "cachedInputTokens": 105600,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 206,
+        "reasoningOutputTokens": 32
+      },
+      "last": {
+        "totalTokens": 21320,
+        "inputTokens": 21313,
+        "cachedInputTokens": 12032,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 7,
+        "reasoningOutputTokens": 0
+      },
+      "modelContextWindow": 475000
+    },
+    {
+      "total": {
+        "totalTokens": 167436,
+        "inputTokens": 167225,
+        "cachedInputTokens": 126720,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 211,
+        "reasoningOutputTokens": 32
+      },
+      "last": {
+        "totalTokens": 21338,
+        "inputTokens": 21333,
+        "cachedInputTokens": 21120,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 5,
+        "reasoningOutputTokens": 0
+      },
+      "modelContextWindow": 475000
+    },
+    {
+      "total": {
+        "totalTokens": 20178,
+        "inputTokens": 20173,
+        "cachedInputTokens": 12032,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 5,
+        "reasoningOutputTokens": 0
+      },
+      "last": {
+        "totalTokens": 20178,
+        "inputTokens": 20173,
+        "cachedInputTokens": 12032,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 5,
+        "reasoningOutputTokens": 0
+      },
+      "modelContextWindow": 475000
+    },
+    {
+      "total": {
+        "totalTokens": 167436,
+        "inputTokens": 167225,
+        "cachedInputTokens": 126720,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 211,
+        "reasoningOutputTokens": 32
+      },
+      "last": {
+        "totalTokens": 21338,
+        "inputTokens": 21333,
+        "cachedInputTokens": 21120,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 5,
+        "reasoningOutputTokens": 0
+      },
+      "modelContextWindow": 475000
+    },
+    {
+      "total": {
+        "totalTokens": 194364,
+        "inputTokens": 194145,
+        "cachedInputTokens": 147840,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 219,
+        "reasoningOutputTokens": 32
+      },
+      "last": {
+        "totalTokens": 26928,
+        "inputTokens": 26920,
+        "cachedInputTokens": 21120,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 8,
+        "reasoningOutputTokens": 0
+      },
+      "modelContextWindow": 475000
+    },
+    {
+      "total": {
+        "totalTokens": 194364,
+        "inputTokens": 194145,
+        "cachedInputTokens": 147840,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 219,
+        "reasoningOutputTokens": 32
+      },
+      "last": {
+        "totalTokens": 26928,
+        "inputTokens": 26920,
+        "cachedInputTokens": 21120,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 8,
+        "reasoningOutputTokens": 0
+      },
+      "modelContextWindow": 475000
+    },
+    {
+      "total": {
+        "totalTokens": 227378,
+        "inputTokens": 227152,
+        "cachedInputTokens": 180608,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 226,
+        "reasoningOutputTokens": 32
+      },
+      "last": {
+        "totalTokens": 33014,
+        "inputTokens": 33007,
+        "cachedInputTokens": 32768,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 7,
+        "reasoningOutputTokens": 0
+      },
+      "modelContextWindow": 475000
+    }
+  ],
+  "errors": [],
+  "globalConfigUnchanged": true
+}

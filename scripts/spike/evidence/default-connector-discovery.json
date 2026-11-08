@@ -1,0 +1,32 @@
+{
+  "date": "2026-11-08T07:20:32.888Z",
+  "note": "Discovery only; no connector tools invoked. Tool identities intentionally omitted.",
+  "checks": {
+    "alpha_mcp_inventory": [
+      {
+        "server": "alpha",
+        "toolCount": 1
+      },
+      {
+        "server": "codex_apps",
+        "toolCount": 282
+      }
+    ],
+    "beta_mcp_inventory": [
+      {
+        "server": "beta",
+        "toolCount": 1
+      },
+      {
+        "server": "codex_apps",
+        "toolCount": 282
+      }
+    ],
+    "plain_thread_mcp_inventory": [
+      {
+        "server": "codex_apps",
+        "toolCount": 282
+      }
+    ]
+  }
+}

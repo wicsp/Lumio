@@ -1,0 +1,444 @@
+import { randomBytes, randomUUID, createHash, timingSafeEqual } from "node:crypto";
+import { AIConnectionInput, AIProfileInput, AIConfiguration, NativeCreate, NativeAction, NativeSession, NativeRuntimeMessage, NativeRuntimeCommand, NativeMCPRequest, CAPABILITIES, toolName, AssistantConversation, AssistantToolCall, AssistantMessage, type NativeEventData, type AssistantEvent, type AssistantChatRequest } from "@lumio/schema";
+import { newId } from "@lumio/foundation";
+import type { SqliteAIStore } from "@lumio/storage";
+import type { AssistantContext } from "@lumio/assistant";
+import type { AssistantService } from "@lumio/assistant";
+import type { SqliteAssistantStore } from "@lumio/storage";
+import type { AIConfigurationService } from "./ai-config.ts";
+import type { Capabilities } from "./capabilities.ts";
+interface NativeModules {
+    ai: AIConfigurationService;
+    assistant: AssistantService;
+    assistantStore: SqliteAssistantStore;
+    capabilities: Capabilities;
+    signal: AbortSignal;
+}
+import type { HubStore, Identity } from "./store.ts";
+import type { HubConfig } from "./config.ts";
+import { HubError } from "./errors.ts";
+interface Socket {
+    data: {
+        runtime: string;
+    };
+    id: string;
+    send(message: string): void;
+    close(code?: number, reason?: string): void;
+    terminate(): void;
+}
+type Active = {
+    turn: string;
+    event: (e: AssistantEvent) => void;
+    resolve: (v: {
+        text: string;
+        status: "done" | "failed" | "unknown" | "cancelled";
+        error?: string;
+    }) => void;
+};
+const problem = (reason = "native.unavailable", code: "INVALID" | "CONFLICT" | "NOT_FOUND" | "FORBIDDEN" = "INVALID") => new HubError(code, { key: reason, args: [] });
+export class NativeAssistant {
+    private sockets = new Map<string, {
+        ws: Socket;
+        ready: boolean;
+        instance?: string;
+        isolation?: string;
+    }>();
+    private active = new Map<string, Active>();
+    constructor(readonly ai: SqliteAIStore, private modules: NativeModules, private hub: HubStore, private config: HubConfig) {
+        for (const s of ai.sessions()) {
+            if (["running", "awaiting_approval"].includes(s.view.state) || ai.deliveries(s.id).some(d => d.state === "sent")) {
+                s.quarantined = true;
+                s.view = { ...s.view, state: "unknown", approval: undefined, error: "native.unknown" };
+                ai.invalidate(s.id);
+            }
+            else if (s.view.state !== "closed")
+                s.view = { ...s.view, state: "offline", approval: undefined };
+            ai.putSession(s);
+        }
+    }
+    validate(conversation: AssistantConversation, request: AssistantChatRequest) { const s = this.owned(conversation.native_session!, conversation.owner); this.current(s); if (this.ai.sessions(s.owner).some(v => v.quarantined) || !["ready"].includes(s.view.state) || !this.online(s.runtime))
+        throw problem(s.quarantined ? "native.unknown" : "native.not_ready", "CONFLICT"); if (request.profile && request.profile !== s.profile.id)
+        throw problem("native.rebuild_required"); }
+    private owned(id: string, owner: string) { const s = this.ai.session(id); if (!s || s.owner !== owner || (!this.modules.assistantStore.conversation(s.conversation)||this.modules.assistantStore.trash(s.conversation)))
+        throw problem("native.session_missing", "NOT_FOUND"); return s; }
+    private current(s: NativeSession) { const c = this.ai.connection(s.connection.id); if (!c || c.revision !== s.connection.revision)
+        throw problem("native.rebuild_required", "CONFLICT"); const p = this.ai.profile(s.profile.id); if (!p || p.connection !== s.connection.id || p.engine !== "codex")
+        throw problem("native.rebuild_required", "CONFLICT"); }
+    private online(runtime: string) { return this.sockets.get(runtime)?.ready === true; }
+    private put(s: NativeSession) { s.updated = new Date().toISOString(); this.ai.putSession(s); }
+    private send(runtime: string, message: NativeRuntimeCommand) { const socket = this.sockets.get(runtime); if (!socket?.ready)
+        throw problem("native.runtime_offline", "CONFLICT"); socket.ws.send(JSON.stringify(NativeRuntimeCommand.parse(message))); }
+    async channel(request: Request, identity: Identity): Promise<Response> {
+        if (identity.actor.role !== "runtime" || !this.hub.runtimes(new Date()).some(r => r.actor === identity.actor.id))
+            throw problem("native.forbidden", "FORBIDDEN");
+        if (request.method === "POST" && new URL(request.url).pathname === "/v2/runtime/native/events") {
+            const link = this.sockets.get(identity.actor.id);
+            if (!link || link.ws.id !== request.headers.get("x-lumio-native-channel"))
+                throw problem("native.runtime_offline", "CONFLICT");
+            const body = await request.text();
+            if (body.length > 2 * 1024 * 1024)
+                throw problem("ai.invalid");
+            this.channelMessage(link.ws, body);
+            return new Response(null, { status: 204 });
+        }
+        if (request.method !== "GET" || new URL(request.url).pathname !== "/v2/runtime/native")
+            throw problem("native.session_missing", "NOT_FOUND");
+        const id = randomUUID(), encoder = new TextEncoder();
+        let peer: Socket | undefined;
+        let close = () => { };
+        const stream = new ReadableStream<Uint8Array>({ start: controller => {
+                let ended = false;
+                const timer = setInterval(() => { if (!ended)
+                    try {
+                        controller.enqueue(encoder.encode("\n"));
+                    }
+                    catch {
+                        close();
+                    } }, 3000);
+                close = () => { if (ended)
+                    return; ended = true; clearInterval(timer); request.signal.removeEventListener("abort", close); this.modules.signal.removeEventListener("abort", close); if (peer)
+                    this.channelClose(peer); try {
+                    controller.close();
+                }
+                catch { } };
+                peer = { id, data: { runtime: identity.actor.id }, send: message => { if (ended)
+                        throw problem("native.runtime_offline", "CONFLICT"); controller.enqueue(encoder.encode(message + "\n")); }, close, terminate: close };
+                this.channelOpen(peer);
+                controller.enqueue(encoder.encode("\n"));
+                request.signal.addEventListener("abort", close, { once: true });
+                this.modules.signal.addEventListener("abort", close, { once: true });
+            }, cancel: () => close() });
+        return new Response(stream, { headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-store", "X-Lumio-Native-Channel": id } });
+    }
+    channelOpen(ws: Socket) { const old = this.sockets.get(ws.data.runtime); old?.ws.close(1008, "Superseded"); this.sockets.set(ws.data.runtime, { ws, ready: false }); }
+    channelClose(ws: Socket) {
+        if (this.sockets.get(ws.data.runtime)?.ws !== ws)
+            return;
+        this.sockets.delete(ws.data.runtime);
+        for (const s of this.ai.sessions().filter(s => s.runtime === ws.data.runtime && s.view.state !== "closed")) {
+            const active = this.active.get(s.id);
+            if (active || ["running", "awaiting_approval"].includes(s.view.state)) {
+                s.quarantined = true;
+                s.view = { ...s.view, state: "unknown", approval: undefined, error: "native.unknown" };
+                this.ai.invalidate(s.id);
+                this.complete(s.id, "unknown", "", "native.unknown");
+            }
+            else
+                s.view = { ...s.view, state: "offline", approval: undefined };
+            this.put(s);
+        }
+    }
+    channelMessage(ws: Socket, data: string | Buffer) {
+        if (String(data).length > 2 * 1024 * 1024) {
+            ws.close(1009);
+            return;
+        }
+        const parsed = NativeRuntimeMessage.safeParse((() => { try {
+            return JSON.parse(String(data));
+        }
+        catch {
+            return null;
+        } })());
+        if (!parsed.success) {
+            ws.close(1008);
+            return;
+        }
+        const m = parsed.data, link = this.sockets.get(ws.data.runtime);
+        if (!link || link.ws !== ws)
+            return;
+        if (m.type === "hello") {
+            if (m.isolation !== "macos-seatbelt") {
+                ws.close(1008, "Isolation required");
+                return;
+            }
+            link.ready = true;
+            link.instance = m.instance;
+            link.isolation = m.isolation;
+            for (const s of this.ai.sessions().filter(s => s.runtime === ws.data.runtime && s.view.state !== "closed" && !s.quarantined)) {
+                try {
+                    this.open(s);
+                }
+                catch { }
+            }
+            return;
+        }
+        if (m.type !== "event")
+            return;
+        const s = this.ai.session(m.session);
+        if(!s&&this.ai.retired(m.session,ws.data.runtime)){this.send(ws.data.runtime,{type:"ack",session:m.session,sequence:m.sequence});return;}
+        if (!s || s.runtime !== ws.data.runtime) {
+            ws.close(1008);
+            return;
+        }
+        if (m.sequence <= s.sequence) {
+            this.send(s.runtime, { type: "ack", session: s.id, sequence: s.sequence });
+            return;
+        }
+        if (m.sequence !== s.sequence + 1) {
+            ws.close(1008, "Sequence gap");
+            return;
+        }
+        const terminal=s.view.state==="closed"&&!s.quarantined;
+        this.ai.db.transaction(() => {
+            this.ai.event(s.id, m.sequence, m.turn, m.event);
+            s.sequence = m.sequence;
+            if (m.event.type === "state"&&!terminal) {
+                const view = m.event.view;
+                if (s.view.account && view.account && s.view.account !== view.account) {
+                    s.quarantined = true;
+                    this.ai.invalidate(s.id);
+                }
+                s.view = { ...view, ...(view.state==="ready"&&this.active.has(s.id)?{state:"running" as const}:{}), ...(s.quarantined ? { state: "unknown" as const, error: "native.unknown" } : {}) };
+                if (view.state === "unknown") {
+                    s.quarantined = true;
+                    this.ai.invalidate(s.id);
+                }
+            }
+            if (m.event.type === "complete") {
+                if(m.event.status==="done"&&!s.quarantined&&!terminal)s.view={...s.view,state:"ready",approval:undefined};
+                if (m.turn)
+                    this.ai.deliveryState(m.turn, "completed");
+                if (m.event.status === "unknown"&&!terminal){s.quarantined = true;s.view={...s.view,state:"unknown",error:"native.unknown"};this.ai.invalidate(s.id);}
+            }
+            this.put(s);
+        })();
+        this.send(s.runtime, { type: "ack", session: s.id, sequence: s.sequence });
+        const active = this.active.get(s.id);
+        if (active && (!m.turn || m.turn === active.turn)) {
+            if (m.event.type === "text")
+                active.event({ type: "token", turn: active.turn, delta: m.event.delta });
+            else
+                active.event({ type: "native", turn: active.turn, event: m.event });
+        }
+        if (m.event.type === "complete")
+            this.complete(s.id, m.event.status, m.event.text, m.event.error);
+    }
+    private complete(id: string, status: "done" | "failed" | "unknown" | "cancelled", text: string, error?: string) { const a = this.active.get(id); if (a) {
+        this.active.delete(id);
+        a.resolve({ text, status, error });
+    } }
+    private open(s: NativeSession) {
+        this.current(s);
+        const token = `native_${randomBytes(32).toString("base64url")}`;
+        const name = `native-${createHash("sha256").update(s.id).digest("hex").slice(0, 20)}`;
+        const actor = this.hub.actors().find(a => a.name === name) ?? this.hub.createActor(name, "agent");
+        if (actor.role !== "agent")
+            throw problem("native.forbidden", "FORBIDDEN");
+        this.ai.setToken(s.id, createHash("sha256").update(token).digest("hex"), actor.id);
+        // The secret is sent once over the authenticated channel, never persisted in the Hub outbox.
+        this.send(s.runtime, { type: "open", command: randomUUID(), session: s, hub_url: this.config.publicUrl ?? this.hubUrl(), mcp_token: token });
+    }
+    setPort(port: number) { this.config.port = port; }
+    private hubUrl() { return `http://${this.config.hostname.includes(":") ? `[${this.config.hostname}]` : this.config.hostname}:${this.config.port}`; }
+    async create(owner: string, raw: unknown) {
+        const input = NativeCreate.parse(raw), fingerprint = JSON.stringify(input);
+        const receipt = this.ai.receipt(owner, input.request_id, fingerprint);
+        if (receipt) {
+            if (!receipt.matches)
+                throw problem("ai.conflict", "CONFLICT");
+            return this.owned(String(receipt.result), owner);
+        }
+        const { profile, connection } = this.modules.ai.get(owner, input.profile);
+        if (profile.engine !== "codex")
+            throw problem("ai.invalid");
+        const runtime = this.hub.runtimes(new Date()).find(r => r.registration.name === connection.host);
+        if (!runtime || !this.online(runtime.actor))
+            throw problem("native.runtime_offline", "CONFLICT");
+        if (this.ai.sessions(owner).some(s => s.quarantined))
+            throw problem("native.unknown", "CONFLICT");
+        const time = new Date().toISOString(), id = newId("ais", new Date(), randomBytes), conversation = newId("conv", new Date(), randomBytes), capabilities = CAPABILITIES.map(c => toolName(c.name));
+        const memories = await this.modules.assistant.memories(owner), context_revision = createHash("sha256").update(JSON.stringify(memories.map(m => [m.id, m.revision]))).digest("hex");
+        const again = this.ai.receipt(owner, input.request_id, fingerprint);
+        if (again) {
+            if (!again.matches)
+                throw problem("ai.conflict", "CONFLICT");
+            return this.owned(String(again.result), owner);
+        }
+        const s = NativeSession.parse({ id, conversation, owner, runtime: runtime.actor, profile, connection, binding: { profile: profile.id, purpose: "assistant", revision: 1, workdir: "managed-session", approval_policy: "on-request", reviewer: "user", sandbox: "workspace-write", command_network: false, tools: capabilities, timeout_seconds: 1800 }, capabilities, context_revision,
+            view: { state: "starting", models: [] }, sequence: 0, created: time, updated: time, quarantined: false });
+        this.ai.db.transaction(() => { this.modules.assistantStore.putConversation(AssistantConversation.parse({ id: conversation, title: input.title ?? profile.name, owner, native_session: id, profile: profile.id, created: time, updated: time, revision: 1 })); this.ai.putSession(s); this.ai.putReceipt(owner, input.request_id, fingerprint, id); })();
+        this.open(s);
+        return s;
+    }
+    readonly run: NonNullable<AssistantContext["native"]>["run"] = async (input) => {
+        const s = this.owned(input.conversation.native_session!, input.conversation.owner);
+        this.validate(input.conversation, input.request);
+        const context_revision = createHash("sha256").update(JSON.stringify(input.memories.map(m => [m.id, m.revision]))).digest("hex");
+        if (context_revision !== s.context_revision) {
+            this.ai.invalidate(s.id);
+            s.view = { ...s.view, state: "failed", error: "native.context_expired" };
+            this.put(s);
+            throw problem("native.context_expired", "CONFLICT");
+        }
+        const p = this.ai.profile(s.profile.id)!;
+        const selectedModel = input.request.model ?? (p.model === "default" ? s.view.default_model ?? "default" : p.model);
+        const selectedEffort = input.request.effort === "default" ? s.view.models.find(m => m.id === selectedModel)?.default_effort : input.request.effort ?? p.effort;
+        const command = randomUUID();
+        const packet: NativeRuntimeCommand = { type: "turn", command, session: s.id, turn: input.turn.id, profile_revision: p.revision, message: input.request.message, model: selectedModel, effort: selectedEffort, context: input.memories.map(m => m.content).join("\n"), context_revision };
+        const result = new Promise<{
+            text: string;
+            status: "done" | "failed" | "unknown" | "cancelled";
+            error?: string;
+        }>(resolve => this.active.set(s.id, { turn: input.turn.id, event: input.event, resolve }));
+        const abort = () => { void this.interrupt(s.id); };
+        input.signal.addEventListener("abort", abort, { once: true });
+        try {
+            this.ai.delivery(s.id, input.turn.id, command, packet);
+            this.ai.deliveryState(input.turn.id, "sent");
+            s.view = { ...s.view, state: "running" };
+            this.put(s);
+            this.send(s.runtime, packet);
+            return await result;
+        }
+        catch {
+            s.quarantined = true;
+            s.view = { ...s.view, state: "unknown", error: "native.unknown" };
+            this.put(s);
+            this.complete(s.id, "unknown", "", "native.unknown");
+            return await result;
+        }
+        finally {
+            input.signal.removeEventListener("abort", abort);
+        }
+    };
+    async interrupt(id: string) {
+        const s=this.ai.session(id);if(!s)return;
+        const uncertain=this.active.has(id)||["running","awaiting_approval"].includes(s.view.state);
+        if(uncertain){s.quarantined=true;s.view={...s.view,state:"unknown",approval:undefined,error:"native.unknown"};this.ai.invalidate(id);this.put(s);}
+        try{this.send(s.runtime,{type:"action",command:randomUUID(),session:id,input:{action:"interrupt"}});}catch{/* The frozen state does not depend on receiving an interruption acknowledgment. */}
+        if(uncertain)this.complete(id,"unknown","","native.unknown");
+    }
+    async action(id: string, owner: string, raw: unknown) {
+        const a = NativeAction.parse(raw), s = this.owned(id, owner);
+        if (a.action === "approval" && (!s.view.approval || s.view.approval.id !== a.approval || s.view.approval.instance !== a.instance || Date.parse(s.view.approval.expires) < Date.now() || s.quarantined))
+            throw problem("native.approval_expired", "CONFLICT");
+        if(a.action==="interrupt"){await this.interrupt(id);return this.ai.session(id)!;}
+        if (a.action === "resolve") {
+            if (!s.quarantined || !a.processes_stopped)
+                throw problem("native.not_stopped", "CONFLICT");
+            this.hub.audit({ actor: this.hub.actors().find(a => a.id === owner)!, label: "native-review" }, JSON.stringify({ session: id, ...a }), "allow", undefined, "applied");
+            s.quarantined = false;
+            s.view = { ...s.view, state: "closed", error: undefined };
+            this.put(s);
+            this.send(s.runtime, { type: "action", command: randomUUID(), session: id, input: a });
+            return s;
+        }
+        if (s.quarantined && a.action !== "close")
+            throw problem("native.unknown", "CONFLICT");
+        if (a.action === "resume") {
+            if (!["offline", "failed"].includes(s.view.state))
+                throw problem("native.not_ready", "CONFLICT");
+            this.current(s);
+            s.view = { ...s.view, state: "recovering" };
+            this.put(s);
+            this.open(s);
+        }
+        else {
+            if(a.action==="approval"){s.view={...s.view,state:"running",approval:undefined};this.put(s);}
+            if (a.action === "close")
+                this.ai.invalidate(id);
+            this.send(s.runtime, { type: "action", command: randomUUID(), session: id, input: a });
+        }
+        return s;
+    }
+    async handle(request: Request, identity: Identity) {
+        if (identity.actor.role !== "human")
+            throw problem("native.forbidden", "FORBIDDEN");
+        const path = new URL(request.url).pathname, owner = identity.actor.id;
+        if (path === "/v2/ai/config" && request.method === "GET")
+            return Response.json(AIConfiguration.parse(this.modules.ai.list(owner)));
+        if (path === "/v2/ai/runtimes" && request.method === "GET")
+            return Response.json(this.hub.runtimes(new Date()).map(r => ({ actor: r.actor, name: r.registration.name, online: this.online(r.actor), isolation: this.sockets.get(r.actor)?.isolation ?? "unsupported" })));
+        const connection = /^\/v2\/ai\/connections(?:\/(aic_[0-9A-HJKMNP-TV-Z]{26}))?$/.exec(path);
+        if (connection && ["POST", "PUT"].includes(request.method))
+            return Response.json(this.modules.ai.connection(owner, AIConnectionInput.parse(await request.json()), connection[1]));
+        const profile = /^\/v2\/ai\/profiles(?:\/(aip_[0-9A-HJKMNP-TV-Z]{26}))?$/.exec(path);
+        if (profile && ["POST", "PUT"].includes(request.method))
+            return Response.json(this.modules.ai.profile(owner, AIProfileInput.parse(await request.json()), profile[1]));
+        if (path === "/v2/assistant/native-sessions") {
+            if (request.method === "POST")
+                return Response.json(await this.create(owner, await request.json()));
+            if (request.method === "GET")
+                return Response.json(this.ai.sessions(owner).filter(s => !(!this.modules.assistantStore.conversation(s.conversation)||this.modules.assistantStore.trash(s.conversation))));
+        }
+        const match = /^\/v2\/assistant\/native-sessions\/(ais_[0-9A-HJKMNP-TV-Z]{26})(?:\/(actions|events))?$/.exec(path);
+        if (match) {
+            const s = this.owned(match[1]!, owner);
+            if (request.method === "POST" && match[2] === "actions")
+                return Response.json(await this.action(s.id, owner, await request.json()));
+            if (request.method === "GET")
+                return Response.json(match[2] === "events" ? this.ai.events(s.id, Number(new URL(request.url).searchParams.get("after") ?? 0)) : s);
+        }
+        throw problem("native.session_missing", "NOT_FOUND");
+    }
+    async mcpHandle(request: Request) {
+        const id = /^\/v2\/native-mcp\/(ais_[0-9A-HJKMNP-TV-Z]{26})\/(tools|call)$/.exec(new URL(request.url).pathname);
+        if (!id)
+            throw problem("native.forbidden", "FORBIDDEN");
+        const s = this.ai.session(id[1]!), meta = this.ai.token(id[1]!);
+        const supplied = /^Bearer (native_[A-Za-z0-9_-]{43})$/.exec(request.headers.get("authorization") ?? "")?.[1];
+        const digest = createHash("sha256").update(supplied ?? "").digest();
+        const expected = meta?.token_hash ? Buffer.from(meta.token_hash, "hex") : Buffer.alloc(32);
+        if (!s || !meta?.agent || !supplied || !timingSafeEqual(expected, digest) || s.quarantined || s.view.state === "closed" || this.modules.assistantStore.trash(s.conversation) || !this.online(s.runtime))
+            throw problem("native.forbidden", "FORBIDDEN");
+        const defs = CAPABILITIES.filter(c => s.capabilities.includes(toolName(c.name)));
+        if (id[2] === "tools" && request.method === "GET")
+            return Response.json({ tools: defs.map(c => ({ name: toolName(c.name), description: c.summary.en, inputSchema: c.args.toJSONSchema() })) });
+        if (id[2] !== "call" || request.method !== "POST")
+            throw problem("native.forbidden", "FORBIDDEN");
+        const input = NativeMCPRequest.parse({ ...await request.json() as object, session: s.id }), def = defs.find(c => toolName(c.name) === input.tool), active = this.active.get(s.id);
+        if (!def || !active || (def.kind === "write" && this.ai.sessions(s.owner).some(v => v.quarantined)) || !["running", "awaiting_approval"].includes(s.view.state))
+            throw problem("native.forbidden", "FORBIDDEN");
+        const old = this.ai.db.query<{
+            name: string;
+            args: string;
+            status: string;
+            result: string | null;
+        }, [
+            string,
+            string
+        ]>("SELECT name,args,status,result FROM native_operations WHERE session=? AND request=?").get(s.id, input.request_id);
+        if (old) {
+            if (old.name !== def.name || old.args !== JSON.stringify(input.args))
+                throw problem("ai.conflict", "CONFLICT");
+            if (old.status === "done")
+                return Response.json({ result: JSON.parse(old.result!) });
+            throw problem("native.unknown", "CONFLICT");
+        }
+        this.ai.db.query("INSERT INTO native_operations VALUES(?,?,?,?,?,'running',NULL)").run(s.id, input.request_id, active.turn, def.name, JSON.stringify(input.args));
+        const actor = this.hub.actors().find(a => a.id === meta.agent && a.role === "agent");
+        if (!actor)
+            throw problem("native.forbidden", "FORBIDDEN");
+        const callId = newId("tool", new Date(), randomBytes);
+        let call = AssistantToolCall.parse({ id: callId, turn: active.turn, name: input.tool, args: input.args, status: "running", capability: def.name, created: new Date().toISOString() });
+        this.modules.assistantStore.putCall(call);
+        try {
+            const outcome = await this.modules.capabilities.execute(def.name, input.args, { actor, label: `native-${s.id}` }, input.request_id);
+            const result = JSON.parse(JSON.stringify(outcome.result ?? null));
+            this.ai.db.transaction(() => { this.ai.db.query("UPDATE native_operations SET status='done',result=? WHERE session=? AND request=?").run(JSON.stringify(result), s.id, input.request_id); call = { ...call, status: "succeeded", result, change: outcome.change, finished: new Date().toISOString() }; this.modules.assistantStore.putCall(call); this.modules.assistantStore.putMessage(AssistantMessage.parse({ id: newId("amsg", new Date(), randomBytes), conversation: s.conversation, turn: active.turn, role: "tool", tool_call: callId, content: JSON.stringify(result), created: new Date().toISOString() })); })();
+            return Response.json({ result });
+        }
+        catch (e) {
+            const known = e instanceof HubError && ["FORBIDDEN", "INVALID", "NOT_FOUND", "CONFLICT"].includes(e.code);
+            this.ai.db.query("UPDATE native_operations SET status=? WHERE session=? AND request=?").run(known ? "failed" : "unknown", s.id, input.request_id);
+            this.modules.assistantStore.putCall({ ...call, status: known ? "failed" : "unknown", error: "native.tool_failed", finished: new Date().toISOString() });
+            if (!known && def.kind === "write") {
+                const current = this.ai.session(s.id)!;
+                current.quarantined = true;
+                current.view = { ...current.view, state: "unknown", error: "native.unknown" };
+                this.put(current);
+                this.ai.invalidate(s.id);
+                await this.interrupt(s.id);
+            }
+            throw problem(known ? "native.tool_failed" : "native.unknown", known ? "FORBIDDEN" : "CONFLICT");
+        }
+    }
+    beforePurge(conversation:string){if(this.ai.sessions().some(s=>s.conversation===conversation&&s.quarantined))throw problem("native.unknown","CONFLICT");}
+    cancelConversation(id:string){const s=this.ai.sessions().find(s=>s.conversation===id);if(!s)return;this.ai.invalidate(s.id);if(this.active.has(s.id)||["running","awaiting_approval"].includes(s.view.state))void this.interrupt(s.id);else try{this.send(s.runtime,{type:"action",command:randomUUID(),session:s.id,input:{action:"close"}});}catch{}}
+
+    async stop() { for (const s of this.ai.sessions())
+        if (this.active.has(s.id))
+            await this.interrupt(s.id); const links = [...this.sockets.values()]; this.sockets.clear(); for (const c of links)
+        c.ws.terminate(); for (const [id] of this.active)
+        this.complete(id, "unknown", "", "native.unknown"); await Bun.sleep(0); }
+}

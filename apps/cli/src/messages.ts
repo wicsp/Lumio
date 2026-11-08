@@ -1,6 +1,9 @@
 import { language, renderMessage, type Language } from "@lumio/platform";
 
 export const en = {
+  "ai.unknown": "Execution outcome is unknown. Review before continuing.",
+  "ai.invalid": "Check the AI profile, connection, and model settings.",
+  "ai.unavailable": "AI backend is unavailable.",
   "work.readiness_exclusive": "--ready and --blocked cannot be used together.",
   "work.waiting_for": (count: unknown) => `Waiting for ${String(count)} ${Number(count) === 1 ? "task" : "tasks"}`,
   "work.prerequisites": "Prerequisites",
@@ -768,6 +771,9 @@ ${String(p0)}${String(p1)}`,
   "Run tailscale serve status to check": "Run tailscale serve status to check",
 };
 export const zh: typeof en = {
+  "ai.unknown": "执行结果未知，请核查后继续。",
+  "ai.invalid": "请检查 AI Profile、连接和模型设置。",
+  "ai.unavailable": "AI 后端不可用。",
   "work.readiness_exclusive": "--ready 与 --blocked 不能同时使用。",
   "work.waiting_for": (count: unknown) => `等 ${String(count)} 个`,
   "work.prerequisites": "前置",

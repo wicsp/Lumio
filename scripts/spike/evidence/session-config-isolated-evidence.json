@@ -1,0 +1,175 @@
+{
+  "date": "2026-11-08T07:32:49.932Z",
+  "root": "$SPIKE_ROOT",
+  "checks": {
+    "thread_alpha_settings": {
+      "model": "gpt-6.1-sol",
+      "sandbox": {
+        "type": "workspaceWrite",
+        "writableRoots": [],
+        "networkAccess": false,
+        "excludeTmpdirEnvVar": true,
+        "excludeSlashTmp": true
+      },
+      "approval": "on-request"
+    },
+    "thread_beta_settings": {
+      "model": "gpt-6.1-sol",
+      "sandbox": {
+        "type": "workspaceWrite",
+        "writableRoots": [],
+        "networkAccess": true,
+        "excludeTmpdirEnvVar": true,
+        "excludeSlashTmp": true
+      },
+      "approval": "on-request"
+    },
+    "alpha_mcp_inventory": [
+      {
+        "name": "alpha",
+        "authStatus": "unsupported",
+        "tools": [
+          "synthetic_echo_alpha"
+        ]
+      }
+    ],
+    "beta_mcp_inventory": [
+      {
+        "name": "beta",
+        "authStatus": "unsupported",
+        "tools": [
+          "synthetic_echo_beta"
+        ]
+      }
+    ],
+    "plain_thread_mcp_inventory": [],
+    "elicitation_shape": {
+      "threadId": {
+        "type": "string",
+        "length": 36
+      },
+      "turnId": {
+        "type": "string",
+        "length": 36
+      },
+      "serverName": {
+        "type": "string",
+        "length": 5
+      },
+      "mode": {
+        "type": "string",
+        "length": 4
+      },
+      "_meta": {
+        "codex_approval_kind": {
+          "type": "string",
+          "length": 13
+        },
+        "persist": [
+          {
+            "type": "string",
+            "length": 7
+          },
+          {
+            "type": "string",
+            "length": 6
+          }
+        ],
+        "tool_description": {
+          "type": "string",
+          "length": 35
+        },
+        "tool_params": {},
+        "tool_params_display": []
+      },
+      "message": {
+        "type": "string",
+        "length": 62
+      },
+      "requestedSchema": {
+        "type": {
+          "type": "string",
+          "length": 6
+        },
+        "properties": {}
+      }
+    },
+    "mcp_tool_round": {
+      "status": "completed",
+      "itemTypes": [
+        "userMessage",
+        "mcpToolCall",
+        "reasoning",
+        "agentMessage"
+      ],
+      "mcpCalls": [
+        {
+          "server": "alpha",
+          "tool": "synthetic_echo_alpha",
+          "status": "completed"
+        }
+      ],
+      "developerCodeReturned": true
+    },
+    "resume_without_explicit_policy": {
+      "approval": "on-request",
+      "sandbox": {
+        "type": "workspaceWrite",
+        "writableRoots": [],
+        "networkAccess": false,
+        "excludeTmpdirEnvVar": true,
+        "excludeSlashTmp": true
+      },
+      "effort": "low"
+    },
+    "events": [
+      "remoteControl/status/changed",
+      "account/updated",
+      "thread/started",
+      "mcpServer/startupStatus/updated",
+      "thread/settings/updated",
+      "thread/status/changed",
+      "turn/started",
+      "item/started",
+      "item/completed",
+      "turn/moderationMetadata",
+      "mcpServer/elicitation/request",
+      "serverRequest/resolved",
+      "thread/tokenUsage/updated",
+      "account/rateLimits/updated",
+      "item/agentMessage/delta",
+      "thread/readState/changed",
+      "turn/completed"
+    ],
+    "fresh_process_resume": {
+      "sandbox": {
+        "type": "readOnly",
+        "networkAccess": false
+      },
+      "servers": [
+        "codex_apps"
+      ]
+    },
+    "repeat_resume_loaded_thread_with_overrides": {
+      "sandbox": {
+        "type": "readOnly",
+        "networkAccess": false
+      },
+      "servers": [
+        "codex_apps"
+      ]
+    },
+    "fresh_process_resume_with_explicit_config": {
+      "sandbox": {
+        "type": "workspaceWrite",
+        "writableRoots": [],
+        "networkAccess": false,
+        "excludeTmpdirEnvVar": true,
+        "excludeSlashTmp": true
+      },
+      "servers": [
+        "alpha"
+      ]
+    }
+  }
+}

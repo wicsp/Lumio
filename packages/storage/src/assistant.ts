@@ -29,6 +29,7 @@ export class SqliteAssistantStore implements AssistantStore {
       CREATE TABLE IF NOT EXISTS assistant_contexts(turn TEXT NOT NULL REFERENCES assistant_turns(id),step INTEGER NOT NULL CHECK(step>=0),
         request TEXT NOT NULL CHECK(json_valid(request)),created TEXT NOT NULL,tool_actor TEXT,PRIMARY KEY(turn,step));
       INSERT OR IGNORE INTO platform_migrations(name,applied) VALUES('assistant-3',strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+      CREATE TABLE IF NOT EXISTS assistant_model_states(message TEXT PRIMARY KEY,record TEXT NOT NULL CHECK(json_valid(record)));
       CREATE TABLE IF NOT EXISTS assistant_memory_requests(owner TEXT NOT NULL,request TEXT NOT NULL,operation_hash TEXT NOT NULL,
         result TEXT NOT NULL CHECK(json_valid(result)),PRIMARY KEY(owner,request));
       INSERT OR IGNORE INTO platform_migrations(name,applied) VALUES('assistant-2',strftime('%Y-%m-%dT%H:%M:%fZ','now'));
@@ -36,6 +37,8 @@ export class SqliteAssistantStore implements AssistantStore {
     `))();
   }
   transaction<T>(action: () => T): T { return this.db.transaction(action)(); }
+  putModelState(message:string,state:NonNullable<import("@lumio/schema").AssistantModelResponse["continuation"]>):void {this.db.query("INSERT INTO assistant_model_states VALUES(?,?)").run(message,JSON.stringify(state));}
+  modelState(message:string):import("@lumio/schema").AssistantModelResponse["continuation"] {const r=this.db.query<{record:string},[string]>("SELECT record FROM assistant_model_states WHERE message=?").get(message);return r?JSON.parse(r.record):undefined;}
   trash(id: string): TrashItem | undefined {
     const row = this.db.query<{ record: string }, [string]>("SELECT record FROM assistant_trash WHERE id=?").get(id);
     return row ? TrashItem.parse(JSON.parse(row.record)) : undefined;
@@ -55,6 +58,7 @@ export class SqliteAssistantStore implements AssistantStore {
     for (const table of ["assistant_requests", "assistant_calls", "assistant_contexts"]) {
       this.db.query(`DELETE FROM ${table} WHERE turn IN (SELECT id FROM assistant_turns WHERE conversation=?)`).run(id);
     }
+    this.db.query("DELETE FROM assistant_model_states WHERE message IN (SELECT id FROM assistant_messages WHERE conversation=?)").run(id);
     this.db.query("DELETE FROM assistant_messages WHERE conversation=?").run(id);
     this.db.query("DELETE FROM assistant_turns WHERE conversation=?").run(id);
     this.removeTrash(id);
