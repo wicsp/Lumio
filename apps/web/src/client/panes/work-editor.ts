@@ -20,6 +20,8 @@ import { allTags, blockingTitles, childProgress, normalizeTag, parentCandidates,
 import { renderMarkdown } from "../utils/markdown.ts";
 import { referenceInput } from "../reference-input.ts";
 import { WorkSave, type WorkDraft } from "../work-save.ts";
+import { MAX_TASK_NODES, taskGraph } from "../graph/data.ts";
+import { dependencyGraph } from "../graph/view.ts";
 import { drafts, textDraft } from "../drafts.ts";
 import { confirmDelete } from "../trash-actions.ts";
 import type { Navigate } from "../navigation.ts";
@@ -492,18 +494,56 @@ export class WorkEditor {
   private projectTasks(project: WorkProject): HTMLElement {
     const body = h("div", {}, h("p", { class: "muted" }, t("Loading…")));
     const add = h("button", { type: "button", class: "btn btn-small", onclick: () => this.hooks.newTask?.(project.id) }, icon("plus"), t("New task in this project"));
-    void this.client.workTasks({ project: project.id }).then(tasks => {
-      if (!this.active) return;
+    // 列表 / 依赖图（ADR 0039，T1-5）：选择保存在本浏览器。
+    const VIEW_KEY = "lumio.web.project-task-view";
+    let view = (() => { try { return localStorage.getItem(VIEW_KEY) === "graph" ? "graph" : "list"; } catch { return "list"; } })();
+    const listBtn = h("button", { type: "button" }, t("List")), graphBtn = h("button", { type: "button" }, t("Dependency graph"));
+    let tasks: WorkTask[] | undefined;
+    const render = () => {
+      listBtn.setAttribute("aria-pressed", String(view === "list")); graphBtn.setAttribute("aria-pressed", String(view === "graph"));
+      if (!tasks || !this.active) return;
+      if (view === "graph") { void this.renderProjectGraph(body, tasks, project.id); return; }
       if (!tasks.length) { clear(body, h("p", { class: "muted" }, t("No tasks in this project yet."))); return; }
-      const groups = TURN_GROUPS.map(group => [group, tasks.filter(task => turnGroup(task) === group)] as const).filter(([, list]) => list.length);
+      const groups = TURN_GROUPS.map(group => [group, tasks!.filter(task => turnGroup(task) === group)] as const).filter(([, list]) => list.length);
       clear(body, ...groups.map(([group, list]) => h("div", { class: "project-task-group" },
         h("p", { class: "project-task-head" }, turnIcon(group), TURN_GROUP_LABELS[group], h("span", { class: "count" }, list.length)),
         h("div", { class: "runs" }, ...list.map(task => h("button", { type: "button", class: "run", onclick: () => this.hooks.navigate("work", task.id) },
           turnIcon(turnGroup(task)), h("span", { class: "run-round" }, task.title),
           group === "todo" || group === "done" || group === "cancelled" ? null : group === "blocked" ? h("span", { class: "muted" }, t("Waiting on {0}", task.blocked_by!.length)) : h("span", { class: "muted" }, turnText(task)),
           h("span", { class: "row-meta" }, icon("chevron"))))))));
-    }).catch(cause => { if (this.active) clear(body, failure(errorText(cause))); });
-    return h("section", { class: "section" }, h("div", { class: "section-head" }, h("h3", {}, t("Tasks")), h("div", { class: "detail-actions" }, add)), body);
+    };
+    const choose = (next: "list" | "graph") => { view = next; try { localStorage.setItem(VIEW_KEY, next); } catch { /* 只在本次显示 */ } render(); };
+    listBtn.addEventListener("click", () => choose("list")); graphBtn.addEventListener("click", () => choose("graph"));
+    void this.client.workTasks({ project: project.id }).then(list => { tasks = list; render(); })
+      .catch(cause => { if (this.active) clear(body, failure(errorText(cause))); });
+    render();
+    return h("section", { class: "section" }, h("div", { class: "section-head" }, h("h3", {}, t("Tasks")),
+      h("div", { class: "detail-actions" }, h("div", { class: "segmented segmented-small", role: "group", "aria-label": t("View") }, listBtn, graphBtn), add)), body);
+  }
+
+  /** 项目依赖图：未完成任务自左向右按依赖分层，可开工的高亮；项目外未完成的前置以虚线标出。 */
+  private async renderProjectGraph(body: HTMLElement, tasks: WorkTask[], projectId: string): Promise<void> {
+    const open = tasks.filter(task => task.outcome === "open");
+    if (!open.length) { clear(body, h("p", { class: "muted" }, t("No unfinished tasks to draw."))); return; }
+    if (open.length > MAX_TASK_NODES) { clear(body, h("p", { class: "muted" }, t("This project has {0} unfinished tasks — too many for a readable graph. Use the list instead.", open.length))); return; }
+    // 项目外的前置要标题：需要时才读一次全部任务。
+    const needsAll = open.some(task => task.dependencies.some(id => !tasks.some(other => other.id === id)));
+    const all = needsAll ? await this.client.workTasks().catch(() => tasks) : tasks;
+    if (!this.active) return;
+    const projectTitle = (id?: string) => this.projects.find(p => p.id === id)?.title;
+    const { nodes, edges } = taskGraph(tasks, all, task => {
+      const group = turnGroup(task), outside = task.project !== projectId;
+      const sub = group === "blocked" ? t("Waiting on {0}", task.blocked_by!.length) : group === "todo" ? t("Ready to start") : turnText(task);
+      return { state: group, sub: outside ? t("{0} · {1}", projectTitle(task.project) ?? t("No project"), sub) : sub };
+    });
+    const legend = h("div", { class: "graph-legend" },
+      h("span", { class: "lg lg-ready" }, t("Ready to start")), h("span", { class: "lg lg-blocked" }, t("Waiting on prerequisites")),
+      h("span", { class: "lg lg-agents" }, t("Agents working")), h("span", { class: "lg lg-external" }, t("Prerequisite outside this project")),
+      h("span", { class: "graph-hint" }, t("⌘/Ctrl + scroll to zoom · drag to move")));
+    const graph = dependencyGraph(nodes, edges, id => this.hooks.navigate("work", id));
+    graph.setAttribute("aria-label", t("Dependency graph of {0} unfinished tasks", nodes.length));
+    clear(body, h("div", { class: "graph-frame" }, graph), legend,
+      edges.length ? null : h("p", { class: "muted" }, t("No dependencies yet. Add prerequisites on a task to see the order here.")));
   }
 
   // ───────────── 交接计划 ─────────────
