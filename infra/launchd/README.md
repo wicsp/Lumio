@@ -12,7 +12,7 @@ CLI 自动读取 `~/.config/lumio/config.json`，环境变量可以覆盖其中�
 
 以下保留模板安装方法。Hub 只讲 HTTP，默认监听 `127.0.0.1:7420`。
 
-1. 用 Bun 1.3.x 在 `apps/hub` 中运行 `bun run build`，将 `dist/lumio-hub` 放到固定的绝对路径。
+1. 用根目录 `package.json` 的 `packageManager` 指定的 Bun 版本在 `apps/hub` 中运行 `bun run build`，将 `dist/lumio-hub` 放到固定的绝对路径。
 2. 复制 `io.lumio.hub.plist` 到 `~/Library/LaunchAgents/`，替换所有 `/ABSOLUTE/PATH/TO/…`。
    launchd 不展开 `~` 或 shell 变量。状态目录必须在 vault 和外部同步目录之外，先创建该目录以便 launchd 打开日志文件。
 3. 使用同一个 `LUMIO_STATE_DIR` 初始化身份和令牌：

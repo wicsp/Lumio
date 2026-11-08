@@ -5,7 +5,7 @@
 
 网页由 Hub 提供；决定见 ADR 0026、0027。
 
-- **技术栈**：原生 TypeScript、DOM 与 CSS，用 Bun 1.3.x 构建静态资源，由 Hub 提供。业务依赖 `@lumio/api-client` 与 `@lumio/schema`；笔记编辑集成 CodeMirror 6 的 state/view/commands/language/lang-markdown/autocomplete（ADR 0035）。
+- **技术栈**：原生 TypeScript、DOM 与 CSS，用仓库固定的 Bun 1.4.4 构建静态资源，由 Hub 提供（2026-11-08 人类批准 Bun 1.4 升级）。业务依赖 `@lumio/api-client` 与 `@lumio/schema`；笔记编辑集成 CodeMirror 6 的 state/view/commands/language/lang-markdown/autocomplete（ADR 0035）。
   Hub 为每次 HTML 响应生成样式 nonce，允许编辑器动态样式，不放宽脚本 CSP。公式使用随包提供的 KaTeX，输出原生 MathML，不加载远程渲染资源（W1-0）。
 - **类型隔离**：浏览器端与服务端是两个独立的 TypeScript 程序，根 typecheck 同时检查两者。
 - **访问路径**（ADR 0027）：网页由 Hub 在自己的地址上提供（单机 `http://127.0.0.1:7420`；服务器模式为 Hub 的对外地址），浏览器与 Hub 同源，直接调用 `/v1`、`/v2`。
