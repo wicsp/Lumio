@@ -50,7 +50,8 @@ export function layeredLayout(nodes: readonly string[], edges: readonly Edge[]):
 export interface Point { x: number; y: number }
 
 /** 力导向布局（Fruchterman–Reingold 的简化版）。center 固定在中央；输出坐标落在 [0,width]×[0,height] 内。 */
-export function forceLayout(nodes: readonly string[], edges: readonly Edge[], options: { width: number; height: number; center?: string; iterations?: number }): Map<string, Point> {
+function* forceSteps(nodes: readonly string[], edges: readonly Edge[], options: { width: number; height: number; center?: string; iterations?: number }): Generator<void, Map<string, Point>> {
+  if (!nodes.length) return new Map();
   const { width, height } = options, iterations = options.iterations ?? 300;
   const pos = new Map<string, Point>();
   const cx = width / 2, cy = height / 2;
@@ -90,6 +91,7 @@ export function forceLayout(nodes: readonly string[], edges: readonly Edge[], op
       p.y += (m.y / d) * Math.min(d, temperature) + (cy - p.y) * 0.01;
     }
     temperature *= 0.985;
+    yield;
   }
   // Fit into the canvas with a margin, keeping the aspect ratio and the center node centred.
   const margin = 40, xs = [...pos.values()].map(p => p.x), ys = [...pos.values()].map(p => p.y);
@@ -103,6 +105,35 @@ export function forceLayout(nodes: readonly string[], edges: readonly Edge[], op
     out.set(id, { x: clamp(cx + (p.x - anchorX) * scale, margin / 2, width - margin / 2), y: clamp(cy + (p.y - anchorY) * scale, margin / 2, height - margin / 2) });
   }
   return out;
+}
+
+export function forceLayout(nodes: readonly string[], edges: readonly Edge[], options: { width: number; height: number; center?: string; iterations?: number }): Map<string, Point> {
+  const steps = forceSteps(nodes, edges, options);
+  let next = steps.next(); while (!next.done) next = steps.next();
+  return next.value;
+}
+
+/** Share the same deterministic simulation, yielding between small batches for input and cancellation. */
+export async function forceLayoutAsync(nodes: readonly string[], edges: readonly Edge[], options: {
+  width: number; height: number; center?: string; iterations?: number; batchSize?: number;
+  isCurrent?: () => boolean; yieldFrame?: () => Promise<void>;
+}): Promise<Map<string, Point> | undefined> {
+  // Message tasks yield to input without animation/timer throttling in background tabs.
+  const channel = !options.yieldFrame && typeof MessageChannel !== "undefined" ? new MessageChannel() : undefined;
+  const yieldFrame = options.yieldFrame ?? (() => new Promise<void>(resolve => {
+    if (channel) { channel.port1.onmessage = () => resolve(); channel.port2.postMessage(null); }
+    else setTimeout(resolve, 0);
+  }));
+  const steps = forceSteps(nodes, edges, options), batch = Math.max(1, options.batchSize ?? 2);
+  let count = 0;
+  try {
+    for (;;) {
+      if (options.isCurrent && !options.isCurrent()) return;
+      const next = steps.next();
+      if (next.done) return next.value;
+      if (++count % batch === 0) await yieldFrame();
+    }
+  } finally { channel?.port1.close(); channel?.port2.close(); }
 }
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));

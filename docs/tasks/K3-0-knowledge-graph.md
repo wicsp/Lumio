@@ -1,6 +1,6 @@
 # K3-0 全库知识图谱
 
-依据：[ADR 0040](../adr/0040-knowledge-graph-endpoint.md)（**Proposed，等人类批准后才能动 `packages/schema`**）。
+依据：[ADR 0040](../adr/0040-knowledge-graph-endpoint.md)（Implemented；2026-11-08 人类批准并授权实现 K3-1 至 K3-3）。
 必读：`docs/DESIGN.md`、`docs/design/knowledge.md`、`web.md`、`security.md`。
 
 ## 目标
@@ -21,6 +21,8 @@
 | K3-3 | Web：知识页「图谱」视图、类型筛选、隐藏孤立笔记、300 节点上限、分批布局 | 前端（Claude） | `packages/api-client`、`apps/web` |
 
 K3-2、K3-3 依赖 K3-1；K3-3 依赖 K3-2 的路由。
+
+实施状态（2026-11-08）：K3-1、K3-2、K3-3 全部完成；契约、权限、索引快照、过滤、节点上限和可取消布局均有 fixtures 回归测试。项目依赖图和单篇关系图沿用 #115。
 
 ## K3-1 契约要点
 
