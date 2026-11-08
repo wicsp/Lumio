@@ -288,6 +288,7 @@ select { appearance: none; padding-right: 28px; background-image: linear-gradien
 .s-todo, .s-planning, .s-queued { color: var(--ink-4); }
 .s-active, .s-running, .s-assigned { color: var(--blue); }
 .s-waiting, .s-waiting_for_human { color: var(--ochre); }
+.s-blocked { color: var(--ochre); }
 .s-paused, .s-cancelled { color: var(--grey); }
 .s-done { color: var(--green); }
 .s-failed, .s-unknown { color: var(--red); }
@@ -398,6 +399,16 @@ select { appearance: none; padding-right: 28px; background-image: linear-gradien
 .prop-input { height: 30px; min-height: 30px; margin-left: -8px; width: calc(100% + 8px); max-width: 320px; border-color: transparent; background: none; }
 .prop-input:hover { background: var(--hover); }
 .prop-input[type="date"] { width: 170px; }
+/* 任务结构（ADR 0039）：前置与标签芯片 */
+.dep-list, .tag-list { flex-wrap: wrap; row-gap: 6px; }
+.pill-x { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; margin-right: -4px; padding: 0; border: 0; border-radius: 50%; background: none; color: inherit; opacity: .6; }
+.pill-x:hover, .pill-x:focus-visible { opacity: 1; background: var(--hover); }
+.pill-x .icon { width: 10px; height: 10px; }
+.pill-link { border: 0; padding: 0; background: none; color: inherit; font: inherit; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.pill-link:hover { text-decoration: underline; }
+.dep-note { opacity: .75; }
+.tag-input { width: 140px; max-width: 140px; margin-left: 0; }
+.who-chip.is-blocked { color: var(--ochre); }
 .prop-input:focus { background: var(--surface); }
 .prop-saving { opacity: .55; pointer-events: none; }
 .advanced-toggle { grid-column: 1 / -1; justify-self: start; margin: 2px 0 0; }

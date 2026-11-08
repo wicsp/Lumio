@@ -9,7 +9,8 @@ import { newRequestId, projectCreateCommand, taskCreateCommand } from "../comman
 import { autosize, clear, debounce, empty, failure, field, h, icon, loading, openDialog, openMenu, placeholder, select, statusIcon, toast } from "../dom.ts";
 import { dueLabel } from "../format.ts";
 import { PROJECT_LABELS } from "../labels.ts";
-import { TURN_ACTION_DONE, TURN_ACTION_ICONS, TURN_ACTION_LABELS, TURN_GROUPS, TURN_GROUP_LABELS, turnActionCommand, turnActions, turnGroup, turnIcon, turnText, type TurnAction, type TurnGroup } from "../turn.ts";
+import { TURN_ACTION_DONE, TURN_ACTION_ICONS, TURN_ACTION_LABELS, TURN_GROUPS, TURN_GROUP_LABELS, isBlocked, turnActionCommand, turnActions, turnGroup, turnIcon, turnText, type TurnAction, type TurnGroup } from "../turn.ts";
+import { allTags, blockingTitles } from "../task-structure.ts";
 import { listKeys, markSelected } from "../list-keys.ts";
 import type { Navigate } from "../navigation.ts";
 import { WorkEditor } from "./work-editor.ts";
@@ -28,6 +29,8 @@ export class WorkPane {
   private query = h("input", { type: "search", name: "work-search", placeholder: t("Search tasks"), autocomplete: "off" });
   private statusFilter = "";
   private projectFilter = "";
+  private tagFilter = "";
+  private tagButton = h("button", { type: "button", class: "filter-btn" });
   private statusButton = h("button", { type: "button", class: "filter-btn" });
   private projectButton = h("button", { type: "button", class: "filter-btn" });
   private projects: WorkProject[] = [];
@@ -45,6 +48,7 @@ export class WorkPane {
     this.query.placeholder = mode === "tasks" ? t("Search tasks") : t("Search projects");
     this.statusButton.addEventListener("click", () => this.pickStatusFilter());
     this.projectButton.addEventListener("click", () => this.pickProjectFilter());
+    this.tagButton.addEventListener("click", () => this.pickTagFilter());
     this.query.addEventListener("input", debounce(() => void this.load(), 200));
     this.query.addEventListener("keydown", event => { if (event.key === "Escape" && this.query.value) { this.query.value = ""; void this.load(); } });
     root.append(
@@ -59,7 +63,7 @@ export class WorkPane {
       this.split);
     this.split.append(
       h("div", { class: "list-pane" },
-        h("div", { class: "list-tools" }, h("label", { class: "search-box" }, icon("search"), this.query), this.statusButton, this.projectButton),
+        h("div", { class: "list-tools" }, h("label", { class: "search-box" }, icon("search"), this.query), this.statusButton, this.projectButton, this.tagButton),
         this.list),
       this.detailLayout);
     this.renderFilters();
@@ -106,6 +110,18 @@ export class WorkPane {
     const project = this.projects.find(p => p.id === this.projectFilter);
     clear(this.projectButton, icon("folder"), project?.title ?? t("Projects"));
     this.projectButton.classList.toggle("is-set", !!project);
+    this.tagButton.hidden = this.mode !== "tasks";
+    clear(this.tagButton, icon("flag"), this.tagFilter ? `#${this.tagFilter}` : t("Tags"));
+    this.tagButton.classList.toggle("is-set", !!this.tagFilter);
+  }
+
+  /** 按标签筛选（ADR 0039）：候选来自已载入的任务，标签主要由 AI 维护，人只需要挑。 */
+  private pickTagFilter(): void {
+    const tags = allTags(this.tasks);
+    if (this.tagFilter && !tags.includes(this.tagFilter)) tags.unshift(this.tagFilter);
+    openMenu(this.tagButton, [{ value: "", label: t("All tags"), selected: !this.tagFilter },
+      ...tags.map(tag => ({ value: tag, label: `#${tag}`, selected: this.tagFilter === tag }))],
+      value => { this.tagFilter = value; this.renderFilters(); void this.load(); }, { filter: tags.length > 6, placeholder: t("Find a tag") });
   }
 
   private pickStatusFilter(): void {
@@ -144,9 +160,9 @@ export class WorkPane {
       const all = await this.client.workTasks({ project: this.projectFilter || undefined, query: q || undefined });
       if (generation !== this.listGeneration || !this.active) return;
       this.tasks = all;
-      const tasks = this.statusFilter ? all.filter(task => turnGroup(task) === this.statusFilter) : all;
+      const tasks = all.filter(task => (!this.statusFilter || turnGroup(task) === this.statusFilter) && (!this.tagFilter || task.tags.includes(this.tagFilter)));
       this.renderGroups(TURN_GROUPS, tasks, turnGroup, t => this.taskRow(t), TURN_GROUP_LABELS, group => turnIcon(group as TurnGroup),
-        q || this.statusFilter || this.projectFilter ? t("No matching tasks. Try another search or clear the filters.") : t("No tasks yet. Press C to create the first one."));
+        q || this.statusFilter || this.projectFilter || this.tagFilter ? t("No matching tasks. Try another search or clear the filters.") : t("No tasks yet. Press C to create the first one."));
     } catch (error) {
       if (!quiet && generation === this.listGeneration && this.active) clear(this.list, failure(errorText(error), () => this.load()));
     }
@@ -175,10 +191,13 @@ export class WorkPane {
     const statusBtn = h("button", { type: "button", class: "status-btn", title: turnText(task), "aria-label": t("Change who has it (now: {0})", turnText(task)),
       onclick: (event: Event) => { event.stopPropagation(); this.quickTurn(task, statusBtn); } }, turnIcon(group));
     // 不是轮到你的待办时，副标题说明轮到谁（agent、外部、搁置、需要你处理的原因）。
-    const holder = group === "todo" || group === "done" || group === "cancelled" ? undefined : turnText(task);
+    const holder = group === "todo" || group === "blocked" || group === "done" || group === "cancelled" ? undefined : turnText(task);
     const sub = [project && h("span", { class: "project-chip" }, icon("folder", "icon"), project),
       holder && h("span", { class: `who-chip${group === "needs" ? " is-needs" : ""}` }, icon(group === "agents" ? "bot" : group === "external" ? "clock" : group === "hold" ? "pause" : "alert"), holder),
-      task.plan && h("span", { class: "who-chip", title: t("Has a handoff plan") }, icon("route"))].filter(Boolean) as HTMLElement[];
+      task.plan && h("span", { class: "who-chip", title: t("Has a handoff plan") }, icon("route")),
+      // 被阻塞（ADR 0039）：叠加在轮到谁之上；悬停列出还没完成的前置。
+      isBlocked(task) && h("span", { class: "who-chip is-blocked", title: t("Waiting on: {0}", blockingTitles(task, new Map(this.tasks.map(item => [item.id, item]))).join(t(", "))) },
+        icon("link"), t("Waiting on {0}", task.blocked_by!.length))].filter(Boolean) as HTMLElement[];
     return h("div", { class: `row t-${group}`, "data-id": task.id, role: "button", tabindex: "0",
       onclick: () => void this.open(task.id), onkeydown: (event: Event) => { if ((event as KeyboardEvent).key === "Enter" && event.target === event.currentTarget) void this.open(task.id); } },
       statusBtn,
@@ -261,6 +280,7 @@ export class WorkPane {
         navigate: this.navigate,
         openProject: projectId => this.navigate("work", projectId),
         newTask: projectId => this.create("tasks", projectId),
+        newSubtask: (parent, projectId) => this.create("tasks", projectId, parent),
       });
       if (quiet) this.detail.scrollTop = scroll;
     } catch (error) {
@@ -275,7 +295,8 @@ export class WorkPane {
   // ───────────── 新建 ─────────────
 
   /** kind 缺省跟随当前视图；从项目页新建任务时带 preset，创建后回到该项目。 */
-  private create(kind: Mode = this.mode, preset?: string): void {
+  /** parent：从任务详情新建子任务时预填父任务，创建后回到父任务。 */
+  private create(kind: Mode = this.mode, preset?: string, parent?: string): void {
     const isTask = kind === "tasks";
     const title = h("input", { name: "title", required: true, placeholder: isTask ? t("What needs to get done?") : t("Project name"), autocomplete: "off" });
     const description = autosize(h("textarea", { name: "description", rows: "4", placeholder: isTask ? t("Background, approach or definition of done (optional, Markdown)") : t("Project background (optional, Markdown)") }));
@@ -290,7 +311,9 @@ export class WorkPane {
       isTask ? null : field(t("Working directory"), workdir, t("Tasks in this project run here unless they set their own.")),
       field(t("Description"), description), error);
     const save = h("button", { type: "submit", form: formId, class: "btn btn-primary" }, isTask ? t("Create task") : t("Create project"), h("kbd", {}, "⌘↵"));
-    const dialog = openDialog(isTask ? t("New task") : t("New project"), form, [save], { draftKey: `new-${isTask ? "task" : "project"}:${preset ?? ""}` });
+    const parentTitle = parent ? this.tasks.find(task => task.id === parent)?.title ?? parent : undefined;
+    if (parentTitle) form.prepend(h("p", { class: "muted" }, t("Subtask of “{0}”", parentTitle)));
+    const dialog = openDialog(parent ? t("New subtask") : isTask ? t("New task") : t("New project"), form, [save], { draftKey: `new-${isTask ? "task" : "project"}:${preset ?? ""}:${parent ?? ""}` });
     form.addEventListener("keydown", event => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); form.requestSubmit(); } });
     let pending = false, prior = dialog.dataset.previous ?? "", requestId = dialog.dataset.requestId ?? newRequestId();
     form.addEventListener("submit", async event => {
@@ -303,14 +326,15 @@ export class WorkPane {
       prior = key; dialog.dataset.previous = prior; dialog.dataset.requestId = requestId;
       try {
         const request = isTask
-          ? taskCreateCommand({ title: title.value, description: description.value, project: project.value || undefined }, requestId)
+          ? taskCreateCommand({ title: title.value, description: description.value, project: project.value || undefined, parent }, requestId)
           : projectCreateCommand({ title: title.value, description: description.value, goal: goal.value, workdir: workdir.value }, requestId);
         const result = await this.client.workCommand(request);
         if (!this.active) return;
         dialog.dataset.dirty = "false"; dialog.close();
         toast(isTask ? t("Task created") : t("Project created"));
         this.changed();
-        if (preset && result.kind === "task") { await this.load(); await this.open(preset, true); }
+        if (parent && result.kind === "task") { await this.load(); await this.open(parent, true); }
+        else if (preset && result.kind === "task") { await this.load(); await this.open(preset, true); }
         else if (result.kind === "task" || result.kind === "project") { await this.load(); await this.open(result.kind === "task" ? result.task.id : result.project.id); }
       } catch (cause) {
         clear(error, failure(t("{0} Your input is kept; if the connection dropped, refresh the list to check whether it was created.", errorText(cause))));

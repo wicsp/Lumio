@@ -7,11 +7,11 @@ import { statusIcon } from "./dom.ts";
 import { t, translated } from "./i18n.ts";
 import { newRequestId } from "./commands.ts";
 
-export type TurnGroup = "needs" | "todo" | "agents" | "external" | "hold" | "done" | "cancelled";
-export const TURN_GROUPS: readonly TurnGroup[] = ["needs", "todo", "agents", "external", "hold", "done", "cancelled"];
+export type TurnGroup = "needs" | "todo" | "blocked" | "agents" | "external" | "hold" | "done" | "cancelled";
+export const TURN_GROUPS: readonly TurnGroup[] = ["needs", "todo", "blocked", "agents", "external", "hold", "done", "cancelled"];
 
 export const TURN_GROUP_LABELS: Record<TurnGroup, string> = translated({
-  needs: "Needs you", todo: "Your to-dos", agents: "Agents working", external: "Waiting on others", hold: "On hold", done: "Done", cancelled: "Cancelled",
+  needs: "Needs you", todo: "Your to-dos", blocked: "Waiting on prerequisites", agents: "Agents working", external: "Waiting on others", hold: "On hold", done: "Done", cancelled: "Cancelled",
 });
 const REASON_LABELS: Record<string, string> = translated({
   todo: "To do", answer: "Answer the question", review: "Ready for review", failed: "Run failed", working: "Working", waiting: "Waiting", on_hold: "On hold",
@@ -19,9 +19,12 @@ const REASON_LABELS: Record<string, string> = translated({
 
 export const needsYou = (task: WorkTask) => task.outcome === "open" && task.turn.holder === "human" && (RESPONSE_REASONS as readonly string[]).includes(task.turn.reason);
 
+/** 被阻塞（ADR 0039）：结局 open 且有未完成的前置。它叠加在「轮到谁」之上，不改变交接。 */
+export const isBlocked = (task: WorkTask) => task.outcome === "open" && (task.blocked_by?.length ?? 0) > 0;
+
 export function turnGroup(task: WorkTask): TurnGroup {
   if (task.outcome !== "open") return task.outcome;
-  if (task.turn.holder === "human") return needsYou(task) ? "needs" : "todo";
+  if (task.turn.holder === "human") return needsYou(task) ? "needs" : isBlocked(task) ? "blocked" : "todo";
   if (task.turn.holder === "external") return "external";
   if (task.turn.holder === "nobody") return "hold";
   return "agents";
@@ -29,7 +32,7 @@ export function turnGroup(task: WorkTask): TurnGroup {
 
 /** 组 → 图标样式（复用状态图标的形状）。 */
 export function turnIcon(group: TurnGroup): SVGSVGElement {
-  return statusIcon({ needs: "needs", todo: "todo", agents: "active", external: "waiting", hold: "paused", done: "done", cancelled: "cancelled" }[group]);
+  return statusIcon({ needs: "needs", todo: "todo", blocked: "blocked", agents: "active", external: "waiting", hold: "paused", done: "done", cancelled: "cancelled" }[group]);
 }
 
 /** 一句话说明现在轮到谁，例如「轮到你 · 验收」「codex@mac 正在执行（第 3 轮）」。 */

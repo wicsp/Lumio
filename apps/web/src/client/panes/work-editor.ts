@@ -15,7 +15,8 @@ import { ago, dateInputValue, dueLabel, isoFromDateInput } from "../format.ts";
 import { PROJECT_LABELS } from "../labels.ts";
 import { checkpointCommand, openPlanEditor, planProgress, stageLabel } from "../plan.ts";
 import { MessageRail } from "../side-rail.ts";
-import { TURN_ACTION_DONE, TURN_ACTION_ICONS, TURN_ACTION_LABELS, TURN_GROUPS, TURN_GROUP_LABELS, reasonLabel, turnActionCommand, turnActions, turnGroup, turnIcon, turnText, type TurnAction } from "../turn.ts";
+import { TURN_ACTION_DONE, TURN_ACTION_ICONS, TURN_ACTION_LABELS, TURN_GROUPS, TURN_GROUP_LABELS, isBlocked, reasonLabel, turnActionCommand, turnActions, turnGroup, turnIcon, turnText, type TurnAction } from "../turn.ts";
+import { allTags, blockingTitles, childProgress, normalizeTag, parentCandidates, prerequisiteCandidates, prerequisiteState, type PrerequisiteState } from "../task-structure.ts";
 import { renderMarkdown } from "../utils/markdown.ts";
 import { referenceInput } from "../reference-input.ts";
 import { WorkSave, type WorkDraft } from "../work-save.ts";
@@ -34,6 +35,8 @@ export interface EditorHooks {
   openProject(id: string): void;
   /** 在这个项目里新建任务（项目页用）。 */
   newTask?(project: string): void;
+  /** 新建子任务：预填父任务与项目（ADR 0039）。 */
+  newSubtask?(parent: string, project?: string): void;
   /** 对象已移入回收站：关闭详情并刷新列表（ADR 0038）。 */
   removed?(): void;
 }
@@ -59,6 +62,12 @@ export class WorkEditor {
   private active = true;
   private showAdvanced = false;
   private updated = h("p", { class: "detail-sub" });
+  /** 其他任务（不含回收站）：显示前置 / 父任务 / 子任务的标题，挑选候选（ADR 0039）。 */
+  private allTasks: WorkTask[] = [];
+  private byId = new Map<string, WorkTask>();
+  private relations = h("div", {});
+  private delegateButton?: HTMLButtonElement;
+  private detailInput?: WorkTaskDetail;
 
   constructor(private root: HTMLElement, private dock: HTMLElement, private client: Client, private hub: HubExtras, input: WorkProject | WorkTaskDetail, private projects: WorkProject[], private hooks: EditorHooks) {
     this.record = "task" in input ? input.task : input;
@@ -97,7 +106,7 @@ export class WorkEditor {
       h("div", { class: "detail-actions" },
         h("button", { type: "button", class: "icon-btn", title: t("Copy ID"), "aria-label": t("Copy ID"), onclick: () => void navigator.clipboard?.writeText(this.record.id).then(() => toast(t("ID copied"))) }, icon("link")),
         rec.type === "task" && !rec.plan && this.planButton(rec),
-        isTask && h("button", { type: "button", class: "btn btn-primary btn-small", onclick: () => void this.dispatch() }, icon("play"), t("Delegate")),
+        isTask && (this.delegateButton = h("button", { type: "button", class: "btn btn-primary btn-small", onclick: () => void this.dispatch() }, icon("play"), t("Delegate"))),
         this.moreButton()));
 
     const attention = h("div", { class: "attn-slot" });
@@ -115,11 +124,15 @@ export class WorkEditor {
         if (item && this.active) attention.append(attentionCard(item, { client, hub, navigate: hooks.navigate, changed: () => { hooks.changed(); hooks.reload(); } }, "task"));
       }).catch(() => { /* 旧 Hub：没有这个接口 */ });
       if (input.task.plan) detail.append(this.planSection(input.task));
+      this.detailInput = input;
+      detail.append(this.relations);
+      this.renderRelations();
+      void client.workTasks().then(tasks => {
+        if (!this.active) return;
+        this.allTasks = tasks; this.byId = new Map(tasks.map(task => [task.id, task]));
+        this.renderProps(); this.renderRelations();
+      }).catch(() => { /* 标题暂时显示为 ID；编辑仍可用 */ });
       detail.append(this.timeline(input));
-      if (input.task.dependencies.length || input.task.parent) detail.append(h("section", { class: "section" },
-        h("div", { class: "section-head" }, h("h3", {}, t("Relationships"))),
-        h("p", { class: "muted" }, input.task.parent ? t("Parent task {0}", input.task.parent) : ""),
-        input.task.dependencies.length ? h("p", { class: "muted" }, t("Blocked by: {0}", input.task.dependencies.join(t(", ")))) : null));
       if (input.task.references.length) detail.append(h("section", { class: "section" },
         h("div", { class: "section-head" }, h("h3", {}, t("References")), h("span", { class: "count" }, input.task.references.length)),
         h("ul", {}, ...input.task.references.map(ref => h("li", {}, ref.label ?? ref.id)))));
@@ -210,8 +223,112 @@ export class WorkEditor {
       row(t("Working directory"), "terminal", this.textInput("workdir", r.workdir, t("~ (runtime's home directory)")));
       row(t("Repository"), "link", this.textInput("repo", r.repo, t("URL or path, for reference")));
     }
-    if (r.tags.length) row(t("Tags"), "more", h("span", { class: "button-row" }, ...r.tags.map(tag => h("span", { class: "pill" }, tag))));
+    if (r.type === "task") {
+      row(t("Parent task"), "route", this.parentControl(r));
+      row(t("Prerequisites"), "link", this.prerequisiteControl(r));
+    }
+    row(t("Tags"), "flag", this.tagControl(r));
     clear(this.props, ...rows);
+    this.updateDelegate();
+  }
+
+  // ───────────── 结构：父任务、前置、标签（ADR 0039） ─────────────
+
+  private titleOf(id: string): string { return this.byId.get(id)?.title ?? id; }
+
+  /** 被阻塞时不能委派（Hub 也会拒绝）；按钮说明还差哪些前置。 */
+  private updateDelegate(): void {
+    const r = this.record, button = this.delegateButton;
+    if (!button || r.type !== "task") return;
+    const blocked = isBlocked(r);
+    button.disabled = blocked;
+    button.title = blocked ? t("Prerequisites not done: {0}", blockingTitles(r, this.byId).join(t(", "))) : "";
+  }
+
+  private parentControl(task: WorkTask): HTMLElement {
+    const button = h("button", { type: "button", class: `prop-btn${task.parent ? "" : " placeholder-value"}` }, icon("route"), h("span", {}, task.parent ? this.titleOf(task.parent) : t("None")));
+    button.addEventListener("click", () => {
+      const candidates = parentCandidates(task, this.allTasks);
+      openMenu(button, [{ value: "", label: t("No parent task"), selected: !task.parent },
+        ...candidates.map(other => ({ value: other.id, label: other.title, icon: turnIcon(turnGroup(other)), selected: other.id === task.parent }))],
+        value => void this.patch({ parent: value || null }, button, value ? t("Parent task set") : t("Parent task cleared")), { filter: true, placeholder: t("Find a task") });
+    });
+    const parent = task.parent;
+    return h("span", { class: "button-row" }, button,
+      parent ? h("button", { type: "button", class: "icon-btn", title: t("Open parent task"), "aria-label": t("Open parent task"), onclick: () => this.hooks.navigate("work", parent) }, icon("chevron")) : null);
+  }
+
+  private prerequisiteControl(task: WorkTask): HTMLElement {
+    const labels: Record<PrerequisiteState, string> = { open: t("Not done"), done: t("Done"), cancelled: t("Cancelled"), deleted: t("Deleted") };
+    const chips = task.dependencies.map(id => {
+      const state = prerequisiteState(id, this.byId);
+      const tone = state === "open" ? " pill-ochre" : state === "done" ? " pill-green" : "";
+      const remove = h("button", { type: "button", class: "pill-x", title: t("Remove prerequisite"), "aria-label": t("Remove prerequisite {0}", this.titleOf(id)),
+        onclick: () => void this.patch({ dependencies: task.dependencies.filter(value => value !== id) }, remove, t("Prerequisite removed")) }, icon("close"));
+      const name = state === "deleted" ? h("span", {}, t("Deleted task"))
+        : h("button", { type: "button", class: "pill-link", onclick: () => this.hooks.navigate("work", id) }, this.titleOf(id));
+      return h("span", { class: `pill dep-chip${tone}`, title: labels[state] }, statusIcon(state === "deleted" ? "cancelled" : state === "open" ? "blocked" : state), name,
+        state === "cancelled" || state === "deleted" ? h("span", { class: "dep-note" }, labels[state]) : null, remove);
+    });
+    const add = h("button", { type: "button", class: "text-btn" }, icon("plus"), t("Add"));
+    add.addEventListener("click", () => {
+      const candidates = prerequisiteCandidates(task, this.allTasks);
+      if (!candidates.length) { toast(this.allTasks.length ? t("No other task can be a prerequisite") : t("Loading…")); return; }
+      openMenu(add, candidates.map(other => ({ value: other.id, label: other.title, icon: turnIcon(turnGroup(other)) })),
+        value => void this.patch({ dependencies: [...task.dependencies, value] }, add, t("Prerequisite added")), { filter: true, placeholder: t("Find a task") });
+    });
+    return h("span", { class: "button-row dep-list" }, ...chips, add);
+  }
+
+  private tagControl(record: EditableWork): HTMLElement {
+    const known = allTags(this.allTasks).filter(tag => !record.tags.includes(tag));
+    const listId = `tags-${record.id}`;
+    const input = h("input", { class: "prop-input tag-input", name: "prop-tag", placeholder: t("Add a tag"), autocomplete: "off", list: listId, "aria-label": t("Add a tag") });
+    const commit = () => {
+      const tag = normalizeTag(input.value);
+      input.value = "";
+      if (tag && !record.tags.includes(tag)) void this.patch({ tags: [...record.tags, tag] }, input, t("Tag added"));
+    };
+    input.addEventListener("keydown", event => {
+      if (event.isComposing) return;
+      if (event.key === "Enter" || event.key === ",") { event.preventDefault(); commit(); }
+      if (event.key === "Escape") { input.value = ""; input.blur(); }
+    });
+    input.addEventListener("change", () => { if (known.includes(input.value)) commit(); });
+    input.addEventListener("blur", () => { if (normalizeTag(input.value)) commit(); });
+    const pills = record.tags.map(tag => {
+      const remove = h("button", { type: "button", class: "pill-x", title: t("Remove tag"), "aria-label": t("Remove tag {0}", tag),
+        onclick: () => void this.patch({ tags: record.tags.filter(value => value !== tag) }, remove, t("Tag removed")) }, icon("close"));
+      return h("span", { class: "pill" }, `#${tag}`, remove);
+    });
+    return h("span", { class: "button-row tag-list" }, ...pills, input, h("datalist", { id: listId }, ...known.map(tag => h("option", { value: tag }))));
+  }
+
+  /** 后续任务与子任务（来自详情的推导字段）。 */
+  private renderRelations(): void {
+    const input = this.detailInput;
+    if (!input) return;
+    const item = (id: string) => {
+      const task = this.byId.get(id);
+      return h("button", { type: "button", class: "run", onclick: () => this.hooks.navigate("work", id) },
+        task ? turnIcon(turnGroup(task)) : statusIcon("todo"), h("span", { class: "run-round" }, task?.title ?? id),
+        task && isBlocked(task) ? h("span", { class: "muted" }, t("Waiting on {0}", task.blocked_by!.length)) : null,
+        h("span", { class: "row-meta" }, icon("chevron")));
+    };
+    const sections: HTMLElement[] = [];
+    if (input.dependents.length) sections.push(h("section", { class: "section" },
+      h("div", { class: "section-head" }, h("h3", {}, t("Waiting on this task")), h("span", { class: "count" }, input.dependents.length)),
+      h("div", { class: "runs" }, ...input.dependents.map(item))));
+    const progress = childProgress(input.children, this.byId);
+    const task = input.task;
+    const add = this.hooks.newSubtask && task.outcome === "open"
+      ? h("button", { type: "button", class: "btn btn-small", onclick: () => this.hooks.newSubtask?.(task.id, task.project) }, icon("plus"), t("New subtask")) : null;
+    sections.push(h("section", { class: "section" },
+      h("div", { class: "section-head" }, h("h3", {}, t("Subtasks")),
+        progress.total ? h("span", { class: "count", title: t("{0} of {1} done", progress.done, progress.total) }, `${progress.done}/${progress.total}`) : null,
+        h("div", { class: "detail-actions" }, add)),
+      input.children.length ? h("div", { class: "runs" }, ...input.children.map(item)) : h("p", { class: "muted" }, t("No subtasks. Split a large task into smaller ones here."))));
+    clear(this.relations, ...sections);
   }
 
   private textInput(key: string, value: string | undefined, placeholder: string, type = "text"): HTMLInputElement {
@@ -383,7 +500,7 @@ export class WorkEditor {
         h("p", { class: "project-task-head" }, turnIcon(group), TURN_GROUP_LABELS[group], h("span", { class: "count" }, list.length)),
         h("div", { class: "runs" }, ...list.map(task => h("button", { type: "button", class: "run", onclick: () => this.hooks.navigate("work", task.id) },
           turnIcon(turnGroup(task)), h("span", { class: "run-round" }, task.title),
-          group === "todo" || group === "done" || group === "cancelled" ? null : h("span", { class: "muted" }, turnText(task)),
+          group === "todo" || group === "done" || group === "cancelled" ? null : group === "blocked" ? h("span", { class: "muted" }, t("Waiting on {0}", task.blocked_by!.length)) : h("span", { class: "muted" }, turnText(task)),
           h("span", { class: "row-meta" }, icon("chevron"))))))));
     }).catch(cause => { if (this.active) clear(body, failure(errorText(cause))); });
     return h("section", { class: "section" }, h("div", { class: "section-head" }, h("h3", {}, t("Tasks")), h("div", { class: "detail-actions" }, add)), body);
@@ -461,6 +578,7 @@ export class WorkEditor {
     if (task.outcome !== "open") { toast(t("Reopen the task before delegating it."), "error"); return; }
     if (task.turn.reason === "working") { toast(t("{0} is still working on this task.", task.turn.holder), "error"); return; }
     if (task.turn.holder === "nobody") { toast(t("This task is on hold. Choose “I'll handle it” first."), "error"); return; }
+    if (isBlocked(task)) { toast(t("Prerequisites not done: {0}", blockingTitles(task, this.byId).join(t(", "))), "error"); return; }
     const run = task.plan;
     const stage = run && run.stage !== "end" ? run.plan.stages.find(value => value.id === run.stage) : undefined;
     if (run && stage?.kind !== "agent") { this.planStop(task, run.stage); return; }
