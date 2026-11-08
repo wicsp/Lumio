@@ -23,7 +23,7 @@
 | T1-2 ✅ | Work：推导 `blocked_by` / `dependents` / `children`；新筛选；已取消 / 已删除前置不阻塞（修复卡死）；错误信息带阻塞任务 | 后端（Codex） | `packages/work`、`packages/storage`、`apps/hub` |
 | T1-3 ✅ | CLI 与 skill：`task list --ready/--blocked/--tag/--parent`，`task show` 显示前置、后续、子任务；SKILL.md 补充 | 后端（Codex） | `apps/cli`、`skills/lumio` |
 | T1-4 ✅ | Web：被阻塞分组与标记、依赖 / 父任务 / 标签编辑、子任务区、按标签筛选 | 前端（Claude） | `packages/api-client`、`apps/web` |
-| T1-5 | Web：项目依赖图视图（可选，T1-4 验收后再决定） | 前端（Claude） | `apps/web` |
+| T1-5 ✅ | Web：项目依赖图视图（2026-11-08 人类要求实现） | 前端（Claude） | `apps/web` |
 
 T1-2、T1-3 依赖 T1-1；T1-4 依赖 T1-2；T1-5 依赖 T1-4。
 
