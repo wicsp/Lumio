@@ -148,6 +148,8 @@ export function statusIcon(status: string): SVGSVGElement {
       add("circle", ring); add("path", { d: "M8 2a6 6 0 0 1 0 12z", class: "fill" }); break;
     case "waiting": case "waiting_for_human": case "queued": case "planning":
       add("circle", { ...ring, class: "ring dashed" }); break;
+    case "blocked":
+      add("circle", { ...ring, class: "ring dashed" }); add("path", { d: "M5.5 8h5", class: "mark" }); break;
     case "paused":
       add("circle", ring); add("path", { d: "M6.5 5.5v5M9.5 5.5v5", class: "mark" }); break;
     case "done":

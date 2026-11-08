@@ -1,6 +1,6 @@
 # T1-0 任务结构与可开工状态
 
-依据：[ADR 0039](../adr/0039-task-structure-and-readiness.md)（Accepted，2026-11-08 人类批准；T1-1 契约按本文与 ADR 第 2–4 节实现即可）。
+依据：[ADR 0039](../adr/0039-task-structure-and-readiness.md)（Implemented，2026-11-08；T1-1/T1-2 #111，T1-3 #112，T1-4 Web）。
 必读：`docs/DESIGN.md`、`docs/design/work.md`、`web.md`、`security.md`。
 
 ## 目标
@@ -19,10 +19,10 @@
 
 | 编号 | 内容 | 负责 | 改动范围 |
 |---|---|---|---|
-| T1-1 | 契约：`WorkTask.blocked_by`（只读推导）、`WorkTaskDetail.dependents` / `children`、`WorkTaskListArgs` 的 `readiness` / `tag` / `parent`；能力说明文字 | Claude 起草，人类批准 | `packages/schema` |
-| T1-2 | Work：推导 `blocked_by` / `dependents` / `children`；新筛选；已取消 / 已删除前置不阻塞（修复卡死）；错误信息带阻塞任务 | 后端（Codex） | `packages/work`、`packages/storage`、`apps/hub` |
-| T1-3 | CLI 与 skill：`task list --ready/--blocked/--tag/--parent`，`task show` 显示前置、后续、子任务；SKILL.md 补充 | 后端（Codex） | `apps/cli`、`skills/lumio` |
-| T1-4 | Web：被阻塞分组与标记、依赖 / 父任务 / 标签编辑、子任务区、按标签筛选 | 前端（Claude） | `packages/api-client`、`apps/web` |
+| T1-1 ✅ | 契约：`WorkTask.blocked_by`（只读推导）、`WorkTaskDetail.dependents` / `children`、`WorkTaskListArgs` 的 `readiness` / `tag` / `parent`；能力说明文字 | Claude 起草，人类批准 | `packages/schema` |
+| T1-2 ✅ | Work：推导 `blocked_by` / `dependents` / `children`；新筛选；已取消 / 已删除前置不阻塞（修复卡死）；错误信息带阻塞任务 | 后端（Codex） | `packages/work`、`packages/storage`、`apps/hub` |
+| T1-3 ✅ | CLI 与 skill：`task list --ready/--blocked/--tag/--parent`，`task show` 显示前置、后续、子任务；SKILL.md 补充 | 后端（Codex） | `apps/cli`、`skills/lumio` |
+| T1-4 ✅ | Web：被阻塞分组与标记、依赖 / 父任务 / 标签编辑、子任务区、按标签筛选 | 前端（Claude） | `packages/api-client`、`apps/web` |
 | T1-5 | Web：项目依赖图视图（可选，T1-4 验收后再决定） | 前端（Claude） | `apps/web` |
 
 T1-2、T1-3 依赖 T1-1；T1-4 依赖 T1-2；T1-5 依赖 T1-4。
