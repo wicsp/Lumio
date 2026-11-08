@@ -1,3 +1,4 @@
+import {runNativeMCP} from "./native/mcp.ts";
 import { withLanguage, errorMessage, text as msg } from "./messages.ts";
 import { parseArgs } from "node:util";
 import { doctor } from "./doctor.ts";
@@ -17,6 +18,8 @@ import { prepareMigration } from "./prepare-migration.ts";
 import { StorageError } from "@lumio/storage";
 
 export async function run(args: string[]): Promise<void> {
+  if(args[0]==="native-mcp"){await runNativeMCP();return;}
+
   if (args.length === 1 && args[0] === "--version") {
     console.log(version);
   } else if (args[0] === "prepare-migration") {

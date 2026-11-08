@@ -1,3 +1,6 @@
+import {AIConfigurationService} from "./ai-config.ts";
+import {NativeAssistant} from "./native-assistant.ts";
+import {SqliteAIStore} from "@lumio/storage";
 import type { Trash } from "./trash.ts";
 import { validateTarget } from "./targets.ts";
 import { Notifications } from "./notifications.ts";
@@ -23,6 +26,8 @@ import { workdirInVault } from "./execution-policy.ts";
 
 /** Composition only: domain rules belong to their modules; adapters share one transaction-capable database. */
 export class BusinessModules {
+  readonly ai:AIConfigurationService;
+  readonly native:NativeAssistant;
   readonly notifications: Notifications;
   readonly workStore: SqliteWorkStore;
   readonly work: WorkService;
@@ -87,8 +92,11 @@ export class BusinessModules {
     this.workCommands = new WorkCommands(store, this.work, options.authorize ?? authorize, config.localRuntime);
     this.capabilities = new Capabilities(this, store, config, options.authorize);
     this.assistantStore = new SqliteAssistantStore(store.db);
+    this.ai=new AIConfigurationService(new SqliteAIStore(store.db),config.assistantModel);
+    this.ai.store.installConversationPurge();
+    this.native=new NativeAssistant(this.ai.store,this,store,config);
     this.assistant = new AssistantService(this.assistantStore, options.assistantModel ?? configuredModel(config.assistantModel),
-      [...this.capabilities.tools(), ...(options.assistantTools ?? [])], { text: msg, now, id, toolActor: store.assistantActor() });
+      [...this.capabilities.tools(), ...(options.assistantTools ?? [])], { text: msg, now, id, toolActor: store.assistantActor(),resolveModel:(profile,owner)=>this.ai.model(owner,profile),native:{validate:(c,r)=>this.native.validate(c,r),run:this.native.run,cancel:c=>this.native.cancelConversation(c)} });
     this.assistant.recover();
     this.reconcile();
     this.timer = setInterval(() => {

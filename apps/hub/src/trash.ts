@@ -16,6 +16,7 @@ interface TrashModules {
   workStore: SqliteWorkStore;
   assistant: AssistantService;
   assistantStore: SqliteAssistantStore;
+  native?: {beforePurge(conversation:string):void};
 }
 
 type Change = "delete-note" | "delete-conversation" | "restore" | "purge";
@@ -134,7 +135,7 @@ export class Trash {
     return this.store.db.transaction(() => {
       let reattached_tasks: string[] | undefined;
       if (item.kind === "conversation") {
-        if (change === "purge") this.modules.assistantStore.purge(id);
+        if (change === "purge") {this.modules.native?.beforePurge(id);this.modules.assistantStore.purge(id);}
         else this.modules.assistantStore.removeTrash(id);
       } else if (change === "purge") this.modules.workStore.purge(item);
       else reattached_tasks = this.modules.work.restore(item, actor);

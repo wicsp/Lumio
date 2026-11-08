@@ -191,7 +191,8 @@ export async function handleV2(request: Request, route: V2Route, identity: Ident
     const parsed = AssistantChatRequest.safeParse(await json(request));
     if (!parsed.success) throw new HubError("INVALID", { key: "v2.invalid_assistant_request_parameters", args: [] });
     await modules.assistantConfig.refresh();
-    const signal = AbortSignal.any([request.signal, modules.signal, AbortSignal.timeout(120_000)]);
+    const native=parsed.data.conversation?modules.assistant.detail(parsed.data.conversation,identity.actor.id).conversation.native_session:undefined;
+    const signal = AbortSignal.any([...(native?[]:[request.signal]), modules.signal, AbortSignal.timeout(native?1800000:120000)]);
     if (parsed.data.conversation) modules.assistant.detail(parsed.data.conversation, identity.actor.id);
     if (request.headers.get("accept")?.includes("application/x-ndjson")) {
       const encoder = new TextEncoder();

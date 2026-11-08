@@ -157,11 +157,14 @@ async function startHubInstance(config: HubConfig, options: {
             return webFileResponse(file, request.method, options.web!.csp);
           }
           if (url.pathname === "/" && !options.web) { status = 404; return Response.json(ApiError.parse({ error: { code: "NOT_FOUND", message: msg("server.endpoint_not_found") } }), { status }); }
+          if(url.pathname.startsWith("/v2/native-mcp/")){const response=await modules!.native.mcpHandle(request);status=response.status;return response;}
           if (route?.operation === "health") identity = store.authenticate(request.headers.get("authorization"), (options.now ?? (() => new Date()))());
           if (route?.operation !== "health" && route?.operation !== "runtime.join" && route?.operation !== "client.join") {
             identity = store.authenticate(request.headers.get("authorization"), (options.now ?? (() => new Date()))());
             if (!identity) throw new HubError("UNAUTHENTICATED", { key: "server.a_valid_bearer_token_is_required", args: [] });
           }
+          if(url.pathname.startsWith("/v2/runtime/native")){const response=await modules!.native.channel(request,identity!);status=response.status;return response;}
+          if(url.pathname.startsWith("/v2/ai/")||url.pathname.startsWith("/v2/assistant/native-sessions")){const response=await modules!.native.handle(request,identity!);store.audit(identity!,"assistant.config","allow",undefined,"applied");status=response.status;return response;}
           if (!route) throw new HubError("NOT_FOUND", { key: "server.endpoint_not_found", args: [] });
           const knowledgeRoute = KNOWLEDGE_ROUTES.find(item => item.operation === route.operation);
           if (knowledgeRoute) {
@@ -271,6 +274,7 @@ async function startHubInstance(config: HubConfig, options: {
           let code: ApiErrorCode = "INTERNAL", message = msg("server.hub_could_not_process_the_request");
           let details: Omit<ApiError["error"], "code" | "message"> = {};
           if (cause instanceof HubError) { code = cause.code; message = errorMessage(cause); details = cause.details; }
+          else if(cause instanceof Error&&cause.name==="ZodError"){code="INVALID";message=msg("ai.invalid");}
           else if (cause instanceof CoreError) {
             if (cause.code === "NOTE_NOT_FOUND") { code = "NOT_FOUND"; message = errorMessage(cause); }
             else if (["INVALID_QUERY", "INVALID_LIMIT", "AMBIGUOUS_REFERENCE"].includes(cause.code)) { code = "INVALID"; message = errorMessage(cause); }
@@ -284,10 +288,11 @@ async function startHubInstance(config: HubConfig, options: {
         }
     };
     server = Bun.serve({ hostname: config.hostname, port: config.port,
-      async fetch(request, server) { return webResponse(await withLanguage(language({ LUMIO_LANG: request.headers.get("Accept-Language") ?? undefined }), () => handle(request, server)), options.web?.csp); },
+      async fetch(request, server) {return webResponse(await withLanguage(language({LUMIO_LANG:request.headers.get("Accept-Language")??undefined}),()=>handle(request,server)),options.web?.csp);},
     });
+    modules.native.setPort(server.port!);
   } catch (cause) { modules?.stop(); await modules?.trash?.stop(); await modules?.notifications.stop(); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); throw cause; }
-  return { server, store, tasks: tasks!, routines: routines!, modules: modules!, async stop() { modules?.stop(); await server.stop(true); await modules?.trash?.stop(); await modules?.notifications.stop(); await modules?.artifacts.drain(); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); } };
+  return { server, store, tasks: tasks!, routines: routines!, modules: modules!, async stop() { modules?.stop(); await modules?.native.stop(); await server.stop(true); await modules?.trash?.stop(); await modules?.notifications.stop(); await modules?.artifacts.drain(); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); } };
 }
 
 /** One Hub or offline migration owns a state directory. OS locks disappear on crashes, without deleting lock files. */

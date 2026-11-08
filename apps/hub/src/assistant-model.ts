@@ -28,12 +28,9 @@ const object = (value: unknown): Record<string, unknown> => {
 interface Call { id: string; name: string; arguments: string }
 const MAX_BYTES = 4 * 1024 * 1024;
 
-/** The persisted model contract has no reasoning channel. DeepSeek enables thinking by
- * default and requires that channel on tool continuations, so request non-thinking
- * mode explicitly. Match the official host, never a model name on another provider.
- * https://api-docs.deepseek.com/guides/thinking_mode/ */
-export function modelRequestOptions(baseUrl: string): { thinking?: { type: "disabled" } } {
-  return new URL(baseUrl).hostname === "api.deepseek.com" ? { thinking: { type: "disabled" } } : {};
+/** Legacy requests keep their prior non-thinking default; Profiles explicitly opt in. */
+export function modelRequestOptions(baseUrl:string,input?:Pick<AssistantModelRequest,"thinking"|"reasoning_effort">):Record<string,unknown>{
+ const thinking=input?.thinking;const known=new URL(baseUrl).hostname==="api.deepseek.com";if(!known&&((thinking&&thinking!=="default")||input?.reasoning_effort))throw invalid();if(input?.reasoning_effort&&!["low","high","max"].includes(input.reasoning_effort))throw invalid();return {...(thinking&&thinking!=="default"?{thinking:{type:thinking==="on"?"enabled":"disabled"}}:new URL(baseUrl).hostname==="api.deepseek.com"?{thinking:{type:"disabled"}}:{}),...(input?.reasoning_effort?{reasoning_effort:input.reasoning_effort}:{})};
 }
 
 function rejected(status: number): AssistantError {
@@ -61,8 +58,8 @@ export class ChatCompletionsModel implements AssistantModel {
       const key = this.config.credential();
       response = await this.fetcher(`${this.config.baseUrl}/chat/completions`, { method: "POST", redirect: "error", signal,
         headers: { "Content-Type": "application/json", Accept: "text/event-stream", ...(key ? { Authorization: `Bearer ${key}` } : {}) },
-        body: JSON.stringify({ model: input.model ?? this.config.model, stream: true, ...modelRequestOptions(this.config.baseUrl),
-          messages: input.messages.map(message => ({ role: message.role, content: message.content,
+        body: JSON.stringify({ model: input.model ?? this.config.model, stream: true, ...modelRequestOptions(this.config.baseUrl,input),
+          messages: input.messages.map(message => ({ role: message.role, content: message.content,...message.continuation,
             ...(message.tool_call_id ? { tool_call_id: message.tool_call_id } : {}),
             ...(message.tool_calls?.length ? { tool_calls: message.tool_calls.map(call => ({ id: call.id, type: "function", function: { name: call.name, arguments: JSON.stringify(call.args) } })) } : {}),
           })),
@@ -87,6 +84,7 @@ export class ChatCompletionsModel implements AssistantModel {
         }
         let buffer = "", data: string[] = [], content = "", finish: string | undefined, done = false;
         const calls = new Map<number, Call>();
+        const continuation:NonNullable<AssistantModelResponse["continuation"]>={};
         const event = () => {
           if (!data.length) return;
           const payload = data.join("\n"); data = [];
@@ -100,6 +98,7 @@ export class ChatCompletionsModel implements AssistantModel {
           if (choice.index !== 0 || finish) throw invalid();
           const delta = object(choice.delta);
           if (delta.refusal) throw invalid();
+          for(const key of ["reasoning_content","encrypted_content"] as const){if(delta[key]!==undefined&&delta[key]!==null){if(typeof delta[key]!=="string")throw invalid();continuation[key]=(continuation[key]??"")+delta[key];}}
           if (delta.content !== undefined && delta.content !== null) {
             if (typeof delta.content !== "string") throw invalid();
             content += delta.content; options.token(delta.content);
@@ -134,7 +133,7 @@ export class ChatCompletionsModel implements AssistantModel {
           }
         }
         if (buffer.trim() || data.length || !done) throw invalid();
-        return this.result(content, [...calls.entries()].sort(([a], [b]) => a - b).map(([, value]) => value), finish, input);
+        return {...this.result(content, [...calls.entries()].sort(([a], [b]) => a - b).map(([, value]) => value), finish, input),...(Object.keys(continuation).length?{continuation}:{})};
       } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
     } catch (cause) {
       if (cause instanceof AssistantError) throw cause;
@@ -156,7 +155,9 @@ export class ChatCompletionsModel implements AssistantModel {
       if (call.type !== "function" || typeof call.id !== "string" || typeof fn.name !== "string" || typeof fn.arguments !== "string") throw invalid();
       return { id: call.id, name: fn.name, arguments: fn.arguments };
     }), choice.finish_reason, input);
-    if (content) token(content); return result;
+    if (content) token(content);
+    const continuation:NonNullable<AssistantModelResponse["continuation"]>={};for(const key of ["reasoning_content","encrypted_content"] as const){if(message[key]!==undefined){if(message[key]!==null&&typeof message[key]!=="string")throw invalid();continuation[key]=message[key] as string|null;}}
+    return {...result,...(Object.keys(continuation).length?{continuation}:{})};
   }
   private result(content: string, calls: Call[], finish: unknown, input: AssistantModelRequest): AssistantModelResponse {
     if ((calls.length ? finish !== "tool_calls" : finish !== "stop") || calls.length > 16) throw invalid();

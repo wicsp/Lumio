@@ -1,3 +1,4 @@
+import {AIConnection,AIConnectionInput,AIProfile,AIProfileInput,AIConfiguration,AIRuntime,NativeSession,NativeCreate,NativeAction,NativeEventRecord} from "@lumio/schema";
 import { Id, KnowledgeDocument, KnowledgeUpdateRequest, KnowledgeUpdateResult, KnowledgeRelatedRequest, KnowledgeRelatedResult, KnowledgeReferencesRequest, KnowledgeReferencesResult } from "@lumio/schema";
 import { KnowledgeTemplateRequest, KnowledgeTemplateResult, PaperResolveRequest, PaperResolveResult, KnowledgeCreateRequest, KnowledgeCreateResult } from "@lumio/schema";
 import { ExecutionTarget, ExecutionTargetListArgs } from "@lumio/schema";
@@ -72,6 +73,15 @@ export function createClient(options: { url: string; token?: string; language?: 
   }
   const queryParams = (options: QueryOptions): Record<string, string> => options.includePrivate === undefined ? {} : { include_private: String(options.includePrivate) };
   return {
+    aiConfiguration(){return request("/v2/ai/config",{},AIConfiguration);},
+    aiRuntimes(){return request("/v2/ai/runtimes",{},AIRuntime.array());},
+    saveAIConnection(input:AIConnectionInput,id?:string){return request(`/v2/ai/connections${id?`/${validate(idOf("aic"),id)}`:""}`,{},AIConnection,validate(AIConnectionInput,input),id?"PUT":"POST");},
+    saveAIProfile(input:AIProfileInput,id?:string){return request(`/v2/ai/profiles${id?`/${validate(idOf("aip"),id)}`:""}`,{},AIProfile,validate(AIProfileInput,input),id?"PUT":"POST");},
+    createNativeSession(input:NativeCreate){return request("/v2/assistant/native-sessions",{},NativeSession,validate(NativeCreate,input));},
+    nativeSessions(){return request("/v2/assistant/native-sessions",{},NativeSession.array());},
+    nativeSession(id:string){return request(`/v2/assistant/native-sessions/${validate(idOf("ais"),id)}`,{},NativeSession);},
+    nativeAction(id:string,input:NativeAction){return request(`/v2/assistant/native-sessions/${validate(idOf("ais"),id)}/actions`,{},NativeSession,validate(NativeAction,input));},
+    nativeEvents(id:string,after=0){return request(`/v2/assistant/native-sessions/${validate(idOf("ais"),id)}/events`,{after:String(after)},NativeEventRecord.array());},
     knowledgeDocument(id: string) { return request(`/v2/knowledge/notes/${encodeURIComponent(validate(Id, id))}/document`, {}, KnowledgeDocument); },
     // 删除与回收站（ADR 0038）：只有人可用。任务与项目的删除走 workCommand。
     deleteNote(id: string, input: KnowledgeDeleteRequest) { return request(`/v2/knowledge/notes/${encodeURIComponent(validate(Id, id))}`, {}, TrashResult, validate(KnowledgeDeleteRequest, input), "DELETE"); },

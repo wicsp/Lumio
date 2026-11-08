@@ -144,6 +144,10 @@ pi 的 skill 验收说明：pi 的回答完全正确（推荐了 `[[渲染格式
 
 （阶段表 2026-11-06 从 `DESIGN.md` 第 8 节移到这里，ADR 0036。）
 
+## 原生 Assistant 试用
+
+[M1-0](M1-0-native-assistant.md)：统一 AI Profile 与原生 Codex Assistant，独立本地试用中，ADR 0040/0041；合并由用户验收后决定。
+
 ## 给实现者的约定
 - 开始前读 `AGENTS.md`、`docs/DESIGN.md`、本任务说明，以及任务说明里列出的 `docs/design/` 分册；任务说明里列出的 ADR 只在需要了解原因时再读。
 - 写任务说明时（Claude）：在"依据"里列出要读的分册；具体需求写在任务说明里，不为小功能写 ADR（ADR 0036）。

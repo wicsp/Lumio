@@ -27,6 +27,7 @@ export interface Session {
 }
 
 export interface HubExtras {
+  ai?: Client;
   /** 需要你处理（ADR 0030）。旧 Hub 没有这个接口时返回 undefined，界面退回按 Job 显示。 */
   attention(): Promise<WorkAttention[] | undefined>;
   assistantConfig(): Promise<AssistantConfigView>;
@@ -62,6 +63,7 @@ export function createSession(token: string | undefined, onUnauthorized: () => v
   // 旧 Hub（R3-2 之前）没有这些接口：需要你处理退回按 Job 显示，工具记录为空。
   const missing = (cause: unknown) => cause instanceof ApiClientError && cause.code === "NOT_FOUND";
   const hub: HubExtras = {
+    ai:client,
     attention: () => client.workAttention().catch((cause: unknown) => { if (missing(cause)) return undefined; throw cause; }),
     assistantConfig: () => client.assistantConfig(),
     saveAssistantConfig: (update) => client.updateAssistantConfig(update),

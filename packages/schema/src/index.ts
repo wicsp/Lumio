@@ -1,3 +1,4 @@
+import {AIConnection,AIConnectionInput,AIProfile,AIProfileInput,AIUsageBinding,AIConfiguration,AIModel,AIRuntime,NativeSession,NativeRuntimeView,NativeApproval,NativeAction,NativeCreate,NativeEventData,NativeEventRecord,NativeRuntimeCommand,NativeRuntimeMessage,NativeMCPRequest,NativeMCPResult} from "./ai.ts";
 import { KnowledgeDocument, KnowledgeUpdateRequest, KnowledgeUpdateResult, KnowledgeContext, KnowledgeRelatedRequest, KnowledgeRelatedResult, KnowledgeReferencesRequest, KnowledgeReferencesResult } from "./knowledge-editing.ts";
 /**
  * @lumio/schema —— Lumio 的契约，唯一事实来源（ADR 0003）。
@@ -58,6 +59,8 @@ import { CheckResult, LinksResult, NoteDetail, SearchResult } from "./query.ts";
 import { KnowledgeTemplateRequest, KnowledgeTemplateResult, PaperResolveRequest, PaperResolveResult, KnowledgeCreateRequest, KnowledgeCreateResult } from "./knowledge-authoring.ts";
 
 export const CONTRACTS = {
+  "ai-connection": AIConnection, "ai-connection-input": AIConnectionInput, "ai-profile": AIProfile, "ai-profile-input": AIProfileInput, "ai-usage-binding": AIUsageBinding, "ai-configuration": AIConfiguration, "ai-model": AIModel, "ai-runtime": AIRuntime,
+  "native-session": NativeSession, "native-runtime-view": NativeRuntimeView, "native-approval": NativeApproval, "native-action": NativeAction, "native-create": NativeCreate, "native-event": NativeEventData, "native-event-record": NativeEventRecord, "native-runtime-command": NativeRuntimeCommand, "native-runtime-message": NativeRuntimeMessage, "native-mcp-request": NativeMCPRequest, "native-mcp-result": NativeMCPResult,
   "knowledge-document": KnowledgeDocument,
   "knowledge-update-request": KnowledgeUpdateRequest,
   "knowledge-update-result": KnowledgeUpdateResult,
@@ -183,3 +186,5 @@ export * from "./knowledge-authoring.ts";
 export * from "./knowledge-editing.ts";
 
 export * from "./trash.ts";
+
+export * from "./ai.ts";

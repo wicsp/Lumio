@@ -1159,3 +1159,17 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
   .trash-expiry { grid-column: 2; grid-row: 2; }
   .trash-actions { grid-column: 3; grid-row: 1 / span 2; }
 }
+
+/* Native assistant controls share the conversation's existing composer surface. */
+.native-panel { border:1px solid var(--line); border-radius:var(--r-md); padding:12px; margin-bottom:10px; max-height:38vh; overflow:auto; font-size:var(--fs-sm); }
+.native-status { margin-bottom:8px; color:var(--ink-2); }
+.native-panel .button-row { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+.native-panel select { max-width:100%; min-width:0; }
+.native-panel pre { white-space:pre-wrap; overflow-wrap:anywhere; font:var(--fs-sm)/1.5 var(--mono); }
+.native-panel .native-approval { border-left:3px solid var(--lumen); margin-top:10px; padding:10px; background:var(--sunken); }
+.native-history details { margin-top:8px; }
+.native-history summary { cursor:pointer; color:var(--ink-3); }
+.native-code { display:inline-block; padding:6px 10px; user-select:all; }
+.native-panel .check-field { display:flex; align-items:center; gap:8px; padding:8px 0; }
+.composer-foot select { max-width:240px; min-width:0; }
+@media(max-width:600px) { .native-panel { max-height:32vh; padding:8px; } .composer-foot { flex-wrap:wrap; } .composer-foot select { max-width:160px; } }

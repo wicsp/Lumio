@@ -1,3 +1,4 @@
+import {AISettings} from "./ai-settings.ts";
 /**
  * 设置页「助手模型」（ADR 0027 第 4 节、0029 第 7 节）。
  * 密钥只写不读；保存前默认先测试连接，失败不保存；保存后 Hub 立即使用，不需要重启。
@@ -29,12 +30,16 @@ export function configProblem(cause: unknown): string {
 export class AssistantSettings {
   readonly element = h("div", { class: "set-rows" });
   private active = true;
+  private legacy=h("div",{class:"set-rows"});
+  private profiles?:AISettings;
 
   constructor(private hub: HubExtras) {
-    clear(this.element, h("p", { class: "set-empty" }, t("Loading…")));
+    if(hub.ai){this.profiles=new AISettings(hub.ai);this.element.append(this.profiles.element,h("details",{},h("summary",{},t("Existing API configuration")),this.legacy));}
+    else this.element.append(this.legacy);
+    clear(this.legacy, h("p", { class: "set-empty" }, t("Loading…")));
     void this.load();
   }
-  dispose(): void { this.active = false; }
+  dispose(): void { this.active = false;this.profiles?.dispose(); }
 
   private async load(): Promise<void> {
     try {
@@ -43,7 +48,7 @@ export class AssistantSettings {
     } catch (cause) {
       if (!this.active) return;
       const missing = cause instanceof ApiClientError && cause.code === "NOT_FOUND";
-      clear(this.element, h("p", { class: "set-empty" }, missing
+      clear(this.legacy, h("p", { class: "set-empty" }, missing
         ? t("This Hub can't be configured from the browser yet. Run lumio hub assistant setup on the Hub machine.")
         : errorText(cause)));
     }
@@ -57,7 +62,7 @@ export class AssistantSettings {
         configured ? h("span", { class: "set-sub" }, view.base_url!) : h("span", { class: "set-sub" }, t("Chat is unavailable until a model is set."))),
       h("span", { class: "set-value muted" }, view.api_key_set ? t("Key saved") : t("No key")));
     if (!view.managed) {
-      clear(this.element, summary, h("p", { class: "set-empty" }, t("This configuration comes from the Hub's service environment, so it can't be changed here.")));
+      clear(this.legacy, summary, h("p", { class: "set-empty" }, t("This configuration comes from the Hub's service environment, so it can't be changed here.")));
       return;
     }
 
@@ -110,6 +115,6 @@ export class AssistantSettings {
       catch (cause) { if (this.active) clear(message, failure(errorText(cause))); }
       finally { busy = false; }
     });
-    clear(this.element, summary, h("div", { class: "set-form-wrap" }, form));
+    clear(this.legacy, summary, h("div", { class: "set-form-wrap" }, form));
   }
 }

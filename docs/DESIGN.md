@@ -56,7 +56,7 @@ Foundation 提供 ID 和错误；Platform 提供终端、诊断、下载与升�
 ## 2. 工程基础
 
 - **一个代码仓库**，数据（vault）不放在仓库里（ADR 0001）。
-- **全部 TypeScript，运行在 Bun 上**；Bun 固定为 1.3.x，与人类的 Nix 环境一致（ADR 0002，AGENTS.md）。
+- **全部 TypeScript，运行在 Bun 上**；Bun 固定为 1.4.x（2026-11-08 人类升级），与人类的 Nix 环境一致（ADR 0002，AGENTS.md）。
 - 全部角色用 `bun build --compile` 编译成**一个程序** `lumio`，以子命令区分 `lumio hub …`、`lumio runtime …`；`lumio-hub`、`lumio-runtime` 是指向它的兼容链接（ADR 0002、0027）。
 - **界面语言**（ADR 0028）：面向人的输出默认英文，中文环境用中文。命令行按 `LUMIO_LANG`、`LC_ALL`、`LC_MESSAGES`、`LANG` 的第一个非空值判断（`zh` 开头用中文）；
   后台服务日志固定英文；Hub 的错误说明按请求 `Accept-Language` 选择，`code` 不变、客户端不依赖文字判断；Web 可切换并保存在浏览器。

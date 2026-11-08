@@ -5,7 +5,7 @@
 
 网页由 Hub 提供；决定见 ADR 0026、0027。
 
-- **技术栈**：原生 TypeScript、DOM 与 CSS，用 Bun 1.3.x 构建静态资源，由 Hub 提供。业务依赖 `@lumio/api-client` 与 `@lumio/schema`；笔记编辑集成 CodeMirror 6 的 state/view/commands/language/lang-markdown/autocomplete（ADR 0035）。
+- **技术栈**：原生 TypeScript、DOM 与 CSS，用 Bun 1.4.x 构建静态资源，由 Hub 提供。业务依赖 `@lumio/api-client` 与 `@lumio/schema`；笔记编辑集成 CodeMirror 6 的 state/view/commands/language/lang-markdown/autocomplete（ADR 0035）。
   Hub 为每次 HTML 响应生成样式 nonce，允许编辑器动态样式，不放宽脚本 CSP。公式使用随包提供的 KaTeX，输出原生 MathML，不加载远程渲染资源（W1-0）。
 - **类型隔离**：浏览器端与服务端是两个独立的 TypeScript 程序，根 typecheck 同时检查两者。
 - **访问路径**（ADR 0027）：网页由 Hub 在自己的地址上提供（单机 `http://127.0.0.1:7420`；服务器模式为 Hub 的对外地址），浏览器与 Hub 同源，直接调用 `/v1`、`/v2`。
@@ -22,3 +22,8 @@
 - **部署**：前端资源构建时嵌入 `lumio` 程序，随 Hub 一起提供与升级（ADR 0027）。
 - **App**：提供 Web App Manifest 与图标，可安装到桌面或主屏幕；除恢复副本外不缓存业务数据。原生 Mac App 以后另定（ADR 0027）。
 - **边界**：Web 不自行运行 agent，通过 Hub 显式委派。
+
+## 原生 Assistant（ADR 0040、0041）
+
+- 设置页统一管理 Connection/Profile；Assistant 选择 API 或原生 Profile。原生登录只打开官方地址，网页登录不持有官方认证；动态模型与思考档位来自执行器报告。
+- 已保存原生状态、公开思考摘要、工具进度和审批在同一对话展示；不能用刷新/重连重发未知消息。审批与核查表单轮询时保留输入，发送前检查会话 ready；模型不支持的档位需重新选择。

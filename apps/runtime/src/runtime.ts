@@ -1,3 +1,4 @@
+import {runNativeChannel} from "./native/channel.ts";
 import { withLanguage, text as msg } from "./messages.ts";
 import { SudoGate } from "./sudo.ts";
 import { privateFile } from "./service.ts";
@@ -93,9 +94,11 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
   let delivering: Promise<void> | undefined;
   let archiving: Promise<void> | undefined;
   let deliveryFailure: unknown;
+  let native:Promise<void>|undefined;
   try {
     await sudo.start();
     await executor.recover();
+    if((options.env??process.env).LUMIO_NATIVE_SESSIONS==="1")native=runNativeChannel(config,signal,options.env??process.env).catch(()=>{log(msg("native.channel_failed"));});
     delivering = deliver().catch((cause) => { deliveryFailure = cause; shutdown.abort(); });
     archiving = (async () => {
       while (!signal.aborted) {
@@ -147,6 +150,7 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
     await sudo.close();
     await delivering;
     await archiving;
+    await native;
     queue.close();
   }
   if (deliveryFailure) throw deliveryFailure;

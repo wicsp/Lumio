@@ -1,3 +1,4 @@
+import {NativeEventData} from "./ai.ts";
 import { z } from "zod";
 import { CapabilityChange, CapabilityName } from "./capabilities.ts";
 import { RequestId, Revision, Timestamp, idOf } from "./common.ts";
@@ -19,6 +20,8 @@ export const ModelMessageRole = z.enum(["system", "user", "assistant", "tool"]);
 export const AssistantConversation = z.strictObject({
   id: idOf("conv"),
   title: z.string().min(1),
+  native_session: idOf("ais").optional(),
+  profile: idOf("aip").optional(),
   owner: idOf("act").describe("拥有者身份；只有拥有者与授权者可见"),
   created: Timestamp,
   updated: Timestamp,
@@ -173,6 +176,8 @@ export const AssistantChatRequest = z.strictObject({
   request_id: RequestId,
   conversation: idOf("conv").optional().describe("缺省时创建新对话"),
   message: z.string().min(1).describe("用户输入"),
+  profile: idOf("aip").optional(),
+  effort: z.string().min(1).max(32).optional(),
   model: z.string().min(1).optional().describe("指定模型；缺省由应用决定"),
 });
 
@@ -198,6 +203,7 @@ export const AssistantChatResult = z.strictObject({
  */
 export const AssistantModelMessage = z.strictObject({
   role: ModelMessageRole,
+  continuation: z.strictObject({reasoning_content:z.string().nullable().optional(),encrypted_content:z.string().nullable().optional()}).optional(),
   content: z.string(),
   tool_call_id: z.string().optional().describe("role=tool 时：这是哪个工具调用的结果"),
   tool_calls: z
@@ -215,6 +221,8 @@ export const AssistantToolSpec = z.strictObject({
 
 /** 模型请求（给适配器用）。 */
 export const AssistantModelRequest = z.strictObject({
+  reasoning_effort:z.string().optional(),
+  thinking:z.enum(["default","off","on"]).optional(),
   model: z.string().min(1).optional().describe("缺省时用适配器默认模型"),
   messages: z.array(AssistantModelMessage).min(1),
   tools: z.array(AssistantToolSpec).describe("可用工具；没有工具时传 []"),
@@ -222,6 +230,7 @@ export const AssistantModelRequest = z.strictObject({
 
 /** 模型响应（适配器返回给 Assistant 核心）。 */
 export const AssistantModelResponse = z.strictObject({
+  continuation:z.strictObject({reasoning_content:z.string().nullable().optional(),encrypted_content:z.string().nullable().optional()}).optional(),
   content: z.string().describe("assistant 回复的文本内容"),
   tool_calls: z.array(z.strictObject({ id: z.string(), name: z.string(), args: z.record(z.string(), z.unknown()) })).describe(
     "assistant 想调用的工具；没有时为空数组",
@@ -235,6 +244,7 @@ export const AssistantModelResponse = z.strictObject({
  * token：流式文本片段；tool：工具调用开始/结束；result：轮次完成；error：失败。
  */
 export const AssistantEvent = z.discriminatedUnion("type", [
+  z.strictObject({type:z.literal("native"),turn:idOf("turn"),event:NativeEventData}),
   z.strictObject({ type: z.literal("token"), turn: idOf("turn"), delta: z.string() }),
   z.strictObject({ type: z.literal("tool"), turn: idOf("turn"), tool: AssistantToolCall }),
   z.strictObject({ type: z.literal("result"), turn: idOf("turn"), messages: z.array(AssistantMessage) }),
