@@ -13,7 +13,9 @@ import { KnowledgeCreate } from "./knowledge-create.ts";
  */
 import { NOTE_TYPES, type NoteDetail, type LinksResult, type SearchResult } from "@lumio/schema";
 import { errorText, type Client } from "../api.ts";
-import { clear, debounce, empty, failure, h, icon, loading, openMenu, placeholder, highlightedText, toast } from "../dom.ts";
+import { clear, debounce, empty, failure, h, icon, loading, openDialog, openMenu, placeholder, highlightedText, toast } from "../dom.ts";
+import { noteGraph } from "../graph/data.ts";
+import { relationGraph } from "../graph/view.ts";
 import { listKeys, markSelected } from "../list-keys.ts";
 import { renderMarkdown, safeExternalUrl } from "../utils/markdown.ts";
 import { t, translated } from "../i18n.ts";
@@ -201,13 +203,48 @@ export class KnowledgePane {
     clear(this.detail, h("article", { class: "reader" },
       h("div", { class: "detail-crumbs" }, h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": t("Back to list"), onclick: async () => { if (!(await this.beforeLeave())) return; this.clearWriter(); this.selected = undefined; markSelected(this.results, undefined); this.showPlaceholder(); } }, icon("back"))),
       h("h1", { class: "reader-title" }, note.note.title),
-      h("div", { class: "reader-meta" }, h("span", { class: "pill" }, kindLabel), attribution && h("span", {}, attribution), sourceUrl && h("a", { href: sourceUrl, target: "_blank", rel: "noopener noreferrer nofollow", class: "btn btn-small" }, icon("external"), t("Open source")), note.note.citekey && h("span", { class: "pill" }, note.note.citekey)),
+      h("div", { class: "reader-meta" }, h("span", { class: "pill" }, kindLabel), attribution && h("span", {}, attribution), sourceUrl && h("a", { href: sourceUrl, target: "_blank", rel: "noopener noreferrer nofollow", class: "btn btn-small" }, icon("external"), t("Open source")), note.note.citekey && h("span", { class: "pill" }, note.note.citekey),
+        h("button", { type: "button", class: "btn btn-small", title: t("Show how this note links to others"), onclick: () => this.openGraph(note.note.id ?? note.note.path, note.note.title) }, icon("graph"), t("Graph"))),
       body,
       links && h("footer", { class: "backlinks" }, list(t("Links to"), links.outgoing), list(t("Linked from"), links.incoming))));
     this.detail.scrollTop = 0;
     this.outlineEntries = () => renderedOutline(this.detail, body); this.outline.refresh();
     if(note.note.id && ["paper","source","idea","experiment","post"].includes(note.note.type) && !note.note.path.startsWith("life/"))void this.enableEditing(note);
     else this.detail.querySelector("article")?.append(h("p",{class:"field-hint"},t("This note is read-only here. Check its metadata or edit it in your external editor.")));
+  }
+  /**
+   * 关系图：以这篇笔记为中心，沿出链与反链画一层或两层（只读现有链接接口）。
+   * 私密开关与列表一致；点节点关闭对话框并打开那篇笔记（会先保存当前编辑）。
+   */
+  private openGraph(reference: string, title: string): void {
+    const includePrivate = this.includePrivate;
+    const DEPTH_KEY = "lumio.web.note-graph-depth";
+    let depth: 1 | 2 = (() => { try { return localStorage.getItem(DEPTH_KEY) === "1" ? 1 : 2; } catch { return 2; } })();
+    const area = h("div", { class: "graph-frame graph-frame-net" }, loading());
+    const info = h("p", { class: "graph-hint" });
+    const one = h("button", { type: "button" }, t("Direct links")), two = h("button", { type: "button" }, t("Two steps"));
+    const legend = h("div", { class: "graph-legend" }, ...["paper", "idea", "source", "experiment", "post", "asset"].map(type => h("span", { class: `lg lg-kind-${type}` }, TYPE_LABEL[type] ?? type)));
+    const body = h("div", { class: "form-stack" }, h("div", { class: "graph-toolbar" }, h("div", { class: "segmented segmented-small", role: "group", "aria-label": t("Depth") }, one, two), info), area, legend);
+    const dialog = openDialog(t("Graph: {0}", title), body, [], { wide: true });
+    dialog.classList.add("dialog-graph");
+    let generation = 0;
+    const draw = async () => {
+      one.setAttribute("aria-pressed", String(depth === 1)); two.setAttribute("aria-pressed", String(depth === 2));
+      const current = ++generation;
+      clear(area, loading()); info.textContent = "";
+      try {
+        const graph = await noteGraph(reference, depth, ref => this.client.links(ref, { includePrivate }));
+        if (current !== generation || !dialog.open) return;
+        if (graph.nodes.length < 2) { clear(area, h("p", { class: "muted graph-empty" }, t("This note has no links yet. Link notes with [[name]] or a Markdown link."))); return; }
+        const svg = relationGraph(graph.nodes, graph.edges, id => { dialog.close(); void this.open(id); });
+        svg.setAttribute("aria-label", t("Graph of {0} notes", graph.nodes.length));
+        clear(area, svg);
+        info.textContent = graph.truncated ? t("{0} notes · showing part of the graph · scroll to zoom, drag to move", graph.nodes.length) : t("{0} notes · scroll to zoom, drag to move", graph.nodes.length);
+      } catch (error) { if (current === generation) clear(area, failure(errorText(error), () => void draw())); }
+    };
+    const choose = (next: 1 | 2) => { depth = next; try { localStorage.setItem(DEPTH_KEY, String(next)); } catch { /* 只在本次显示 */ } void draw(); };
+    one.addEventListener("click", () => choose(1)); two.addEventListener("click", () => choose(2));
+    void draw();
   }
   private async enableEditing(note:NoteDetail):Promise<void>{
     const generation=this.generation;
