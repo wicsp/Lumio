@@ -23,7 +23,7 @@ Always add `--json`. Each successful command returns one JSON value matching its
 | knowledge.note.search | `lumio search <query> [--type <type>] [--limit <limit>] [--include-private] [--vault <vault>] --json` | Search the user's notes (papers, ideas, sources). Snippets are short; read a hit with knowledge.note.show. |
 | knowledge.note.show | `lumio show <ref> [--include-private] [--vault <vault>] --json` | Read one note in full. |
 | knowledge.note.links | `lumio links <ref> [--include-private] [--vault <vault>] --json` | List a note's outgoing and incoming links. |
-| work.task.list | `lumio task list [--project <project>] [--status <status>] [--turn <turn>] [--query <query>] --json` | List tasks with derived blocked_by; filter by readiness (ready or blocked), tag, parent, project, status or text. |
+| work.task.list | `lumio task list [--project <project>] [--status <status>] [--turn <turn>] [--query <query>] [--ready] [--blocked] [--tag <tag>] [--parent <parent>] --json` | List tasks with derived blocked_by; filter by readiness (ready or blocked), tag, parent, project, status or text. |
 | work.task.show | `lumio task show <id> [--legacy] --json` | Show a task with derived blocked_by, dependents, children, discussion and execution rounds. |
 | work.attention.list | `lumio attention --json` | List what needs the user now: questions from agents, finished rounds awaiting review, and failed rounds. |
 | work.project.list | `lumio project list [--status <status>] --json` | List projects. |
@@ -75,7 +75,11 @@ Before delegation or setting a plan, run `lumio targets --json` and use a return
 
 ## Working with tasks and rounds
 
-Use `task list` and `project list` to find work, then `task show` for discussion and execution rounds. Use `job show` for a round's report. Use `attention` to find questions, results awaiting review and failed rounds that need the user. You can explain pending proposals but only the user decides them.
+Before claiming work, run `lumio task list --ready --json` and `project list`, then read `task show` for prerequisites, dependents, children, discussion and execution rounds. Ready means an open task with no blocking prerequisites; it does not grant permission to start a round. Use `task list --blocked`, `--tag <tag>` or `--parent <task-id>` to inspect structure. Cancelled or deleted prerequisites do not block; restoring an open prerequisite blocks again.
+
+When you discover an ordering relationship, propose `lumio task update <task-id> --depends <id1,id2> --revision <observed-revision> --json` under the existing proposal rules. Explain the suggested structure and get the user's agreement before submitting changes to someone else's tasks. `--depends` replaces the entire dependency list, so preserve existing prerequisites. Do not change another task's parent, project, dependencies or tags on your own. Structure edits use the existing update permission and proposal rules; this workflow does not add a new approval API.
+
+Use `task show` for discussion and execution rounds. Use `job show` for a round's report. Use `attention` to find questions, results awaiting review and failed rounds that need the user. You can explain pending proposals but only the user decides them.
 
 When a round needs clarification, ask one clear question inside `<lumio-question>...</lumio-question>` and end the round. Report completed work under Result / Changes / Validation. A successful round is evidence for the user to review; do not declare the task complete.
 

@@ -1,6 +1,15 @@
 import { language, renderMessage, type Language } from "@lumio/platform";
 
 export const en = {
+  "work.readiness_exclusive": "--ready and --blocked cannot be used together.",
+  "work.waiting_for": (count: unknown) => `Waiting for ${String(count)} ${Number(count) === 1 ? "task" : "tasks"}`,
+  "work.prerequisites": "Prerequisites",
+  "work.dependents": "Dependents",
+  "work.children": "Children",
+  "work.deleted_task": "Deleted task",
+  "work.outcome.open": "Open",
+  "work.outcome.done": "Done",
+  "work.outcome.cancelled": "Cancelled",
   "work.blocked_dependencies": (tasks: unknown) => `Unfinished prerequisites: ${String(tasks)}`,
   "help.usage": "Usage",
   "targets.offline": (targets: unknown) => `Offline targets (execution waits until they reconnect): ${String(targets)}`,
@@ -759,6 +768,15 @@ ${String(p0)}${String(p1)}`,
   "Run tailscale serve status to check": "Run tailscale serve status to check",
 };
 export const zh: typeof en = {
+  "work.readiness_exclusive": "--ready 与 --blocked 不能同时使用。",
+  "work.waiting_for": (count: unknown) => `等 ${String(count)} 个`,
+  "work.prerequisites": "前置",
+  "work.dependents": "后续",
+  "work.children": "子任务",
+  "work.deleted_task": "已删除的任务",
+  "work.outcome.open": "未完成",
+  "work.outcome.done": "已完成",
+  "work.outcome.cancelled": "已取消",
   "work.blocked_dependencies": (tasks: unknown) => `前置未完成：${String(tasks)}`,
   "help.usage": "用法",
   "targets.offline": (targets: unknown) => `离线目标（上线后开始执行）：${String(targets)}`,
