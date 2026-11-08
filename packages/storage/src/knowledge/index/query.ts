@@ -1,16 +1,16 @@
 import type { Database } from "bun:sqlite";
-import { CheckResult, LinksResult, NoteDetail, SearchResult, type Link, type NoteRef } from "@lumio/schema";
+import { CheckResult, KnowledgeGraph, LinksResult, NoteDetail, SearchResult, type Link, type NoteRef } from "@lumio/schema";
 import { CoreError } from "@lumio/foundation";
 import { extractCitations, resolveMarkdownPath } from "@lumio/knowledge";
-import { noteRef, snippet, withIndex, type IndexOptions, type NoteRow } from "./store.ts";
+import { noteRef, snippet, withIndex, readIndex, type IndexOptions, type NoteRow } from "./store.ts";
 
 export interface QueryOptions extends IndexOptions { includePrivate?: boolean }
 export interface SearchOptions extends QueryOptions { type?: NoteRef["type"]; limit?: number }
 
 function resolveReference(db: Database, reference: string, includePrivate = false): NoteRow {
-  const candidates = db.query<NoteRow, [string, string, string, number]>(
-    "SELECT * FROM notes WHERE (id=? OR citekey=? OR filename=?) AND (private=0 OR ?=1) ORDER BY path",
-  ).all(reference, reference, reference, Number(includePrivate));
+  const candidates = db.query<NoteRow, [string, string, string, string, number]>(
+    "SELECT * FROM notes WHERE (path=? OR id=? OR citekey=? OR filename=?) AND (private=0 OR ?=1) ORDER BY path",
+  ).all(reference, reference, reference, reference, Number(includePrivate));
   if (candidates.length === 1) return candidates[0]!;
   if (!candidates.length) throw new CoreError("NOTE_NOT_FOUND", { key: "query.note_not_found_candidates_none", args: [] });
   throw new CoreError("AMBIGUOUS_REFERENCE", { key: "query.reference_matches_multiple_notes_candidates", args: [candidates.map((n) => n.path).join("\n")] });
@@ -104,4 +104,26 @@ export async function checkLinks(root: string, options: QueryOptions = {}): Prom
 /** Paths only: raw sensitive text is never stored or returned. */
 export async function excludedCardPaths(root: string, options: QueryOptions = {}): Promise<string[]> {
   return withIndex(root, options, (db) => db.query<{ path: string }, []>("SELECT path FROM files WHERE blocked=1 ORDER BY path").all().map((f) => f.path));
+}
+
+/** Whole graph comes from one consistent index snapshot, never a per-note query loop. */
+export async function knowledgeGraph(root: string, options: SearchOptions & { includeLegacy?: boolean } = {}): Promise<KnowledgeGraph> {
+  return readIndex(root, options, db => {
+    const params = { private: Number(options.includePrivate ?? false), type: options.type ?? null, legacy: Number(options.includeLegacy ?? false) };
+    const rows = db.query<NoteRow, typeof params>(`SELECT * FROM notes WHERE (private=0 OR $private=1)
+      AND ($type IS NULL OR type=$type) AND ($legacy=1 OR type NOT IN ('task','project','routine'))
+      AND path NOT LIKE '.trash/%' AND path NOT LIKE '%/.trash/%' ORDER BY path`).all(params);
+    const shown = new Set(rows.map(row => row.path)), edges = new Map<string, { from: string; to: string; count: number }>();
+    let dangling = 0;
+    const links = db.query<{ from_path: string; resolved_path: string | null }, []>("SELECT from_path,resolved_path FROM links ORDER BY from_path,resolved_path,rowid").all();
+    for (const link of links) {
+      if (!shown.has(link.from_path)) continue;
+      if (link.resolved_path === null) { dangling++; continue; }
+      if (!shown.has(link.resolved_path) || link.from_path === link.resolved_path) continue;
+      const key = JSON.stringify([link.from_path, link.resolved_path]);
+      const edge = edges.get(key) ?? { from: link.from_path, to: link.resolved_path, count: 0 }; edge.count++; edges.set(key, edge);
+    }
+    return KnowledgeGraph.parse({ nodes: rows.map(noteRef), edges: [...edges.values()], dangling,
+      generated_at: db.query<{ updated_at: string }, []>("SELECT updated_at FROM metadata").get()!.updated_at });
+  });
 }

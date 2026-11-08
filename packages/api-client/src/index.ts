@@ -1,4 +1,4 @@
-import { Id, KnowledgeDocument, KnowledgeUpdateRequest, KnowledgeUpdateResult, KnowledgeRelatedRequest, KnowledgeRelatedResult, KnowledgeReferencesRequest, KnowledgeReferencesResult } from "@lumio/schema";
+import { KnowledgeGraph, KnowledgeGraphArgs, Id, KnowledgeDocument, KnowledgeUpdateRequest, KnowledgeUpdateResult, KnowledgeRelatedRequest, KnowledgeRelatedResult, KnowledgeReferencesRequest, KnowledgeReferencesResult } from "@lumio/schema";
 import { KnowledgeTemplateRequest, KnowledgeTemplateResult, PaperResolveRequest, PaperResolveResult, KnowledgeCreateRequest, KnowledgeCreateResult } from "@lumio/schema";
 import { ExecutionTarget, ExecutionTargetListArgs } from "@lumio/schema";
 import { AssistantConversationDeleteRequest, KnowledgeDeleteRequest, TrashListArgs, TrashListResult, TrashPurgeRequest, TrashPurgeResult, TrashRestoreRequest, TrashRestoreResult, TrashResult } from "@lumio/schema";
@@ -72,6 +72,10 @@ export function createClient(options: { url: string; token?: string; language?: 
   }
   const queryParams = (options: QueryOptions): Record<string, string> => options.includePrivate === undefined ? {} : { include_private: String(options.includePrivate) };
   return {
+    knowledgeGraph(args: KnowledgeGraphArgs = {}) {
+      const input = validate(KnowledgeGraphArgs, args);
+      return request("/v2/knowledge/graph", Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined).map(([key, value]) => [key, String(value)])), KnowledgeGraph);
+    },
     knowledgeDocument(id: string) { return request(`/v2/knowledge/notes/${encodeURIComponent(validate(Id, id))}/document`, {}, KnowledgeDocument); },
     // 删除与回收站（ADR 0038）：只有人可用。任务与项目的删除走 workCommand。
     deleteNote(id: string, input: KnowledgeDeleteRequest) { return request(`/v2/knowledge/notes/${encodeURIComponent(validate(Id, id))}`, {}, TrashResult, validate(KnowledgeDeleteRequest, input), "DELETE"); },

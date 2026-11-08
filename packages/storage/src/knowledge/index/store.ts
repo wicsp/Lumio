@@ -43,7 +43,7 @@ function initializeOnce(db: Database, root: string): void {
 
 function initialize(db: Database, root: string): void {
   db.exec(`
-    CREATE TABLE metadata (version INTEGER NOT NULL, vault TEXT NOT NULL);
+    CREATE TABLE metadata (version INTEGER NOT NULL, vault TEXT NOT NULL, updated_at TEXT NOT NULL);
     CREATE TABLE files (path TEXT PRIMARY KEY, mtime REAL NOT NULL, size INTEGER NOT NULL, blocked INTEGER NOT NULL);
     CREATE TABLE notes (path TEXT UNIQUE NOT NULL, id TEXT, type TEXT NOT NULL, title TEXT NOT NULL,
       citekey TEXT, filename TEXT NOT NULL, private INTEGER NOT NULL, mtime REAL NOT NULL, size INTEGER NOT NULL,
@@ -55,7 +55,7 @@ function initialize(db: Database, root: string): void {
     CREATE INDEX links_from ON links(from_path);
     CREATE INDEX links_to ON links(resolved_path);
   `);
-  db.query("INSERT INTO metadata VALUES (?, ?)").run(VERSION, root);
+  db.query("INSERT INTO metadata VALUES (?, ?, ?)").run(VERSION, root, new Date().toISOString());
 }
 
 /**
@@ -95,6 +95,15 @@ async function openStore(path: string, root: string): Promise<Database> {
     if (healthy && metadata?.version === VERSION && metadata.vault === root
       && ["files", "notes", "fulltext", "links"].every((name) => tables.some((t) => t.name === name))) {
       db.exec("INSERT INTO fulltext(fulltext) VALUES ('integrity-check')");
+      // Additive derived metadata remains readable by older clients; no business migration.
+      if (!db.query<{ name: string }, []>("PRAGMA table_info(metadata)").all().some(column => column.name === "updated_at")) {
+        db.transaction(() => {
+          if (!db!.query<{ name: string }, []>("PRAGMA table_info(metadata)").all().some(column => column.name === "updated_at")) {
+            db!.exec("ALTER TABLE metadata ADD COLUMN updated_at TEXT NOT NULL DEFAULT '1970-01-01T00:00:00.000Z'");
+            db!.query("UPDATE metadata SET updated_at=?").run(new Date().toISOString());
+          }
+        }).immediate();
+      }
       return db;
     }
   } catch (cause) {
@@ -192,6 +201,7 @@ export async function withIndex<T>(root: string, options: IndexOptions, query: (
           update.run(path ? find.get(path)?.path ?? null : null, link.rowid);
         }
       }
+      database.query("UPDATE metadata SET updated_at=?").run(new Date().toISOString());
     }).immediate();
     return query(database);
   } catch (cause) {
@@ -216,4 +226,21 @@ export function snippet(text: string, query: string): string {
 /** Refresh the derived index without issuing a user query. */
 export async function updateIndex(root: string, options: IndexOptions = {}): Promise<void> {
   await withIndex(root, options, () => {});
+}
+
+/** Read the current index snapshot without scanning, parsing or modifying vault files. */
+export async function readIndex<T>(root: string, options: IndexOptions, query: (db: Database) => T): Promise<T> {
+  let db: Database | undefined;
+  try {
+    const state = options.stateDir ?? process.env.LUMIO_STATE_DIR ?? join(homedir(), ".local", "share", "lumio");
+    db = new Database(join(state, "index.sqlite"), { readonly: true, strict: true });
+    db.exec("PRAGMA busy_timeout = 5000");
+    const metadata = db.query<{ version: number; vault: string }, []>("SELECT version,vault FROM metadata").get();
+    if (metadata?.version !== VERSION || metadata.vault !== resolve(root)) throw new Error("Index metadata mismatch");
+    const database = db;
+    return database.transaction(() => query(database))();
+  } catch (cause) {
+    if (cause instanceof CoreError) throw cause;
+    throw new CoreError("INDEX_FAILED", { key: "store.could_not_update_or_query_local_index", args: [] }, { cause });
+  } finally { db?.close(); }
 }
