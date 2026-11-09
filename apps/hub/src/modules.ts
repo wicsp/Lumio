@@ -96,6 +96,7 @@ export class BusinessModules {
     this.capabilities = new Capabilities(this, store, config, options.authorize);
     this.assistantStore = new SqliteAssistantStore(store.db);
     this.ai=new AIConfigurationService(new SqliteAIStore(store.db),config.assistantModel);
+    this.ai.migrateLegacy(store.actors().filter(actor => actor.role === "human").map(actor => actor.id));
     this.ai.store.installConversationPurge();
     this.native=new NativeAssistant(this.ai.store,this,store,config);
     this.assistant = new AssistantService(this.assistantStore, options.assistantModel ?? configuredModel(config.assistantModel),
