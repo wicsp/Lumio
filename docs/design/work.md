@@ -10,6 +10,8 @@
 - **通知**（ADR 0031 第 4 节，R4-4）：Hub 内统一 `notify()`，在业务事务里写入待发事件并按事件 ID 去重；只在新出现「轮到人且原因为 answer / review / failed」与新的待批准提议时通知，每个事件最多发一次。先实现 Web Push：VAPID 私钥私密保存，JWT 一定带 https 的 `sub`（`LUMIO_PUBLIC_URL`，否则订阅页面的 Origin），TTL 24 小时；推送服务返回 404/410 时移除设备；推送地址与密钥不出现在响应、日志与审计中。
 - **工作目录与目标**（ADR 0033，R4-8）：一轮的工作目录在委派时按「任务 → 项目 → `~`」确定，项目的 `repo` 只供参考并写进每轮输入；
   委派目标与计划里的 agent 在提交时校验，`execution.target.list` 列出可委派的目标。
+- **默认执行者**（ADR 0044，E1）：项目可设 `default_target`。不带 `to` 委派时依次用：计划步骤的 agent → 最近一轮的 agent → 项目 `default_target` → INVALID；
+  即第一次用项目默认，之后谁做过就一直是谁，直到人手动换。任务读取出口推导只读的 `next_target`（同一套解析，不存储、不可提交），派出结果带实际目标与来源。
   同一作者对同一任务的同类 Work 提议会取代它之前的待批准提议（`withdrawn` + `superseded_by`），作者也可以撤回自己的提议。
 - **删除与回收站**（ADR 0038，D1）：`work.task.delete` / `work.project.delete` 只有人能做，带 `expected_revision`，结果为 `trashed`。删除即移入回收站，30 天后永久删除，期间可恢复或彻底删除；回收站中的对象不出现在任何列表、搜索、概览和助手结果中，按 ID 读取返回 NOT_FOUND（`reason: trashed`）。
   删除进行中的任务时同一事务里先停掉这一轮；执行记录永不随之删除；其他任务的 parent/dependencies 不级联。删除项目只删项目，其下任务置为无项目；恢复项目时把仍无项目的任务挂回。
