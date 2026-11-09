@@ -1,11 +1,13 @@
 import { z } from "zod";
 import { idOf, Timestamp, Revision, RequestId, RuntimeName } from "./common.ts";
 /** ADR 0041/0042: shared model configuration; credentials never appear in a view. */
-export const AIConnectionKind = z.enum(["codex-account", "openai-compatible", "deepseek", "doubao"]);
+export const TYPESAFE_JEV_BASE_URL = "https://api.typesafe.ai/v1";
+export const AIConnectionKind = z.enum(["codex-account", "openai-compatible", "deepseek", "doubao", "typesafe-jev"]);
 export const AIConnection = z.strictObject({ id: idOf("aic"), owner: idOf("act"), name: z.string().trim().min(1).max(100), kind: AIConnectionKind,
     host: z.union([z.literal("hub"), RuntimeName]), base_url: z.string().url().optional(), api_key_set: z.boolean(), revision: Revision, created: Timestamp, updated: Timestamp });
 export const AIConnectionInput = z.strictObject({ name: z.string().trim().min(1).max(100), kind: AIConnectionKind, host: z.union([z.literal("hub"), RuntimeName]), base_url: z.string().url().optional(), api_key: z.string().min(1).max(8192).optional(), clear_api_key: z.boolean().optional() })
     .refine(v => !(v.api_key && v.clear_api_key), "Conflicting credential changes")
+    .refine(v => v.kind !== "typesafe-jev" || v.base_url === TYPESAFE_JEV_BASE_URL, { path: ["base_url"], message: "Use the official TypeSafe API address" })
     .refine(v => v.kind === "codex-account" ? v.host !== "hub" && !v.api_key && !v.base_url : !!v.base_url && v.host === "hub", "Unsupported connection location")
     .refine(v => !v.base_url || (() => { const u = new URL(v.base_url); return ["http:", "https:"].includes(u.protocol) && !u.username && !u.password && !u.search && !u.hash; })(), "Invalid API address");
 export const AIProfile = z.strictObject({ id: idOf("aip"), owner: idOf("act"), name: z.string().trim().min(1).max(100), connection: idOf("aic"), engine: z.enum(["lumio", "codex"]), model: z.string().trim().min(1).max(200), thinking: z.enum(["default", "off", "on"]).default("default"), effort: z.string().min(1).max(32).optional(), revision: Revision, created: Timestamp, updated: Timestamp });

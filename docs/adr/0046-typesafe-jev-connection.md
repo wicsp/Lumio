@@ -1,6 +1,6 @@
 # 0046 TypeSafe Jev 决策服务连接
 
-- 状态：Proposed（等待人类批准，尚未变更契约或实现）
+- 状态：Accepted
 - 日期：2026-11-09
 - 关联：ADR 0041、0042
 
@@ -19,4 +19,8 @@ TypeSafe System One 接收状态与结构化问题，返回带类型的答案，
 
 ## 实施与验证
 
-获批后由 Claude 起草 `packages/schema` 契约，Hub 和 Web 同批接入。合成契约测试覆盖 Jev 连接保存、固定地址、凭据遮蔽、所有者隔离、旧连接兼容及禁止用于聊天 Profile。提交前运行 `bun run check`。
+由 Codex 起草 `packages/schema` 契约，Hub 和 Web 同批接入。合成契约测试覆盖 Jev 连接保存、固定地址、凭据遮蔽、所有者隔离、旧连接兼容及禁止用于聊天 Profile。提交前运行 `bun run check`。
+
+## 修订记录
+
+- 2026-11-09：用户批准本 ADR，并单独授权由 Codex 起草本次契约。

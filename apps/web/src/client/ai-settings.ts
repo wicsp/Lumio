@@ -4,6 +4,7 @@
  * Profile 是「用哪个模型、怎么思考」，助手和执行器共用。密钥只写不读。
  */
 import type { AIConfiguration, AIConnection, AIProfile, AIRuntime, NativeSession } from "@lumio/schema";
+import { TYPESAFE_JEV_BASE_URL } from "@lumio/schema";
 import { errorText, type Client } from "./api.ts";
 import { clear, failure, h, icon, openDialog, toast } from "./dom.ts";
 import { t } from "./i18n.ts";
@@ -14,11 +15,16 @@ type Kind = AIConnection["kind"];
 
 export const CONNECTION_KINDS: ReadonlyArray<readonly [Kind, string]> = [
   ["codex-account", "Codex account"], ["deepseek", "DeepSeek API"], ["doubao", "Doubao API"], ["openai-compatible", "Compatible API"],
+  ["typesafe-jev", "TypeSafe Jev"],
 ];
 const BASE_URL: Partial<Record<Kind, string>> = { deepseek: "https://api.deepseek.com/v1", doubao: "https://ark.cn-beijing.volces.com/api/v3" };
 const DEEPSEEK_EFFORTS = ["low", "high", "max"];
 
 export const kindLabel = (kind: Kind) => t(CONNECTION_KINDS.find(([value]) => value === kind)?.[1] ?? kind);
+
+export function profileConnections(connections: readonly AIConnection[]): AIConnection[] {
+  return connections.filter(connection => connection.kind !== "typesafe-jev");
+}
 
 /** Profile 一行的副标题：引擎 · 模型 · 思考强度。 */
 export function profileSummary(profile: AIProfile, connection?: AIConnection): string {
@@ -74,11 +80,12 @@ export class AISettings {
   private render(): void {
     this.renderDefault();
     const byId = new Map(this.config.connections.map(connection => [connection.id, connection]));
-    this.newProfile.disabled = !this.config.connections.length;
-    this.newProfile.title = this.config.connections.length ? "" : t("Add a connection first.");
+    const hasChatConnection = profileConnections(this.config.connections).length > 0;
+    this.newProfile.disabled = !hasChatConnection;
+    this.newProfile.title = hasChatConnection ? "" : t("Add a chat connection first.");
     clear(this.profileRows, ...(this.config.profiles.length ? this.config.profiles.map(profile => this.item(
       profile.engine === "codex" ? "terminal" : "assistant", profile.name, profileSummary(profile, byId.get(profile.connection)), () => this.editProfile(profile)))
-      : [h("p", { class: "set-empty" }, this.config.connections.length ? t("No profiles yet. Create one to choose a model for the assistant.") : t("Add a connection first, then create a profile."))]));
+      : [h("p", { class: "set-empty" }, hasChatConnection ? t("No profiles yet. Create one to choose a model for the assistant.") : t("Add a chat connection first, then create a profile."))]));
     clear(this.connectionRows, ...(this.config.connections.length ? this.config.connections.map(connection => this.item(
       connection.kind === "codex-account" ? "device" : "globe", connection.name, connectionSummary(connection), () => this.editConnection(connection)))
       : [h("p", { class: "set-empty" }, t("No connections yet."))]));
@@ -88,7 +95,7 @@ export class AISettings {
     const profiles = this.config.profiles;
     const owner = profiles[0]?.owner;
     if (!owner) {
-      clear(this.defaultRows, h("p", { class: "set-empty" }, t("Add a connection and create a profile to choose a default.")));
+      clear(this.defaultRows, h("p", { class: "set-empty" }, t("Add a chat connection and create a profile to choose a default.")));
       return;
     }
     const select = h("select", { "aria-label": t("Default assistant model") },
@@ -125,20 +132,33 @@ export class AISettings {
     const host = h("select", { disabled: !!old }, ...this.runtimes.map(runtime => h("option", { value: runtime.name, selected: old?.host === runtime.name },
       runtime.online ? runtime.name : `${runtime.name} · ${t("Offline")}`)));
     const base = h("input", { type: "url", value: old?.base_url ?? "", placeholder: "https://…/v1", autocomplete: "off", spellcheck: "false" });
-    const key = h("input", { type: "password", autocomplete: "new-password", spellcheck: "false",
-      placeholder: old?.api_key_set ? t("Saved. Leave blank to keep it.") : t("Leave blank if the service needs no key") });
-    const api = h("div", { class: "form-stack" }, this.field(t("API address"), base), this.field(t("API key"), key, t("Stored only on the Hub, never shown again, and never sent to agents.")));
+    const key = h("input", { type: "password", autocomplete: "new-password", spellcheck: "false" });
+    const jevHint = h("p", { class: "field-hint" }, t("TypeSafe Jev is for structured decisions and is unavailable in chat profiles."));
+    const api = h("div", { class: "form-stack" }, this.field(t("API address"), base), this.field(t("API key"), key, t("Stored only on the Hub, never shown again, and never sent to agents.")), jevHint);
     const native = h("div", { class: "form-stack" },
       this.runtimes.length ? this.field(t("Runtime"), host) : h("p", { class: "notice" }, t("No runtimes yet. Run lumio runtime add <name> to pair a machine.")),
       h("p", { class: "field-hint" }, t("Sign in through the official Codex client for each isolated conversation. Your personal Codex configuration stays separate.")));
+    let editableAddress = base.value;
     const sync = () => {
       const codex = kind.value === "codex-account";
+      const jev = kind.value === "typesafe-jev";
       api.hidden = codex; native.hidden = !codex;
+      jevHint.hidden = !jev;
+      if (jev) {
+        editableAddress = base.value;
+        base.value = TYPESAFE_JEV_BASE_URL;
+      } else if (base.readOnly) {
+        base.value = editableAddress;
+      }
+      base.readOnly = jev;
       const preset = BASE_URL[kind.value as Kind];
       if (!old && preset && (!base.value || Object.values(BASE_URL).includes(base.value))) base.value = preset;
       base.required = !codex;
+      key.required = jev && !old?.api_key_set;
+      key.placeholder = old?.api_key_set ? t("Saved. Leave blank to keep it.")
+        : jev ? t("Enter your TypeSafe API key") : t("Leave blank if the service needs no key");
     };
-    kind.addEventListener("change", sync);
+    kind.addEventListener("change", () => { key.value = ""; sync(); });
     sync();
     const message = h("div", { role: "status" });
     const save = h("button", { type: "submit", class: "btn btn-primary" }, t("Save"));
@@ -158,7 +178,7 @@ export class AISettings {
   }
 
   private editProfile(old?: AIProfile): void {
-    const connections = this.config.connections;
+    const connections = profileConnections(this.config.connections);
     const name = h("input", { required: true, value: old?.name ?? "", placeholder: t("Profile name"), autocomplete: "off" });
     const connection = h("select", {}, ...connections.map(c => h("option", { value: c.id, selected: old?.connection === c.id }, `${c.name} · ${kindLabel(c.kind)}`)));
     const model = h("input", { required: true, value: old?.model ?? "", placeholder: t("Model name, as the service spells it"), autocomplete: "off", spellcheck: "false" });

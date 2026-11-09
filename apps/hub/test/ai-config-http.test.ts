@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AIConfiguration, AIConnection, ApiError } from "@lumio/schema";
+import { AIConfiguration, AIConnection, AIConnectionInput, AIProfileInput, ApiError, TYPESAFE_JEV_BASE_URL } from "@lumio/schema";
 import { HubStore } from "../src/store.ts";
 import { readConfig } from "../src/config.ts";
 import { startHub } from "../src/server.ts";
@@ -36,9 +36,9 @@ async function fixture() {
     hub,
     logs,
     owner,
-    async request(path: string, body?: unknown, language = "en", bearer = token) {
+    async request(path: string, body?: unknown, language = "en", bearer = token, method = body === undefined ? "GET" : "POST") {
       return fetch(new URL(path, hub.server.url), {
-        method: body === undefined ? "GET" : "POST",
+        method,
         headers: {
           Authorization: `Bearer ${bearer}`,
           "Content-Type": "application/json",
@@ -77,6 +77,75 @@ test("Hub migrates legacy settings before requests, while concurrent config GETs
     expect(AIConfiguration.parse(await late.json())).toEqual({ connections: [], profiles: [] });
     expect(JSON.stringify(initial)).not.toContain("SYNTHETIC_PRIVATE_KEY");
     expect(f.logs.join("\n")).not.toContain("SYNTHETIC_PRIVATE_KEY");
+  } finally {
+    await f.close();
+  }
+});
+
+test("Jev connections stay owner-scoped and keep credentials private on create and edit", async () => {
+  const f = await fixture();
+  try {
+    const key = "${secret:synthetic-jev}";
+    const input = AIConnectionInput.parse({
+      name: "Synthetic Jev", kind: "typesafe-jev", host: "hub", base_url: TYPESAFE_JEV_BASE_URL, api_key: key,
+    });
+    const path = "/v2/ai/connections";
+    for (const [attempt, reason] of [
+      [{ ...input, base_url: "https://fixture.example.test/v1" }, "ai-jev-address"],
+      [{ ...input, api_key: undefined }, "ai-jev-key-required"],
+    ] as const) {
+      const response = await f.request(path, attempt);
+      expect(response.status).toBe(400);
+      expect(ApiError.parse(await response.json()).error.reason).toBe(reason);
+    }
+    const created = await f.request(path, input);
+    expect(created.status).toBe(200);
+    const view = AIConnection.parse(await created.json());
+    expect(view).toMatchObject({ kind: "typesafe-jev", host: "hub", base_url: TYPESAFE_JEV_BASE_URL, api_key_set: true });
+    const existingPath = `${path}/${view.id}`;
+    const rename = AIConnectionInput.parse({ ...input, name: "Renamed Jev", api_key: undefined });
+    const updated = await f.request(existingPath, rename, "en", undefined, "PUT");
+    expect(updated.status).toBe(200);
+    expect(AIConnection.parse(await updated.json())).toMatchObject({ id: view.id, name: rename.name, revision: view.revision + 1, api_key_set: true });
+    expect(f.hub.modules.ai.store.secret(view.id)).toBe(key);
+
+    const cleared = await f.request(existingPath, { ...rename, clear_api_key: true }, "en", undefined, "PUT");
+    expect(cleared.status).toBe(400);
+    expect(ApiError.parse(await cleared.json()).error.reason).toBe("ai-jev-key-required");
+    const replacement = "${secret:synthetic-jev-rotated}";
+    const rotated = await f.request(existingPath, AIConnectionInput.parse({ ...rename, api_key: replacement }), "en", undefined, "PUT");
+    expect(rotated.status).toBe(200);
+    expect(AIConnection.parse(await rotated.json()).api_key_set).toBe(true);
+    expect(f.hub.modules.ai.store.secret(view.id)).toBe(replacement);
+
+    const config = AIConfiguration.parse(await (await f.request("/v2/ai/config")).json());
+    expect(config.connections.map(connection => connection.kind).sort()).toEqual(["deepseek", "typesafe-jev"]);
+    expect(config.profiles).toHaveLength(1);
+    expect(JSON.stringify(config)).not.toContain(key);
+    expect(JSON.stringify(config)).not.toContain(replacement);
+    expect(f.logs.join("\n")).not.toContain(key);
+    expect(f.logs.join("\n")).not.toContain(replacement);
+
+    const other = f.hub.store.createActor("jev-other-owner", "human");
+    const otherToken = f.hub.store.createToken("jev-other-owner", other.name);
+    const foreign = await f.request("/v2/ai/config", undefined, "en", otherToken);
+    expect(AIConfiguration.parse(await foreign.json())).toEqual({ connections: [], profiles: [] });
+    const foreignEdit = await f.request(existingPath, rename, "en", otherToken, "PUT");
+    expect(foreignEdit.status).toBe(404);
+    expect(ApiError.parse(await foreignEdit.json()).error.reason).toBe("ai-connection-missing");
+    expect((await f.request(path, input, "en", f.agentToken)).status).toBe(403);
+
+    const profile = AIProfileInput.parse({ name: "Synthetic", connection: view.id, engine: "lumio", model: "jev-latest" });
+    const profilePath = "/v2/ai/profiles";
+    for (const response of [
+      await f.request(profilePath, profile),
+      await f.request(`${profilePath}/${config.profiles[0]!.id}`, profile, "en", undefined, "PUT"),
+    ]) {
+      expect(response.status).toBe(400);
+      expect(ApiError.parse(await response.json()).error.reason).toBe("ai-jev-chat-unsupported");
+    }
+    const after = AIConfiguration.parse(await (await f.request("/v2/ai/config")).json());
+    expect(after.profiles).toEqual(config.profiles);
   } finally {
     await f.close();
   }

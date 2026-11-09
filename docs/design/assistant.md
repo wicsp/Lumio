@@ -18,6 +18,7 @@
 > 删除配置的契约扩展见 [ADR 0043](../adr/0043-ai-configuration-deletion.md)（Proposed，待批准；现行接口仍只有创建和修改）。
 
 - Connection 负责来源/设备与私有凭据，Profile 负责引擎/模型/原生思考档位，用途绑定负责权限；共用 Profile 不共用工具与沙箱。API 连接当前在 Hub，Codex 连接在指定 Runtime。旧 API 设置保留兼容。
+- TypeSafe Jev Connection 使用固定的官方 System One API 地址，由 Hub 保存私有 API 密钥。现阶段支持连接管理，保存和读取不调用推理，且不能用于聊天 Profile（ADR 0046）。
 - 旧 API 配置在 Hub 启动、接收请求之前迁入已有 human 所有者的兼容 Connection/Profile；每个所有者的两项配置与一次性回执在同一事务提交，已有配置优先。GET 只读，不生成配置；后续移除配置也不重新导入。原私有环境文件保留（PR #120 review 修复）。
 - 原生 conversation 独占持久 CODEX_HOME、workspace 与 app-server，官方登录、同 thread 续接和压缩；Lumio 只调用原生端口，不套第二层工具循环或摘要汇报模板。公开事件与每轮交付快照独立保存，不声称记录官方内部全部模型请求。
 - 恢复必须首次携带完整配置并校验账户/版本/工具/沙箱；状态丢失显式失败。模型与 effort 可逐轮切换，安全/账户/上下文变化新建环境。记忆或来源可见性变化使旧上下文停用，不宣称引擎已经忘记。
