@@ -1,6 +1,6 @@
 # 0046 TypeSafe Jev 决策服务连接
 
-- 状态：Accepted
+- 状态：Implemented
 - 日期：2026-11-09
 - 关联：ADR 0041、0042
 
