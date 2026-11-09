@@ -1,44 +1,17 @@
-# 主线开发与本机沙盒
+# 本机日常部署与正式发布
 
-## 日常开发与发布
+## PR 开出后部署到日常实例
 
-从最新的 `origin/main` 建立功能分支。每个 PR 通过交叉 review 和完整 CI 后合入 `main`。日常实例从主线构建。合入后发现的问题在主线上修复或 revert。准备对外发布时，从已验收的主线提交推送正式 `v*` 标签。Release workflow 校验提交属于主线，重跑全量检查并创建 GitHub Release。
+从最新的 `origin/main` 建立功能分支。本机开发的功能开出 PR 后，直接把该 PR 的提交部署到日常使用的 [7420](http://127.0.0.1:7420)。浏览器继续使用原来的地址，命令行继续使用 `lumio`，沿用现有数据和登录身份。人工试用、交叉 review 和 CI 并行。需要修订时，把修订推送到同一个 PR 并更新日常实例。合入前处理试用反馈，并通过交叉 review 和完整 CI。
 
-从源码更新有日常数据的 7420 前，先用 `lumio hub backup business <新目录>` 创建业务快照，再用 `lumio hub backup verify <目录>` 校验。涉及迁移时先在独立沙盒验证，并确认备份可恢复。业务备份、vault 和安装配置的边界见 [Hub 部署与备份](design/hub.md#存放)。
+从已推送的准确提交构建程序。部署前协调部署和服务重启，等正在执行的助手轮次结束，再备份原程序和服务配置。用 `lumio hub backup business <新目录>` 创建业务快照，再用 `lumio hub backup verify <目录>` 校验。涉及迁移时，先用隔离数据验证迁移和恢复流程。业务备份、vault 和安装配置的边界见 [Hub 部署与备份](design/hub.md#存放)。
 
-## PR 开出后立即试用
+将新程序原子替换到现有的 `lumio` 路径。纯前端或与当前 Runtime 协议兼容的 Hub 更新只重启 Hub，保留运行中的 Runtime 进程。Web 资源随 Hub 打包，Hub 重启时页面和 API 会短暂离线。Runtime 已确认的本地 Job 可以继续排队和执行，结果写入持久化 outbox，重连后补交。尚未领取的 Job 留在 Hub，恢复后再领取。
 
-本机开发的功能开出 PR 后，立即将该 PR 的提交部署到独立的 7421，让人工试用、交叉 review 和 CI 并行。需要修订时，把修订推送到同一个 PR 并更新试用版本。合入前处理试用反馈。试用实例一次只部署一个 PR，切换前与正在试用的人协调。
+需要更新 Runtime 时，等待正在执行的 Job 结束并确认结果已交回，再重启 Runtime。运行中的 Job 遇到 Runtime 重启会进入 `unknown`，由人工核查。涉及协议变更时，先验证 Hub 与 Runtime 的版本兼容性，再决定切换顺序。参见 [Execution](design/execution.md)。
 
-先更新本地远端引用，再从包含本脚本的仓库检出运行以下命令。
+部署后确认 7420 的健康检查和 `lumio --version` 对应本次提交，并确认 Runtime 已恢复同步。保留可恢复的旧版本和备份。合入后发现的问题在主线上修复或 revert。
 
-```sh
-git fetch origin
-./scripts/update-preview.sh origin/feature-branch
-```
+## 正式发布
 
-派给 agent 的命令统一使用 `lumio`。新版本的 Runtime 会优先提供本实例的二进制和任务临时凭据。
-
-脚本也接受本地分支名、标签或提交 SHA。它从指定提交导出源码构建，工作树里的未提交改动不会进入试用程序。成功后在试用目录的 `preview-commit` 记录部署的 SHA。
-
-脚本使用现有的 [独立试用服务](native-assistant-trial.md#本机部署与停止) 和仓库指定的 Bun。构建完成才替换程序，重启后核对 Hub 版本再重启 Runtime。旧程序保存在 `bin/lumio.previous`；换回旧程序前先核对试用数据库的迁移兼容性。更新前等试用任务结束。
-
-## 用命令行连接试用实例
-
-这台 Mac 的 `~/.local/bin` 里有两个入口。按你要操作的数据选择命令。
-
-| 命令 | 默认连接 | 程序和客户端配置 |
-| --- | --- | --- |
-| `lumio` | [7420 日常实例](http://127.0.0.1:7420) | `~/.local/bin/lumio`，读取 `~/.config/lumio/config.json` |
-| `lumio-preview` | [7421 试用实例](http://127.0.0.1:7421) | 使用 `~/.local/share/lumio-native-trial/bin/lumio` 和 `~/.local/share/lumio-native-trial/client.json` |
-
-```sh
-lumio hub status
-lumio-preview hub status
-lumio-preview task list --status active --json
-lumio-preview --version
-```
-
-`lumio-preview` 直接转发日常子命令和参数，并使用试用配置中的 token。即使当前 shell 已设置其他 Hub 地址、token 或 vault，试用入口也会使用自己的连接配置。两个实例各有自己的任务、项目、助手会话和执行记录。试用实例当前没有挂载知识 vault，`new` 和 `sync` 这类本地文件命令需要显式指定试用 vault。
-
-试用配置已经配好。检查连接用 `lumio-preview hub status`，更新试用程序和服务用下文的 `update-preview.sh`。会访问默认安装的配置或管理本机服务的命令（如 `login`、`logout`、`doctor`、`upgrade` 和 `hub setup`）由试用入口拦截。
+所有功能 PR 合入 `main` 后，从主线上已验收的提交打正式 `v*` 标签。Release workflow 校验提交属于主线，重跑全量检查并创建 GitHub Release。
