@@ -9,6 +9,10 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require a commit on main
+        run: git merge-base --is-ancestor HEAD refs/remotes/origin/main
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json

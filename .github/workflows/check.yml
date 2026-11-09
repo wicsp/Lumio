@@ -1,7 +1,8 @@
 name: Check
-# 只在 PR 上检查：所有改动都经 PR 合并，检查通过后才合并（自动合并）。发布前 release.yml 在 macOS 上再跑一遍。
+# main 的 PR 跑完整检查。preview 通过相关测试和构建后直接推送。
 on:
   pull_request:
+    branches: [main]
 permissions:
   contents: read
 jobs:
@@ -14,4 +15,4 @@ jobs:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile
       - run: bun run check
-      - run: shellcheck install.sh
+      - run: shellcheck install.sh scripts/update-preview.sh
