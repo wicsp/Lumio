@@ -15,4 +15,4 @@ jobs:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile
       - run: bun run check
-      - run: shellcheck install.sh scripts/update-preview.sh
+      - run: shellcheck install.sh

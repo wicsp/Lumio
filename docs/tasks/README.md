@@ -66,7 +66,6 @@
 | [T1-1 至 T1-5](T1-0-task-structure-and-readiness.md) | 任务结构与可开工状态：被阻塞推导、依赖/父任务/标签编辑、按可开工筛选、项目依赖图（ADR 0039） | Claude + Codex | — |
 | [E1-0](E1-0-project-default-target.md) | 项目默认执行者与 Today「委托」（ADR 0044；E1-1 契约 Claude，E1-2/E1-3 后端 Codex，E1-4 Web Claude） | 见任务说明 | — |
 | [K3-1 至 K3-3](K3-0-knowledge-graph.md) | 全库知识图谱：一次读出链接图的 Hub 接口与 Web 图谱视图（ADR 0040，Implemented） | Claude + Codex | 完成 |
-| [I1-0](I1-0-preview-updater.md) | 试用更新命令加固：Runtime 连通确认、版本与服务校验 | 后端（Codex） | — |
 
 P1 的设计决定见 ADR 0014、0016、0017、0018；P2 见 ADR 0019、0020、0021、0022 与修订后的 ADR 0005；契约见 `packages/schema/src/` 中的 `query.ts`、`actor.ts`、`operation.ts`、`proposal.ts`、`api.ts`。
 
