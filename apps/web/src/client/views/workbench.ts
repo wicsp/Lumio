@@ -77,7 +77,6 @@ export class WorkbenchView {
 
   private name: string;
   private account: HTMLButtonElement;
-  private trashButton: HTMLButtonElement;
   /** 进入设置页之前所在的位置，设置页的返回键回到这里。 */
   private beforeSettings = "#overview";
   /** 语言切换被推迟时，App 在下一次切换模块前重建界面；返回 true 表示已接管。 */
@@ -92,8 +91,6 @@ export class WorkbenchView {
         icon(s.icon), h("span", { class: "nav-label" }, t(s.label)), s.short && h("span", { class: "nav-short" }, t(s.short)), count);
       this.nav.set(s.key, button); this.counts.set(s.key, count); nav.append(button);
     }
-    this.trashButton = h("button", { type: "button", class: "nav-item trash-link desktop-nav", title: t("Recently deleted"), "aria-label": t("Recently deleted"), onclick: () => this.go("trash") },
-      icon("trash"), h("span", { class: "nav-label" }, t("Recently deleted")));
     this.name = humans[0] ?? t("Me");
     this.account = h("button", { type: "button", class: "account", title: t("Settings"), "aria-label": t("Settings"), onclick: () => this.go("settings") },
       h("span", { class: "who-avatar", "aria-hidden": "true" }, this.name.slice(0, 1).toUpperCase()),
@@ -105,7 +102,7 @@ export class WorkbenchView {
       h("div", { class: "brand" }, h("span", { class: "brand-mark", "aria-hidden": "true" }), h("span", { class: "brand-name" }, "Lumio"), toggle),
       h("button", { type: "button", class: "quick-find", title: t("Search or jump to"), "aria-label": t("Search or jump to"), onclick: () => this.palette.open() }, icon("search"), h("span", {}, t("Search or jump to")), h("kbd", {}, "⌘K")),
       nav,
-      h("div", { class: "sidebar-foot" }, this.trashButton, this.account));
+      h("div", { class: "sidebar-foot" }, this.account));
     const shell = h("div", { class: "shell" }, sidebar, this.main);
     const labelToggle = (collapsed: boolean) => {
       const label = collapsed ? t("Expand sidebar") : t("Collapse sidebar");
@@ -139,7 +136,8 @@ export class WorkbenchView {
   private async go(section: Section, id?: string, intent?: string): Promise<void> {
     const generation = ++this.routeGeneration;
     if (section === "work" && !id) id = intent === "new-project" ? "projects" : intent === "new" ? "tasks" : this.workMode;
-    if (section === this.section && !intent && (!id || (section === "work" && id === this.workMode))) return;
+    // 设置页的二级菜单也走路由（#settings/<分类>），回到分类列表时 id 为空，不能提前返回。
+    if (section === this.section && section !== "settings" && !intent && (!id || (section === "work" && id === this.workMode))) return;
     if (!(await this.beforeLeave()) || generation !== this.routeGeneration) return;
     const hash = `#${section}${id ? `/${encodeURIComponent(id)}` : ""}`;
     if (location.hash !== hash) history.pushState(null, "", hash);
@@ -148,7 +146,7 @@ export class WorkbenchView {
 
   private show(section: Section, id?: string, intent?: string): void {
     if (!this.dirty && this.beforeShow()) return;
-    if (section === "settings" && this.section !== "settings") this.beforeSettings = this.currentHash || "#overview";
+    if (section === "settings" && this.section !== "settings" && this.section !== "trash") this.beforeSettings = this.currentHash || "#overview";
     const previous = this.current;
     const previousSection = this.section;
     this.section = section;
@@ -162,8 +160,8 @@ export class WorkbenchView {
     const label = section === "settings" ? t("Settings") : section === "trash" ? t("Recently deleted") : t(SECTIONS.find(s => s.key === section)?.label ?? "Today");
     document.title = t(t("{0} · Lumio"), label);
     for (const [key, button] of this.nav) button.setAttribute("aria-current", key === section ? "page" : "false");
-    this.account.setAttribute("aria-current", section === "settings" ? "page" : "false");
-    this.trashButton.setAttribute("aria-current", section === "trash" ? "page" : "false");
+    // 「最近删除」属于设置，侧栏不单独放入口；打开它时高亮账户（设置）按钮。
+    this.account.setAttribute("aria-current", section === "settings" || section === "trash" ? "page" : "false");
     let mounted = this.panes.get(key);
     if (previous !== mounted) {
       document.querySelectorAll<HTMLDialogElement>("dialog").forEach(dialog => { dialog.close(); dialog.remove(); });
@@ -182,7 +180,7 @@ export class WorkbenchView {
       mounted.target.hidden = false;
       // Returning to a retained module: keep its state, but catch up with changes made elsewhere meanwhile.
       if (previous !== mounted) { mounted.pane.resume?.(); mounted.pane.liveRefresh?.(); }
-      if (id) mounted.pane.open?.(id);
+      if (id || section === "settings") mounted.pane.open?.(id ?? "");
     }
     this.current = mounted;
     if (intent) mounted.pane.intent?.(intent);
@@ -196,7 +194,7 @@ export class WorkbenchView {
     const changed = () => void this.refreshCounts();
     let pane: Pane;
     if (section === "overview") pane = new OverviewPane(target, client, this.session.hub, navigate, this.name, changed);
-    else if (section === "settings") pane = new SettingsPane(target, this.session, this.name, () => void this.signOut(), () => this.leaveSettings());
+    else if (section === "settings") pane = new SettingsPane(target, this.session, this.name, () => void this.signOut(), () => this.leaveSettings(), sub => void this.go("settings", sub), id);
     else if (section === "knowledge") pane = new KnowledgePane(target, client, id);
     else if (section === "work") pane = new WorkPane(target, client, this.session.hub, this.workMode, id, navigate, changed);
     else if (section === "execution") pane = new ExecutionPane(target, client, this.session.hub, id, navigate, changed);
