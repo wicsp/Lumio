@@ -17,6 +17,9 @@ class MemoryStore implements WorkStore {
   comments(task: string) { return structuredClone(this.data.comments.filter((value) => value.task === task)); }
   putComment(value: WorkComment) { this.data.comments.push(structuredClone(value)); }
   executions(task?: string) { return structuredClone(this.data.executions.filter((value) => task === undefined || value.task === task)); }
+  latestJobs() {
+    return new Map([...this.data.executions].sort((a, b) => a.round - b.round).map(run => [run.task, run.job]));
+  }
   putExecution(value: WorkExecution) { this.data.executions = [...this.data.executions.filter((item) => item.job !== value.job), structuredClone(value)]; }
   turns(task: string) { return structuredClone(this.data.turns.filter(value => value.task === task)); }
   putTurn(value: TaskTurnChange) { this.data.turns.push(structuredClone(value)); }
@@ -41,7 +44,7 @@ function fixture(systemActor = owner) {
   const id = (prefix: string) => `${prefix}_${String(++sequence).padStart(26, "0")}`;
   const service = new WorkService(store, { now: () => new Date(++clock), id, systemActor, job: id => jobs.get(id),
     text: (key, ...args) => key === "work.plan_max_rounds" ? `Reached ${args[0]} rounds; human review required` : key,
-    agentForJob: job => targets.get(job) ?? "pi@server",
+    agentsForJobs: ids => new Map(ids.map(job => [job, targets.get(job) ?? "pi@server"])),
     dispatch(task, input, round, to) {
       dispatches++;
       const job = Job.parse({ spec: { id: id("job"), protocol_version: 2, source: { task: task.id, round }, runtime: "act_00000000000000000000000002",
@@ -386,7 +389,7 @@ test("only humans handle checkpoints and templates; templates can be saved, over
 test("delegation proposals freeze the current plan stage agent even before any round exists", () => {
   const f = fixture(), task = planned(f);
   expect(f.service.proposalRequest({ request_id: "synthetic-proposed-plan-dispatch", operation: { op: "work.task.dispatch", args: { task } } }))
-    .toMatchObject({ operation: { args: { task, to: "codex@mac", expected_revision: 2 } } });
+    .toMatchObject({ request: { operation: { args: { task, to: "codex@mac", expected_revision: 2 } } }, source: "plan" });
   expect(() => f.service.proposalRequest({ request_id: "synthetic-proposed-outside-agent", operation: { op: "work.task.dispatch", args: { task, to: "pi@server" } } })).toThrow("CONFLICT");
 });
 

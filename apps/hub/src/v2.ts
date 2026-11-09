@@ -1,5 +1,5 @@
 import { text as msg } from "./messages.ts";
-import { KnowledgeGraph, KnowledgeGraphArgs, AgentInfo, AgentTokenRequest, AgentRevokeRequest, AssistantChatRequest, WorkCommandRequest, ExecutionRoutineCommandRequest, RequestId, AssistantToolCall, capability, ExecutionRoutine, PlanTemplate, type AssistantEvent, KnowledgeDeleteRequest, AssistantConversationDeleteRequest, TrashListArgs, TrashPurgeRequest, TrashRestoreRequest } from "@lumio/schema";
+import { KnowledgeGraph, KnowledgeGraphArgs, AgentInfo, AgentTokenRequest, AgentRevokeRequest, AssistantChatRequest, WorkCommandRequest, ExecutionRoutineCommandRequest, RequestId, AssistantToolCall, capability, ExecutionRoutine, PlanTemplate, WorkCommandResult, type AssistantEvent, KnowledgeDeleteRequest, AssistantConversationDeleteRequest, TrashListArgs, TrashPurgeRequest, TrashRestoreRequest } from "@lumio/schema";
 import { AssistantError } from "@lumio/assistant";
 import { WorkError } from "@lumio/work";
 import type { BusinessModules } from "./modules.ts";
@@ -162,20 +162,25 @@ export async function handleV2(request: Request, route: V2Route, identity: Ident
       const parsed = (route.operation === "work.command" ? WorkCommandRequest : ExecutionRoutineCommandRequest).safeParse(body);
       if (!parsed.success) throw new HubError("INVALID", { key: "index.invalid_work_command_parameters", args: [] });
       const { operation, request_id } = parsed.data;
-      const offline = route.operation === "work.command" ? modules.workCommands.offlineTargets(WorkCommandRequest.parse(body)) : [];
-      const headers = offline.length ? { "X-Lumio-Offline-Targets": offline.join(", ") } : undefined;
+      const respond = (result: unknown, status = 200) => {
+        const offline = route.operation === "work.command"
+          ? modules.workCommands.offlineTargets(WorkCommandRequest.parse(body).operation, WorkCommandResult.parse(result))
+          : [];
+        const headers = offline.length ? { "X-Lumio-Offline-Targets": offline.join(", ") } : undefined;
+        return Response.json(result, { status, headers });
+      };
       const commandDecision = decision = decide(identity.actor, { operation: route.operation, command: operation.op, args: operation.args });
       if (commandDecision.result === "needs_approval" && route.operation === "work.command") {
         const value = modules.workCommands.execute(WorkCommandRequest.parse(body), identity);
-        audited = true; return Response.json(value, { status: 202, headers });
+        audited = true; return respond(value, 202);
       }
       if (commandDecision.result !== "allow") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: commandDecision.result === "deny" ? commandDecision.reason : msg("v2.approval_required") });
-      if (capability(operation.op)) return Response.json((await modules.capabilities.execute(operation.op, operation.args, identity, request_id)).result, { headers });
+      if (capability(operation.op)) return respond((await modules.capabilities.execute(operation.op, operation.args, identity, request_id)).result);
       const result = store.db.transaction(() => {
         const value = route.operation === "work.command" ? modules.workCommands.execute(WorkCommandRequest.parse(body), identity) : modules.routines.command(body, identity.actor.id);
         store.audit(identity, route.operation, decision.result, undefined, "applied"); return value;
       })();
-      audited = true; return Response.json(result, { headers });
+      audited = true; return respond(result);
     }
     const read = async (name: string, args: Record<string, unknown>) => Response.json((await modules.capabilities.execute(name, args, identity)).result);
     if (route.operation === "execution.read" && url.pathname.startsWith("/v2/execution/jobs")) {

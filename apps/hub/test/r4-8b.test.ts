@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ApiError, Proposal, WorkCommandResult, ExecutionTarget, Job, WorkProject } from "@lumio/schema";
+import { ApiError, Proposal, WorkCommandResult, ExecutionTarget, Job, WorkProject, WorkTask, WorkTaskDetail } from "@lumio/schema";
 import { startHub } from "../src/server.ts";
 import { readConfig } from "../src/config.ts";
 import { HubStore } from "../src/store.ts";
@@ -24,7 +24,7 @@ async function applied(op: string, args: object) {
   const r = await command(op, args); if (r.status !== 200) throw Error(await r.text()); return WorkCommandResult.parse(await r.json());
 }
 async function task(args: object = {}) { const r = await applied("work.task.create", { title: "Synthetic task", ...args }); if (r.kind !== "task") throw Error(); return r.task; }
-async function project() { const r = await applied("work.project.create", { title: "Synthetic project", workdir: "/synthetic/project", repo: "https://example.test/repo" }); if (r.kind !== "project") throw Error(); return r.project; }
+async function project(args: object = {}) { const r = await applied("work.project.create", { title: "Synthetic project", workdir: "/synthetic/project", repo: "https://example.test/repo", ...args }); if (r.kind !== "project") throw Error(); return r.project; }
 async function proposed(op: string, args: object, token = agent, id?: string) { const r = await command(op, args, token, id); expect(r.status).toBe(202); const value = WorkCommandResult.parse(await r.json()); if (value.kind !== "proposal") throw Error(); return value.proposal; }
 beforeEach(async () => {
   temp = await mkdtemp(join(tmpdir(), "lumio-r48-")); const store = await HubStore.open(temp);
@@ -108,4 +108,115 @@ test("inherited directories pass the existing local vault guard", async () => {
   const response = await command("work.task.dispatch", { task: t.id, to: "codex@mac" });
   expect(response.status).toBe(400); expect(ApiError.parse(await response.json()).error.code).toBe("INVALID");
   expect(hub.modules.work.detail(t.id).executions).toEqual([]);
+});
+
+test("implicit dispatch and task reads share plan, last round, and project precedence", async () => {
+  const p = await project({ default_target: "codex" });
+  const mac = hub.store.runtimes(new Date())[0]!;
+  hub.store.registerRuntime(mac.actor, { ...mac.registration, engines: [...mac.registration.engines,
+    { name: "claude-code", version: "synthetic", sandbox: "os" }] }, new Date(0));
+  const projectDefault = { target: "codex@mac", source: "project" } as const;
+  const t = await task({ project: p.id });
+  const untouched = await task({ project: p.id });
+  const implicit = await task({ project: p.id });
+  expect(t.next_target).toEqual(projectDefault);
+  expect((await client().workProject(p.id)).default_target).toBe("codex");
+  const show = async (id: string) => WorkTaskDetail.parse(await (await api(`/v2/work/tasks/${id}`)).json());
+  const list = async () => WorkTask.array().parse(await (await api("/v2/work/tasks")).json());
+  expect((await show(t.id)).task.next_target).toEqual(projectDefault);
+  expect((await list()).find(value => value.id === t.id)?.next_target).toEqual(projectDefault);
+  const request = "synthetic-project-dispatch";
+  const queued = await command("work.task.dispatch", { task: implicit.id }, human, request);
+  expect(queued.status).toBe(200);
+  expect(queued.headers.get("X-Lumio-Offline-Targets")).toBe("codex@mac");
+  const initial = WorkCommandResult.parse(await queued.json());
+  expect(initial).toMatchObject({ kind: "job", target: "codex@mac", target_source: "project", job: { status: "queued" } });
+
+  const first = await applied("work.task.dispatch", { task: t.id, to: "claude-code@mac" });
+  if (first.kind !== "job") throw Error("Expected a job");
+  expect(first).toMatchObject({ target: "claude-code@mac", target_source: "explicit" });
+  await api("/v1/runtime/ack", { accepted: [first.job.spec.id] }, runtime);
+  const question = await api("/v1/runtime/results", { job: first.job.spec.id, lease: first.job.spec.lease,
+    status: "waiting_for_human", finished: new Date().toISOString(), question: "Synthetic question?" }, runtime);
+  expect(question.status).toBe(200);
+  hub.modules.reconcile();
+  await applied("work.project.update", { project: p.id, expected_revision: p.revision, patch: { default_target: "claude-code@mac" } });
+  expect((await list()).find(value => value.id === untouched.id)?.next_target).toEqual({ target: "claude-code@mac", source: "project" });
+  expect((await show(implicit.id)).task.next_target).toEqual({ target: "codex@mac", source: "last_round" });
+  expect((await client().jobs(undefined, implicit.id))[0]?.spec.run).toMatchObject({ engine: "codex" });
+  const replay = await command("work.task.dispatch", { task: implicit.id }, human, request);
+  expect(replay.headers.get("X-Lumio-Offline-Targets")).toBe("codex@mac");
+  expect(WorkCommandResult.parse(await replay.json())).toEqual(initial);
+  expect((await show(t.id)).task).toMatchObject({ turn: { reason: "answer" }, next_target: { target: "claude-code@mac", source: "last_round" } });
+  const answer = await applied("work.task.dispatch", { task: t.id, comment: "Synthetic answer" });
+  expect(answer).toMatchObject({ kind: "job", target: "claude-code@mac", target_source: "last_round" });
+  expect((await show(t.id)).executions.at(-1)?.input_snapshot).toContain("Synthetic answer");
+
+  if (answer.kind !== "job") throw Error("Expected a job");
+  await api("/v1/runtime/ack", { accepted: [answer.job.spec.id] }, runtime);
+  const done = await api("/v1/runtime/results", { job: answer.job.spec.id, lease: answer.job.spec.lease,
+    status: "done", finished: new Date().toISOString(), report: "Synthetic completion" }, runtime);
+  expect(done.status).toBe(200);
+  hub.modules.reconcile();
+  const plan = { stages: [{ kind: "agent", id: "first", agent: "codex", instruction: "Synthetic plan" }] };
+  const planned = await applied("work.task.plan.set", { task: t.id, expected_revision: (await show(t.id)).task.revision, plan });
+  expect(planned).toMatchObject({ task: { next_target: { target: "codex@mac", source: "plan" } } });
+  expect(await applied("work.task.dispatch", { task: t.id })).toMatchObject({ target: "codex@mac", target_source: "plan" });
+  const explicitPlan = await applied("work.task.plan.set", { task: untouched.id, expected_revision: untouched.revision, plan });
+  expect(explicitPlan).toMatchObject({ task: { next_target: { target: "codex@mac", source: "plan" } } });
+  expect(await applied("work.task.dispatch", { task: untouched.id, to: "codex" })).toMatchObject({ target: "codex@mac", target_source: "explicit" });
+});
+
+test("project defaults are validated, cleared and detached while blocked or unavailable targets fail safely", async () => {
+  const badCreate = await command("work.project.create", { title: "Synthetic invalid", default_target: "codex@missing" });
+  expect(badCreate.status).toBe(400);
+  expect(ApiError.parse(await badCreate.json()).error).toMatchObject({ code: "INVALID" });
+  const mac = hub.store.runtimes(new Date())[0]!;
+  hub.store.registerRuntime(mac.actor, { ...mac.registration, engines: [...mac.registration.engines,
+    { name: "claude-code", version: "synthetic", sandbox: "os" }] }, new Date(0));
+  const p = await project({ default_target: "claude-code@mac" });
+  const blocked = await task({ project: p.id, dependencies: [(await task()).id] });
+  for (const token of [human, agent]) expect((await command("work.task.dispatch", { task: blocked.id }, token)).status).toBe(409);
+  const t = await task({ project: p.id });
+  const badUpdate = await command("work.project.update", { project: p.id, expected_revision: p.revision, patch: { default_target: "codex@missing" } });
+  expect(badUpdate.status).toBe(400);
+  expect((await client().workProject(p.id)).revision).toBe(p.revision);
+
+  hub.store.registerRuntime(mac.actor, mac.registration, new Date(0));
+  const unavailable = await command("work.task.dispatch", { task: t.id });
+  expect(unavailable.status).toBe(400);
+  const error = ApiError.parse(await unavailable.json()).error;
+  expect(error.code).toBe("INVALID");
+  expect(error.message).toContain("Project default claude-code@mac");
+  expect(error.message).toContain("codex@mac");
+  const clear = await applied("work.project.update", { project: p.id, expected_revision: p.revision, patch: { default_target: null } });
+  expect(clear.kind === "project" && clear.project.default_target).toBeUndefined();
+  const missing = await command("work.task.dispatch", { task: t.id });
+  expect(missing.status).toBe(400);
+  expect(ApiError.parse(await missing.json()).error.message).toContain("set a default target");
+  await applied("work.project.update", { project: p.id, expected_revision: p.revision + 1, patch: { default_target: "codex" } });
+  await applied("work.project.delete", { project: p.id, expected_revision: p.revision + 2 });
+  const read = WorkTaskDetail.parse(await (await api(`/v2/work/tasks/${t.id}`)).json()).task;
+  expect(read.project).toBeUndefined();
+  expect(read.next_target).toBeUndefined();
+  expect(await client().jobs(undefined, t.id)).toEqual([]);
+});
+
+test("an agent's implicit proposal preserves its shown target and source through approval", async () => {
+  const p = await project({ default_target: "codex" }), t = await task({ project: p.id });
+  const request = "synthetic-default-proposal";
+  const response = await command("work.task.dispatch", { task: t.id }, agent, request);
+  expect(response.status).toBe(202);
+  expect(response.headers.get("X-Lumio-Offline-Targets")).toBe("codex@mac");
+  const pending = WorkCommandResult.parse(await response.json());
+  if (pending.kind !== "proposal") throw Error("Expected a proposal");
+  const proposal = Proposal.parse(hub.store.proposal(pending.proposal));
+  expect(proposal.operation).toMatchObject({ args: { operation: { args: { to: "codex@mac", expected_revision: t.revision } } } });
+  expect(await client().jobs(undefined, t.id)).toEqual([]);
+
+  await applied("work.project.update", { project: p.id, expected_revision: p.revision, patch: { default_target: null } });
+  expect((await api(`/v1/proposals/${proposal.id}/accept`, {})).status).toBe(200);
+  const result = hub.modules.workStore.receipt(proposal.author, request)?.result;
+  expect(result).toMatchObject({ kind: "job", target: "codex@mac", target_source: "project" });
+  expect(await client().jobs(undefined, t.id)).toHaveLength(1);
 });

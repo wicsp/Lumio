@@ -46,7 +46,11 @@ export class SqliteWorkStore implements WorkStore {
       if (db.query("SELECT 1 FROM work_tasks LIMIT 1").get()) throw new WorkError("CONFLICT", { key: "work.migration_required", args: [] });
       upgradeWorkTables(db);
     }
-    if (!db.query<{ name: string }, []>("PRAGMA table_info(work_projects)").all().some(column => column.name === "workdir")) db.exec("ALTER TABLE work_projects ADD COLUMN workdir TEXT");
+    db.transaction(() => {
+      const columns = db.query<{ name: string }, []>("PRAGMA table_info(work_projects)").all();
+      if (!columns.some(column => column.name === "workdir")) db.exec("ALTER TABLE work_projects ADD COLUMN workdir TEXT");
+      if (!columns.some(column => column.name === "default_target")) db.exec("ALTER TABLE work_projects ADD COLUMN default_target TEXT");
+    }).immediate();
   }
   transaction<T>(action: () => T): T { return this.db.transaction(action)(); }
   private readProject(row: Record<string, unknown> | null): WorkProject | undefined {
@@ -62,12 +66,12 @@ export class SqliteWorkStore implements WorkStore {
   }
   putProject(input: WorkProject): void {
     const value = WorkProject.parse(input);
-    this.db.query(`INSERT INTO work_projects(id,title,description,revision,status,created,updated,tags,goal,repo,deadline,created_by,updated_by,workdir)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    this.db.query(`INSERT INTO work_projects(id,title,description,revision,status,created,updated,tags,goal,repo,deadline,created_by,updated_by,workdir,default_target)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(id) DO UPDATE SET title=excluded.title,description=excluded.description,revision=excluded.revision,
-      status=excluded.status,updated=excluded.updated,tags=excluded.tags,goal=excluded.goal,repo=excluded.repo,workdir=excluded.workdir,deadline=excluded.deadline,updated_by=excluded.updated_by`).run(
+      status=excluded.status,updated=excluded.updated,tags=excluded.tags,goal=excluded.goal,repo=excluded.repo,workdir=excluded.workdir,default_target=excluded.default_target,deadline=excluded.deadline,updated_by=excluded.updated_by`).run(
       value.id, value.title, value.description, value.revision, value.status, value.created, value.updated,
-      JSON.stringify(value.tags), value.goal ?? null, value.repo ?? null, value.deadline ?? null, value.created_by ?? null, value.updated_by ?? null, value.workdir ?? null);
+      JSON.stringify(value.tags), value.goal ?? null, value.repo ?? null, value.deadline ?? null, value.created_by ?? null, value.updated_by ?? null, value.workdir ?? null, value.default_target ?? null);
   }
 
   private readTask(row: Record<string, unknown> | null, batchDependencies?: Map<string, string[]>): WorkTask | undefined {
@@ -87,7 +91,7 @@ export class SqliteWorkStore implements WorkStore {
       .all().map(row => this.readTask(row, dependencies)!);
   }
   putTask(input: WorkTask): void {
-    const { blocked_by: _derived, ...value } = WorkTask.parse(input);
+    const { blocked_by: _blocked, next_target: _target, ...value } = WorkTask.parse(input);
     this.transaction(() => {
       this.db.query(`INSERT INTO work_tasks(id,title,description,revision,outcome,turn,plan,project,parent,due,created,updated,tags,refs,workdir,model,gpus,timeout_minutes,created_by,updated_by)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
@@ -113,6 +117,13 @@ export class SqliteWorkStore implements WorkStore {
     const rows = task === undefined ? this.db.query<Record<string, unknown>, []>("SELECT * FROM work_executions ORDER BY rowid").all()
       : this.db.query<Record<string, unknown>, [string]>("SELECT * FROM work_executions WHERE task=? ORDER BY round").all(task);
     return rows.map((row) => WorkExecution.parse({ ...row, applied: Boolean(row.applied) }));
+  }
+  latestJobs(): Map<string, string> {
+    const rows = this.db.query<{ task: string; job: string }, []>(`SELECT execution.task, execution.job
+      FROM work_executions AS execution
+      JOIN (SELECT task, MAX(round) AS round FROM work_executions GROUP BY task) AS latest
+      ON execution.task=latest.task AND execution.round=latest.round`).all();
+    return new Map(rows.map(({ task, job }) => [task, job]));
   }
   putExecution(input: WorkExecution): void {
     const value = WorkExecution.parse(input);
@@ -171,7 +182,7 @@ export class SqliteWorkStore implements WorkStore {
   putReceipt(actor: string, request: string, operation: string, result: WorkCommandResult): void {
     const parsed = WorkCommandResult.parse(result);
     if (parsed.kind === "task") {
-      const { blocked_by: _derived, ...task } = parsed.task;
+      const { blocked_by: _blocked, next_target: _target, ...task } = parsed.task;
       parsed.task = task;
     }
     this.db.query("INSERT INTO work_requests(actor,request,operation,result) VALUES (?,?,?,?)").run(actor, request, operation, JSON.stringify(parsed));

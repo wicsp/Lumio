@@ -1,4 +1,4 @@
-import { ExecutionTarget, parseAssignee } from "@lumio/schema";
+import { ExecutionTarget, parseAssignee, DISPATCH_TARGET_SOURCES } from "@lumio/schema";
 import type { HubStore } from "./store.ts";
 import { HubError } from "./errors.ts";
 
@@ -8,9 +8,9 @@ export function executionTargets(store: HubStore, now = new Date()): ExecutionTa
     engine: engine.name, version: engine.version, online: runtime.online,
   }))));
 }
-export function validateTarget(store: HubStore, localRuntime: string | undefined, target: string, now = new Date()): ExecutionTarget {
+export function validateTarget(store: HubStore, localRuntime: string | undefined, target: string, now = new Date(), source?: (typeof DISPATCH_TARGET_SOURCES)[number]): ExecutionTarget {
   const targets = executionTargets(store, now), parsed = parseAssignee(target);
   const found = parsed === "human" ? undefined : targets.find(value => value.runtime === (parsed.device ?? localRuntime) && value.engine === parsed.agent);
-  if (!found) throw new HubError("INVALID", { key: "target.invalid", args: [target, targets.map(value => value.target).join(", ")] });
+  if (!found) throw new HubError("INVALID", { key: source === "project" ? "target.invalid_project_default" : "target.invalid", args: [target, targets.map(value => value.target).join(", ")] });
   return found;
 }
