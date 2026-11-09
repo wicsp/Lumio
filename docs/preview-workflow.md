@@ -1,6 +1,12 @@
 # 实验分支与本机试用
 
-`preview` 收集准备一起试用的改动。功能开发继续使用独立分支和 worktree，契约审批、测试数据隔离和新功能带测试的规则照常执行。只供试用的功能提交可以先跑受影响的测试。集成会话负责构建组合结果、解决冲突并推送。
+`preview` 是本机试用的集成分支，可以同时试用多个尚未进入 `main` 的功能。验收以单个功能为单位。通过的功能从自己的分支开 PR 进入 `main`，其他功能继续在各自的分支修改。
+
+## 分支关系
+
+- 功能分支从最新的 `origin/main` 开，避免把其他待验收功能带进自己的 PR。确实依赖另一个未合入的功能时，先说明依赖并确定合并顺序。
+- `preview` 通过合并或 revert 向前推进。部署检出只做快进更新。
+- 新功能仍须带测试，契约改动仍须经人类批准。仅供试用的提交可以先跑受影响的测试。完整规则见 [AGENTS.md](../AGENTS.md)。
 
 ## 用命令行连接试用实例
 
@@ -24,21 +30,25 @@ lumio-preview --version
 
 ## 合入一个功能
 
-在干净的集成 worktree 中，从最新 `origin/preview` 建立该会话的集成分支。把选定的已提交功能合入，运行受影响的测试和本机编译。通过后提交并直接推送到 `preview`。示例中的 `feature_ref` 是待合入的提交或分支。
+一次由一个集成会话负责。在干净的 worktree 中，从最新 `origin/preview` 建立集成分支，合入功能分支，运行受影响的测试并编译。示例中的 `feature_branch` 是远端功能分支名。
 
 ```sh
 git fetch origin
 git switch -c codex/preview-integration-example origin/preview
-git merge --no-ff --no-commit "$feature_ref"
+git merge --no-ff --no-commit "origin/$feature_branch"
 bun install --frozen-lockfile
 # 用 bun test 加上受影响的测试路径
 build_dir=$(mktemp -d)
 bun run apps/cli/src/build-binary.ts --outfile "$build_dir/lumio"
-git commit -m "preview: integrate <功能>"
+git commit -m "preview: integrate $feature_branch"
 git push origin HEAD:refs/heads/preview
 ```
 
-一次由一个会话集成。推送被拒绝时重新获取远端，基于最新 `origin/preview` 解决冲突并复验。禁止强推。主线有相关改动时，同样串行把 `origin/main` 合入 `preview`，先验证组合版本。
+如果远端已前进，重新获取最新的 `origin/preview`，解决冲突并复验后再推送。推送后 GitHub Actions 会跑完整检查，供集成会话发现组合版本的问题。失败时修复或撤下相关功能。
+
+主线有新合并时，串行把 `origin/main` 合入 `preview`，验证组合结果后推送。只在 `preview` 上解决的冲突如果影响功能行为，要把相应修正带回该功能分支，并试用修正后的版本。
+
+如果需要撤下某个功能，在 `preview` 上执行 `git revert -m 1 <集成合并提交>`。重新试用该功能时，先撤销这次 revert，再合入修复提交，并将两步作为一批测试和推送。若功能后来已在 `main` 合入，同步主线时也要核对原 revert 是否仍抵消功能，必要时在同一批同步中撤销它。
 
 ## 本机更新
 
@@ -56,8 +66,11 @@ git clone --single-branch --branch preview ssh://git@github.com/wicsp/Lumio.git 
 
 命令要求已配置 [独立试用服务](native-assistant-trial.md#本机部署与停止) 和仓库指定的 Bun。它使用 `io.lumio.native-trial.*` 两个 launchd 服务及 `~/.local/share/lumio-native-trial/`，地址为 <http://127.0.0.1:7421>。这个实例使用独立状态，知识 vault 保持未挂载。部署检出用于快进更新，功能开发在其他 worktree 中进行。
 
-命令依次快进拉取、安装锁定依赖、编译、替换程序、重启 Hub 并验证其版本，然后重启 Runtime。部署成功的 SHA 写到试用目录的 `preview-commit`。构建失败时当前服务继续运行。替换后的启动失败可查试用目录下的 `logs/`，上一次的程序保存在 `bin/lumio.previous`。恢复程序前要核对试用数据库的迁移兼容性。运行中的试用任务会受到重启影响，更新前先等任务结束。
+命令依次快进拉取、安装锁定依赖、编译、替换程序、重启 Hub 并验证其版本，然后重启 Runtime。部署成功的 SHA 写到试用目录的 `preview-commit`。构建失败时当前服务继续运行。替换后的启动失败可查试用目录下的 `logs/`，上一次的程序保存在 `bin/lumio.previous`。恢复程序前要核对试用数据库的迁移兼容性。运行中的试用任务会受到重启影响，更新前先等任务结束。已有 launchd 服务重启时沿用已加载的 plist，修改 plist 后按[独立试用服务说明](native-assistant-trial.md#本机部署与停止)重新加载。Runtime 重新连通的自动检查列入 [I1-0](tasks/I1-0-preview-updater.md)。
 
 ## 验收与发布
 
-用户确认所验收的 SHA 后，冻结这一批改动并开一个 `preview → main` PR。若之后加入新提交或解决主线冲突，要重新试用变化后的版本。通过完整 CI 后用合并提交合入 `main`，使后续批次能沿用共同历史。只在合入后的主线提交上推送正式 `v*` 标签。Release workflow 校验主线归属并重新跑全量检查后再发布。
+1. 用户在试用实例上确认通过的功能，并提供当时的 `preview-commit`。
+2. 每个通过的功能从自己的分支开一个 PR 到 `main`，完整 CI 通过后合并。若功能分支为解决主线冲突而改变了试用结果，先把变化合入 `preview` 重新验收。
+3. 将合并后的 `origin/main` 同步到 `preview`。试用分支上可以继续集成其他待验收功能。
+4. 正式 `v*` 标签指向 `main` 上的提交。Release workflow 校验主线归属并重新跑全量检查后发布。
