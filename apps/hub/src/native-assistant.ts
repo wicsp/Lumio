@@ -22,7 +22,7 @@ import type { AssistantContext } from "@lumio/assistant";
 import type { AssistantService } from "@lumio/assistant";
 import type { SqliteAssistantStore } from "@lumio/storage";
 import type { AIConfigurationService } from "./ai-config.ts";
-import type { Capabilities } from "./capabilities.ts";
+import { assistantToolDescription, type Capabilities } from "./capabilities.ts";
 interface NativeModules {
   ai: AIConfigurationService;
   assistant: AssistantService;
@@ -595,7 +595,7 @@ export class NativeAssistant {
       return Response.json({
         tools: defs.map((c) => ({
           name: toolName(c.name),
-          description: c.summary.en,
+          description: assistantToolDescription(c),
           inputSchema: c.args.toJSONSchema(),
         })),
       });

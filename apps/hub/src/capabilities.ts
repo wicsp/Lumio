@@ -18,6 +18,11 @@ interface CapabilityModules { workCommands: WorkCommands; work: WorkService; rou
 
 export interface CapabilityResult { result: unknown; change?: CapabilityChange; private_read?: boolean }
 
+export function assistantToolDescription(def: (typeof CAPABILITIES)[number]): string {
+  if (def.name !== "work.task.update") return def.summary.en;
+  return `${def.summary.en} To add, remove, or reorder prerequisites, first read the task with ${toolName("work.task.show")} and use its revision as expected_revision. Set patch.dependencies to the complete list of prerequisite task IDs, preserving any dependencies the user did not ask to change. Use [] to clear all prerequisites. To make A wait for B, put B's ID in A's dependencies. The Hub checks for cycles and stale revisions.`;
+}
+
 /** Hub composition: schemas and authorization precede every module invocation. No HTTP input grants private delegation. */
 export class Capabilities {
   private readonly knowledge?: KnowledgeService;
@@ -30,7 +35,7 @@ export class Capabilities {
   }
   tools(): AssistantTool[] {
     return CAPABILITIES.map(def => ({
-      spec: { name: toolName(def.name), description: def.summary.en, input_schema: def.args.toJSONSchema() },
+      spec: { name: toolName(def.name), description: assistantToolDescription(def), input_schema: def.args.toJSONSchema() },
       capability: def.name, effect: def.kind,
       execute: async (args, context) => {
         const actor = this.store.assistantActor();
