@@ -749,17 +749,6 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 .set-about { display: flex; align-items: center; gap: 14px; padding: 18px; border: 1px solid var(--line); border-radius: var(--r-lg); background: linear-gradient(135deg, var(--lumen-wash), var(--surface) 60%); }
 .set-about-mark { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; background: #1c2220; color: var(--lumen); font: 700 22px/1 var(--serif); box-shadow: 0 0 0 1px var(--line); flex: none; }
 
-/* 不常用的内容折叠起来 */
-.set-fold { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); overflow: hidden; }
-.set-fold > .set-card { border: 0; border-top: 1px solid var(--line); border-radius: 0; }
-.set-fold-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; cursor: pointer; list-style: none; }
-.set-fold-head::-webkit-details-marker { display: none; }
-.set-fold-head:hover { background: var(--hover); }
-.set-fold-text { flex: 1; min-width: 0; }
-.set-fold-title { font-size: var(--fs-md); font-weight: 550; }
-.set-fold-chevron { width: 16px; height: 16px; color: var(--ink-3); transition: transform .15s var(--ease); flex: none; }
-.set-fold[open] .set-fold-chevron { transform: rotate(180deg); }
-
 @media (max-width: 860px) {
   .set-shell { display: block; padding: 14px 16px 48px; }
   .set-shell.at-index .set-content, .set-shell:not(.at-index) .set-nav { display: none; }
@@ -897,8 +886,8 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 .chat-dock .composer { margin-top: 0; box-shadow: var(--shadow-pop); }
 .chat-dock .composer textarea { min-height: 52px; padding-top: 12px; font-size: var(--fs-lg); }
 .chat-dock .composer-foot .btn { margin-left: 0; }
-.chat-dock .composer-foot .model-input { margin-right: auto; min-width: 0; }
-.model-input { width: 180px !important; height: 26px !important; min-height: 26px !important; font-size: var(--fs-xs) !important; padding: 0 8px !important; border-color: transparent !important; background: var(--sunken) !important; }
+.chat-dock .composer-foot { justify-content: flex-end; }
+.chat-dock .composer-foot select { margin-right: auto; }
 .welcome { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 12vh 0 0; }
 .welcome h2 { font-size: var(--fs-2xl); font-weight: 650; letter-spacing: -0.02em; }
 .welcome p { color: var(--ink-3); max-width: 34em; }
@@ -1334,4 +1323,4 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 .composer-foot select { height: 26px; max-width: 200px; min-width: 0; padding: 0 22px 0 8px; border: 0; border-radius: var(--r-md); background-color: var(--sunken); color: var(--ink-2); font-size: var(--fs-xs); }
 .composer-foot select:hover { color: var(--ink); }
 .composer-foot select:disabled { opacity: .6; }
-@media (max-width: 600px) { .native-panel { max-height: 32vh; padding: 10px; } .composer-foot { flex-wrap: wrap; } .composer-foot select { max-width: 150px; } .chat-dock .composer-foot .model-input { width: 120px !important; } }
+@media (max-width: 600px) { .native-panel { max-height: 32vh; padding: 10px; } .composer-foot { flex-wrap: wrap; } .composer-foot select { max-width: 150px; } }

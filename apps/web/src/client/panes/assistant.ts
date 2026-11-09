@@ -1,10 +1,10 @@
-import {NativeSessionPanel} from "../native-session.ts";
-import type {AIProfile} from "@lumio/schema";
+import { NativeSessionPanel } from "../native-session.ts";
+import { assistantProfiles, defaultAssistantProfile } from "../assistant-profile.ts";
 /**
  * 助手：对话历史、流式回复、停止接收与中断后核查；显式记忆。
  * 中断或结果不明时只核对已保存记录，不自动重发；同样的草稿重发时复用 request_id。
  */
-import type { AssistantConversation, AssistantConversationDetail, AssistantMemory, AssistantChatRequest, AssistantToolCall } from "@lumio/schema";
+import type { AIProfile, AssistantConversation, AssistantConversationDetail, AssistantMemory, AssistantChatRequest, AssistantToolCall } from "@lumio/schema";
 import { errorText, type Client, type HubExtras } from "../api.ts";
 import { formatTime, newRequestId } from "../commands.ts";
 import { autosize, clear, empty, failure, h, icon, loading, openDialog, toast } from "../dom.ts";
@@ -27,12 +27,17 @@ export class AssistantPane {
   private scroller = h("div", { class: "chat-scroll" });
   private messages = h("div", { class: "messages", role: "log", "aria-label": t("Conversation messages") });
   private text = autosize(h("textarea", { name: "chat-message", rows: "1", placeholder: t("Ask anything, or think through the next step…"), "aria-label": t("Message") }));
-  private profiles:AIProfile[]=[];
-  private profile=h("select",{"aria-label":t("AI profile")},h("option",{value:""},t("Default assistant model")));
-  private native!:NativeSessionPanel;
-  private nativeReady=true;
-  private model = h("input", { name: "chat-model", class: "model-input", placeholder: t("Default model"), title: t("Applies to this message only; doesn't change the service or permissions"), autocomplete: "off" });
-  private send = h("button", { type: "submit", class: "btn btn-primary btn-small", "aria-label": t("Send"), title: t("↵ send · ⇧↵ new line") }, icon("send"), t("Send"));
+  private profiles: AIProfile[] = [];
+  private profile = h("select", { "aria-label": t("AI profile"), disabled: true });
+  private profileStatus = h("div", { role: "status" });
+  private profileLoad?: Promise<void>;
+  private profilesLoaded = false;
+  private selectedProfile?: string;
+  private boundProfile?: string;
+  private conversationLoading = false;
+  private native: NativeSessionPanel;
+  private nativeReady = true;
+  private send = h("button", { type: "submit", class: "btn btn-primary btn-small", disabled: true, "aria-label": t("Send"), title: t("↵ send · ⇧↵ new line") }, icon("send"), t("Send"));
   private stop = h("button", { type: "button", class: "btn btn-small", hidden: true, onclick: () => {if(this.native.session)void this.client.nativeAction(this.native.session.id,{action:"interrupt"});this.controller?.abort();} }, icon("stop"), t("Stop"));
   private notice = h("div", { role: "status" });
   private dock: HTMLElement;
@@ -54,13 +59,20 @@ export class AssistantPane {
 
   constructor(private root: HTMLElement, private client: Client, private hub: HubExtras, private navigate: Navigate = () => {}) {
     this.disposeReferences = referenceInput(this.text,client);
-    this.native=new NativeSessionPanel(client,ready=>{this.nativeReady=ready;this.send.disabled=this.sending||this.serverRunning||!ready;if(ready&&!this.sending&&this.serverRunning)void this.refresh();});
-    void client.aiConfiguration().then(config=>{if(!this.active)return;this.profiles=config.profiles;this.profile.append(...config.profiles.map(p=>h("option",{value:p.id},p.name)));}).catch(()=>{});
+    this.native = new NativeSessionPanel(client, ready => {
+      this.nativeReady = ready;
+      this.updateComposer();
+      if (ready && !this.sending && this.serverRunning) void this.refresh();
+    });
+    this.profile.addEventListener("change", () => {
+      this.selectedProfile = this.profile.value;
+      this.updateComposer();
+    });
     this.composer = h("form", { class: "composer" }, this.text,
-      h("div", { class: "composer-foot" }, this.profile,this.model, this.stop, this.send));
+      h("div", { class: "composer-foot" }, this.profile, this.stop, this.send));
     this.composer.addEventListener("submit", event => { event.preventDefault(); void this.submit(); });
     this.text.addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); this.composer.requestSubmit(); } });
-    this.dock = h("div", { class: "chat-dock" }, this.native.element,this.notice, this.composer);
+    this.dock = h("div", { class: "chat-dock" }, this.native.element, this.notice, this.profileStatus, this.composer);
     this.scroller.append(this.messages);
     this.messageNav = new MessageRail(this.scroller, this.messages, ".msg-user", t("Jump to a message"), (index, excerpt) => t("Message {0}: {1}", index + 1, excerpt));
     this.layout.append(
@@ -78,14 +90,17 @@ export class AssistantPane {
       this.layout);
     this.restoreDraft();
     this.text.addEventListener("input", () => this.captureDraft());
-    this.model.addEventListener("input", () => this.captureDraft());
+    void this.loadProfiles();
     this.showWelcome();
     void this.loadConversations();
     this.text.focus();
   }
 
   dispose(): void { this.native.dispose();this.messageNav.dispose(); this.disposeReferences(); this.captureDraft(); this.active = false; this.generation++; this.controller?.abort(); }
-  resume(): void { if (this.scrollOnResume) this.scrollToLatest(); }
+  resume(): void {
+    if (this.scrollOnResume) this.scrollToLatest();
+    void this.loadProfiles();
+  }
   intent(name: string): void {
     if (name === "new") this.newConversation();
     else if (name.startsWith("ask:")) {
@@ -101,18 +116,49 @@ export class AssistantPane {
   canLeave(): boolean { this.captureDraft(); return true; }
   private captureDraft(): void {
     const key = `chat:${this.current ?? "new"}`;
-    if (this.text.value || this.uncertain) this.store.write(key, {text:this.text.value, model:this.model.value, uncertain:this.uncertain}); else this.store.remove(key);
+    if (this.text.value || this.uncertain) this.store.write(key, { text: this.text.value, uncertain: this.uncertain }); else this.store.remove(key);
   }
   private restoreDraft(): void {
-    const draft = this.store.read<{text:string;model:string;uncertain?:AssistantChatRequest}>(`chat:${this.current ?? "new"}`);
-    this.text.value = draft?.text ?? ""; this.model.value = draft?.model ?? ""; this.uncertain = draft?.uncertain;
+    const draft = this.store.read<{text:string;uncertain?:AssistantChatRequest}>(`chat:${this.current ?? "new"}`);
+    this.text.value = draft?.text ?? ""; this.uncertain = draft?.uncertain;
     if (!this.text.value && this.uncertain) this.text.value = this.uncertain.message;
+  }
+
+  private loadProfiles(): Promise<void> {
+    return this.profileLoad ??= this.client.aiConfiguration().then(config => {
+      if (!this.active) return;
+      this.profiles = config.profiles;
+      this.profilesLoaded = true;
+      this.renderProfiles();
+    }).catch(cause => {
+      if (this.active && !this.profilesLoaded) clear(this.profileStatus, failure(errorText(cause), () => this.loadProfiles()));
+    }).finally(() => { this.profileLoad = undefined; });
+  }
+
+  private renderProfiles(): void {
+    const options = assistantProfiles(this.profiles, !!this.current, this.boundProfile);
+    clear(this.profile, ...options.map(profile => h("option", { value: profile.id }, profile.name)));
+    this.profile.value = this.selectedProfile ?? (this.current ? "" : defaultAssistantProfile(options));
+    this.profile.hidden = !options.length;
+    this.updateComposer();
+  }
+
+  private updateComposer(): void {
+    const blocked = this.sending || this.serverRunning || this.conversationLoading;
+    this.profile.disabled = blocked || this.native.bound || !this.profile.options.length;
+    this.send.disabled = blocked || !this.nativeReady || !this.profile.value;
+    if (!this.profilesLoaded) return;
+    clear(this.profileStatus);
+    if (this.profile.value || this.conversationLoading) return;
+    const hint = this.native.bound ? "The profile for this conversation is unavailable."
+      : this.current ? "Choose an API profile to continue this chat." : "Choose a profile to start chatting.";
+    this.profileStatus.append(h("p", { class: "notice" }, t(hint), " ",
+      h("a", { href: "#settings/ai" }, t("Set up AI"))));
   }
 
   private setBusy(busy: boolean): void {
     this.sending = busy;
-    this.send.disabled = busy || this.serverRunning || !this.nativeReady;
-    this.profile.disabled=busy||this.native.bound;
+    this.updateComposer();
     this.text.disabled = busy;
     this.stop.hidden = !busy; this.send.hidden = busy;
     this.segChat.disabled = busy; this.segMemory.disabled = busy;
@@ -136,8 +182,13 @@ export class AssistantPane {
     if (this.sending) return;
     if (this.mode !== "chat") this.switchMode("chat");
     if (this.mode !== "chat") return;
-    this.generation++; this.serverRunning = false; this.setBusy(false);
-    this.captureDraft(); this.current = undefined;this.native.bind(undefined);this.model.hidden=false; this.restoreDraft();
+    this.generation++; this.serverRunning = false; this.conversationLoading = false;
+    this.captureDraft();
+    this.current = this.selectedProfile = this.boundProfile = undefined;
+    this.native.bind(undefined);
+    this.restoreDraft();
+    this.renderProfiles();
+    this.setBusy(false);
     clear(this.notice); this.showWelcome(); this.markCurrent();
     this.layout.classList.remove("show-side");
     this.text.focus();
@@ -199,7 +250,15 @@ export class AssistantPane {
     if (this.mode !== "chat") this.switchMode("chat");
     if (this.mode !== "chat") return;
     const generation = ++this.generation;
-    this.captureDraft(); this.current = id; this.restoreDraft(); this.markCurrent();
+    this.captureDraft();
+    if (this.current !== id) {
+      this.selectedProfile = this.boundProfile = undefined;
+      this.native.bind(undefined);
+    }
+    this.current = id;
+    this.conversationLoading = true;
+    this.updateComposer();
+    this.restoreDraft(); this.markCurrent();
     this.layout.classList.remove("show-side");
     clear(this.messages, loading()); clear(this.notice);
     try {
@@ -218,8 +277,11 @@ export class AssistantPane {
 
   private renderDetail(detail: AssistantConversationDetail, tools: AssistantToolCall[] = []): void {
     this.current = detail.conversation.id;
-    this.profile.value=detail.conversation.profile??"";
-    this.native.bind(detail.conversation.native_session);this.model.hidden=!!detail.conversation.native_session;
+    this.conversationLoading = false;
+    this.selectedProfile ??= detail.conversation.profile;
+    this.boundProfile = detail.conversation.native_session ? detail.conversation.profile : undefined;
+    this.native.bind(detail.conversation.native_session);
+    this.renderProfiles();
     const calls = new Map(tools.map(call => [call.id, call]));
     let toolGroup: HTMLElement | undefined;
     clear(this.messages, ...detail.messages.flatMap(message => {
@@ -253,19 +315,40 @@ export class AssistantPane {
     if (this.sending) return;
     if (this.mode === "memory") {
       await this.loadMemories();
-    } else { await this.loadConversations(); if (this.current) await this.openConversation(this.current); }
+    } else { await Promise.all([this.loadProfiles(), this.loadConversations()]); if (this.current) await this.openConversation(this.current); }
   }
 
   private async submit(): Promise<void> {
-    if (this.sending || this.serverRunning || !this.text.value.trim()) return;
-    const selected=this.profiles.find(p=>p.id===this.profile.value);
-    if(!this.current&&selected?.engine==="codex"){
-      this.setBusy(true);try{const s=await this.client.createNativeSession({request_id:newRequestId("native"),profile:selected.id});this.captureDraft();this.current=s.conversation;this.native.bind(s.id);this.model.hidden=true;this.captureDraft();void this.loadConversations();clear(this.notice,h("p",{class:"notice"},t("Sign in to continue. Your message is kept as a draft.")));}catch(e){clear(this.notice,failure(errorText(e)));}finally{this.setBusy(false);}return;
+    const generation = this.generation;
+    if (this.profileLoad && !this.profilesLoaded) await this.profileLoad;
+    if (!this.active || generation !== this.generation || this.mode !== "chat" || this.send.disabled || !this.text.value.trim()) return;
+    const selected = this.profiles.find(profile => profile.id === this.profile.value);
+    if (!selected) return;
+    this.selectedProfile = selected.id;
+    if (!this.current && selected.engine === "codex") {
+      this.setBusy(true);
+      try {
+        const session = await this.client.createNativeSession({ request_id: newRequestId("native"), profile: selected.id });
+        if (!this.active) return;
+        this.captureDraft();
+        this.current = session.conversation;
+        this.boundProfile = selected.id;
+        this.native.bind(session.id);
+        this.renderProfiles();
+        this.captureDraft();
+        void this.loadConversations();
+        clear(this.notice, h("p", { class: "notice" }, t("Sign in to continue. Your message is kept as a draft.")));
+      } catch (cause) {
+        if (this.active) clear(this.notice, failure(errorText(cause)));
+      } finally { this.setBusy(false); }
+      return;
     }
-    if(!this.nativeReady)return;
-    const input = { ...(selected?{profile:selected.id}:{}),...this.native.settings(),conversation: this.current, message: this.text.value.trim(), ...(!this.native.session&&this.model.value.trim() ? { model: this.model.value.trim() } : {}) };
+    const input: Omit<AssistantChatRequest, "request_id"> = {
+      profile: selected.id, ...this.native.settings(), conversation: this.current, message: this.text.value.trim(),
+    };
     const previous = this.uncertain;
-    const same = previous && previous.message === input.message && previous.conversation === input.conversation && previous.model === input.model;
+    const same = previous && previous.message === input.message && previous.conversation === input.conversation
+      && previous.profile === input.profile && previous.model === input.model && previous.effort === input.effort;
     const request: AssistantChatRequest = { ...input, request_id: same ? previous.request_id : newRequestId("chat") };
     this.uncertain = request; this.captureDraft();
     this.setBusy(true);
@@ -336,6 +419,7 @@ export class AssistantPane {
       if (detail && detail.turns.some(turn => turn.request_id === request.request_id)) {
         const tools = await this.hub.assistantTools(detail.conversation.id).catch(() => []);
         if (!this.active) return;
+        this.selectedProfile = request.profile;
         this.renderDetail(detail, tools);
         const turn = detail.turns.find(value => value.request_id === request.request_id)!;
         if (turn.status === "running") clear(this.notice, h("div", { class: "notice" }, icon("alert"), h("span", {}, t("The Hub is still working on it. Refresh later to see the result. The request was not sent again."))));

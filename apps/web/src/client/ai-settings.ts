@@ -7,6 +7,7 @@ import type { AIConfiguration, AIConnection, AIProfile, AIRuntime, NativeSession
 import { errorText, type Client } from "./api.ts";
 import { clear, failure, h, icon, openDialog, toast } from "./dom.ts";
 import { t } from "./i18n.ts";
+import { defaultAssistantProfile, saveDefaultAssistantProfile } from "./assistant-profile.ts";
 
 type Group = (title: string, hint: string | undefined, body: HTMLElement, action?: HTMLElement) => HTMLElement;
 type Kind = AIConnection["kind"];
@@ -37,6 +38,7 @@ export class AISettings {
   private config: AIConfiguration = { connections: [], profiles: [] };
   private runtimes: AIRuntime[] = [];
   private sessions: NativeSession[] = [];
+  private defaultRows = h("div", { class: "set-rows" });
   private profileRows = h("div", { class: "set-rows" });
   private connectionRows = h("div", { class: "set-rows" });
   private newProfile = h("button", { type: "button", class: "btn btn-quiet btn-small", onclick: () => this.editProfile() }, icon("plus"), t("New profile"));
@@ -44,10 +46,12 @@ export class AISettings {
 
   constructor(private client: Client, group: Group) {
     this.element.append(
-      group(t("AI profiles"), t("Choose an API or an official Codex session. Profiles share model settings; each conversation keeps its own permissions and history."), this.profileRows, this.newProfile),
-      group(t("Connections"), t("Where models are called: an API address and key kept on the Hub, or an official Codex sign-in on a runtime."), this.connectionRows, this.newConnection));
-    clear(this.profileRows, h("p", { class: "set-empty" }, t("Loading…")));
-    clear(this.connectionRows, h("p", { class: "set-empty" }, t("Loading…")));
+      group(t("Default assistant model"), t("New chats start with this profile. This preference is saved in this browser."), this.defaultRows),
+      group(t("Connections"), t("Where models are called: an API address and key kept on the Hub, or an official Codex sign-in on a runtime."), this.connectionRows, this.newConnection),
+      group(t("AI profiles"), t("Choose an API or an official Codex session. Profiles share model settings; each conversation keeps its own permissions and history."), this.profileRows, this.newProfile));
+    for (const rows of [this.defaultRows, this.connectionRows, this.profileRows]) {
+      clear(rows, h("p", { class: "set-empty" }, t("Loading…")));
+    }
     void this.load();
   }
 
@@ -61,12 +65,14 @@ export class AISettings {
       this.render();
     } catch (cause) {
       if (!this.active) return;
-      clear(this.profileRows, failure(errorText(cause)));
+      clear(this.defaultRows, failure(errorText(cause), () => this.load()));
+      clear(this.profileRows);
       clear(this.connectionRows);
     }
   }
 
   private render(): void {
+    this.renderDefault();
     const byId = new Map(this.config.connections.map(connection => [connection.id, connection]));
     this.newProfile.disabled = !this.config.connections.length;
     this.newProfile.title = this.config.connections.length ? "" : t("Add a connection first.");
@@ -76,6 +82,30 @@ export class AISettings {
     clear(this.connectionRows, ...(this.config.connections.length ? this.config.connections.map(connection => this.item(
       connection.kind === "codex-account" ? "device" : "globe", connection.name, connectionSummary(connection), () => this.editConnection(connection)))
       : [h("p", { class: "set-empty" }, t("No connections yet."))]));
+  }
+
+  private renderDefault(): void {
+    const profiles = this.config.profiles;
+    const owner = profiles[0]?.owner;
+    if (!owner) {
+      clear(this.defaultRows, h("p", { class: "set-empty" }, t("Add a connection and create a profile to choose a default.")));
+      return;
+    }
+    const select = h("select", { "aria-label": t("Default assistant model") },
+      h("option", { value: "" }, t("No default profile")),
+      ...profiles.map(profile => h("option", { value: profile.id }, profile.name)));
+    select.value = defaultAssistantProfile(profiles);
+    const message = h("div", { role: "status" });
+    select.addEventListener("change", () => {
+      if (saveDefaultAssistantProfile(owner, select.value)) {
+        clear(message);
+        toast(t("Saved."));
+      } else {
+        select.value = defaultAssistantProfile(profiles);
+        clear(message, failure(t("This browser could not save your default profile.")));
+      }
+    });
+    clear(this.defaultRows, h("div", { class: "set-form-wrap" }, select, message));
   }
 
   private item(glyph: string, title: string, sub: string, edit: () => void): HTMLElement {
