@@ -7,7 +7,19 @@ export type Lang = "en" | "zh";
 const KEY = "lumio.web.lang";
 
 export const ZH: Record<string, string> = {
-  "Manage Codex sign-in": "管理 Codex 登录",
+  "Codex sign-in": "Codex 登录",
+  "Only existing chats are signed in": "仅旧对话已登录",
+  "Older chats can still use their own sign-in. Sign in here once to use this connection in new chats.": "旧对话可能仍在使用自己的登录。请在这里授权一次，之后新对话都可以使用这个连接。",
+  "Finish": "完成",
+  "Cancel authorization": "取消授权",
+  "New chats can use this connection.": "新对话可以使用这个连接。",
+  "This runtime has an unsupported Codex version.": "这台执行器上的 Codex 版本不受支持。",
+  "Codex authorization failed. Check that device code sign-in is enabled in your ChatGPT security settings and try again.": "Codex 授权未成功。请确认 ChatGPT 安全设置已启用设备码登录，然后重试。",
+  "Codex activity": "Codex 活动",
+  "Approve command": "批准执行命令",
+  "Approve file change": "批准修改文件",
+  "Approve tool use": "批准调用工具",
+  "Allow once": "允许一次",
   "Signed in": "已登录",
   "Signed out": "未登录",
   "Waiting for authorization": "等待授权",

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { AIConnection, AIProfile, TYPESAFE_JEV_BASE_URL } from "@lumio/schema";
+import { AIConnection, AIProfile, NativeConnectionView, TYPESAFE_JEV_BASE_URL } from "@lumio/schema";
 import { DEFAULT_SETTINGS_SECTION, SETTINGS_SECTIONS, settingsSection } from "../../src/client/settings-sections.ts";
 import { CONNECTION_KINDS, connectionSummary, profileConnections, profileSummary } from "../../src/client/ai-settings.ts";
 import { ZH } from "../../src/client/i18n.ts";
@@ -34,6 +34,12 @@ describe("AI settings summaries", () => {
   test("connection rows name the service and location but never the key", () => {
     expect(connectionSummary(api)).toBe("DeepSeek API · api.example.test · Key saved");
     expect(connectionSummary(codex)).toBe("Codex account · laptop · Official sign-in");
+  });
+  test("an existing Codex chat never marks a signed-out connection as ready", () => {
+    const signedOut = NativeConnectionView.parse({ state: "signed_out" });
+    expect(connectionSummary(codex, signedOut)).toBe("Codex account · laptop · Signed out");
+    expect(connectionSummary(codex, signedOut, true)).toBe("Codex account · laptop · Only existing chats are signed in");
+    expect(connectionSummary(codex, { state: "ready", models: [] }, true)).toBe("Codex account · laptop · Signed in");
   });
   test("profile rows show connection, model and effort", () => {
     const profile = AIProfile.parse({ id: "aip_01J00000000000000000000000", owner: api.owner, name: "Daily", connection: api.id, engine: "lumio", model: "synthetic-chat", thinking: "default", effort: "high", revision: 1, created: stamp, updated: stamp });

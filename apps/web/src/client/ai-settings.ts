@@ -32,11 +32,18 @@ export function profileSummary(profile: AIProfile, connection?: AIConnection): s
   return [connection ? connection.name : t("Missing connection"), profile.model === "default" ? t("Client default model") : profile.model, profile.effort ?? t("Default effort")].join(" · ");
 }
 
-/** 连接一行的副标题：服务 · 位置 · 密钥状态。 */
-export function connectionSummary(connection: AIConnection): string {
-  const where = connection.kind === "codex-account" ? connection.host : connection.base_url ? new URL(connection.base_url).host : t("Hub");
-  const key = connection.kind === "codex-account" ? t("Official sign-in") : connection.api_key_set ? t("Key saved") : t("No key");
-  return [kindLabel(connection.kind), where, key].join(" · ");
+const authLabel = (view: NativeConnectionView): string =>
+  t({ ready: "Signed in", signed_out: "Signed out", authorizing: "Waiting for authorization", offline: "Runtime disconnected", error: "Codex sign-in failed" }[view.state]);
+
+/** 连接一行的副标题：服务、位置与连接级授权或密钥状态。 */
+export function connectionSummary(connection: AIConnection, view?: NativeConnectionView, hasLegacyChat = false): string {
+  if (connection.kind === "codex-account") {
+    const status = !view ? t("Official sign-in") : view.state === "signed_out" && hasLegacyChat
+      ? t("Only existing chats are signed in") : authLabel(view);
+    return [kindLabel(connection.kind), connection.host, status].join(" · ");
+  }
+  const where = connection.base_url ? new URL(connection.base_url).host : t("Hub");
+  return [kindLabel(connection.kind), where, connection.api_key_set ? t("Key saved") : t("No key")].join(" · ");
 }
 
 export class AISettings {
@@ -92,50 +99,16 @@ export class AISettings {
     clear(this.profileRows, ...(this.config.profiles.length ? this.config.profiles.map(profile => this.item(
       profile.engine === "codex" ? "terminal" : "assistant", profile.name, profileSummary(profile, byId.get(profile.connection)), () => this.editProfile(profile)))
       : [h("p", { class: "set-empty" }, hasChatConnection ? t("No profiles yet. Create one to choose a model for the assistant.") : t("Add a chat connection first, then create a profile."))]));
-    clear(this.connectionRows, ...(this.config.connections.length ? this.config.connections.map(connection => {
-      if (connection.kind !== "codex-account") return this.item("globe", connection.name, connectionSummary(connection), () => this.editConnection(connection));
-      const view = this.auth.get(connection.id);
-      return h("div", { class: "form-stack" }, this.item("device", connection.name,
-        [connectionSummary(connection), view && this.authLabel(view)].filter(Boolean).join(" · "), () => this.editConnection(connection)),
-        h("div", { class: "button-row" }, h("button", { type: "button", class: "btn btn-small", onclick: () => this.manageLogin(connection) }, t("Manage Codex sign-in"))));
-    })
+    clear(this.connectionRows, ...(this.config.connections.length ? this.config.connections.map(connection =>
+      this.item(connection.kind === "codex-account" ? "device" : "globe", connection.name,
+        connectionSummary(connection, this.auth.get(connection.id), this.legacyChatUses(connection)),
+        () => this.editConnection(connection)))
       : [h("p", { class: "set-empty" }, t("No connections yet."))]));
   }
 
-  private authLabel(view: NativeConnectionView): string {
-    return t({ ready: "Signed in", signed_out: "Signed out", authorizing: "Waiting for authorization", offline: "Runtime disconnected", error: "Codex sign-in failed" }[view.state]);
-  }
-
-  private manageLogin(connection: AIConnection) {
-    const body = h("div", { class: "form-stack", role: "status" }, t("Loading…"));
-    const dialog = openDialog(t("Manage Codex sign-in"), body, []);
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    dialog.addEventListener("close", () => { clearTimeout(timer); if (this.active) this.render(); }, { once: true });
-    const load = async (action?: NativeConnectionAction["action"]) => {
-      clearTimeout(timer);
-      if (action) clear(body, h("p", {}, t("Loading…")));
-      try {
-        const view = action ? await this.client.nativeConnectionAction(connection.id, { request_id: newRequestId("codex-auth"), action })
-          : await this.client.nativeConnection(connection.id);
-        if (!dialog.open) return;
-        this.auth.set(connection.id, view);
-        const control = (label: string, next: NativeConnectionAction["action"]) => h("button", {
-          type: "button", class: "btn btn-small", onclick: () => void load(next),
-        }, t(label));
-        clear(body, h("strong", {}, connection.name), h("p", {}, this.authLabel(view)));
-        if (view.state === "authorizing" && view.login_url && view.login_code) {
-          body.append(h("p", {}, t("Enter this one-time code on the official page.")),
-            h("div", { class: "button-row" }, h("a", { href: view.login_url, target: "_blank", rel: "noopener noreferrer", class: "btn btn-primary" }, t("Open official sign-in")),
-              h("code", { class: "native-code" }, view.login_code), control("Cancel", "cancel")));
-          timer = setTimeout(() => void load(), 2000);
-        } else if (view.state === "ready") body.append(control("Sign out of Codex", "logout"));
-        else if (view.state === "offline") body.append(h("button", { type: "button", class: "btn btn-small", onclick: () => void load() }, t("Refresh")));
-        else body.append(control("Sign in with Codex", "login"));
-      } catch (cause) {
-        if (dialog.open) clear(body, failure(errorText(cause)), h("button", { type: "button", class: "btn btn-small", onclick: () => void load() }, t("Refresh")));
-      }
-    };
-    void load();
+  private legacyChatUses(connection: AIConnection): boolean {
+    return this.sessions.some(session => session.connection.id === connection.id && !session.connection_auth &&
+      !["closed", "login_required"].includes(session.view.state) && !!session.view.account);
   }
 
   private renderDefault(): void {
@@ -174,17 +147,21 @@ export class AISettings {
   }
 
   private editConnection(old?: AIConnection): void {
-    const name = h("input", { required: true, value: old?.name ?? "", placeholder: t("Connection name"), autocomplete: "off" });
+    const name = h("input", { required: true, maxLength: 100, value: old?.name ?? "", placeholder: t("Connection name"), autocomplete: "off" });
     const kind = h("select", { disabled: !!old }, ...CONNECTION_KINDS.map(([value, label]) => h("option", { value, selected: (old?.kind ?? "deepseek") === value }, t(label))));
-    const host = h("select", { disabled: !!old }, ...this.runtimes.map(runtime => h("option", { value: runtime.name, selected: old?.host === runtime.name },
+    const host = h("select", { disabled: !!old },
+      old?.kind === "codex-account" && !this.runtimes.some(runtime => runtime.name === old.host)
+        ? h("option", { value: old.host }, `${old.host} · ${t("Offline")}`) : undefined,
+      ...this.runtimes.map(runtime => h("option", { value: runtime.name, selected: old?.host === runtime.name },
       runtime.online ? runtime.name : `${runtime.name} · ${t("Offline")}`)));
     const base = h("input", { type: "url", value: old?.base_url ?? "", placeholder: "https://…/v1", autocomplete: "off", spellcheck: "false" });
     const key = h("input", { type: "password", autocomplete: "new-password", spellcheck: "false" });
     const jevHint = h("p", { class: "field-hint" }, t("TypeSafe Jev is for structured decisions and is unavailable in chat profiles."));
     const api = h("div", { class: "form-stack" }, this.field(t("API address"), base), this.field(t("API key"), key, t("Stored only on the Hub, never shown again, and never sent to agents.")), jevHint);
+    const authSection = h("section", { class: "codex-auth", "aria-label": t("Codex sign-in") });
     const native = h("div", { class: "form-stack" },
-      this.runtimes.length ? this.field(t("Runtime"), host) : h("p", { class: "notice" }, t("No runtimes yet. Run lumio runtime add <name> to pair a machine.")),
-      h("p", { class: "field-hint" }, t("Sign in once for this connection. Each assistant chat keeps its own history and tools.")));
+      (this.runtimes.length || old?.kind === "codex-account") ? this.field(t("Runtime"), host) : h("p", { class: "notice" }, t("No runtimes yet. Run lumio runtime add <name> to pair a machine.")),
+      authSection);
     let editableAddress = base.value;
     const sync = () => {
       const codex = kind.value === "codex-account";
@@ -208,19 +185,129 @@ export class AISettings {
     kind.addEventListener("change", () => { key.value = ""; sync(); });
     sync();
     const message = h("div", { role: "status" });
-    const save = h("button", { type: "submit", class: "btn btn-primary" }, t("Save"));
+    const save = h("button", { type: "submit", class: "btn btn-primary" });
     const form = h("form", { class: "form-stack", autocomplete: "off" }, this.field(t("Name"), name), this.field(t("Service"), kind, old ? t("The service and location can't change after creation.") : undefined), native, api, message);
-    const dialog = openDialog(old ? t("Edit connection") : t("Add connection"), form, [save]);
+    const dialog = openDialog(old?.name ?? t("Add connection"), form, [save]);
     save.setAttribute("form", form.id = `ai-connection-${Date.now()}`);
-    form.addEventListener("submit", event => {
+    let connection = old;
+    let view: NativeConnectionView | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let busy = false;
+
+    const isCodex = () => kind.value === "codex-account";
+    const updateFooter = () => {
+      save.textContent = t(isCodex() ? "Finish" : "Save");
+      save.disabled = busy || (isCodex() && !old && view?.state !== "ready");
+    };
+    const button = (label: string, run: () => void, primary = false) =>
+      h("button", { type: "button", class: `btn btn-small${primary ? " btn-primary" : ""}`, onclick: run }, t(label));
+
+    const renderAuth = () => {
+      clear(authSection, h("div", { class: "codex-auth-head" },
+        h("strong", {}, t("Codex sign-in")),
+        h("span", { class: "codex-auth-state", role: "status" }, view ? authLabel(view) : connection ? t("Loading…") : "")));
+      if (!connection) {
+        authSection.append(h("p", { class: "field-hint" }, t("Sign in once for this connection. Each assistant chat keeps its own history and tools.")),
+          button("Sign in with Codex", () => void changeAuth("login"), true));
+        return;
+      }
+      if (view?.state === "authorizing" && view.login_url && view.login_code) {
+        authSection.append(h("p", { class: "field-hint" }, t("Enter this one-time code on the official page.")),
+          h("div", { class: "button-row" }, h("code", { class: "native-code" }, view.login_code),
+            h("a", { href: view.login_url, target: "_blank", rel: "noopener noreferrer", class: "btn btn-primary btn-small" }, t("Open official sign-in")),
+            button("Cancel authorization", () => void changeAuth("cancel"))));
+      } else if (view?.state === "ready") {
+        authSection.append(h("p", { class: "field-hint" }, t("New chats can use this connection.")),
+          button("Sign out of Codex", () => void changeAuth("logout")));
+      } else if (view?.state === "offline") {
+        authSection.append(button("Refresh", () => void changeAuth()));
+      } else if (view) {
+        if (this.legacyChatUses(connection)) authSection.append(h("p", { class: "field-hint" },
+          t("Older chats can still use their own sign-in. Sign in here once to use this connection in new chats.")));
+        if (view.error) authSection.append(h("p", { class: "field-hint" }, t(
+          view.error === "native.version_unsupported" ? "This runtime has an unsupported Codex version."
+            : "Codex authorization failed. Check that device code sign-in is enabled in your ChatGPT security settings and try again.")));
+        authSection.append(button("Sign in with Codex", () => void changeAuth("login"), true));
+      }
+    };
+
+    const changeAuth = async (action?: NativeConnectionAction["action"]) => {
+      if (busy || !dialog.open || !isCodex()) return;
+      if (!connection && (!form.reportValidity() || !host.value)) return;
+      clearTimeout(timer);
+      busy = true;
+      updateFooter();
+      if (action) for (const control of authSection.querySelectorAll("button")) control.disabled = true;
+      if (!connection) { kind.disabled = true; host.disabled = true; }
+      clear(message);
+      try {
+        if (!connection) {
+          connection = await this.client.saveAIConnection({ name: name.value.trim(), kind: "codex-account", host: host.value });
+        }
+        if (!dialog.open) return;
+        const next = action ? await this.client.nativeConnectionAction(connection.id, { request_id: newRequestId("codex-auth"), action })
+          : await this.client.nativeConnection(connection.id);
+        this.auth.set(connection.id, next);
+        if (!dialog.open) return;
+        const changed = !view || view.state !== next.state || view.login_code !== next.login_code || view.login_url !== next.login_url || view.error !== next.error;
+        view = next;
+        if (changed) renderAuth();
+        if (next.state === "authorizing") timer = setTimeout(() => void changeAuth(), 2000);
+      } catch (cause) {
+        if (dialog.open) {
+          renderAuth();
+          clear(message, failure(errorText(cause), connection ? () => void changeAuth() : undefined));
+        }
+      } finally {
+        busy = false;
+        if (!connection) { kind.disabled = false; host.disabled = false; }
+        for (const control of authSection.querySelectorAll("button")) control.disabled = false;
+        updateFooter();
+        if (!dialog.open && this.active) void this.load();
+      }
+    };
+
+    kind.addEventListener("change", updateFooter);
+    updateFooter();
+    if (old?.kind === "codex-account") {
+      view = this.auth.get(old.id);
+      renderAuth();
+      void changeAuth();
+    } else renderAuth();
+    dialog.addEventListener("close", () => {
+      clearTimeout(timer);
+      if (isCodex() && connection && this.active) void this.load();
+    }, { once: true });
+
+    form.addEventListener("submit", async event => {
       event.preventDefault();
-      const codex = kind.value === "codex-account";
-      if (codex && !host.value) { clear(message, failure(t("No runtimes yet. Run lumio runtime add <name> to pair a machine."))); return; }
-      save.disabled = true;
-      void this.client.saveAIConnection({ name: name.value.trim(), kind: kind.value as Kind, host: codex ? host.value : "hub",
-        ...(codex ? {} : { base_url: base.value.trim(), ...(key.value ? { api_key: key.value } : {}) }) }, old?.id)
-        .then(() => { key.value = ""; dialog.close(); toast(t("Saved.")); void this.load(); })
-        .catch((cause: unknown) => { clear(message, failure(errorText(cause))); save.disabled = false; });
+      if (save.disabled) return;
+      busy = true;
+      updateFooter();
+      clear(message);
+      try {
+        const updatedName = name.value.trim();
+        if (!isCodex() || (connection && connection.name !== updatedName)) {
+          connection = await this.client.saveAIConnection({ name: updatedName, kind: kind.value as Kind, host: isCodex() ? host.value : "hub",
+            ...(isCodex() ? {} : { base_url: base.value.trim(), ...(key.value ? { api_key: key.value } : {}) }) }, connection?.id);
+        }
+        if (isCodex() && connection && view?.state === "ready") {
+          const current = await this.client.aiConfiguration();
+          const { id, name } = connection;
+          if (!current.profiles.some(profile => profile.connection === id)) {
+            await this.client.saveAIProfile({ connection: id, name, engine: "codex", model: "default", thinking: "default" });
+          }
+        }
+        key.value = "";
+        dialog.close();
+        toast(t("Saved."));
+        if (!isCodex() && this.active) void this.load();
+      } catch (cause) {
+        if (dialog.open) clear(message, failure(errorText(cause)));
+      } finally {
+        busy = false;
+        updateFooter();
+      }
     });
   }
 

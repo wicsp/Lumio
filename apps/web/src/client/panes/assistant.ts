@@ -80,7 +80,7 @@ export class AssistantPane {
     this.composer.addEventListener("submit", event => { event.preventDefault(); void this.submit(); });
     this.text.addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); this.composer.requestSubmit(); } });
     this.dock = h("div", { class: "chat-dock" }, this.native.element, this.notice, this.profileStatus, this.composer);
-    this.scroller.append(this.messages);
+    this.scroller.append(this.messages, this.native.activity);
     this.messageNav = new MessageRail(this.scroller, this.messages, ".msg-user", t("Jump to a message"), (index, excerpt) => t("Message {0}: {1}", index + 1, excerpt));
     this.layout.append(
       h("aside", { class: "chat-side" },
@@ -364,8 +364,10 @@ export class AssistantPane {
         this.captureDraft();
         void this.loadConversations();
         clear(this.notice, h("p", { class: "notice" }, t(session.connection_auth ? "Starting Codex" : "Sign in to continue. Your message is kept as a draft.")));
-      } catch (error) { if (this.active) clear(this.notice, failure(errorText(error))); }
-      finally { this.setBusy(false); }
+      } catch (error) {
+        if (this.active) clear(this.notice, failure(errorText(error)),
+          h("button", { type: "button", class: "btn btn-small", onclick: () => this.navigate("settings", "ai") }, t("Open AI settings")));
+      } finally { this.setBusy(false); }
       return;
     }
     const input: Omit<AssistantChatRequest, "request_id"> = {
