@@ -53,9 +53,18 @@ trap 'rm -rf -- "$lock"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+updater=$(git rev-parse HEAD:scripts/update-preview.sh)
 git pull --ff-only origin preview
 commit=$(git rev-parse HEAD)
 [[ "$commit" == "$(git rev-parse FETCH_HEAD)" ]] || fail '本地 preview 含有尚未推送的提交。'
+
+# A pull can replace this script while Bash is still reading the old copy.
+updated_updater=$(git rev-parse HEAD:scripts/update-preview.sh)
+if [[ "$updater" != "$updated_updater" ]]; then
+  trap - EXIT INT TERM
+  rmdir "$lock"
+  exec bash "$PWD/scripts/update-preview.sh"
+fi
 
 required=$(bun -e 'console.log(require("./package.json").packageManager.replace(/^bun@/, ""))')
 [[ $(bun --version) == "$required" ]] || fail "此提交需要 Bun $required。"
@@ -76,9 +85,10 @@ rm -f "$trial/preview-commit"
 restart() {
   local role=$1 target="$domain/$label.$1"
   if launchctl print "$target" >/dev/null 2>&1; then
-    launchctl bootout "$target" || return
+    launchctl kickstart -k "$target"
+  else
+    launchctl bootstrap "$domain" "$agent_dir/$label.$role.plist"
   fi
-  launchctl bootstrap "$domain" "$agent_dir/$label.$role.plist"
 }
 
 restart hub || fail '试用 Hub 重启失败，旧程序保存在 bin/lumio.previous。'
