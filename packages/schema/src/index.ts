@@ -1,4 +1,4 @@
-import {AIConnection,AIConnectionInput,AIProfile,AIProfileInput,AIUsageBinding,AIConfiguration,AIModel,AIRuntime,NativeSession,NativeRuntimeView,NativeApproval,NativeAction,NativeCreate,NativeEventData,NativeEventRecord,NativeRuntimeCommand,NativeRuntimeMessage,NativeMCPRequest,NativeMCPResult} from "./ai.ts";
+import {AIConnection,AIConnectionInput,AIProfile,AIProfileInput,AIUsageBinding,AIConfiguration,AIModel,AIRuntime,NativeAccountBinding,NativeConnectionAction,NativeConnectionView,NativeSession,NativeRuntimeView,NativeApproval,NativeAction,NativeCreate,NativeEventData,NativeEventRecord,NativeRuntimeCommand,NativeRuntimeMessage,NativeMCPRequest,NativeMCPResult} from "./ai.ts";
 import { KnowledgeDocument, KnowledgeUpdateRequest, KnowledgeUpdateResult, KnowledgeContext, KnowledgeRelatedRequest, KnowledgeRelatedResult, KnowledgeReferencesRequest, KnowledgeReferencesResult } from "./knowledge-editing.ts";
 /**
  * @lumio/schema —— Lumio 的契约，唯一事实来源（ADR 0003）。
@@ -63,6 +63,7 @@ import { KnowledgeGraphArgs, KnowledgeGraph, KnowledgeGraphEdge } from "./knowle
 
 export const CONTRACTS = {
   "ai-connection": AIConnection, "ai-connection-input": AIConnectionInput, "ai-profile": AIProfile, "ai-profile-input": AIProfileInput, "ai-usage-binding": AIUsageBinding, "ai-configuration": AIConfiguration, "ai-model": AIModel, "ai-runtime": AIRuntime,
+  "native-account-binding": NativeAccountBinding, "native-connection-action": NativeConnectionAction, "native-connection-view": NativeConnectionView,
   "native-session": NativeSession, "native-runtime-view": NativeRuntimeView, "native-approval": NativeApproval, "native-action": NativeAction, "native-create": NativeCreate, "native-event": NativeEventData, "native-event-record": NativeEventRecord, "native-runtime-command": NativeRuntimeCommand, "native-runtime-message": NativeRuntimeMessage, "native-mcp-request": NativeMCPRequest, "native-mcp-result": NativeMCPResult,
   "knowledge-graph-args": KnowledgeGraphArgs,
   "knowledge-graph": KnowledgeGraph,

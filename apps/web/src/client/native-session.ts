@@ -8,6 +8,8 @@ export class NativeSessionPanel {
     readonly element = h("div", { class: "native-panel", hidden: true });
     private status = h("div", { class: "native-status" });
     private controls = h("div", { class: "button-row" });
+    private advanced = h("details", { class: "native-advanced" });
+    private restoreAttempted = false;
     private approvals = h("div", {});
     private history = h("div", { class: "native-history" });
     private model = h("select", { "aria-label": t("Model") });
@@ -26,10 +28,10 @@ export class NativeSessionPanel {
     private formKey = "";
     session?: NativeSession;
     get bound(){return !!this.id;}
-    constructor(private client: Client, private ready: (ready: boolean) => void) { this.element.append(this.status, this.controls, this.approvals, this.history); this.model.addEventListener("change", () => { this.desiredModel = this.model.value; this.efforts(); }); this.effort.addEventListener("change", () => { this.desiredEffort = this.effort.value; this.efforts(); }); }
+    constructor(private client: Client, private ready: (ready: boolean) => void, private openSettings: () => void) { this.element.append(this.status, this.controls, this.approvals, this.advanced, this.history); this.model.addEventListener("change", () => { this.desiredModel = this.model.value; this.efforts(); }); this.effort.addEventListener("change", () => { this.desiredEffort = this.effort.value; this.efforts(); }); }
     dispose() { this.active = false; clearTimeout(this.timer); this.generation++; }
-    bind(id?: string) { if (id === this.id)
-        return; this.generation++; clearTimeout(this.timer); this.id = id; this.session = undefined; this.after = 0; this.summary.clear(); this.seen.clear(); this.desiredModel = ""; this.desiredEffort = ""; this.configured = false; this.formKey = ""; clear(this.history); this.element.hidden = !id; if (id) {
+    bind(id?: string, model = "") { if (id === this.id)
+        return; this.generation++; clearTimeout(this.timer); this.id = id; this.session = undefined; this.after = 0; this.summary.clear(); this.seen.clear(); this.desiredModel = model; this.restoreAttempted = false; this.desiredEffort = ""; this.configured = false; this.formKey = ""; clear(this.history); this.element.hidden = !id; if (id) {
         this.ready(false);
         void this.poll(this.generation);
     }
@@ -47,6 +49,11 @@ export class NativeSessionPanel {
         }
         this.session = s;
         this.render(s);
+        if (s.view.state === "ready") this.restoreAttempted = false;
+        if (s.view.state === "offline" && !s.quarantined && !this.restoreAttempted) {
+            this.restoreAttempted = true;
+            void this.action({ action: "resume" }, true);
+        }
         for (const e of events) {
             this.after = e.sequence;
             this.event(e);
@@ -64,25 +71,37 @@ export class NativeSessionPanel {
     } }
     private efforts() { const m = this.session?.view.models.find(m => m.id === this.model.value); const valid = !this.desiredEffort || !!m?.efforts.includes(this.desiredEffort); clear(this.effort, h("option", { value: "" }, t("Default effort")), ...(!valid ? [h("option", { value: this.desiredEffort, selected: true, disabled: true }, t("Choose a supported effort"))] : []), ...(m?.efforts ?? []).map(value => h("option", { value, selected: value === this.desiredEffort }, value))); this.ready(valid && this.session?.view.state === "ready" && !this.session.quarantined); }
     private render(s: NativeSession) {
-        this.ready(s.view.state === "ready" && !s.quarantined);
         clear(this.status, h("strong", {}, t(LABEL[s.view.state] ?? "Session unavailable")), h("span", { class: "muted" }, ` · ${s.view.model ?? s.profile.model} · ${s.view.effort ?? t("Default effort")}`));
-        const selected = this.desiredModel || s.view.model || s.view.default_model || s.profile.model;
+        const selected = [this.desiredModel, s.profile.model, s.view.model, s.view.default_model]
+            .find(value => s.view.models.some(model => model.id === value));
         clear(this.model, ...s.view.models.map(m => h("option", { value: m.id, selected: m.id === selected }, m.id)));
         this.efforts();
         this.model.disabled = this.effort.disabled = s.view.state !== "ready";
-        clear(this.controls, this.model, this.effort, ...([["resume", "Restore session"], ["compact", "Compact context"], ["interrupt", "Stop execution"], ["close", "Close session"]] as const).map(([action, label]) => h("button", { type: "button", class: "btn btn-small", disabled: this.busy || s.quarantined || (action === "compact" && s.view.state !== "ready") || (action === "resume" && !["offline", "failed"].includes(s.view.state)), onclick: () => void this.action({ action }) }, t(label))));
+        clear(this.controls, this.model, this.effort);
+        const compact = h("button", { type: "button", class: "btn btn-small", disabled: this.busy || s.quarantined || s.view.state !== "ready", onclick: () => void this.action({ action: "compact" }) }, t("Compact context"));
+        if (!this.advanced.firstChild) this.advanced.append(h("summary", {}, t("Advanced")), compact);
+        else this.advanced.lastChild?.replaceWith(compact);
+        this.advanced.hidden = s.view.state !== "ready";
         const formKey = JSON.stringify([s.view.state, s.view.approval, s.view.login_url, s.view.login_code, s.view.error, s.quarantined, s.view.stopped]);
         if (formKey === this.formKey)
             return;
         this.formKey = formKey;
         clear(this.approvals);
-        if (s.view.state === "login_required")
+        if (s.view.state === "failed" || s.view.state === "offline") {
+            if (s.view.error === "native.connection_sign_in" || s.view.error === "native.login_required") {
+                this.approvals.append(h("button", { type: "button", class: "btn btn-small", onclick: this.openSettings }, t("Open AI settings")));
+            }
+            if (!["native.account_changed", "native.rebuild_required", "native.context_expired", "native.state_lost"].includes(s.view.error ?? "")) {
+                this.approvals.append(h("button", { type: "button", class: "btn btn-small", disabled: s.quarantined, onclick: () => void this.action({ action: "resume" }) }, t("Restore session")));
+            }
+        }
+        if (s.view.state === "login_required" && !s.connection_auth)
             this.approvals.append(h("p", {}, t("This conversation uses an isolated official client. Sign in with your own ChatGPT account.")), h("button", { class: "btn btn-primary btn-small", disabled: this.busy, onclick: () => void this.action({ action: "login" }) }, t("Sign in with Codex")));
         if (s.view.login_url) {
             this.approvals.append(h("a", { href: s.view.login_url, target: "_blank", rel: "noopener noreferrer", class: "btn btn-small" }, t("Open official sign-in")), h("code", { class: "native-code" }, s.view.login_code ?? ""));
         }
         if (s.view.error)
-            this.approvals.append(h("p", { class: "notice" }, t("The session could not continue safely. Review the saved history before starting another operation.")));
+            this.approvals.append(h("p", { class: "notice" }, t(({ "native.connection_sign_in": "Sign in to this Codex connection in AI settings.", "native.login_required": "Sign in to this Codex connection in AI settings.", "native.account_changed": "This chat belongs to a different Codex account.", "native.rebuild_required": "This chat’s connection changed. Start a new chat.", "native.context_expired": "Saved context changed. Start a new chat." } as Record<string, string>)[s.view.error] ?? "The session could not continue safely. Review the saved history before starting another operation.")));
         const approval = s.view.approval;
         if (approval) {
             const answers: Record<string, string[]> = {};
@@ -101,10 +120,10 @@ export class NativeSessionPanel {
             this.approvals.append(h("p", {}, t("Nothing is retried automatically. Check tool results and stopped processes first. A new thread does not undo side effects.")), h("label", { class: "check-field" }, checked, t("I checked that this session’s processes are stopped.")), resolution, note, review);
         }
     }
-    private async action(input: NativeAction) { if (!this.id || this.busy)
+    private async action(input: NativeAction, silent = false) { if (!this.id || this.busy)
         return; this.busy = true; try {
         await this.client.nativeAction(this.id, input);
-        toast(t("Request sent"));
+        if (!silent) toast(t("Request sent"));
     }
     catch (e) {
         this.approvals.append(failure(errorText(e)));

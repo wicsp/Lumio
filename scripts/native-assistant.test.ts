@@ -8,6 +8,7 @@ import { createClient } from "../packages/api-client/src/index.ts";
 import { NativeRuntimeCommand, NativeSession, WorkCommandResult, type NativeRuntimeMessage } from "../packages/schema/src/index.ts";
 import { NativeManager } from "../apps/runtime/src/native/manager.ts";
 import { NativeLocalStore } from "../apps/runtime/src/native/store.ts";
+import { ConnectionAuth } from "../apps/runtime/src/native/connection-auth.ts";
 async function until<T>(get: () => Promise<T> | T, predicate: (v: T) => boolean, timeout = 10000) { const end = Date.now() + timeout; let last: T; while (Date.now() < end) {
     last = await get();
     if (predicate(last))
@@ -16,6 +17,7 @@ async function until<T>(get: () => Promise<T> | T, predicate: (v: T) => boolean,
 } throw new Error("Synthetic condition timed out"); }
 async function fixture(options: {
     official?: boolean;
+    connectionAuth?: boolean;
 } = {}) {
     const root = await mkdtemp(join(await realpath(tmpdir()),"lumio-native-integration-"));
     const state = join(root, "hub"), local = join(root, "runtime");
@@ -43,7 +45,9 @@ async function fixture(options: {
     finally {
         flushing = false;
     } })(); };
-    const fake = resolve("fixtures/native/fake-codex.ts"), manager = new NativeManager(store, local, flush, { runtimeName: "synthetic-runtime", ...(options.official ? { mcp: { command: process.execPath, args: [resolve("apps/runtime/src/main.ts"), "native-mcp"] } } : { codex: fake, unsafeTestCommand: [process.execPath, fake] }) });
+    const fake = resolve("fixtures/native/fake-codex.ts");
+    const accounts = options.connectionAuth ? new ConnectionAuth(local, { codex: fake, unsafeTestCommand: [process.execPath, fake] }) : undefined;
+    const manager = new NativeManager(store, local, flush, { runtimeName: "synthetic-runtime", ...(options.official ? { mcp: { command: process.execPath, args: [resolve("apps/runtime/src/main.ts"), "native-mcp"] } } : { codex: fake, unsafeTestCommand: [process.execPath, fake] }) }, accounts);
     const connect = async () => {
         abort = new AbortController();
         const response = await fetch(`${url}/v2/runtime/native`, { headers: { Authorization: `Bearer ${runtimeToken}` }, signal: abort.signal });
@@ -60,6 +64,11 @@ async function fixture(options: {
                     buffer = buffer.slice(end + 1);
                     if (line.trim()) {
                         const c = NativeRuntimeCommand.parse(JSON.parse(line));
+                        if (c.type === "connection_auth") {
+                            if (!accounts) throw new Error("Unexpected auth command");
+                            await post({ type: "connection_auth", command: c.command, connection: c.connection, owner: c.owner, view: await accounts.request(c) });
+                            continue;
+                        }
                         if (options.official && c.type === "open") {
                             const home = join(local, "native", c.session.id, "codex");
                             await mkdir(home, { recursive: true, mode: 0o700 });
@@ -79,14 +88,14 @@ async function fixture(options: {
             await reader.cancel().catch(() => { });
             reader.releaseLock();
         } })();
-        await post({ type: "hello", protocol: 1, instance: "synthetic-runtime-instance", version: "1", isolation: "macos-seatbelt" });
+        await post({ type: "hello", protocol: 1, instance: "synthetic-runtime-instance", version: "1", isolation: "macos-seatbelt", ...(accounts ? { connection_auth: true } : {}) });
         await until(() => client.aiRuntimes(), r => r.some(v => v.online));
     };
     await connect();
     const connection = await client.saveAIConnection({ name: "Synthetic Codex", kind: "codex-account", host: "synthetic-runtime" }), profile = await client.saveAIProfile({ name: "Synthetic profile", connection: connection.id, engine: "codex", model: "default", thinking: "default" });
     const create = async () => { const s = NativeSession.parse(await client.createNativeSession({ request_id: `synthetic-create-${crypto.randomUUID()}`, profile: profile.id }).catch(e => { throw e; })); return until(() => client.nativeSession(s.id), v => v.view.state === "ready"); };
-    const close = async () => { await manager.stop(); channel = undefined; abort?.abort(); await reading; await hub.stop(); store.close(); await rm(root, { recursive: true, force: true }); };
-    return { root, local, hub, client, profile, connection, create, close, store, manager, url, owner, connect };
+    const close = async () => { await manager.stop(); await accounts?.stop(); channel = undefined; abort?.abort(); await reading; await hub.stop(); store.close(); await rm(root, { recursive: true, force: true }); };
+    return { root, local, hub, client, profile, connection, create, close, store, manager, accounts, url, owner, connect };
 }
 test("native conversation keeps one official thread, dynamic model settings, idempotency and owner boundary", async () => {
     const f = await fixture();
@@ -256,3 +265,62 @@ test("purging a closed native conversation clears Hub payloads and keeps late ev
  expect(f.hub.modules.ai.store.events(s.id)).toEqual([]);expect(f.hub.modules.ai.store.deliveries(s.id)).toEqual([]);expect(f.hub.modules.ai.store.retired(s.id,s.runtime)).toBe(true);expect((await f.client.aiRuntimes())[0]?.online).toBe(true);
  }finally{await f.close();}
 },20000);
+
+test("connection sign-in authorizes two isolated chats, survives rename, and restores a cleanly cancelled chat", async () => {
+    const f = await fixture({ connectionAuth: true });
+    const auth = () => f.client.nativeConnection(f.connection.id);
+    const action = (action: "login" | "logout", request_id = `fixture-auth-${crypto.randomUUID()}`) =>
+        f.client.nativeConnectionAction(f.connection.id, { request_id, action });
+    const chat = (conversation: string, message: string) => f.client.assistantChat({
+        request_id: `fixture-turn-${crypto.randomUUID()}`, conversation, message,
+    });
+    try {
+        expect((await auth()).state).toBe("signed_out");
+        await expect(f.client.createNativeSession({ request_id: "fixture-native-unauthed", profile: f.profile.id })).rejects.toMatchObject({ code: "CONFLICT" });
+        const loginId = "fixture-auth-idempotent";
+        expect(await action("login", loginId)).toMatchObject({ state: "authorizing", login_code: "FIXTURE-ONLY" });
+        const binding = (await until(auth, v => v.state === "ready")).binding!;
+        expect((await action("login", loginId)).state).toBe("ready");
+        const foreign = f.hub.store.createActor("unrelated-human", "human");
+        const other = createClient({ url: f.url, token: f.hub.store.createToken("other", foreign.name) });
+        await expect(other.nativeConnection(f.connection.id)).rejects.toMatchObject({ code: "NOT_FOUND" });
+        const access = (rejected?: string) => f.accounts!.access(f.connection.id, f.owner.id, binding, rejected);
+        const first = await access();
+        const rejected = new Bun.CryptoHasher("sha256").update(first.accessToken).digest("hex");
+        const [refresh1, refresh2] = await Promise.all([access(rejected), access(rejected)]);
+        expect(refresh1.accessToken).not.toBe(first.accessToken);
+        expect(refresh2).toEqual(refresh1);
+        const a = await f.create(), b = await f.create();
+        expect(a.connection_auth).toEqual(binding);
+        expect(b.connection_auth).toEqual(binding);
+        expect((await chat(a.conversation, "REMEMBER FIXTURE_ONE")).turn.status).toBe("done");
+        expect((await chat(b.conversation, "RECALL")).messages.at(-1)?.content).toBe("SYNTHETIC");
+        for (const s of [a, b]) {
+            expect(await stat(join(f.local, "native", s.id, "codex", "auth.json")).catch(() => null)).toBeNull();
+        }
+        const renamed = await f.client.saveAIConnection({ name: "Renamed", kind: "codex-account", host: "synthetic-runtime" }, f.connection.id);
+        expect(renamed.revision).toBeGreaterThan(f.connection.revision);
+        const pending = chat(a.conversation, "WAIT");
+        await until(() => f.client.nativeSession(a.id), v => v.view.state === "running");
+        await expect(action("logout")).rejects.toMatchObject({ code: "CONFLICT" });
+        await f.client.nativeAction(a.id, { action: "interrupt" });
+        expect((await pending).turn.status).toBe("cancelled");
+        await f.client.nativeAction(a.id, { action: "idle" });
+        await until(() => f.client.nativeSession(a.id), v => v.view.state === "offline");
+        await f.client.nativeAction(a.id, { action: "resume" });
+        await until(() => f.client.nativeSession(a.id), v => v.view.state === "ready");
+        expect((await chat(a.conversation, "RECALL")).messages.at(-1)?.content).toBe("FIXTURE_ONE");
+        expect((await action("logout")).state).toBe("signed_out");
+        await expect(chat(a.conversation, "RECALL")).rejects.toMatchObject({ code: "CONFLICT" });
+        expect((await action("login")).state).toBe("authorizing");
+        expect((await until(auth, v => v.state === "ready")).binding).toMatchObject({ account: binding.account, generation: binding.generation + 1 });
+        await f.client.nativeAction(a.id, { action: "resume" });
+        await until(() => f.client.nativeSession(a.id), v => v.view.state === "ready");
+        expect((await chat(a.conversation, "RECALL")).messages.at(-1)?.content).toBe("FIXTURE_ONE");
+        const unsafe = chat(a.conversation, "WAIT UNCONFIRMED");
+        await until(() => f.client.nativeEvents(a.id), events => events.some(e => e.event.type === "tool" && e.event.id === "unsafe-fixture"));
+        await f.client.nativeAction(a.id, { action: "interrupt" });
+        expect((await unsafe).turn.status).toBe("unknown");
+        expect((await f.client.nativeSession(a.id)).quarantined).toBe(true);
+    } finally { await f.close(); }
+}, 25000);

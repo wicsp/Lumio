@@ -86,6 +86,9 @@ export class NativeRpc {
   answer(id: string | number, result: Wire) {
     this.send({ id, result });
   }
+  reject(id: string | number) {
+    if (!this.child.stdin.destroyed) this.send({ id, error: { code: -32000, message: "Connection authorization required" } });
+  }
   async initialize() {
     await this.request("initialize", {
       clientInfo: { name: "lumio", title: "Lumio Assistant", version: "0.1.0" },

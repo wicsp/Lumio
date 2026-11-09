@@ -1,6 +1,6 @@
 /** Synthetic official-protocol fixture. No model, credentials, or business data. */
 import { createInterface } from "node:readline";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { CAPABILITIES, toolName } from "../../packages/schema/src/index.ts";
 const home = process.env.CODEX_HOME!;
@@ -18,6 +18,15 @@ let pending: {
     text: string;
 } | undefined;
 let serial = 0;
+const broker = home.includes("/native-accounts/");
+let authorized = false;
+async function saveSyntheticAuth() {
+    const payload = Buffer.from(JSON.stringify({ sub: "synthetic-user", exp: Math.floor(Date.now() / 1000) + 3600,
+        "https://api.openai.com/auth": { chatgpt_account_id: "synthetic-account" }, fixture: ++serial })).toString("base64url");
+    await writeFile(join(home, "auth.json"), JSON.stringify({ auth_mode: "chatgpt", tokens: {
+        access_token: `eyJhbGciOiJub25lIn0.${payload}.fixture`, account_id: "synthetic-account", refresh_token: "fixture-not-a-credential",
+    } }), { mode: 0o600 });
+}
 const send = (m: unknown) => process.stdout.write(JSON.stringify(m) + "\n");
 const notify = (method: string, params: unknown) => send({ method, params });
 const policy = { model: "gpt-6.1-sol", reasoningEffort: "low", approvalPolicy: "on-request", approvalsReviewer: "user", sandbox: { type: "workspaceWrite", writableRoots: [], networkAccess: false, excludeSlashTmp: true, excludeTmpdirEnvVar: true } };
@@ -50,7 +59,21 @@ createInterface({ input: process.stdin }).on("line", line => {
                 reply({ userAgent: "synthetic" });
                 break;
             case "account/read":
+                if (broker && p.refreshToken) await saveSyntheticAuth();
                 reply({ account: { type: "chatgpt", accountId: "synthetic-account" }, requiresOpenaiAuth: true });
+                break;
+            case "account/login/start":
+                if (p.type === "chatgptAuthTokens") {
+                    authorized = typeof p.accessToken === "string" && p.chatgptAccountId === "synthetic-account";
+                    reply({ type: "chatgptAuthTokens" });
+                } else {
+                    reply({ type: "chatgptDeviceCode", loginId: "synthetic-login", verificationUrl: "https://auth.openai.com/codex/device", userCode: "FIXTURE-ONLY" });
+                    setTimeout(() => void saveSyntheticAuth().then(() => notify("account/login/completed", { loginId: "synthetic-login", success: true })), 90);
+                }
+                break;
+            case "account/logout":
+                await rm(join(home, "auth.json"), { force: true });
+                reply({});
                 break;
             case "config/read":
                 reply({});
@@ -60,6 +83,10 @@ createInterface({ input: process.stdin }).on("line", line => {
                 break;
             case "thread/start":
             case "thread/resume":
+                if ((await readFile(join(home, "config.toml"), "utf8")).includes('"ephemeral"') && !authorized) {
+                    send({ id: m.id, error: { code: -32000, message: "Synthetic authorization required" } });
+                    break;
+                }
                 reply({ ...policy, thread: { id: saved.thread, status: { type: "idle" } } });
                 break;
             case "mcpServerStatus/list":
@@ -99,6 +126,7 @@ createInterface({ input: process.stdin }).on("line", line => {
                 }
                 if (input.includes("WAIT")) {
                     pending = { turn, text: input };
+                    if (input.includes("UNCONFIRMED")) notify("item/started", { item: { id: "unsafe-fixture", type: "commandExecution", command: "fixture" } });
                     break;
                 }
                 const remember = /REMEMBER ([A-Z_]+)/.exec(input);
