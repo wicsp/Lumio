@@ -87,9 +87,9 @@ export const CAPABILITIES = [
   define({ name: "knowledge.note.links", kind: "read", args: KnowledgeLinksArgs, result: LinksResult,
     summary: { en: "List a note's outgoing and incoming links.", zh: "列出一篇笔记的出链与反链。" } }),
   define({ name: "work.task.list", kind: "read", args: WorkTaskListArgs, result: z.array(WorkTask),
-    summary: { en: "List tasks with derived blocked_by; filter by readiness (ready or blocked), tag, parent, project, status or text.", zh: "列出任务与推导的 blocked_by，可按可开工/被阻塞、标签、父任务、项目、状态或文字筛选。" } }),
+    summary: { en: "List tasks with derived blocked_by and next_target; filter by readiness (ready or blocked), tag, parent, project, status or text.", zh: "列出任务与推导的 blocked_by、next_target（下一次委派给谁），可按可开工/被阻塞、标签、父任务、项目、状态或文字筛选。" } }),
   define({ name: "work.task.show", kind: "read", args: WorkTaskShowArgs, result: WorkTaskDetail,
-    summary: { en: "Show a task with derived blocked_by, dependents, children, discussion and execution rounds.", zh: "查看任务及推导的 blocked_by、后续任务、子任务、讨论和执行轮次。" } }),
+    summary: { en: "Show a task with derived blocked_by, next_target, dependents, children, discussion and execution rounds.", zh: "查看任务及推导的 blocked_by、next_target、后续任务、子任务、讨论和执行轮次。" } }),
   define({ name: "work.attention.list", kind: "read", args: WorkAttentionListArgs, result: z.array(WorkAttention),
     summary: { en: "List what needs the user now: questions from agents, finished rounds awaiting review, and failed rounds.", zh: "列出现在需要用户处理的事：agent 的提问、等待验收的结果、失败的轮次。" } }),
   define({ name: "work.project.list", kind: "read", args: WorkProjectListArgs, result: z.array(WorkProject),
@@ -117,9 +117,9 @@ export const CAPABILITIES = [
   define({ name: "work.task.hand", kind: "write", args: WorkTaskHand.shape.args, result: WorkCommandResult,
     summary: { en: "Hand a task back to the human or to external waiting (with a note). Agents cannot hand to nobody.", zh: "交回给人或交给外部等待（附说明）。agent 不能交给无人。" } }),
   define({ name: "work.project.create", kind: "write", args: WorkProjectCreate.shape.args, result: WorkCommandResult,
-    summary: { en: "Create a project.", zh: "新建项目。" } }),
+    summary: { en: "Create a project, optionally with a default_target used for tasks never dispatched before.", zh: "新建项目，可设默认执行者 default_target（用于还没派过的任务）。" } }),
   define({ name: "work.project.update", kind: "write", args: WorkProjectUpdate.shape.args, result: WorkCommandResult,
-    summary: { en: "Change project fields.", zh: "修改项目字段。" } }),
+    summary: { en: "Change project fields, including default_target (null clears it).", zh: "修改项目字段，包括默认执行者 default_target（null 清空）。" } }),
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];

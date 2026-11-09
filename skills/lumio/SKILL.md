@@ -23,8 +23,8 @@ Always add `--json`. Each successful command returns one JSON value matching its
 | knowledge.note.search | `lumio search <query> [--type <type>] [--limit <limit>] [--include-private] [--vault <vault>] --json` | Search the user's notes (papers, ideas, sources). Snippets are short; read a hit with knowledge.note.show. |
 | knowledge.note.show | `lumio show <ref> [--include-private] [--vault <vault>] --json` | Read one note in full. |
 | knowledge.note.links | `lumio links <ref> [--include-private] [--vault <vault>] --json` | List a note's outgoing and incoming links. |
-| work.task.list | `lumio task list [--project <project>] [--status <status>] [--turn <turn>] [--query <query>] [--ready] [--blocked] [--tag <tag>] [--parent <parent>] --json` | List tasks with derived blocked_by; filter by readiness (ready or blocked), tag, parent, project, status or text. |
-| work.task.show | `lumio task show <id> [--legacy] --json` | Show a task with derived blocked_by, dependents, children, discussion and execution rounds. |
+| work.task.list | `lumio task list [--project <project>] [--status <status>] [--turn <turn>] [--query <query>] [--ready] [--blocked] [--tag <tag>] [--parent <parent>] --json` | List tasks with derived blocked_by and next_target; filter by readiness (ready or blocked), tag, parent, project, status or text. |
+| work.task.show | `lumio task show <id> [--legacy] --json` | Show a task with derived blocked_by, next_target, dependents, children, discussion and execution rounds. |
 | work.attention.list | `lumio attention --json` | List what needs the user now: questions from agents, finished rounds awaiting review, and failed rounds. |
 | work.project.list | `lumio project list [--status <status>] --json` | List projects. |
 | work.project.show | `lumio project show <id> --json` | Show one project. |
@@ -38,8 +38,8 @@ Always add `--json`. Each successful command returns one JSON value matching its
 | work.task.update | `lumio task update <id> [--patch <patch>] [--revision <revision>] [--description <description>] [--file <file>] [--project <project>] [--parent <parent>] [--depends <depends>] [--due <due>] [--workdir <workdir>] [--model <model>] [--gpus <gpus>] [--timeout <timeout>] [--request-id <request-id>] --json` | Change task fields. Tasks have outcome and turn, with no status or assignee; only the user decides completion. |
 | work.task.comment | `lumio task comment <id> [<text>] [--file <file>] [--request-id <request-id>] --json` | Add a comment to a task's discussion. |
 | work.task.hand | `lumio task hand <id> --to <to> [--note <note>] [--revision <revision>] [--request-id <request-id>] --json` | Hand a task back to the human or to external waiting (with a note). Agents cannot hand to nobody. |
-| work.project.create | `lumio project new <title> [--description <description>] [--file <file>] [--goal <goal>] [--repo <repo>] [--deadline <deadline>] [--workdir <workdir>] [--request-id <request-id>] --json` | Create a project. |
-| work.project.update | `lumio project update <id> [--patch <patch>] [--revision <revision>] [--description <description>] [--file <file>] [--goal <goal>] [--repo <repo>] [--deadline <deadline>] [--workdir <workdir>] [--request-id <request-id>] --json` | Change project fields. |
+| work.project.create | `lumio project new <title> [--description <description>] [--file <file>] [--goal <goal>] [--repo <repo>] [--deadline <deadline>] [--workdir <workdir>] [--request-id <request-id>] --json` | Create a project, optionally with a default_target used for tasks never dispatched before. |
+| work.project.update | `lumio project update <id> [--patch <patch>] [--revision <revision>] [--description <description>] [--file <file>] [--goal <goal>] [--repo <repo>] [--deadline <deadline>] [--workdir <workdir>] [--request-id <request-id>] --json` | Change project fields, including default_target (null clears it). |
 
 Additional Work commands (generated from the same CLI definitions):
 

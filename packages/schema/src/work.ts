@@ -70,6 +70,7 @@ export const WorkProject = z.strictObject({
   goal: z.string().min(1).optional(),
   repo: z.string().min(1).optional().describe("关联代码仓库的 URL 或路径，只供参考；写进每一轮的输入（ADR 0033）"),
   workdir: z.string().min(1).optional().describe("项目的工作目录：任务没有自己的 workdir 时，委派那一刻用它（ADR 0033）；规则同任务 workdir"),
+  default_target: AgentTarget.optional().describe("默认执行者：项目下还没派过的任务不带 to 委派时用它（ADR 0044）"),
   deadline: Timestamp.optional(),
 });
 
@@ -114,6 +115,15 @@ const reasonFits = (holder: string, reason: string) =>
       : holder === "nobody" ? reason === "on_hold"
         : reason === "working";
 
+/** 不带 to 委派时目标从哪里来（ADR 0044 第 2 节）：显式、交接计划、最近一轮、项目默认。 */
+export const DISPATCH_TARGET_SOURCES = ["explicit", "plan", "last_round", "project"] as const;
+export const DispatchTargetSource = z.enum(DISPATCH_TARGET_SOURCES);
+/** 读取时推导的下一次委派目标（不含 explicit）。 */
+export const NextTarget = z.strictObject({
+  target: AgentTarget,
+  source: DispatchTargetSource.exclude(["explicit"]),
+});
+
 /** 现在轮到谁（ADR 0032 第 2 节）。持有者与原因必须匹配。 */
 export const Turn = z
   .strictObject({
@@ -148,6 +158,7 @@ export const WorkTask = z
     parent: idOf("task").optional(),
     dependencies: z.array(idOf("task")),
     blocked_by: z.array(idOf("task")).optional().describe("读取时推导，不存储，不可提交；缺失与 [] 等价（ADR 0039）"),
+    next_target: NextTarget.optional().describe("不带 to 委派时会交给谁：计划步骤 → 最近一轮 → 项目默认；读取时推导，不存储，不可提交；无法解析时缺失（ADR 0044）"),
     references: z.array(ResourceRef),
     due: Timestamp.optional(),
     ...RunConfigShape,
@@ -198,6 +209,7 @@ export const WorkProjectPatch = z
     goal: z.string().min(1).nullable().optional().describe("null：清空"),
     repo: z.string().min(1).nullable().optional().describe("null：清空"),
     workdir: z.string().min(1).nullable().optional().describe("null：清空（ADR 0033）"),
+    default_target: AgentTarget.nullable().optional().describe("null：清空（ADR 0044）"),
     deadline: Timestamp.nullable().optional().describe("null：清空"),
   })
   .refine(nonEmpty, PATCH_EMPTY)
@@ -230,6 +242,7 @@ export const WorkProjectCreate = z.strictObject({
     goal: z.string().min(1).optional(),
     repo: z.string().min(1).optional(),
     workdir: z.string().min(1).optional(),
+    default_target: AgentTarget.optional().describe("默认执行者（ADR 0044）"),
     deadline: Timestamp.optional(),
   }),
 });
@@ -269,7 +282,7 @@ export const WorkTaskDispatch = z.strictObject({
   op: z.literal("work.task.dispatch"),
   args: z.strictObject({
     task: idOf("task"),
-    to: AgentTarget.optional().describe("委派给谁；缺省沿用最近一轮的 agent（没有历史时须指定）"),
+    to: AgentTarget.optional().describe("委派给谁；缺省依次用交接计划步骤、最近一轮的 agent、项目默认执行者，都没有时须指定（ADR 0044）"),
     expected_revision: Revision.optional().describe("给出时与当前 revision 不符则 CONFLICT，确保派出的是看到的版本"),
     comment: z.string().min(1).optional().describe(
       "回答并继续（ADR 0030）：先以调用者身份发表这条评论，再在同一事务里派出，下一轮的输入包含它；派出失败时评论也不保存",
@@ -402,7 +415,12 @@ export const WorkCommandResult = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("project"), project: WorkProject }),
   z.strictObject({ kind: z.literal("task"), task: WorkTask }),
   z.strictObject({ kind: z.literal("comment"), comment: WorkComment }),
-  z.strictObject({ kind: z.literal("job"), job: Job }),
+  z.strictObject({
+    kind: z.literal("job"),
+    job: Job,
+    target: AgentTarget.optional().describe("委派实际交给的目标（ADR 0044）"),
+    target_source: DispatchTargetSource.optional().describe("目标从哪里来；界面据此提示「项目默认」等"),
+  }),
   z.strictObject({ kind: z.literal("template"), template: PlanTemplate }),
   z.strictObject({ kind: z.literal("removed"), id: idOf("wft") }),
   z.strictObject({ kind: z.literal("trashed"), item: TrashItem }),
