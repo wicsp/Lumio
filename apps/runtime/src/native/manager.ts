@@ -12,6 +12,7 @@ import type {
 } from "@lumio/schema";
 import { NativeRpc, type Wire } from "./rpc.ts";
 import { NativeLocalStore, type LocalNative } from "./store.ts";
+import type { ConnectionAuth } from "./connection-auth.ts";
 import { codexExecutable, sandboxCommand, isolatedEnvironment, NativeError } from "./isolation.ts";
 type Open = Extract<
   NativeRuntimeCommand,
@@ -32,6 +33,11 @@ interface Client {
   text: string;
   turn?: string;
   nativeTurn?: string;
+  accessHash?: string;
+  stopping?: ReturnType<typeof setTimeout>;
+  idle?: ReturnType<typeof setTimeout>;
+  effects: Set<string>;
+  commandStarted?: boolean;
   pending?: {
     id: string | number;
     method: string;
@@ -59,6 +65,7 @@ export class NativeManager {
       unsafeTestCommand?: string[];
       runtimeName: string;
     },
+    private accounts?: ConnectionAuth,
   ) {}
   private root(id: string) {
     return join(this.stateDir, "native", id);
@@ -81,7 +88,7 @@ export class NativeManager {
   private fail(id: string, reason: string) {
     this.state(id, { state: "failed", error: reason });
   }
-  async receive(c: NativeRuntimeCommand) {
+  async receive(c: Exclude<NativeRuntimeCommand, { type: "connection_auth" }>) {
     if (c.type === "ack") {
       this.store.ack(c.session, c.sequence);
       return;
@@ -108,7 +115,7 @@ export class NativeManager {
         }
       });
     this.chains.set(id, next);
-    await next;
+    try { await next; } finally { if (this.chains.get(id) === next) this.chains.delete(id); }
   }
   async recover() {
     for (const r of this.store.all()) {
@@ -184,19 +191,26 @@ export class NativeManager {
     const reads = [dirname(await realpath(mcp.command))];
     if (mcp.args[0]?.endsWith(".ts")) reads.push(resolve(dirname(mcp.args[0]), "../../.."));
     const config =
-      'cli_auth_credentials_store = "file"\n[features]\napps = false\nplugins = false\nmulti_agent = false\ngoals = false\nhooks = false\n';
+      `cli_auth_credentials_store = "${r.session.connection_auth ? "ephemeral" : "file"}"\n[features]\napps = false\nplugins = false\nmulti_agent = false\ngoals = false\nhooks = false\n`;
     await writeFile(join(home, "config.toml"), config, { mode: 0o600 });
     const rpc = new NativeRpc(
       [...(this.options.unsafeTestCommand ?? sandboxCommand(root, exe, reads)), "app-server", "--listen", "stdio://"],
       cwd,
       env,
     );
-    const client: Client = { rpc, instance: randomUUID(), text: "", closing: false };
+    const client: Client = { rpc, instance: randomUUID(), text: "", closing: false, effects: new Set() };
     this.clients.set(id, client);
     rpc.onEvent = (method, p) => {
       void this.notification(id, client, method, p).catch(() => this.unknown(id, client));
     };
-    rpc.onRequest = (method, request, p) => this.approval(id, client, method, request, p);
+    rpc.onRequest = (method, request, p) => {
+      if (method === "account/chatgptAuthTokens/refresh" && r.session.connection_auth) {
+        void this.access(r, client.accessHash).then(material => {
+          client.accessHash = createHash("sha256").update(material.accessToken).digest("hex");
+          rpc.answer(request, material);
+        }).catch(() => rpc.reject(request));
+      } else this.approval(id, client, method, request, p);
+    };
     rpc.onExit = () => {
       if (client.closing) return;
       if (client.turn) void this.unknown(id, client);
@@ -218,6 +232,12 @@ export class NativeManager {
       }
     }
     this.state(id, { instance: client.instance, version, state: "starting", stopped: false });
+    if (r.session.connection_auth) {
+      try { await this.authorizeConnection(r, client); }
+      catch (error) { await this.closeProcess(id); throw error; }
+      await this.loadThread(id, client, mcp);
+      return;
+    }
     const account = await this.account(id, client);
     if (!account) {
       this.state(id, { state: "login_required" });
@@ -225,7 +245,24 @@ export class NativeManager {
     }
     await this.loadThread(id, client, mcp);
   }
+  private access(r: LocalNative, rejected?: string) {
+    if (!this.accounts || !r.session.connection_auth) throw new NativeError("native.login_required");
+    return this.accounts.access(r.session.connection.id, r.session.owner, r.session.connection_auth, rejected);
+  }
+  private async authorizeConnection(r: LocalNative, c: Client) {
+    const material = await this.access(r);
+    const hash = createHash("sha256").update(material.accessToken).digest("hex");
+    if (c.accessHash === hash) return;
+    await c.rpc.request("account/login/start", { type: "chatgptAuthTokens", ...material });
+    c.accessHash = hash;
+    this.state(r.session.id, { account: r.session.connection_auth!.account, login_url: undefined, login_code: undefined });
+  }
   private async account(id: string, c: Client) {
+    const r = this.record(id);
+    if (r.session.connection_auth) {
+      await this.authorizeConnection(r, c);
+      return true;
+    }
     const reply = await c.rpc.request("account/read", { refreshToken: false });
     const a = reply.account;
     if (!a || a.type !== "chatgpt") return false;
@@ -321,6 +358,15 @@ export class NativeManager {
       effort: reply.reasoningEffort ?? undefined,
       error: undefined,
     });
+    this.scheduleIdle(id, c);
+  }
+  private scheduleIdle(id: string, c: Client) {
+    clearTimeout(c.idle);
+    if (!this.record(id).session.connection_auth) return;
+    c.idle = setTimeout(() => {
+      if (this.clients.get(id) !== c || c.turn || this.chains.has(id) || this.record(id).view.state !== "ready") return;
+      void this.closeProcess(id).then(() => this.state(id, { state: "offline", stopped: true }));
+    }, 5 * 60000);
   }
   private verifyPolicy(v: Wire, id: string) {
     if (v.cwd && v.cwd !== join(this.root(id), "workspace")) throw new NativeError("native.policy_mismatch");
@@ -355,6 +401,9 @@ export class NativeManager {
     if (!(await this.account(v.session, c))) throw new NativeError("native.login_required");
     await this.verifyTools(v.session, c);
     if (!this.store.command(v.command, v.session, "turn")) return;
+    clearTimeout(c.idle);
+    c.effects.clear();
+    c.commandStarted = false;
     const latest = this.record(v.session);
     latest.turn = v.turn;
     latest.pendingCommand = v.command;
@@ -386,7 +435,7 @@ export class NativeManager {
           },
         ],
       });
-      c.nativeTurn = result.turn.id;
+      if (c.turn === v.turn) c.nativeTurn = result.turn.id;
       const next = this.record(v.session);
       next.initialized = true;
       this.store.put(next);
@@ -475,6 +524,7 @@ export class NativeManager {
   }
   private async notification(id: string, c: Client, method: string, p: Wire) {
     if (this.clients.get(id) !== c || c.closing) return;
+    if (p.turnId && c.nativeTurn && p.turnId !== c.nativeTurn) return;
     if (method === "thread/settings/updated") {
       const v = p.threadSettings;
       this.verifyPolicy({ ...v, sandbox: v?.sandboxPolicy }, id);
@@ -495,10 +545,11 @@ export class NativeManager {
       this.state(id, { state: "ready" });
       return;
     }
-    if (method === "account/login/completed" && p.success) {
+    if (method === "account/login/completed" && p.success && !this.record(id).session.connection_auth) {
       if (await this.account(id, c)) await this.loadThread(id, c);
       return;
     }
+    if (method === "turn/started" && c.turn && p.turn?.id) c.nativeTurn = p.turn.id;
     if (method === "item/agentMessage/delta" && c.turn) {
       c.text += text(p.delta, 65536);
       this.emit(id, { type: "text", delta: text(p.delta, 65536) }, c.turn);
@@ -506,7 +557,10 @@ export class NativeManager {
       this.emit(id, { type: "reasoning", delta: text(p.delta, 65536) }, c.turn);
     else if ((method === "item/started" || method === "item/completed") && c.turn) {
       const i = p.item ?? {};
-      if (["commandExecution", "fileChange", "mcpToolCall"].includes(i.type))
+      if (["commandExecution", "fileChange", "mcpToolCall"].includes(i.type)) {
+        if (method === "item/started" && i.type === "commandExecution") c.commandStarted = true;
+        if (method === "item/started") c.effects.add(String(i.id));
+        else if (["completed", "failed", "declined"].includes(i.status)) c.effects.delete(String(i.id));
         this.emit(
           id,
           {
@@ -518,6 +572,7 @@ export class NativeManager {
           },
           c.turn,
         );
+      }
     } else if (method === "thread/tokenUsage/updated") {
       const usage = p.tokenUsage?.last ?? {};
       this.state(id, {
@@ -527,11 +582,25 @@ export class NativeManager {
         >,
       });
     } else if (method === "turn/completed" && c.turn) {
-      if (p.turn?.status !== "completed") {
+      if (c.nativeTurn && p.turn?.id !== c.nativeTurn) return;
+      const cancelled = p.turn?.status === "interrupted" && c.stopping && c.effects.size === 0;
+      if (p.turn?.status !== "completed" && !cancelled) {
         await this.unknown(id, c);
         return;
       }
       const turn = c.turn;
+      clearTimeout(c.stopping);
+      c.stopping = undefined;
+      const retire = Boolean(cancelled && c.commandStarted);
+      if (retire) {
+        c.closing = true;
+        if (!(await c.rpc.stop())) {
+          c.closing = false;
+          await this.unknown(id, c);
+          return;
+        }
+        this.clients.delete(id);
+      }
       if (c.pending) {
         clearTimeout(c.pending.timer);
         c.pending = undefined;
@@ -542,14 +611,17 @@ export class NativeManager {
       r.turn = undefined;
       r.pendingCommand = undefined;
       this.store.put(r);
-      this.state(id, { state: "ready", approval: undefined });
-      this.emit(id, { type: "complete", status: "done", text: c.text.slice(0, 2000000) }, turn);
+      this.state(id, { state: retire ? "offline" : "ready", stopped: retire, approval: undefined });
+      this.emit(id, { type: "complete", status: cancelled ? "cancelled" : "done", text: c.text.slice(0, 2000000) }, turn);
+      if (!retire) this.scheduleIdle(id, c);
     }
   }
   private async unknown(id: string, c: Client) {
     if (c.closing) return;
     const turn = c.turn ?? this.record(id).turn;
     c.closing = true;
+    clearTimeout(c.stopping);
+    clearTimeout(c.idle);
     if (c.pending) {
       clearTimeout(c.pending.timer);
       c.pending = undefined;
@@ -572,6 +644,8 @@ export class NativeManager {
     const c = this.clients.get(id);
     if (!c) return;
     c.closing = true;
+    clearTimeout(c.stopping);
+    clearTimeout(c.idle);
     if (c.pending) clearTimeout(c.pending.timer);
     await c.rpc.stop();
     this.clients.delete(id);
@@ -592,6 +666,7 @@ export class NativeManager {
       return;
     }
     if (a.action === "login") {
+      if (r.session.connection_auth) throw new NativeError("native.login_required");
       if (!c || r.view.state !== "login_required") throw new NativeError("native.not_ready");
       const response = await c.rpc.request("account/login/start", { type: "chatgptDeviceCode" });
       const url = new URL(response.verificationUrl);
@@ -628,15 +703,25 @@ export class NativeManager {
       return;
     }
     if (a.action === "interrupt") {
-      if (c?.nativeTurn)
-        await c.rpc.request("turn/interrupt", { threadId: r.thread, turnId: c.nativeTurn }).catch(() => {});
-      if (c?.turn) await this.unknown(id, c);
+      if (!c?.turn) return;
+      if (!a.confirmed) { await this.unknown(id, c); return; }
+      if (c.stopping) return;
+      if (!c.nativeTurn) { await this.unknown(id, c); return; }
+      c.stopping = setTimeout(() => void this.unknown(id, c), 12000);
+      try {
+        if (c.pending) await this.respond(id, c, false);
+        await c.rpc.request("turn/interrupt", { threadId: r.thread, turnId: c.nativeTurn }, 10000);
+      } catch { if (c.turn) await this.unknown(id, c); }
       return;
     }
     if (a.action === "close") {
       if (c?.turn) await this.unknown(id, c);
       await this.closeProcess(id);
       this.state(id, { state: "closed", approval: undefined, stopped: true });
+    }
+    if (a.action === "idle" && !c?.turn && r.view.state !== "closed") {
+      await this.closeProcess(id);
+      this.state(id, { state: "offline", approval: undefined, stopped: true });
     }
   }
   async disconnect() {

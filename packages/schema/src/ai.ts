@@ -16,16 +16,24 @@ export const AIUsageBinding = z.strictObject({ profile: idOf("aip"), purpose: z.
     approval_policy: z.literal("on-request"), reviewer: z.literal("user"), sandbox: z.literal("workspace-write"), command_network: z.literal(false), tools: z.array(z.string().min(1)).max(128), timeout_seconds: z.number().int().min(30).max(7200) });
 export const AIConfiguration = z.strictObject({ connections: z.array(AIConnection), profiles: z.array(AIProfile) });
 export const AIModel = z.strictObject({ id: z.string().min(1), default_effort: z.string().optional(), efforts: z.array(z.string()) });
+export const NativeAccountBinding = z.strictObject({ account: z.string().regex(/^[a-f0-9]{64}$/), generation: Revision });
+export const NativeConnectionAction = z.strictObject({ request_id: RequestId, action: z.enum(["login", "cancel", "logout"]) });
+export const NativeConnectionView = z.strictObject({
+    state: z.enum(["offline", "signed_out", "authorizing", "ready", "error"]),
+    binding: NativeAccountBinding.optional(), models: z.array(AIModel).default([]),
+    login_url: z.string().url().refine(value => { const u = new URL(value); return u.protocol === "https:" && ["auth.openai.com", "chatgpt.com"].includes(u.hostname) && !u.username && !u.password; }).optional(),
+    login_code: z.string().min(1).max(100).optional(), expires: Timestamp.optional(), error: z.string().max(100).optional(),
+});
 export const NativeState = z.enum(["starting", "login_required", "ready", "running", "awaiting_approval", "recovering", "unknown", "failed", "closed", "offline"]);
 export const NativeApproval = z.strictObject({ id: z.string().min(1).max(180), instance: z.string().min(1), method: z.enum(["command", "file", "mcp", "input"]), description: z.string().max(32000), created: Timestamp, expires: Timestamp,
     questions: z.array(z.strictObject({ id: z.string(), header: z.string(), question: z.string(), options: z.array(z.strictObject({ label: z.string(), description: z.string() })).optional() })).optional() });
 export const NativeRuntimeView = z.strictObject({ state: NativeState, instance: z.string().optional(), thread: z.string().optional(), version: z.string().optional(), account: z.string().optional(),
     stopped: z.boolean().optional(), models: z.array(AIModel).default([]), model: z.string().optional(), default_model: z.string().optional(), effort: z.string().optional(), login_url: z.string().url().refine(value=>{const u=new URL(value);return u.protocol==="https:"&&["auth.openai.com","chatgpt.com"].includes(u.hostname)&&!u.username&&!u.password;},"Official login URL required").optional(), login_code: z.string().optional(), approval: NativeApproval.optional(), error: z.string().max(1000).optional(), usage: z.record(z.string(), z.number()).optional() });
 export const NativeSession = z.strictObject({ id: idOf("ais"), conversation: idOf("conv"), owner: idOf("act"), runtime: idOf("act"), profile: AIProfile, connection: AIConnection, binding: AIUsageBinding,
-    view: NativeRuntimeView, sequence: z.number().int().nonnegative(), created: Timestamp, updated: Timestamp, quarantined: z.boolean(), context_revision: z.string(), capabilities: z.array(z.string()) });
+    connection_auth: NativeAccountBinding.optional(), view: NativeRuntimeView, sequence: z.number().int().nonnegative(), created: Timestamp, updated: Timestamp, quarantined: z.boolean(), context_revision: z.string(), capabilities: z.array(z.string()) });
 export const NativeCreate = z.strictObject({ request_id: RequestId, profile: idOf("aip"), title: z.string().trim().min(1).max(100).optional() });
 export const NativeAction = z.discriminatedUnion("action", [
-    z.strictObject({ action: z.literal("login") }), z.strictObject({ action: z.literal("resume") }), z.strictObject({ action: z.literal("interrupt") }), z.strictObject({ action: z.literal("compact") }), z.strictObject({ action: z.literal("close") }),
+    z.strictObject({ action: z.literal("login") }), z.strictObject({ action: z.literal("resume") }), z.strictObject({ action: z.literal("interrupt"), confirmed: z.literal(true).optional() }), z.strictObject({ action: z.literal("compact") }), z.strictObject({ action: z.literal("close") }), z.strictObject({ action: z.literal("idle") }),
     z.strictObject({ action: z.literal("approval"), approval: z.string().min(1), instance: z.string().min(1), accept: z.boolean(), answers: z.record(z.string(), z.array(z.string())).optional() }),
     z.strictObject({ action: z.literal("resolve"), resolution: z.enum(["verified-complete", "verified-not-executed", "retry-at-own-risk"]), note: z.string().trim().min(8).max(2000), processes_stopped: z.literal(true) })
 ]);
@@ -36,13 +44,15 @@ export const NativeEventData = z.discriminatedUnion("type", [
     z.strictObject({ type: z.literal("complete"), status: z.enum(["done", "failed", "unknown", "cancelled"]), text: z.string().max(2000000), error: z.string().max(1000).optional() })
 ]);
 export const NativeRuntimeCommand = z.discriminatedUnion("type", [
+    z.strictObject({ type: z.literal("connection_auth"), command: z.string().uuid(), connection: idOf("aic"), owner: idOf("act"), action: z.enum(["status", "login", "cancel", "logout"]) }),
     z.strictObject({ type: z.literal("open"), command: z.string(), session: NativeSession, hub_url: z.string().url(), mcp_token: z.string().min(16) }),
     z.strictObject({ type: z.literal("action"), command: z.string(), session: idOf("ais"), input: NativeAction }),
     z.strictObject({ type: z.literal("turn"), command: z.string(), session: idOf("ais"), turn: idOf("turn"), profile_revision: Revision, message: z.string().max(1000000), model: z.string(), effort: z.string().optional(), context: z.string().max(1000000), context_revision: z.string() }),
     z.strictObject({ type: z.literal("ack"), session: idOf("ais"), sequence: z.number().int().nonnegative() })
 ]);
 export const NativeRuntimeMessage = z.discriminatedUnion("type", [
-    z.strictObject({ type: z.literal("hello"), protocol: z.literal(1), instance: z.string(), version: z.string(), isolation: z.enum(["macos-seatbelt", "unsupported"]) }),
+    z.strictObject({ type: z.literal("hello"), protocol: z.literal(1), instance: z.string(), version: z.string(), isolation: z.enum(["macos-seatbelt", "unsupported"]), connection_auth: z.literal(true).optional() }),
+    z.strictObject({ type: z.literal("connection_auth"), command: z.string().uuid(), connection: idOf("aic"), owner: idOf("act"), view: NativeConnectionView }),
     z.strictObject({ type: z.literal("event"), session: idOf("ais"), sequence: z.number().int().positive(), turn: idOf("turn").optional(), event: NativeEventData }),
     z.strictObject({ type: z.literal("pong") })
 ]);
@@ -55,6 +65,9 @@ export type AIProfileInput = z.infer<typeof AIProfileInput>;
 export type AIConfiguration = z.infer<typeof AIConfiguration>;
 export type AIUsageBinding = z.infer<typeof AIUsageBinding>;
 export type AIModel = z.infer<typeof AIModel>;
+export type NativeAccountBinding = z.infer<typeof NativeAccountBinding>;
+export type NativeConnectionAction = z.infer<typeof NativeConnectionAction>;
+export type NativeConnectionView = z.infer<typeof NativeConnectionView>;
 export type NativeSession = z.infer<typeof NativeSession>;
 export type NativeRuntimeView = z.infer<typeof NativeRuntimeView>;
 export type NativeApproval = z.infer<typeof NativeApproval>;

@@ -131,6 +131,46 @@ test("HTTP agents can read and write low-risk fields but cannot dispatch, approv
   for (const def of CAPABILITIES.filter(value => value.kind === "write")) expect(def.result).toBeDefined();
 });
 
+test("assistant can adjust prerequisites through the task update tool while cycles are rejected", async () => {
+  const prerequisite = await task({ title: "Existing prerequisite" });
+  const added = await task({ title: "New prerequisite" });
+  const dependent = await task({ title: "Dependent task", dependencies: [prerequisite.id] });
+  let step = 0;
+  model = { async complete(input) {
+    const update = input.tools.find(tool => tool.name === toolName("work.task.update"));
+    expect(update?.description).toContain("patch.dependencies");
+    const last = input.messages.at(-1);
+    if (step++ === 0) return { content: "", tool_calls: [
+      { id: "read", name: toolName("work.task.show"), args: { task: dependent.id } },
+    ] };
+    if (step === 2) {
+      const current = WorkTaskDetail.parse(JSON.parse(last!.content)).task;
+      return { content: "", tool_calls: [{ id: "add", name: update!.name, args: {
+        task: current.id, expected_revision: current.revision, patch: { dependencies: [...current.dependencies, added.id] },
+      } }] };
+    }
+    if (step === 3) return { content: "", tool_calls: [{ id: "cycle", name: update!.name, args: {
+      task: added.id, expected_revision: added.revision, patch: { dependencies: [dependent.id] },
+    } }] };
+    if (step === 4) {
+      expect(JSON.parse(last!.content).code).toBe("CONFLICT");
+      return { content: "", tool_calls: [{ id: "remove", name: update!.name, args: {
+        task: dependent.id, expected_revision: dependent.revision + 1, patch: { dependencies: [added.id] },
+      } }] };
+    }
+    return { content: "Adjusted prerequisites", tool_calls: [] };
+  } };
+  const chat = await client().assistantChat({ request_id: requestId(), message: "Adjust these synthetic prerequisites" });
+  expect(chat.turn.status).toBe("done");
+  const calls = await client().assistantTools(chat.conversation.id);
+  expect(calls.map(call => call.status)).toEqual(["succeeded", "succeeded", "failed", "succeeded"]);
+  expect(calls[1]?.change?.before).toEqual({ dependencies: [prerequisite.id] });
+  const current = (await client().workTask(dependent.id)).task;
+  expect(current.dependencies).toEqual([added.id]);
+  expect(current.outcome).toBe(dependent.outcome);
+  expect((await client().workTask(added.id)).task.dependencies).toEqual([]);
+});
+
 test("private reads require the in-process tool closure and a human owner; each read is marked and audited", async () => {
   for (const name of ["knowledge.note.show", "knowledge.note.search", "knowledge.note.links"]) {
     let step = 0;

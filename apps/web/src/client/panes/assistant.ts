@@ -4,7 +4,7 @@ import { assistantProfiles, defaultAssistantProfile } from "../assistant-profile
  * 助手：对话历史、流式回复、停止接收与中断后核查；显式记忆。
  * 中断或结果不明时只核对已保存记录，不自动重发；同样的草稿重发时复用 request_id。
  */
-import type { AIProfile, AssistantConversation, AssistantConversationDetail, AssistantMemory, AssistantChatRequest, AssistantToolCall } from "@lumio/schema";
+import type { AIProfile, NativeCreate, AssistantConversation, AssistantConversationDetail, AssistantMemory, AssistantChatRequest, AssistantToolCall } from "@lumio/schema";
 import { errorText, type Client, type HubExtras } from "../api.ts";
 import { formatTime, newRequestId } from "../commands.ts";
 import { autosize, clear, empty, failure, h, icon, loading, openDialog, toast } from "../dom.ts";
@@ -38,7 +38,7 @@ export class AssistantPane {
   private native: NativeSessionPanel;
   private nativeReady = true;
   private send = h("button", { type: "submit", class: "btn btn-primary btn-small", disabled: true, "aria-label": t("Send"), title: t("↵ send · ⇧↵ new line") }, icon("send"), t("Send"));
-  private stop = h("button", { type: "button", class: "btn btn-small", hidden: true, onclick: () => {if(this.native.session)void this.client.nativeAction(this.native.session.id,{action:"interrupt"});this.controller?.abort();} }, icon("stop"), t("Stop"));
+  private stop = h("button", { type: "button", class: "btn btn-small", hidden: true, onclick: () => void this.stopTurn() }, icon("stop"), t("Stop"));
   private notice = h("div", { role: "status" });
   private dock: HTMLElement;
   private composer: HTMLFormElement;
@@ -56,6 +56,8 @@ export class AssistantPane {
   private generation = 0;
   private mode: "chat" | "memory" = "chat";
   private uncertain?: AssistantChatRequest;
+  private nativeCreate?: NativeCreate;
+  private firstNativeSend?: { conversation: string; message: string };
 
   constructor(private root: HTMLElement, private client: Client, private hub: HubExtras, private navigate: Navigate = () => {}) {
     this.disposeReferences = referenceInput(this.text,client);
@@ -63,7 +65,12 @@ export class AssistantPane {
       this.nativeReady = ready;
       this.updateComposer();
       if (ready && !this.sending && this.serverRunning) void this.refresh();
-    });
+      if (ready && !this.sending && this.firstNativeSend?.conversation === this.current && this.firstNativeSend) {
+        const unchanged = this.text.value.trim() === this.firstNativeSend.message;
+        this.firstNativeSend = undefined;
+        if (unchanged) void this.submit();
+      }
+    }, () => this.navigate("settings", "ai"));
     this.profile.addEventListener("change", () => {
       this.selectedProfile = this.profile.value;
       this.updateComposer();
@@ -116,11 +123,11 @@ export class AssistantPane {
   canLeave(): boolean { this.captureDraft(); return true; }
   private captureDraft(): void {
     const key = `chat:${this.current ?? "new"}`;
-    if (this.text.value || this.uncertain) this.store.write(key, { text: this.text.value, uncertain: this.uncertain }); else this.store.remove(key);
+    if (this.text.value || this.uncertain) this.store.write(key, { text: this.text.value, uncertain: this.uncertain, nativeCreate: this.nativeCreate }); else this.store.remove(key);
   }
   private restoreDraft(): void {
-    const draft = this.store.read<{text:string;uncertain?:AssistantChatRequest}>(`chat:${this.current ?? "new"}`);
-    this.text.value = draft?.text ?? ""; this.uncertain = draft?.uncertain;
+    const draft = this.store.read<{text:string;uncertain?:AssistantChatRequest;nativeCreate?:NativeCreate}>(`chat:${this.current ?? "new"}`);
+    this.text.value = draft?.text ?? ""; this.uncertain = draft?.uncertain; this.nativeCreate = draft?.nativeCreate;
     if (!this.text.value && this.uncertain) this.text.value = this.uncertain.message;
   }
 
@@ -144,9 +151,13 @@ export class AssistantPane {
   }
 
   private updateComposer(): void {
-    const blocked = this.sending || this.serverRunning || this.conversationLoading;
+    const nativeRunning = ["running", "awaiting_approval"].includes(this.native.session?.view.state ?? "");
+    const blocked = this.sending || this.serverRunning || this.conversationLoading || nativeRunning;
     this.profile.disabled = blocked || this.native.bound || !this.profile.options.length;
     this.send.disabled = blocked || !this.nativeReady || !this.profile.value;
+    this.stop.hidden = this.native.bound ? !nativeRunning : !this.controller;
+    this.send.hidden = this.sending || nativeRunning;
+    if (this.stop.hidden) this.stop.disabled = false;
     if (!this.profilesLoaded) return;
     clear(this.profileStatus);
     if (this.profile.value || this.conversationLoading) return;
@@ -160,7 +171,6 @@ export class AssistantPane {
     this.sending = busy;
     this.updateComposer();
     this.text.disabled = busy;
-    this.stop.hidden = !busy; this.send.hidden = busy;
     this.segChat.disabled = busy; this.segMemory.disabled = busy;
     this.root.querySelectorAll<HTMLButtonElement>(".chat-side button").forEach(button => button.disabled = busy);
   }
@@ -183,6 +193,7 @@ export class AssistantPane {
     if (this.mode !== "chat") this.switchMode("chat");
     if (this.mode !== "chat") return;
     this.generation++; this.serverRunning = false; this.conversationLoading = false;
+    this.firstNativeSend = undefined;
     this.captureDraft();
     this.current = this.selectedProfile = this.boundProfile = undefined;
     this.native.bind(undefined);
@@ -252,6 +263,7 @@ export class AssistantPane {
     const generation = ++this.generation;
     this.captureDraft();
     if (this.current !== id) {
+      this.firstNativeSend = undefined;
       this.selectedProfile = this.boundProfile = undefined;
       this.native.bind(undefined);
     }
@@ -318,6 +330,15 @@ export class AssistantPane {
     } else { await Promise.all([this.loadProfiles(), this.loadConversations()]); if (this.current) await this.openConversation(this.current); }
   }
 
+  private async stopTurn() {
+    if (this.stop.disabled) return;
+    const session = this.native.session;
+    this.stop.disabled = true;
+    if (!session) { this.controller?.abort(); return; }
+    try { await this.client.nativeAction(session.id, { action: "interrupt" }); }
+    catch (error) { this.stop.disabled = false; clear(this.notice, failure(errorText(error))); }
+  }
+
   private async submit(): Promise<void> {
     const generation = this.generation;
     if (this.profileLoad && !this.profilesLoaded) await this.profileLoad;
@@ -327,20 +348,24 @@ export class AssistantPane {
     this.selectedProfile = selected.id;
     if (!this.current && selected.engine === "codex") {
       this.setBusy(true);
+      this.nativeCreate = this.nativeCreate?.profile === selected.id ? this.nativeCreate
+        : { request_id: newRequestId("native"), profile: selected.id };
+      this.captureDraft();
       try {
-        const session = await this.client.createNativeSession({ request_id: newRequestId("native"), profile: selected.id });
+        const session = await this.client.createNativeSession(this.nativeCreate);
         if (!this.active) return;
-        this.captureDraft();
+        this.store.remove("chat:new");
+        this.nativeCreate = undefined;
         this.current = session.conversation;
         this.boundProfile = selected.id;
+        if (session.connection_auth) this.firstNativeSend = { conversation: session.conversation, message: this.text.value.trim() };
         this.native.bind(session.id);
         this.renderProfiles();
         this.captureDraft();
         void this.loadConversations();
-        clear(this.notice, h("p", { class: "notice" }, t("Sign in to continue. Your message is kept as a draft.")));
-      } catch (cause) {
-        if (this.active) clear(this.notice, failure(errorText(cause)));
-      } finally { this.setBusy(false); }
+        clear(this.notice, h("p", { class: "notice" }, t(session.connection_auth ? "Starting Codex" : "Sign in to continue. Your message is kept as a draft.")));
+      } catch (error) { if (this.active) clear(this.notice, failure(errorText(error))); }
+      finally { this.setBusy(false); }
       return;
     }
     const input: Omit<AssistantChatRequest, "request_id"> = {
@@ -351,8 +376,8 @@ export class AssistantPane {
       && previous.profile === input.profile && previous.model === input.model && previous.effort === input.effort;
     const request: AssistantChatRequest = { ...input, request_id: same ? previous.request_id : newRequestId("chat") };
     this.uncertain = request; this.captureDraft();
-    this.setBusy(true);
     this.controller = new AbortController();
+    this.setBusy(true);
     clear(this.notice);
     this.text.value = ""; this.text.dispatchEvent(new Event("input"));
     if (!this.current) clear(this.messages);
@@ -395,7 +420,7 @@ export class AssistantPane {
       content.classList.remove("streaming");
       if (this.active) {
         await this.inspect(request, complete);
-        this.setBusy(false); this.controller = undefined;
+        this.controller = undefined; this.setBusy(false);
         void this.loadConversations();
         if (this.active && !this.root.hidden) this.text.focus();
       }
