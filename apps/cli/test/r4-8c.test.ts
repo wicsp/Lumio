@@ -2,7 +2,7 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ApiError } from "@lumio/schema";
+import { ApiError, Job, WorkCommandRequest, WorkCommandResult, WorkProject, WorkTask, WorkTaskDetail } from "@lumio/schema";
 import { runCli } from "../src/cli.ts";
 import { COMMANDS, commandUsage } from "../src/command-definitions.ts";
 import { printHelp } from "../src/help.ts";
@@ -69,5 +69,49 @@ test("task new and update send every execution field; continue sends its comment
     expect(requests[0]!.operation.args).toMatchObject({ workdir: "/synthetic/task", model: "synthetic-model", gpus: [0, 2], timeout_minutes: 30 });
     expect(requests[1]!.operation.args).toMatchObject({ expected_revision: 1, patch: { workdir: "/synthetic/task", model: "synthetic-model", gpus: [0, 2], timeout_minutes: 30 } });
     expect(requests[2]!.operation.args).toMatchObject({ task: id, to: "codex@synthetic", comment: "Synthetic answer", expected_revision: 1 });
+  } finally { await server.stop(true); }
+});
+
+test("default-target flags, next-target output and implicit dispatch work through the CLI", async () => {
+  const at = "2026-11-09T00:00:00Z", runtime = "act_00000000000000000000000001";
+  const project = WorkProject.parse({ schema_version: 2, type: "project", id: "prj_00000000000000000000000001",
+    title: "Synthetic", description: "", revision: 1, status: "active", tags: [], created: at, updated: at });
+  const task = WorkTask.parse({ schema_version: 3, type: "task", id: "task_00000000000000000000000001", title: "Synthetic task",
+    description: "", revision: 1, outcome: "open", turn: { holder: "human", reason: "todo", since: at }, tags: [],
+    dependencies: [], references: [], created: at, updated: at, next_target: { target: "codex@synthetic", source: "project" } });
+  const detail = WorkTaskDetail.parse({ task, dependents: [], children: [], comments: [], executions: [], turns: [] });
+  const job = Job.parse({ status: "queued", spec: { protocol_version: 2, id: "job_00000000000000000000000001",
+    runtime, lease: "synthetic-lease-0000", workdir: "~", timeout_seconds: 60, created: at,
+    source: { task: task.id, round: 1 }, run: { kind: "agent", engine: "codex", prompt: "Synthetic" } } });
+  const requests: WorkCommandRequest["operation"][] = [];
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
+    const path = new URL(request.url).pathname;
+    if (request.method === "GET") return Response.json(path.endsWith(project.id) ? project : path.endsWith(task.id) ? detail : [task]);
+    const { operation } = WorkCommandRequest.parse(await request.json());
+    requests.push(operation);
+    return Response.json(WorkCommandResult.parse(operation.op === "work.task.dispatch"
+      ? { kind: "job", job, target: "codex@synthetic", target_source: "project" }
+      : { kind: "project", project }));
+  } });
+  try {
+    const run = async (args: string[], lang = "en") => {
+      const result = await cli(args, lang, server.url.origin);
+      expect(result.code, result.stdout + result.stderr).toBe(0);
+      return result.stdout;
+    };
+    await run(["project", "create", "Synthetic", "--default-target", "codex@synthetic"]);
+    await run(["project", "update", project.id, "--default-target", "pi@synthetic"]);
+    await run(["project", "update", project.id, "--default-target", ""]);
+    expect(requests.map(op => op.args)).toEqual([
+      { title: "Synthetic", default_target: "codex@synthetic" },
+      { project: project.id, expected_revision: 1, patch: { default_target: "pi@synthetic" } },
+      { project: project.id, expected_revision: 1, patch: { default_target: null } },
+    ]);
+    expect(await run(["task", "list"])).toContain("Next delegation to codex@synthetic (project default)");
+    expect(await run(["task", "show", task.id], "zh")).toContain("下次委派给 codex@synthetic（项目默认）");
+    expect(WorkTaskDetail.parse(JSON.parse(await run(["task", "show", task.id, "--json"]))).task.next_target).toEqual(task.next_target);
+    expect(await run(["task", "dispatch", task.id])).toContain(`Dispatched ${job.spec.id} to codex@synthetic`);
+    expect(requests.at(-1)).toEqual({ op: "work.task.dispatch", args: { task: task.id, expected_revision: 1 } });
+    expect(Job.parse(JSON.parse(await run(["task", "continue", task.id, "--json"])))).toEqual(job);
   } finally { await server.stop(true); }
 });

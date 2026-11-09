@@ -18,6 +18,7 @@ export async function runWork(kind: "task" | "project", args: string[], log: (li
   if (kind === "task" && args.includes("--legacy")) return;
   const { values, positionals } = parseArgs({ args, allowPositionals: true, strict: true, options });
   const [action, reference, ...rest] = positionals;
+  const defaultTarget = values["default-target"];
   if (values.ready && values.blocked) throw new Error(msg("work.readiness_exclusive"));
   if (!action || !["new", "create", "list", "show", "update", "edit", "status", "assign", "comment", "continue", "hand", "finish", "cancel", "reopen", "ack", "plan", "checkpoint"].includes(action)) {
     if (kind === "task") return;
@@ -63,7 +64,8 @@ export async function runWork(kind: "task" | "project", args: string[], log: (li
           log(msg(`work.turn.${key}`));
           for (const task of rows) {
             const blocked = taskBlockedLabel(task);
-            log(`${task.id}  ${task.outcome}  ${task.turn.holder} (${task.turn.reason})  ${task.title}${blocked ? `  ${blocked}` : ""}`);
+            const facts = [blocked, nextTargetLabel(task)].filter(Boolean);
+            log([`${task.id}  ${task.outcome}  ${task.turn.holder} (${task.turn.reason})  ${task.title}`, ...facts].join("  "));
           }
         }
       }
@@ -74,7 +76,7 @@ export async function runWork(kind: "task" | "project", args: string[], log: (li
       if (rest.length) throw new Error(msg("work.quote_titles_containing_spaces"));
       if (kind === "task" && (values.to || values.status)) throw new Error(msg("work.use_turn_commands"));
       const description = values.file ? await readFile(values.file, "utf8") : values.description;
-      const fields = kind === "project" ? { goal: values.goal, repo: values.repo, deadline: values.deadline, workdir: values.workdir }
+      const fields = kind === "project" ? { goal: values.goal, repo: values.repo, deadline: values.deadline, workdir: values.workdir, default_target: defaultTarget || undefined }
         : { project: values.project, parent: values.parent,
           dependencies: values.depends?.split(",").filter(Boolean), due: values.due, workdir: values.workdir, model: values.model,
           timeout_minutes: values.timeout === undefined ? undefined : Number(values.timeout), gpus: values.gpus?.split(",").map(Number) };
@@ -89,14 +91,20 @@ export async function runWork(kind: "task" | "project", args: string[], log: (li
     if (action === "show") {
       if (values.json) emit(taskDetail ?? current);
       else {
+        const nextTarget = taskDetail ? nextTargetLabel(taskDetail.task) : "";
         const relations = taskDetail ? `\n\n${formatTaskRelations(taskDetail, await client.workTasks())}\n\n${JSON.stringify(taskDetail, null, 2)}` : "";
-        log(`${current.id}  ${current.type === "task" ? `${current.outcome} / ${current.turn.holder} (${current.turn.reason})` : current.status}  ${current.title}\n\n${current.description}${relations}`);
+        log(`${current.id}  ${current.type === "task" ? `${current.outcome} / ${current.turn.holder} (${current.turn.reason})` : current.status}  ${current.title}${nextTarget ? `\n${nextTarget}` : ""}\n\n${current.description}${relations}`);
       }
       return 0;
     }
     if (action === "continue" && kind === "task") {
       const result = await send("work.task.dispatch", { task: reference, to: values.to, comment: values.comment, expected_revision: values.revision === undefined ? current.revision : Number(values.revision) });
-      if (values.json) emit(result.kind === "job" ? result.job : result); else if (result.kind === "job") log(msg("work.dispatched", result.job.spec.id)); else emit(result);
+      if (values.json) emit(result.kind === "job" ? result.job : result);
+      else if (result.kind === "job") {
+        log(values.to === undefined && result.target
+          ? msg("work.dispatched_to", result.job.spec.id, result.target)
+          : msg("work.dispatched", result.job.spec.id));
+      } else emit(result);
       return 0;
     }
     if (["hand", "finish", "cancel", "reopen"].includes(action) && kind === "task") {
@@ -135,7 +143,7 @@ export async function runWork(kind: "task" | "project", args: string[], log: (li
     } else if (values.patch) {
       try { patch = JSON.parse(values.patch); } catch { throw new Error(msg("execution-routines.patch_must_be_a_json_object")); }
     } else if (action === "update") {
-      const fields = current.type === "project" ? { goal: values.goal, repo: values.repo, deadline: values.deadline, workdir: values.workdir }
+      const fields = current.type === "project" ? { goal: values.goal, repo: values.repo, deadline: values.deadline, workdir: values.workdir, default_target: defaultTarget === "" ? null : defaultTarget }
         : { project: values.project, parent: values.parent, dependencies: values.depends?.split(",").filter(Boolean), due: values.due, workdir: values.workdir, model: values.model,
           gpus: values.gpus?.split(",").map(Number), timeout_minutes: values.timeout === undefined ? undefined : Number(values.timeout) };
       patch = Object.fromEntries(Object.entries({ ...fields, description: values.file ? await readFile(values.file, "utf8") : values.description }).filter(([, value]) => value !== undefined));
@@ -191,6 +199,11 @@ export async function runAttention(args: string[], log: (line: string) => void):
 export function taskBlockedLabel(task: WorkTask, terminal = process.stdout.isTTY === true && process.env.TERM !== "dumb"): string {
   const count = task.outcome === "open" ? task.blocked_by?.length ?? 0 : 0;
   return count ? `${terminal ? "⛓ " : ""}${msg("work.waiting_for", count)}` : "";
+}
+
+function nextTargetLabel(task: WorkTask): string {
+  const next = task.next_target;
+  return next ? msg("work.next_target", next.target, msg(`work.target_source.${next.source}`)) : "";
 }
 
 export function formatTaskRelations(detail: WorkTaskDetail, visible: WorkTask[]): string {

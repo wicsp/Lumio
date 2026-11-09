@@ -9,10 +9,10 @@ export const WORK_OPTIONS = {
   timeout: { type: "string" }, patch: { type: "string" }, revision: { type: "string" }, "request-id": { type: "string" },
   comment: { type: "string" }, turn: { type: "string" }, note: { type: "string" },
   from: { type: "string" }, stage: { type: "string" }, action: { type: "string" }, "back-to": { type: "string" },
-  goal: { type: "string" }, repo: { type: "string" }, deadline: { type: "string" },
+  goal: { type: "string" }, repo: { type: "string" }, deadline: { type: "string" }, "default-target": { type: "string" },
 } as const;
 export interface CommandDefinition { path: string; positional?: string; options?: string[]; required?: string[]; capability?: string; aliases?: string[]; tail?: string }
-const write = ["request-id"], body = ["description", "file"], taskFields = ["project", "parent", "depends", "due", "workdir", "model", "gpus", "timeout"], projectFields = ["goal", "repo", "deadline", "workdir"];
+const write = ["request-id"], body = ["description", "file"], taskFields = ["project", "parent", "depends", "due", "workdir", "model", "gpus", "timeout"], projectFields = ["goal", "repo", "deadline", "workdir", "default-target"];
 const def = (path: string, positional = "", options: string[] = [], capability?: string, extra: Partial<CommandDefinition> = {}): CommandDefinition => ({ path, positional, options, capability, ...extra });
 export const COMMANDS: CommandDefinition[] = [
   def("search", "<query>", ["type", "limit", "include-private", "vault"], "knowledge.note.search"),
@@ -24,7 +24,7 @@ export const COMMANDS: CommandDefinition[] = [
   def("task update", "<id>", ["patch", "revision", ...body, ...taskFields, ...write], "work.task.update"),
   def("task list", "", ["project", "status", "turn", "query", "ready", "blocked", "tag", "parent"], "work.task.list"), def("task show", "<id>", ["legacy"], "work.task.show"),
   def("task edit", "<id>", ["file", "revision", ...write]),
-  def("task continue", "<id>", ["to", "comment", "revision", "legacy", ...write]),
+  def("task continue", "<id>", ["to", "comment", "revision", "legacy", ...write], undefined, { aliases: ["task dispatch"] }),
   def("task hand", "<id>", ["to", "note", "revision", ...write], "work.task.hand", { required: ["to"] }),
   ...["finish", "cancel", "reopen"].map(action => def(`task ${action}`, "<id>", ["revision", ...write])),
   def("task comment", "<id> [<text>]", ["file", ...write], "work.task.comment"),
