@@ -13,3 +13,5 @@
 验收状态（2026-11-08）：实现与独立本地部署完成；Bun 1.4.4 全量检查 1267 pass / 4 skip / 0 fail；真实 Codex 恢复与 MCP 合成验收通过。结果见 [验收报告](../reviews/M1-0-native-assistant-acceptance.md)，登录与启停见 [试用说明](../native-assistant-trial.md)。待用户试用后决定合并。
 
 2026-11-08 用户追加明确指令：合并全部 PR 后从 main 构建并部署到现有 7420；原隔离试用仅作为历史验证记录。
+
+2026-11-09：用户批准 [ADR 0044](../adr/0044-codex-connection-auth-and-assistant-controls.md)，授权实现连接级登录、对话自动恢复和统一停止并部署现有 7420。合成 Hub/Runtime 验收覆盖双会话、同账户重登、并发刷新、正常中断和未确认副作用；官方 0.166.0 通过环回 TLS 合成账户测试，确认 managed cache 刷新、external auth 401 回调和凭据目录隔离。真实账户需由用户在官方页授权。

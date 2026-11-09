@@ -7,6 +7,9 @@ import {
   NativeRuntimeMessage,
   NativeRuntimeCommand,
   NativeMCPRequest,
+  NativeConnectionAction,
+  type NativeConnectionView,
+  type AIConnection,
   CAPABILITIES,
   toolName,
   AssistantConversation,
@@ -46,7 +49,10 @@ type Active = {
   turn: string;
   event: (e: AssistantEvent) => void;
   resolve: (v: { text: string; status: "done" | "failed" | "unknown" | "cancelled"; error?: string }) => void;
+  stopping?: ReturnType<typeof setTimeout>;
 };
+type AuthCommand = Extract<NativeRuntimeCommand, { type: "connection_auth" }>;
+const offline = (): NativeConnectionView => ({ state: "offline", models: [] });
 const problem = (reason = "native.unavailable", code: "INVALID" | "CONFLICT" | "NOT_FOUND" | "FORBIDDEN" = "INVALID") =>
   new HubError(code, { key: reason, args: [] });
 export class NativeAssistant {
@@ -57,9 +63,14 @@ export class NativeAssistant {
       ready: boolean;
       instance?: string;
       isolation?: string;
+      connectionAuth?: boolean;
     }
   >();
   private active = new Map<string, Active>();
+  private authViews = new Map<string, { runtime: string; view: NativeConnectionView }>();
+  private authPending = new Map<string, { command: AuthCommand; runtime: string; finish: (view: NativeConnectionView) => void }>();
+  private authRequests = new Map<string, Promise<NativeConnectionView>>();
+  private authChanges = new Set<string>();
   constructor(
     readonly ai: SqliteAIStore,
     private modules: NativeModules,
@@ -81,6 +92,7 @@ export class NativeAssistant {
   validate(conversation: AssistantConversation, request: AssistantChatRequest) {
     const s = this.owned(conversation.native_session!, conversation.owner);
     this.current(s);
+    this.checkAccount(s);
     if (
       this.ai.sessions(s.owner).some((v) => v.quarantined) ||
       !["ready"].includes(s.view.state) ||
@@ -102,10 +114,45 @@ export class NativeAssistant {
   }
   private current(s: NativeSession) {
     const c = this.ai.connection(s.connection.id);
-    if (!c || c.revision !== s.connection.revision) throw problem("native.rebuild_required", "CONFLICT");
+    if (!c || c.owner !== s.owner || c.host !== s.connection.host || c.kind !== "codex-account")
+      throw problem("native.rebuild_required", "CONFLICT");
     const p = this.ai.profile(s.profile.id);
     if (!p || p.connection !== s.connection.id || p.engine !== "codex")
       throw problem("native.rebuild_required", "CONFLICT");
+  }
+  private checkAccount(s: NativeSession) {
+    if (!s.connection_auth) return;
+    const current = this.authViews.get(s.connection.id);
+    if (this.authChanges.has(s.connection.id) || (current?.runtime === s.runtime && current.view.state !== "ready"))
+      throw problem("native.connection_sign_in", "CONFLICT");
+    if (current?.runtime === s.runtime && current.view.binding?.account !== s.connection_auth.account)
+      throw problem("native.account_changed", "CONFLICT");
+  }
+  private sessionView(s: NativeSession): NativeSession {
+    if (s.quarantined || !["ready", "offline", "failed"].includes(s.view.state)) return s;
+    try { this.current(s); this.checkAccount(s); return s; }
+    catch (error) { return { ...s, view: { ...s.view, state: "failed", error: error instanceof HubError ? error.params.key : "native.not_ready" } }; }
+  }
+  private authCommand(connection: AIConnection, action: AuthCommand["action"]): Promise<NativeConnectionView> {
+    const runtime = this.hub.runtimes(new Date()).find(r => r.registration.name === connection.host)?.actor;
+    if (!runtime || !this.sockets.get(runtime)?.connectionAuth) return Promise.resolve(offline());
+    const existing = this.authRequests.get(connection.id);
+    if (existing) return action === "status" ? existing : existing.then(() => this.authCommand(connection, action));
+    const command: AuthCommand = { type: "connection_auth", command: randomUUID(), connection: connection.id, owner: connection.owner, action };
+    const result = new Promise<NativeConnectionView>(resolve => {
+      const finish = (view: NativeConnectionView) => {
+        clearTimeout(timer);
+        this.authPending.delete(command.command);
+        this.authViews.set(connection.id, { runtime, view });
+        resolve(view);
+      };
+      const timer = setTimeout(() => finish(offline()), 22000);
+      this.authPending.set(command.command, { command, runtime, finish });
+      try { this.send(runtime, command); } catch { finish(offline()); }
+    });
+    this.authRequests.set(connection.id, result);
+    void result.finally(() => this.authRequests.delete(connection.id));
+    return result;
   }
   private online(runtime: string) {
     return this.sockets.get(runtime)?.ready === true;
@@ -177,7 +224,7 @@ export class NativeAssistant {
       cancel: () => close(),
     });
     return new Response(stream, {
-      headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-store", "X-Lumio-Native-Channel": id },
+      headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-store", "X-Lumio-Native-Channel": id, "X-Lumio-Native-Connection-Auth": "1" },
     });
   }
   channelOpen(ws: Socket) {
@@ -188,6 +235,8 @@ export class NativeAssistant {
   channelClose(ws: Socket) {
     if (this.sockets.get(ws.data.runtime)?.ws !== ws) return;
     this.sockets.delete(ws.data.runtime);
+    for (const pending of this.authPending.values()) if (pending.runtime === ws.data.runtime) pending.finish(offline());
+    for (const [connection, current] of this.authViews) if (current.runtime === ws.data.runtime) this.authViews.delete(connection);
     for (const s of this.ai.sessions().filter((s) => s.runtime === ws.data.runtime && s.view.state !== "closed")) {
       const active = this.active.get(s.id);
       if (active || ["running", "awaiting_approval"].includes(s.view.state)) {
@@ -228,13 +277,20 @@ export class NativeAssistant {
       link.ready = true;
       link.instance = m.instance;
       link.isolation = m.isolation;
+      link.connectionAuth = m.connection_auth;
       for (const s of this.ai
         .sessions()
         .filter((s) => s.runtime === ws.data.runtime && s.view.state !== "closed" && !s.quarantined)) {
         try {
-          this.open(s);
+          if (!s.connection_auth) this.open(s);
         } catch {}
       }
+      return;
+    }
+    if (m.type === "connection_auth") {
+      const pending = this.authPending.get(m.command);
+      if (pending?.runtime === ws.data.runtime && pending.command.connection === m.connection && pending.command.owner === m.owner)
+        pending.finish(m.view);
       return;
     }
     if (m.type !== "event") return;
@@ -275,11 +331,14 @@ export class NativeAssistant {
           this.ai.invalidate(s.id);
         }
       }
-      if (m.event.type === "complete") {
-        if (m.event.status === "done" && !s.quarantined && !terminal)
-          s.view = { ...s.view, state: "ready", approval: undefined };
+      if (m.event.type === "complete" && m.turn) {
+        const unknownEffect = m.event.status === "cancelled" && !!this.ai.db.query(
+          "SELECT 1 FROM native_operations WHERE session=? AND turn=? AND status IN ('running','unknown') LIMIT 1",
+        ).get(s.id, m.turn);
+        if ((m.event.status === "done" || (m.event.status === "cancelled" && !unknownEffect)) && !s.quarantined && !terminal)
+          s.view = { ...s.view, state: s.view.stopped ? "offline" : "ready", approval: undefined };
         if (m.turn) this.ai.deliveryState(m.turn, "completed");
-        if (m.event.status === "unknown" && !terminal) {
+        if ((m.event.status === "unknown" || unknownEffect) && !terminal) {
           s.quarantined = true;
           s.view = { ...s.view, state: "unknown", error: "native.unknown" };
           this.ai.invalidate(s.id);
@@ -293,17 +352,22 @@ export class NativeAssistant {
       if (m.event.type === "text") active.event({ type: "token", turn: active.turn, delta: m.event.delta });
       else active.event({ type: "native", turn: active.turn, event: m.event });
     }
-    if (m.event.type === "complete") this.complete(s.id, m.event.status, m.event.text, m.event.error);
+    if (m.event.type === "complete" && active?.turn === m.turn) {
+      const status = s.quarantined ? "unknown" : m.event.status;
+      this.complete(s.id, status, m.event.text, s.quarantined ? "native.unknown" : m.event.error);
+    }
   }
   private complete(id: string, status: "done" | "failed" | "unknown" | "cancelled", text: string, error?: string) {
     const a = this.active.get(id);
     if (a) {
+      clearTimeout(a.stopping);
       this.active.delete(id);
       a.resolve({ text, status, error });
     }
   }
   private open(s: NativeSession) {
     this.current(s);
+    this.checkAccount(s);
     const token = `native_${randomBytes(32).toString("base64url")}`;
     const name = `native-${createHash("sha256").update(s.id).digest("hex").slice(0, 20)}`;
     const actor = this.hub.actors().find((a) => a.name === name) ?? this.hub.createActor(name, "agent");
@@ -337,6 +401,9 @@ export class NativeAssistant {
     const runtime = this.hub.runtimes(new Date()).find((r) => r.registration.name === connection.host);
     if (!runtime || !this.online(runtime.actor)) throw problem("native.runtime_offline", "CONFLICT");
     if (this.ai.sessions(owner).some((s) => s.quarantined)) throw problem("native.unknown", "CONFLICT");
+    const connectionView = this.sockets.get(runtime.actor)?.connectionAuth ? await this.authCommand(connection, "status") : undefined;
+    if (connectionView && (connectionView.state !== "ready" || !connectionView.binding || this.authChanges.has(connection.id)))
+      throw problem("native.connection_sign_in", "CONFLICT");
     const time = new Date().toISOString(),
       id = newId("ais", new Date(), randomBytes),
       conversation = newId("conv", new Date(), randomBytes),
@@ -357,6 +424,7 @@ export class NativeAssistant {
       runtime: runtime.actor,
       profile,
       connection,
+      connection_auth: connectionView?.binding,
       binding: {
         profile: profile.id,
         purpose: "assistant",
@@ -377,6 +445,8 @@ export class NativeAssistant {
       updated: time,
       quarantined: false,
     });
+    this.checkAccount(s);
+    if (!this.online(s.runtime)) throw problem("native.runtime_offline", "CONFLICT");
     this.ai.db.transaction(() => {
       this.modules.assistantStore.putConversation(
         AssistantConversation.parse({
@@ -454,10 +524,20 @@ export class NativeAssistant {
       input.signal.removeEventListener("abort", abort);
     }
   };
-  async interrupt(id: string) {
+  async interrupt(id: string, confirmedStop = false) {
     const s = this.ai.session(id);
     if (!s) return;
     const uncertain = this.active.has(id) || ["running", "awaiting_approval"].includes(s.view.state);
+    const active = this.active.get(id);
+    if (confirmedStop && !uncertain) return;
+    if (confirmedStop && active && this.sockets.get(s.runtime)?.connectionAuth) {
+      if (active.stopping) return;
+      active.stopping = setTimeout(() => void this.interrupt(id), 15000);
+      try {
+        this.send(s.runtime, { type: "action", command: randomUUID(), session: id, input: { action: "interrupt", confirmed: true } });
+        return;
+      } catch { /* Fall back to an unconfirmed stop. */ }
+    }
     if (uncertain) {
       s.quarantined = true;
       s.view = { ...s.view, state: "unknown", approval: undefined, error: "native.unknown" };
@@ -484,7 +564,7 @@ export class NativeAssistant {
     )
       throw problem("native.approval_expired", "CONFLICT");
     if (a.action === "interrupt") {
-      await this.interrupt(id);
+      await this.interrupt(id, true);
       return this.ai.session(id)!;
     }
     if (a.action === "resolve") {
@@ -505,7 +585,13 @@ export class NativeAssistant {
     if (s.quarantined && a.action !== "close") throw problem("native.unknown", "CONFLICT");
     if (a.action === "resume") {
       if (!["offline", "failed"].includes(s.view.state)) throw problem("native.not_ready", "CONFLICT");
+      if (!this.online(s.runtime)) throw problem("native.runtime_offline", "CONFLICT");
+      if (["native.state_lost", "native.context_expired"].includes(s.view.error ?? "")) throw problem(s.view.error, "CONFLICT");
       this.current(s);
+      if (s.connection_auth) {
+        await this.authCommand(s.connection, "status");
+        this.checkAccount(s);
+      }
       s.view = { ...s.view, state: "recovering" };
       this.put(s);
       this.open(s);
@@ -536,6 +622,15 @@ export class NativeAssistant {
             isolation: this.sockets.get(r.actor)?.isolation ?? "unsupported",
           })),
       );
+    const auth = /^\/v2\/ai\/connections\/(aic_[0-9A-HJKMNP-TV-Z]{26})\/auth$/.exec(path);
+    if (auth && ["GET", "POST"].includes(request.method)) {
+      const connection = this.ai.connection(auth[1]!);
+      if (!connection || connection.owner !== owner || connection.kind !== "codex-account")
+        throw problem("native.session_missing", "NOT_FOUND");
+      const view = request.method === "GET" ? await this.authCommand(connection, "status")
+        : await this.changeAuth(connection, NativeConnectionAction.parse(await request.json()));
+      return Response.json(view, { headers: { "Cache-Control": "no-store" } });
+    }
     const connection = /^\/v2\/ai\/connections(?:\/(aic_[0-9A-HJKMNP-TV-Z]{26}))?$/.exec(path);
     if (connection && ["POST", "PUT"].includes(request.method))
       return Response.json(this.modules.ai.connection(owner, await request.json(), connection[1]));
@@ -564,10 +659,32 @@ export class NativeAssistant {
         return Response.json(await this.action(s.id, owner, await request.json()));
       if (request.method === "GET")
         return Response.json(
-          match[2] === "events" ? this.ai.events(s.id, Number(new URL(request.url).searchParams.get("after") ?? 0)) : s,
+          match[2] === "events" ? this.ai.events(s.id, Number(new URL(request.url).searchParams.get("after") ?? 0)) : this.sessionView(s),
         );
     }
     throw problem("native.session_missing", "NOT_FOUND");
+  }
+  private async changeAuth(connection: AIConnection, input: NativeConnectionAction) {
+    const key = `connection-auth:${connection.id}:${input.request_id}`;
+    const receipt = this.ai.receipt(connection.owner, key, input.action);
+    if (receipt && !receipt.matches) throw problem("ai.conflict", "CONFLICT");
+    if (receipt) return this.authCommand(connection, "status");
+    if (this.authChanges.has(connection.id) || this.ai.sessions(connection.owner).some(s =>
+      s.connection.id === connection.id && (s.quarantined || this.modules.assistantStore.turns(s.conversation).some(t => t.status === "running"))))
+      throw problem("native.connection_busy", "CONFLICT");
+    this.authChanges.add(connection.id);
+    try {
+      this.ai.putReceipt(connection.owner, key, input.action, true);
+      const view = await this.authCommand(connection, input.action);
+      if (view.state === "signed_out" || view.state === "authorizing") {
+        for (const s of this.ai.sessions(connection.owner)) {
+          if (s.connection.id !== connection.id || !s.connection_auth || ["closed", "offline"].includes(s.view.state)) continue;
+          this.ai.invalidate(s.id);
+          this.send(s.runtime, { type: "action", command: randomUUID(), session: s.id, input: { action: "idle" } });
+        }
+      }
+      return view;
+    } finally { this.authChanges.delete(connection.id); }
   }
   async mcpHandle(request: Request) {
     const id = /^\/v2\/native-mcp\/(ais_[0-9A-HJKMNP-TV-Z]{26})\/(tools|call)$/.exec(new URL(request.url).pathname);

@@ -7,6 +7,21 @@ export type Lang = "en" | "zh";
 const KEY = "lumio.web.lang";
 
 export const ZH: Record<string, string> = {
+  "Manage Codex sign-in": "管理 Codex 登录",
+  "Signed in": "已登录",
+  "Signed out": "未登录",
+  "Waiting for authorization": "等待授权",
+  "Codex sign-in failed": "Codex 登录未成功",
+  "Enter this one-time code on the official page.": "请在官方页面输入此一次性设备码。",
+  "Sign out of Codex": "退出 Codex 登录",
+  "Sign in once for this connection. Each assistant chat keeps its own history and tools.": "这个连接只需登录一次。每段助手对话保留独立的历史和工具。",
+  "Open AI settings": "打开 AI 设置",
+  "Advanced": "高级",
+
+  "Sign in to this Codex connection in AI settings.": "请在 AI 设置中登录这个 Codex 连接。",
+  "This chat belongs to a different Codex account.": "这段对话属于另一个 Codex 账号。",
+  "This chat’s connection changed. Start a new chat.": "这段对话的连接已变更，请新建对话。",
+  "Saved context changed. Start a new chat.": "已保存的上下文发生变化，请新建对话。",
   "Missing connection": "连接已不存在",
   "Client default model": "客户端默认模型",
   "Official sign-in": "官方登录",

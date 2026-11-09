@@ -4,6 +4,7 @@ import { NativeRuntimeCommand, NativeRuntimeMessage } from "@lumio/schema";
 import type { RuntimeConfig } from "../config.ts";
 import { NativeLocalStore } from "./store.ts";
 import { NativeManager } from "./manager.ts";
+import { ConnectionAuth } from "./connection-auth.ts";
 /** Two authenticated HTTP legs; durable events and commands retain independent semantics. */
 export async function runNativeChannel(
   config: RuntimeConfig,
@@ -50,10 +51,11 @@ export async function runNativeChannel(
       }
     })();
   };
+  const accounts = new ConnectionAuth(config.stateDir, { codex: env.LUMIO_NATIVE_CODEX });
   const manager = new NativeManager(store, config.stateDir, flush, {
     runtimeName: config.registration.name,
     codex: env.LUMIO_NATIVE_CODEX,
-  });
+  }, accounts);
   await manager.recover();
   try {
     while (!signal.aborted) {
@@ -68,6 +70,7 @@ export async function runNativeChannel(
         if (!response.ok || !response.body) throw new Error("Native channel unavailable");
         channel = response.headers.get("x-lumio-native-channel") ?? undefined;
         if (!channel) throw new Error("Native handshake unavailable");
+        const connectionAuth = response.headers.get("x-lumio-native-connection-auth") === "1";
         await post(
           NativeRuntimeMessage.parse({
             type: "hello",
@@ -75,6 +78,7 @@ export async function runNativeChannel(
             instance: randomUUID(),
             version: "1",
             isolation: process.platform === "darwin" ? "macos-seatbelt" : "unsupported",
+            ...(connectionAuth ? { connection_auth: true } : {}),
           }),
         );
         flush();
@@ -93,6 +97,14 @@ export async function runNativeChannel(
               buffer = buffer.slice(end + 1);
               if (!line.trim()) continue;
               const c = NativeRuntimeCommand.parse(JSON.parse(line));
+              if (c.type === "connection_auth") {
+                if (!connectionAuth) throw new Error("Connection auth was not negotiated");
+                void accounts.request(c).then(view => {
+                  if (current.signal.aborted || signal.aborted || controller !== current) return;
+                  return post(NativeRuntimeMessage.parse({ type: "connection_auth", command: c.command, connection: c.connection, owner: c.owner, view }));
+                }).catch(() => current.abort());
+                continue;
+              }
               await manager.receive(c);
               flush();
             }
@@ -122,6 +134,7 @@ export async function runNativeChannel(
   } finally {
     controller?.abort();
     await manager.stop();
+    await accounts.stop();
     store.close();
   }
 }

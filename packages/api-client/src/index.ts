@@ -1,4 +1,4 @@
-import {AIConnection,AIConnectionInput,AIProfile,AIProfileInput,AIConfiguration,AIRuntime,NativeSession,NativeCreate,NativeAction,NativeEventRecord} from "@lumio/schema";
+import {AIConnection,AIConnectionInput,AIProfile,AIProfileInput,AIConfiguration,AIRuntime,NativeConnectionAction,NativeConnectionView,NativeSession,NativeCreate,NativeAction,NativeEventRecord} from "@lumio/schema";
 import { KnowledgeGraph, KnowledgeGraphArgs, Id, KnowledgeDocument, KnowledgeUpdateRequest, KnowledgeUpdateResult, KnowledgeRelatedRequest, KnowledgeRelatedResult, KnowledgeReferencesRequest, KnowledgeReferencesResult } from "@lumio/schema";
 import { KnowledgeTemplateRequest, KnowledgeTemplateResult, PaperResolveRequest, PaperResolveResult, KnowledgeCreateRequest, KnowledgeCreateResult } from "@lumio/schema";
 import { ExecutionTarget, ExecutionTargetListArgs } from "@lumio/schema";
@@ -77,6 +77,10 @@ export function createClient(options: { url: string; token?: string; language?: 
     aiRuntimes(){return request("/v2/ai/runtimes",{},AIRuntime.array());},
     saveAIConnection(input:AIConnectionInput,id?:string){return request(`/v2/ai/connections${id?`/${validate(idOf("aic"),id)}`:""}`,{},AIConnection,validate(AIConnectionInput,input),id?"PUT":"POST");},
     saveAIProfile(input:AIProfileInput,id?:string){return request(`/v2/ai/profiles${id?`/${validate(idOf("aip"),id)}`:""}`,{},AIProfile,validate(AIProfileInput,input),id?"PUT":"POST");},
+    nativeConnection(id: string) { return request(`/v2/ai/connections/${validate(idOf("aic"), id)}/auth`, {}, NativeConnectionView); },
+    nativeConnectionAction(id: string, input: NativeConnectionAction) {
+      return request(`/v2/ai/connections/${validate(idOf("aic"), id)}/auth`, {}, NativeConnectionView, validate(NativeConnectionAction, input));
+    },
     createNativeSession(input:NativeCreate){return request("/v2/assistant/native-sessions",{},NativeSession,validate(NativeCreate,input));},
     nativeSessions(){return request("/v2/assistant/native-sessions",{},NativeSession.array());},
     nativeSession(id:string){return request(`/v2/assistant/native-sessions/${validate(idOf("ais"),id)}`,{},NativeSession);},
