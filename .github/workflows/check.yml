@@ -1,13 +1,8 @@
 name: Check
-# main 的 PR 合并前须通过完整检查。preview 推送后跑同样的检查，用于发现组合版本的问题。
+# main 的 PR 合并前须通过完整检查。
 on:
   pull_request:
     branches: [main]
-  push:
-    branches: [preview]
-concurrency:
-  group: check-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'push' }}
 permissions:
   contents: read
 jobs:

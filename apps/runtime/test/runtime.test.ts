@@ -1,3 +1,4 @@
+import { jobEnv } from "../src/executor.ts";
 import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
 let previousLocale: string | undefined;
 beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
@@ -91,4 +92,11 @@ test("runtime retries exponentially up to 60 seconds, registers again, sends emp
     expect(logs).toEqual(["Hub disconnected; retrying", "Runtime registered", "Hub connection restored", "Hub disconnected; retrying", "Runtime registered", "Hub connection restored"]);
     expect(logs.join("\n")).not.toContain(env.LUMIO_TOKEN);
   } finally { await rm(temp, { recursive: true, force: true }); }
+});
+
+test("compiled agents prefer the instance CLI and do not inherit Runtime credentials", () => {
+  const parent = { PATH: "/daily/bin:/usr/bin", LUMIO_TOKEN: "synthetic-runtime-token" };
+  expect(jobEnv(parent, "/trial/bin/lumio")).toEqual({ PATH: "/trial/bin:/daily/bin:/usr/bin" });
+  expect(jobEnv(parent)).toEqual({ PATH: "/daily/bin:/usr/bin" });
+  expect(jobEnv({}, "/trial/bin/lumio")).toEqual({ PATH: "/trial/bin" });
 });

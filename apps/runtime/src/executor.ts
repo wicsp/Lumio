@@ -8,7 +8,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { GitState, RuntimeRegistration } from "@lumio/schema";
 import { RunLogWriter, finalizeInterruptedLog } from "@lumio/storage/logs";
@@ -51,8 +51,10 @@ export async function killGroup(pid: number) {
  * 被执行的程序（以及 P2-3 起的 agent）拿不到执行器自己的配置，尤其是 LUMIO_TOKEN（P2-2 review）。
  * 局限：执行器与被执行的程序是同一个系统账号，后者仍可能读到执行器的配置文件；真正隔离需要单独的账号（见待办）。
  */
-export function jobEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  return Object.fromEntries(Object.entries(env).filter(([key]) => !key.startsWith("LUMIO_")));
+export function jobEnv(env: NodeJS.ProcessEnv, lumioExecutable?: string): NodeJS.ProcessEnv {
+  const childEnv = Object.fromEntries(Object.entries(env).filter(([key]) => !key.startsWith("LUMIO_")));
+  if (lumioExecutable) childEnv.PATH = [dirname(lumioExecutable), env.PATH].filter(Boolean).join(delimiter);
+  return childEnv;
 }
 export class Executor {
   private running = new Map<string, { child: ChildProcess; stop?: Promise<void>; reason?: "timeout" | "cancelled" }>();
@@ -151,7 +153,9 @@ export class Executor {
       const decoder = new StringDecoder("utf8");
       output.on("error", () => { outputError = true; this.stop(spec.id, "cancelled"); });
       const workerArgs = process.argv[1]?.endsWith(".ts") ? [process.argv[1], "--job-worker"] : ["--job-worker"];
-      const child = spawn(process.execPath, workerArgs, { detached: true, stdio: ["pipe", "pipe", "pipe"], env: jobEnv(this.env), shell: false });
+      // Agent CLI calls use the binary installed beside the compiled Runtime.
+      const childEnv = jobEnv(this.env, agent && workerArgs.length === 1 ? process.execPath : undefined);
+      const child = spawn(process.execPath, workerArgs, { detached: true, stdio: ["pipe", "pipe", "pipe"], env: childEnv, shell: false });
       placeholder.child = child;
       const exited = new Promise<void>((resolve, reject) => { child.once("error", reject); child.once("close", () => resolve()); });
       child.stdin!.on("error", () => {});
@@ -178,7 +182,7 @@ export class Executor {
       };
       child.stdout!.on("data", (chunk: Buffer) => stdout(stdoutRedactor.push(chunk)));
       child.stderr!.on("data", (chunk: Buffer) => { const clean = stderrRedactor.push(chunk); if (clean.length) write(clean, "stderr"); });
-      child.stdin!.end(JSON.stringify({ spec: { ...spec, workdir }, argv, completion, env: { ...jobEnv(this.env), ...this.sudo?.begin(spec),
+      child.stdin!.end(JSON.stringify({ spec: { ...spec, workdir }, argv, completion, env: { ...childEnv, ...this.sudo?.begin(spec),
         ...(run.kind === "agent" && access && Date.parse(access.expires) > Date.now() ? { LUMIO_HUB_URL: this.config.url, LUMIO_TOKEN: access.token } : {}), ...(spec.gpus ? { CUDA_VISIBLE_DEVICES: spec.gpus.join(",") } : {}) } }));
       const deadline = Date.now() + spec.timeout_seconds * 1000;
       const armTimeout = () => {
