@@ -7,9 +7,9 @@ fail() {
   exit 1
 }
 
-cd "$(git rev-parse --show-toplevel)"
-[[ $(git branch --show-current) == preview ]] || fail '请在专用 preview 工作树中运行。'
-[[ -z $(git status --porcelain) ]] || fail 'preview 工作树须干净。'
+[[ $# == 1 ]] || fail '用法：scripts/update-preview.sh <分支、标签或提交>'
+commit=$(git rev-parse --verify --end-of-options "$1^{commit}" 2>/dev/null) ||
+  fail "找不到已提交的版本：$1"
 [[ $(uname -s) == Darwin ]] || fail '试用更新命令需要 macOS launchd。'
 
 trial="$HOME/.local/share/lumio-native-trial"
@@ -53,24 +53,17 @@ trap 'rm -rf -- "$lock"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-updater=$(git rev-parse HEAD:scripts/update-preview.sh)
-git pull --ff-only origin preview
-commit=$(git rev-parse HEAD)
-[[ "$commit" == "$(git rev-parse FETCH_HEAD)" ]] || fail '本地 preview 含有尚未推送的提交。'
-
-# A pull can replace this script while Bash is still reading the old copy.
-updated_updater=$(git rev-parse HEAD:scripts/update-preview.sh)
-if [[ "$updater" != "$updated_updater" ]]; then
-  trap - EXIT INT TERM
-  rmdir "$lock"
-  exec bash "$PWD/scripts/update-preview.sh"
-fi
-
-required=$(bun -e 'console.log(require("./package.json").packageManager.replace(/^bun@/, ""))')
-[[ $(bun --version) == "$required" ]] || fail "此提交需要 Bun $required。"
-bun install --frozen-lockfile
 version="0.0.0-preview.$commit"
-bun run apps/cli/src/build-binary.ts --outfile "$lock/lumio" --version "$version"
+source_dir="$lock/source"
+mkdir "$source_dir"
+git archive "$commit" | tar -xf - -C "$source_dir"
+(
+  cd "$source_dir"
+  required=$(bun -e 'console.log(require("./package.json").packageManager.replace(/^bun@/, ""))')
+  [[ $(bun --version) == "$required" ]] || fail "此提交需要 Bun $required。"
+  bun install --frozen-lockfile
+  bun run apps/cli/src/build-binary.ts --outfile "$lock/lumio" --version "$version"
+)
 
 # Keep the old executable and replace the live path in one rename on the same filesystem.
 previous="$binary.previous"
