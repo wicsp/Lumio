@@ -2,6 +2,26 @@
 
 `preview` 收集准备一起试用的改动。功能开发继续使用独立分支和 worktree，契约审批、测试数据隔离和新功能带测试的规则照常执行。只供试用的功能提交可以先跑受影响的测试。集成会话负责构建组合结果、解决冲突并推送。
 
+## 用命令行连接试用实例
+
+这台 Mac 的 `~/.local/bin` 里有两个入口。按你要操作的数据选择命令。
+
+| 命令 | 默认连接 | 程序和客户端配置 |
+| --- | --- | --- |
+| `lumio` | [7420 日常实例](http://127.0.0.1:7420) | `~/.local/bin/lumio`，读取 `~/.config/lumio/config.json` |
+| `lumio-preview` | [7421 试用实例](http://127.0.0.1:7421) | 使用 `~/.local/share/lumio-native-trial/bin/lumio` 和 `~/.local/share/lumio-native-trial/client.json` |
+
+```sh
+lumio hub status
+lumio-preview hub status
+lumio-preview task list --status active --json
+lumio-preview --version
+```
+
+`lumio-preview` 直接转发日常子命令和参数，并使用试用配置中的 token。即使当前 shell 已设置其他 Hub 地址、token 或 vault，试用入口也会使用自己的连接配置。两个实例各有自己的任务、项目、助手会话和执行记录。试用实例当前没有挂载知识 vault，`new` 和 `sync` 这类本地文件命令需要显式指定试用 vault。
+
+试用配置已经配好。检查连接用 `lumio-preview hub status`，更新试用程序和服务用下文的 `update-preview.sh`。会访问默认安装的配置或管理本机服务的命令（如 `login`、`logout`、`doctor`、`upgrade` 和 `hub setup`）由试用入口拦截。
+
 ## 合入一个功能
 
 在干净的集成 worktree 中，从最新 `origin/preview` 建立该会话的集成分支。把选定的已提交功能合入，运行受影响的测试和本机编译。通过后提交并直接推送到 `preview`。示例中的 `feature_ref` 是待合入的提交或分支。
