@@ -10,7 +10,6 @@ import { ago } from "../format.ts";
 import { lang, setLang, t, type Lang } from "../i18n.ts";
 import { onTheme, setTheme, themeChoice, type ThemeChoice } from "../theme.ts";
 import { LANGS, THEMES } from "../settings.ts";
-import { AssistantSettings } from "../assistant-settings.ts";
 import { AISettings } from "../ai-settings.ts";
 import { AgentsSettings } from "../agents-settings.ts";
 import { NotificationSettings } from "../notification-settings.ts";
@@ -116,15 +115,7 @@ export class SettingsPane {
       }
       case "ai": {
         const profiles = new AISettings(this.session.client, (title, hint, body, action) => this.group(title, hint, body, action));
-        const legacy = new AssistantSettings(this.session.hub);
-        const fold = h("details", { class: "set-fold" },
-          h("summary", { class: "set-fold-head" },
-            h("span", { class: "set-fold-text" }, h("span", { class: "set-fold-title" }, t("Default assistant model")),
-              h("span", { class: "set-sub" }, t("Used by conversations that don't pick a profile. Any service with a Chat Completions-compatible API."))),
-            icon("down", "icon set-fold-chevron")),
-          h("div", { class: "set-card" }, legacy.element));
-        return { element: page(profiles.element, h("section", { class: "set-group" }, fold)),
-          dispose: () => { profiles.dispose(); legacy.dispose(); } };
+        return { element: page(profiles.element), dispose: () => profiles.dispose() };
       }
       case "devices": {
         const hubRows = h("div", { class: "set-rows" }), runtimeRows = h("div", { class: "set-rows" });

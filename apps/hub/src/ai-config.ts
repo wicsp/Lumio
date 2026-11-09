@@ -62,6 +62,7 @@ export class AIConfigurationService {
     const parsed = AIConnectionInput.safeParse(raw);
     if (!parsed.success) {
       const issue = parsed.error.issues[0];
+      if (issue?.message === "Use the official TypeSafe API address") throw failure("jev_address");
       const field = issue?.path[0];
       const problem =
         field === "name"
@@ -80,6 +81,7 @@ export class AIConfigurationService {
     if (id && old?.owner !== owner) throw failure("connection_missing", "NOT_FOUND");
     if (old && (old.kind !== input.kind || old.host !== input.host)) throw failure("connection_immutable");
     const secret = input.clear_api_key ? undefined : (input.api_key ?? (id ? this.store.secret(id) : undefined));
+    if (input.kind === "typesafe-jev" && !secret?.trim()) throw failure("jev_key_required");
     if (
       [input.name, input.base_url ?? "", secret ?? ""].some((value) => /[\r\n\0]/.test(value)) ||
       (secret && [input.name, input.base_url ?? ""].some((value) => value.includes(secret)))
@@ -115,6 +117,7 @@ export class AIConfigurationService {
     const old = id ? this.store.profile(id) : undefined;
     if (id && old?.owner !== owner) throw failure("profile_missing", "NOT_FOUND");
     if (!connection || connection.owner !== owner) throw failure("connection_missing", "NOT_FOUND");
+    if (connection.kind === "typesafe-jev") throw failure("jev_chat_unsupported");
     if ((input.engine === "codex") !== (connection.kind === "codex-account")) throw failure("engine_mismatch");
     if (connection.kind === "codex-account" && input.thinking !== "default") throw failure("thinking_unsupported");
     if (input.effort && !/^[a-z]+$/.test(input.effort)) throw failure("effort_unsupported");
@@ -145,6 +148,7 @@ export class AIConfigurationService {
     if (!profile || profile.owner !== owner) throw failure("profile_missing", "NOT_FOUND");
     const connection = this.store.connection(profile.connection);
     if (!connection || connection.owner !== owner) throw failure("connection_missing", "NOT_FOUND");
+    if (connection.kind === "typesafe-jev") throw failure("jev_chat_unsupported");
     return { profile, connection };
   }
 

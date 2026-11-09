@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { AIConnection, AIProfile } from "@lumio/schema";
+import { AIConnection, AIProfile, TYPESAFE_JEV_BASE_URL } from "@lumio/schema";
 import { DEFAULT_SETTINGS_SECTION, SETTINGS_SECTIONS, settingsSection } from "../../src/client/settings-sections.ts";
-import { connectionSummary, profileSummary } from "../../src/client/ai-settings.ts";
+import { CONNECTION_KINDS, connectionSummary, profileConnections, profileSummary } from "../../src/client/ai-settings.ts";
 import { ZH } from "../../src/client/i18n.ts";
 
 describe("settings sections", () => {
@@ -24,6 +24,13 @@ describe("AI settings summaries", () => {
   const api = AIConnection.parse({ id: "aic_01J00000000000000000000000", owner: "act_01J00000000000000000000000", name: "Synthetic API", kind: "deepseek", host: "hub",
     base_url: "https://api.example.test/v1", api_key_set: true, revision: 1, created: stamp, updated: stamp });
   const codex = AIConnection.parse({ ...api, id: "aic_01J00000000000000000000001", name: "Laptop Codex", kind: "codex-account", host: "laptop", base_url: undefined, api_key_set: false });
+  test("Jev appears in services and connection rows, but not in profile connections", () => {
+    const jev = AIConnection.parse({ ...api, id: "aic_01J00000000000000000000002", kind: "typesafe-jev", base_url: TYPESAFE_JEV_BASE_URL });
+    expect(CONNECTION_KINDS).toContainEqual(["typesafe-jev", "TypeSafe Jev"]);
+    expect(connectionSummary(jev)).toBe("TypeSafe Jev · api.typesafe.ai · Key saved");
+    expect(profileConnections([jev])).toEqual([]);
+    expect(profileConnections([api, jev, codex])).toEqual([api, codex]);
+  });
   test("connection rows name the service and location but never the key", () => {
     expect(connectionSummary(api)).toBe("DeepSeek API · api.example.test · Key saved");
     expect(connectionSummary(codex)).toBe("Codex account · laptop · Official sign-in");
