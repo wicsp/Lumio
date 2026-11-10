@@ -31,11 +31,11 @@ agent 已经能做几乎所有事，Lumio 只需让人按自己的方式组织 a
 
 | 层 | 负责 | 不负责 |
 |---|---|---|
-| 仓库（AGENTS.md、文档、脚本） | 工程事实：分支与工作区要求、检查命令、合入关卡（独立 review、CI、人验收）、本机部署方法 | 由谁做、何时做、交给谁 |
+| 仓库（AGENTS.md、文档、脚本） | 工程事实：分支与工作区要求、检查命令、合入关卡（CI、安排了的 review）、本机部署方法 | 由谁做、何时做、交给谁 |
 | Lumio 交接图 | 每一步交给谁、做什么、何时停下等人、每一步有什么权限、可选钩子 | 某个仓库怎么构建、部署 |
 | Runtime | 本机有哪些 agent 及其隔离能力；按阶段权限启动 agent | 流程本身 |
 
-- 必须保证「发生」或「不发生」的事，用**权限**保证，而不是用固定步骤：例如「验收前不能合并」靠只有合并阶段拿到有合并权限的凭据，
+- 必须保证「发生」或「不发生」的事，用**权限**保证，而不是用固定步骤：例如「检查点放行前不能合并」靠只有合并阶段拿到有合并权限的凭据，
   加上仓库的分支保护兜底；而不是由 Runtime 替 agent 合并。
 - 仓库规则写成**调用方无关**的形式：要求只写结果与关卡，并要求 agent「只做被交代的这一步」；
   没有调用方安排下一步时（例如人直接在 Codex 里开工），做完交回人，不自行找别的 agent 审核或合并。
@@ -99,17 +99,17 @@ agent 阶段可声明本阶段的权限，缺省值与现在的行为一致：
 - `auto` 只允许用于**至少含一个检查点**的计划：人在检查点按「继续」就是验收，之后的阶段（如合并）成功即完成，失败轮到人。
   这样「完成只有人能决定」不变：人批准了含 `finish: auto` 的计划，并在检查点亲自放行。审计记录注明依据的计划批准与检查点操作。
 
-作者的开发方式写成计划：
+作者的开发方式写成计划（修订后：合并后在 `main` 上验收，不在合并前试用）：
 
 ```text
 implement   codex@macsp        write, git
-review      claude-code@macsp  read                 back_to implement
-deploy      codex@macsp        full                 说明：按 docs/local-deployment.md 把这个 PR 部署到 7420 试用
-checkpoint  「试用通过？」                            （CI 与试用同时进行；不行就打回 implement）
 merge       codex@macsp        write, git, secrets: github-merge
             hooks.before: gh pr checks <PR> --watch（等 CI；失败则轮到人）
-finish: auto
+deploy      codex@macsp        full                 说明：按 docs/local-deployment.md 从 main 部署 7420
+finish: review                                      （计划走完轮到人，在日常实例上验收；不行就打回或 revert）
 ```
+
+需要 review 时，在 implement 与 merge 之间加 `review  claude-code@macsp  read  back_to implement`。
 
 ### 6. 配置入口
 
@@ -128,13 +128,13 @@ finish: auto
 
 ### 7. 不在本 ADR
 
-- 并行写入（每个写入分支各自的 worktree）、条件分支、跨任务的试用排队：等用上第一版之后再定。
+- 并行写入（每个写入分支各自的 worktree）、条件分支、跨任务的部署排队：等用上第一版之后再定。
 - 按对话语义授权（ADR 0031 第 5 节）；自研 agent 框架的按步骤动态授权会以「阶段权限」为起点，另写 ADR。
 
 ## 后果
 
 - 好处：谁来审核、要不要审核、用哪台机器的哪个 agent 都在 Lumio 里可见、可改、可校验；仓库规则在 Lumio 内外都适用。
-  「验收前不合并」由凭据隔离保证，不靠 agent 自觉。交接图仍只有两种节点，不写 `after` 时与现在完全一样。
+  「放行前不合并」由凭据隔离保证，不靠 agent 自觉。交接图仍只有两种节点，不写 `after` 时与现在完全一样。
 - 代价：并行带来汇合、打回与提问的组合规则。`PlanRun` 保留 `stage`，只新增可选的 `active` / `done`，旧数据不迁移（见修订记录）。
   `sandbox: none` 的引擎无法强制权限，只能如实提示。
 - 风险：钩子是任意命令，含钩子的计划必须经人批准并完整展示；长时间等待的钩子占用执行器并发名额。
@@ -144,3 +144,4 @@ finish: auto
   权限批准为新命令 `work.task.grant`（范围 `next_round` / `task`，缺省批准后续接）；`AgentRun` 增加 `permissions` / `hooks`，`JobResult` 增加 `permission`；
   `RuntimeRegistration` 增加可选 `features`（`stage_permissions`、`hooks`、`permission_request`），Hub 只把新字段发给声明了对应能力的执行器，旧执行器不受影响。
 - 2026-11-10（H1-4 执行器实测）：macOS 上 Codex 0.166.0 的命名权限配置可沿用 `:workspace`，仅覆盖 Git 元数据。普通仓库授权其 `.git`；linked worktree 须同时明确授权共有 Git 目录和当前 worktree 的元数据目录，仅授权共有目录时 `FETCH_HEAD` 仍不可写。通过临时仓库及回环 Git 服务验证 fetch、commit、push，`.codex` 和工作区外的测试目录仍拒绝写入。执行器从实际 checkout 解析路径，版本或目录不符合时拒绝该轮。
+- 2026-11-10（人类批准）：否决「合并前试用、试用通过再合并」。合入 `main` 的关卡改为 CI 通过与安排了的 review，人类在合并后的 `main` 上验收（#156）。第 1 节表格与示例、第 5 节作者的计划示例、第 7 节与后果中的相应措辞随之修改；背景中作者原先想要的方式保留为历史。
