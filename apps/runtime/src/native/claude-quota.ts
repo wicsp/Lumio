@@ -204,8 +204,13 @@ async function probeEnvironment(stateDir: string, home = homedir(), signal = new
     if (!info.isDirectory() || info.uid !== process.getuid?.()) throw new ProbeError("version_unsupported");
     await chmod(path, 0o700);
   }
-  const found = Bun.which("claude") ?? join(home, ".local/bin/claude");
-  const executable = await realpath(found).catch(() => { throw new ProbeError("version_unsupported"); });
+  // GUI services can inherit terminal shims ahead of the official native installation.
+  const installed = await realpath(join(home, ".local/bin/claude")).catch((cause: NodeJS.ErrnoException) => {
+    if (cause.code !== "ENOENT") throw new ProbeError("version_unsupported");
+  });
+  const found = installed ?? Bun.which("claude");
+  if (!found) throw new ProbeError("version_unsupported");
+  const executable = installed ?? await realpath(found).catch(() => { throw new ProbeError("version_unsupported"); });
   const env = { ...isolatedEnvironment(root, root, executable), PATH: `/usr/bin:/bin:/usr/sbin:/sbin:${dirname(executable)}`,
     CLAUDE_CONFIG_DIR: config, CLAUDE_CODE_TMPDIR: join(root, "tmp"), TERM: "xterm-256color", TZ: "UTC", CLAUDE_CODE_SKIP_PROMPT_HISTORY: "1",
     DISABLE_AUTOUPDATER: "1", DISABLE_TELEMETRY: "1" };
