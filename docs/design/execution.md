@@ -8,6 +8,7 @@
   原始 stdout/stderr 的 JSONL output 负载用 base64 表达，避免二进制和 UTF-8 分块造成内容损坏。
 - 活跃日志末行不完整可报告；封存日志截断、行损坏、事件重复或缺失必须失败。恢复中断运行只封存完整前缀并记 recovery，Job 仍由数据库标为 unknown，不从日志重新执行。
 - 自有日志归档 MIME 为 `application/vnd.lumio.runlog+jsonl`，按完整运行流再次校验；原始输出以 text/plain 独立归档。
+- 按事件 ID 定位运行使用业务库中的派生索引：查询未命中时只补扫尚未建索引的已归档日志，每份归档扫描一次，可由归档重建（ADR 0053）。
 - Runtime 为文件保留独立交付记录；Hub 校验大小与 SHA-256，先发布字节再登记 ready。登记冲突保留文件待核查，重复交付不重复登记。
   Job 结果确认与文件确认互不替代，上传失败不阻塞结果交回；确认后原始文件仍留在 Runtime。
 - 文件接口在 `/v2/execution/` 下；runtime 只能上传自己已接手的 Job 的文件。读取只授予 human，私密产物需显式 include_private。

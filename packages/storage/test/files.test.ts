@@ -123,3 +123,20 @@ test("business backup captures live WAL data and referenced files, verifies and 
     expect(await Bun.file(join(root, "incomplete/manifest.json")).exists()).toBe(false);
   } finally { db.close(); }
 }));
+
+test("run-log event lookups scan each archived log once and keep answering from the derived index", async () => temporary(async (root) => {
+  const db = new Database(":memory:"), files = new SqliteArtifacts(db, root);
+  try {
+    const event = (n: number) => RunLogEvent.parse({ schema_version: 1, id: `evt_0000000000000000000000000${n}`, run, sequence: n, time: "2026-11-01T00:00:00Z", type: n === 1 ? "status" : "output", payload: {} });
+    const log = Buffer.from([event(1), event(2)].map(value => JSON.stringify(value) + "\n").join(""));
+    files.stage(artifact({ media_type: "application/vnd.lumio.runlog+jsonl", sha256: createHash("sha256").update(log).digest("hex"), size: log.length }));
+    expect(await files.runEvent(event(1).id)).toBeUndefined(); // staged logs are not indexed
+    await files.publish(id, chunks(log));
+    expect(await files.runEvent(event(2).id)).toMatchObject({ run, type: "output", artifact: { id } });
+    expect(db.query("SELECT count(*) AS n FROM storage_run_events_indexed").get()).toEqual({ n: 1 });
+    // The archive is not read again: answers come from the index even if the file later disappears.
+    await rm(join(root, `${id}.bin`));
+    expect(await files.runEvent(event(1).id)).toMatchObject({ run, type: "status", time: "2026-11-01T00:00:00Z" });
+    expect(await files.runEvent("evt_00000000000000000000000009")).toBeUndefined();
+  } finally { db.close(); }
+}));

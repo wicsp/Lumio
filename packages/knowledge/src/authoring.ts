@@ -69,6 +69,20 @@ export function renderKnowledgeNote(input: KnowledgeCreateRequest, ctx: FillCont
   return { relativePath, content: bytes, result };
 }
 
+/**
+ * AI 笔记文件名：`<标题> <ID>`（ADR 0053）。标题在前便于在外部编辑器里辨认，ID 在后保证唯一，
+ * 也让 `[[…]]` 与路径链接仅凭文件名就能认出是 AI 笔记。改标题不改文件名。
+ */
+export function aiNoteFileName(title: string, id: string): string {
+  const safe = title
+    .replace(/[\\/:*?"<>|#^[\]\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^[.\s]+/, "");
+  const short = [...safe].slice(0, 60).join("").trim();
+  return short ? `${short} ${id}` : id;
+}
+
 /** The current run or message is appended once without changing an explicit source order. */
 export function aiNoteSources(sources: string[] | undefined, currentSource?: string): string[] | undefined {
   if (!currentSource || sources?.includes(currentSource)) return sources;
@@ -92,7 +106,7 @@ export function renderAiNote(
   if (!parsed.success) {
     throw new CoreError("INVALID_METADATA", { key: "create.could_not_generate_valid_idea_metadata", args: [] });
   }
-  const path = `${entityDirectory("ai-note")}/${id}.md`;
+  const path = `${entityDirectory("ai-note")}/${aiNoteFileName(title, id)}.md`;
   const content = Buffer.concat([parseFrontmatter("").render(data), Buffer.from(body)]);
   return { relativePath: path, content, note: { id, path, type: parsed.data.type, title } };
 }

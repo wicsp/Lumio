@@ -33,6 +33,26 @@ function editableId(note: NoteDetail["note"]): string | undefined {
   return EDITABLE.has(note.type) && !note.path.startsWith("life/") ? note.id : undefined;
 }
 
+/**
+ * 出链 / 反链（ADR 0018）。AI 笔记的链接单独列出（ADR 0053）：AI 笔记页的「链接到」是它自己写的链接；
+ * 其他笔记另有「AI 笔记提到」，不混进人的反链。
+ */
+function linkSections(links: LinksResult): HTMLElement[] {
+  const section = (title: string, items: LinksResult["outgoing"]) => {
+    const rows = items.map(link => h("li", {}, link.note
+      ? h("a", { href: "#", "data-note": link.note.id ?? link.note.path }, link.note.title)
+      : h("span", { class: "muted" }, t("{0} (not found)", link.target))));
+    return h("section", {}, h("h3", {}, t("{0} ({1})", title, items.length)),
+      rows.length ? h("ul", {}, ...rows) : h("p", { class: "muted" }, t("None")));
+  };
+  const ai = links.note.type === "ai-note";
+  return [
+    section(t("Links to"), ai ? links.ai_outgoing ?? [] : links.outgoing),
+    section(t("Linked from"), links.incoming),
+    ...(links.ai_incoming ? [section(t("Mentioned in AI notes"), links.ai_incoming)] : []),
+  ];
+}
+
 export class KnowledgePane {
   private graphMode = false;
   private graphHost = h("section", { class: "knowledge-graph-view", "aria-label": t("Knowledge graph"), hidden: true });
@@ -234,9 +254,6 @@ export class KnowledgePane {
     hydrateAiEmbeds(body, this.client, { open: id => void this.open(id) });
     const ai = note.note.type === "ai-note";
     const model = ai && typeof fm.model === "string" ? fm.model : "";
-    const list = (title: string, items: LinksResult["outgoing"]) => h("section", {}, h("h3", {}, t("{0} ({1})", title, items.length)),
-      items.length ? h("ul", {}, ...items.map(l => h("li", {}, l.note ? h("a", { href: "#", "data-note": l.note.id ?? l.note.path }, l.note.title) : h("span", { class: "muted" }, t("{0} (not found)", l.target)))))
-        : h("p", { class: "muted" }, t("None")));
     clear(this.detail, h("article", { class: "reader" },
       h("div", { class: "detail-crumbs" }, h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": t("Back to list"), onclick: async () => { if (!(await this.beforeLeave())) return; this.clearWriter(); this.selected = undefined; markSelected(this.results, undefined); this.showPlaceholder(); } }, icon("back"))),
       h("h1", { class: "reader-title" }, note.note.title),
@@ -245,7 +262,7 @@ export class KnowledgePane {
       ai && h("p", { class: "ai-note-notice" }, icon("bot"), h("span", {}, model ? t("Written by AI ({0}). Your own notes embed it with a link on its own line.", model) : t("Written by AI. Your own notes embed it with a link on its own line."))),
       this.sources(fm.derived_from),
       body,
-      links && h("footer", { class: "backlinks" }, list(t("Links to"), links.outgoing), list(t("Linked from"), links.incoming))));
+      links && h("footer", { class: "backlinks" }, ...linkSections(links))));
     this.detail.scrollTop = 0;
     this.outlineEntries = () => renderedOutline(this.detail, body); this.outline.refresh();
     if(editableId(note.note))void this.enableEditing(note);
@@ -414,14 +431,7 @@ export class KnowledgePane {
   private async refreshLinks(saver:NoteSave):Promise<void>{
     try{const links=await this.client.links(saver.base.document.note.id!);if(this.saver!==saver)return;
       let footer=this.detail.querySelector<HTMLElement>(".backlinks");if(!footer){footer=h("footer",{class:"backlinks"});this.detail.querySelector("article")?.append(footer);}
-      const sections = ([[t("Links to"), links.outgoing], [t("Linked from"), links.incoming]] as const).map(([title, items]) => {
-        const rows = items.map(link => h("li", {}, link.note
-          ? h("a", { href: "#", "data-note": link.note.id ?? link.note.path }, link.note.title)
-          : h("span", { class: "muted" }, t("{0} (not found)", link.target))));
-        return h("section", {}, h("h3", {}, t("{0} ({1})", title, items.length)),
-          rows.length ? h("ul", {}, ...rows) : h("p", { class: "muted" }, t("None")));
-      });
-      clear(footer, ...sections);
+      clear(footer, ...linkSections(links));
     }catch{/* A saved document remains saved if the derived links cannot refresh. */}
   }
   private async compareNote():Promise<void>{

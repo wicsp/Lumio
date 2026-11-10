@@ -91,6 +91,6 @@ export function hydrateAiEmbeds(root: HTMLElement, client: Client, options: Embe
     const id = aiNoteIdOf(link.dataset.note!);
     if (!id) continue;
     const text = (link.textContent ?? "").trim();
-    paragraph.replaceWith(aiNoteCard(client, id, text === id ? "" : text, options));
+    paragraph.replaceWith(aiNoteCard(client, id, text.endsWith(id) ? "" : text, options));
   }
 }
