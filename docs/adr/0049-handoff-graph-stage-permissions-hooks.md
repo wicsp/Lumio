@@ -143,3 +143,4 @@ finish: auto
 - 2026-11-10（H1-2 契约起草，随 PR 待人类批准）：契约落地方式细化——`PlanRun` 保留 `stage`（并行时为第一个执行中的阶段），新增可选 `active`（≥2）与 `done`，缺失按线性前缀理解，不迁移旧数据；
   权限批准为新命令 `work.task.grant`（范围 `next_round` / `task`，缺省批准后续接）；`AgentRun` 增加 `permissions` / `hooks`，`JobResult` 增加 `permission`；
   `RuntimeRegistration` 增加可选 `features`（`stage_permissions`、`hooks`、`permission_request`），Hub 只把新字段发给声明了对应能力的执行器，旧执行器不受影响。
+- 2026-11-10（H1-4 执行器实测）：macOS 上 Codex 0.166.0 的命名权限配置可沿用 `:workspace`，仅覆盖 Git 元数据。普通仓库授权其 `.git`；linked worktree 须同时明确授权共有 Git 目录和当前 worktree 的元数据目录，仅授权共有目录时 `FETCH_HEAD` 仍不可写。通过临时仓库及回环 Git 服务验证 fetch、commit、push，`.codex` 和工作区外的测试目录仍拒绝写入。执行器从实际 checkout 解析路径，版本或目录不符合时拒绝该轮。

@@ -1,3 +1,4 @@
+import { codexGitOptions } from "./stage.ts";
 import type { AgentRun, RuntimeRegistration } from "@lumio/schema";
 
 /**
@@ -17,6 +18,7 @@ export interface AgentContext {
   lastMessageFile: string;
   skillFile?: string;
   skillText?: string;
+  gitPaths?: readonly string[];
 }
 
 export interface Adapter {
@@ -34,11 +36,16 @@ const codex: Adapter = {
   engine: "codex", command: "codex", sandbox: "os",
   versions: { min: "0.160.0", below: "0.200.0" },
   argv(run, ctx) {
-    // exec resume 不接受 --sandbox（0.163.0）；它接受 -c，与首次执行保持相同隔离配置。
-    const sandbox = run.session?.resume ? ["-c", 'sandbox_mode="workspace-write"'] : ["--sandbox", "workspace-write"];
+    // exec resume accepts configuration overrides even when its flag set differs from exec.
+    const access = run.permissions?.access ?? "write";
+    const mode = access === "read" ? "read-only" : access === "full" ? "danger-full-access" : "workspace-write";
+    const sandbox = access !== "full" && ctx.gitPaths?.length ? codexGitOptions(ctx.gitPaths, access === "read", true)
+      : run.session?.resume ? ["-c", `sandbox_mode="${mode}"`] : ["--sandbox", mode];
     const common = [...(ctx.skillText ? ["-c", `developer_instructions=${JSON.stringify(ctx.skillText)}`,
       "-c", 'shell_environment_policy.inherit="all"', "-c", "shell_environment_policy.ignore_default_excludes=true",
-      "-c", "sandbox_workspace_write.network_access=true"] : []), "--skip-git-repo-check", ...sandbox, "--json", "--output-last-message", ctx.lastMessageFile,
+      "-c", "sandbox_workspace_write.network_access=true"] : []),
+      ...(run.permissions?.secrets?.length && !ctx.skillText ? ["-c", "shell_environment_policy.ignore_default_excludes=true"] : []),
+      "-c", 'approval_policy="never"', "--skip-git-repo-check", ...sandbox, "--json", "--output-last-message", ctx.lastMessageFile,
       ...(run.model ? ["-m", run.model] : [])];
     return run.session?.resume
       ? ["exec", "resume", ...common, run.session.id, run.prompt]

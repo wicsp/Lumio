@@ -1,3 +1,4 @@
+import { gitWritePaths, stageSecrets } from "./stage.ts";
 import { CredentialRedactor } from "./redact.ts";
 import { installSkill, SKILL_TEXT } from "../../../skills/lumio/install.ts";
 import { text as msg } from "./messages.ts";
@@ -106,12 +107,19 @@ export class Executor {
     const finish = async (fields: Parameters<Queue["finish"]>[0]) => {
       try { if (trace) { await trace.append("status", { status: fields.status }); await trace.close(); } }
       catch { fields = { ...fields, status: fields.status === "cancelled" || fields.status === "unknown" ? fields.status : "failed", error: msg("executor.could_not_seal_run_log") }; }
-      this.queue.finish(JSON.parse(redact(JSON.stringify(fields))));
+      this.queue.finish({ ...fields, ...(fields.report === undefined ? {} : { report: redact(fields.report) }),
+        ...(fields.question === undefined ? {} : { question: redact(fields.question) }),
+        ...(fields.error === undefined ? {} : { error: redact(fields.error) }) });
     };
     const fail = (error: string) => finish({ job: spec.id, lease: spec.lease, started, finished: new Date().toISOString(), status: "failed", error });
     const workdir = spec.workdir === "~" ? homedir() : spec.workdir.startsWith("~/") ? join(homedir(), spec.workdir.slice(2)) : spec.workdir;
     const run = spec.run;
     let argv: string[];
+    const injected = stageSecrets(run.kind === "agent" ? run.permissions : undefined, this.env);
+    if (!injected) { await fail(msg("executor.stage_secret_unavailable")); return; }
+    secrets.push(...Object.values(injected).filter((value): value is string => !!value));
+    secrets.sort((a, b) => b.length - a.length);
+    let gitPaths: string[] | undefined;
     let agent: { adapter: Adapter; version: string; lastMessageFile: string; before?: GitState } | undefined;
     if (run.kind === "command") {
       if (!this.config.allowedCommands.includes(run.argv[0]!)) { await fail(msg("executor.program_is_not_in_lumio_runtime_allowed_commands")); return; }
@@ -124,9 +132,14 @@ export class Executor {
       if (!versionSupported(adapter, detected.version)) {
         await fail(msg("executor.is_outside_verified_version_range_verify_the_new_version_before_exte", run.engine, detected.version, adapter.versions.min, adapter.versions.below)); return;
       }
-      const lastMessageFile = join(this.config.stateDir, "logs", `${spec.id}.last.txt`);
+      if (run.engine === "codex" && run.permissions?.git && run.permissions.access !== "full") {
+        if (detected.version !== "0.166.0") { await fail(msg("executor.git_profile_version")); return; }
+        gitPaths = gitWritePaths(workdir, this.env);
+        if (!gitPaths.length) { await fail(msg("executor.git_profile_workdir")); return; }
+      }
+      const lastMessageFile = join(roundDirectory, "last.txt");
       agent = { adapter, version: detected.version, lastMessageFile, before: gitState(workdir, this.env) };
-      argv = [executable, ...adapter.argv(run, { lastMessageFile })];
+      argv = [executable, ...adapter.argv(run, { lastMessageFile, gitPaths })];
     }
     const logs = join(this.config.stateDir, "logs");
     // Synchronous reservation above is counted even while mkdir awaits.
@@ -137,9 +150,10 @@ export class Executor {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await mkdir(logs, { recursive: true, mode: 0o700 });
+      if (agent) await mkdir(roundDirectory, { recursive: true, mode: 0o700 });
       if (agent && access && Date.parse(access.expires) > Date.now()) {
         const skillFile = await installSkill(join(roundDirectory, "skills", "lumio"));
-        argv = [argv[0]!, ...agent.adapter.argv(spec.run as Extract<typeof spec.run, { kind: "agent" }>, { lastMessageFile: agent.lastMessageFile, skillFile, skillText: SKILL_TEXT })];
+        argv = [argv[0]!, ...agent.adapter.argv(spec.run as Extract<typeof spec.run, { kind: "agent" }>, { lastMessageFile: agent.lastMessageFile, skillFile, skillText: SKILL_TEXT, gitPaths })];
       }
       if (this.stopping) return;
       if (placeholder.reason) { await finish({ job: spec.id, lease: spec.lease, started, finished: new Date().toISOString(), status: "cancelled" }); return; }
@@ -173,7 +187,8 @@ export class Executor {
           .catch(() => { outputError = true; this.stop(spec.id, "cancelled"); })
           .finally(() => { tracing--; resume(); });
       };
-      const stdoutRedactor = new CredentialRedactor(secrets), stderrRedactor = new CredentialRedactor(secrets);
+      const encodedSecrets = secrets.flatMap(secret => [secret, JSON.stringify(secret).slice(1, -1)]);
+      const stdoutRedactor = new CredentialRedactor(encodedSecrets), stderrRedactor = new CredentialRedactor(encodedSecrets);
       const stdout = (chunk: Buffer) => {
         const text = decoder.write(chunk);
         report = (report + text).slice(-4000);
@@ -182,7 +197,9 @@ export class Executor {
       };
       child.stdout!.on("data", (chunk: Buffer) => stdout(stdoutRedactor.push(chunk)));
       child.stderr!.on("data", (chunk: Buffer) => { const clean = stderrRedactor.push(chunk); if (clean.length) write(clean, "stderr"); });
-      child.stdin!.end(JSON.stringify({ spec: { ...spec, workdir }, argv, completion, env: { ...childEnv, ...this.sudo?.begin(spec),
+      child.stdin!.end(JSON.stringify({ spec: { ...spec, workdir }, argv, completion, hookEnv: childEnv,
+        lastMessageFile: agent?.lastMessageFile, hookReportFile: agent ? join(roundDirectory, "hook-report.txt") : undefined,
+        redactions: secrets, env: { ...childEnv, ...injected, ...this.sudo?.begin(spec),
         ...(run.kind === "agent" && access && Date.parse(access.expires) > Date.now() ? { LUMIO_HUB_URL: this.config.url, LUMIO_TOKEN: access.token } : {}), ...(spec.gpus ? { CUDA_VISIBLE_DEVICES: spec.gpus.join(",") } : {}) } }));
       const deadline = Date.now() + spec.timeout_seconds * 1000;
       const armTimeout = () => {
@@ -221,7 +238,7 @@ export class Executor {
         report: split.report.slice(0, MAX_REPORT),
         ...(split.question && ok ? { question: split.question } : {}),
         status: stopped ?? (ok ? (split.question ? "waiting_for_human" : "done") : "failed"),
-        engine: { name: agent.adapter.engine, version: agent.version, sandbox: agent.adapter.sandbox },
+        engine: { name: agent.adapter.engine, version: agent.version, sandbox: run.kind === "agent" && run.permissions?.access === "full" ? "none" : agent.adapter.sandbox },
         ...(parsed.sessionId ? { session_id: parsed.sessionId } : {}),
         ...(agent.before || after ? { git: { ...(agent.before ? { before: agent.before } : {}), ...(after ? { after } : {}) } } : {}),
         ...problem });
