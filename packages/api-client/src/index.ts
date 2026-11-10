@@ -1,4 +1,4 @@
-import { KnowledgeAiNoteCommand, KnowledgeAiNoteResult } from "@lumio/schema";
+import { KnowledgeAiNoteCommand, KnowledgeAiNoteResult, ResourceSummary } from "@lumio/schema";
 import {AIConnection,AIConnectionInput,AIProfile,AIProfileInput,AIConfiguration,AIRuntime,NativeConnectionAction,NativeConnectionView,NativeSession,NativeCreate,NativeAction,NativeEventRecord} from "@lumio/schema";
 import { KnowledgeGraph, KnowledgeGraphArgs, Id, KnowledgeDocument, KnowledgeUpdateRequest, KnowledgeUpdateResult, KnowledgeRelatedRequest, KnowledgeRelatedResult, KnowledgeReferencesRequest, KnowledgeReferencesResult } from "@lumio/schema";
 import { KnowledgeTemplateRequest, KnowledgeTemplateResult, PaperResolveRequest, PaperResolveResult, KnowledgeCreateRequest, KnowledgeCreateResult } from "@lumio/schema";
@@ -93,6 +93,10 @@ export function createClient(options: { url: string; token?: string; language?: 
     },
     aiNoteCommand(input: KnowledgeAiNoteCommand) {
       return request("/v2/knowledge/ai-note-commands", {}, KnowledgeAiNoteResult, validate(KnowledgeAiNoteCommand, input));
+    },
+    /** 任意 Lumio ID 的可见摘要（ADR 0051）：对话与任务另带被知识引用的次数。 */
+    resource(id: string, options: QueryOptions = {}) {
+      return request(`/v2/resources/${encodeURIComponent(validate(Id, id))}`, queryParams(options), ResourceSummary);
     },
     knowledgeDocument(id: string) { return request(`/v2/knowledge/notes/${encodeURIComponent(validate(Id, id))}/document`, {}, KnowledgeDocument); },
     // 删除与回收站（ADR 0038）：只有人可用。任务与项目的删除走 workCommand。

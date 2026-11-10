@@ -1,4 +1,5 @@
 import { referenceLinks } from "../reference-links.ts";
+import { resourceLinks } from "../resources.ts";
 import { drafts } from "../drafts.ts";
 import { executionGroups } from "../execution-groups.ts";
 import { turnGroup } from "../turn.ts";
@@ -44,6 +45,7 @@ export class WorkbenchView {
   private currentHash = "";
   private palette: CommandPalette;
   private disposeReferenceLinks: () => void;
+  private disposeResourceLinks: () => void;
   private countTimer: ReturnType<typeof setInterval>;
 
   private routeGeneration = 0;
@@ -85,6 +87,7 @@ export class WorkbenchView {
   /** 语言切换被推迟时，App 在下一次切换模块前重建界面；返回 true 表示已接管。 */
   constructor(root: HTMLElement, private session: Session, humans: string[], private logout: () => void, private beforeShow: () => boolean = () => false) {
     this.disposeReferenceLinks = referenceLinks(this.main, session.client, ref => this.go("knowledge",ref));
+    this.disposeResourceLinks = resourceLinks(this.main, session.client, (section, id, intent) => void this.go(section, id, intent));
     this.palette = new CommandPalette(session.client, (section, id, intent) => this.go(section, id, intent));
     const nav = h("nav", { class: "nav", "aria-label": t("Main navigation") });
     for (const s of SECTIONS) {
@@ -212,7 +215,7 @@ export class WorkbenchView {
     else if (section === "knowledge") pane = new KnowledgePane(target, client, id);
     else if (section === "work") pane = new WorkPane(target, client, this.session.hub, this.workMode, id, navigate, changed);
     else if (section === "execution") pane = new ExecutionPane(target, client, this.session.hub, id, navigate, changed);
-    else if (section === "assistant") pane = new AssistantPane(target, client, this.session.hub, navigate);
+    else if (section === "assistant") pane = new AssistantPane(target, client, this.session.hub, navigate, id);
     else if (section === "trash") pane = new TrashPane(target, client, navigate, changed);
     else pane = new ApprovalsPane(target, client, changed, navigate);
     return { target, pane };
@@ -266,6 +269,7 @@ export class WorkbenchView {
 
   dispose(): void {
     this.disposeReferenceLinks();
+    this.disposeResourceLinks();
     this.routeGeneration++;
     for (const { pane } of this.panes.values()) pane.dispose?.();
     this.panes.clear();

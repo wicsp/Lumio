@@ -14,6 +14,7 @@ import { footnotes, referenceTrigger, insertReference, protectedText } from "./n
 import { chineseQuoteInput, chineseQuoteChange } from "./note-input.ts";
 import { activatePreview } from "./note-preview.ts";
 import { OUTLINE_DEPTH, markdownHeadings, mayHaveHeadings } from "./article-outline.ts";
+import { aiNoteLine } from "./ai-note-embed.ts";
 import type { RailEntry } from "./side-rail.ts";
 type Hit = KnowledgeReferencesResult["hits"][number];
 type ReferenceCompletion = Completion & { hit: Hit; terms: string[] };
@@ -27,6 +28,8 @@ interface Options {
     save?: () => void;
     /** Called (debounced) after the text changes so an outline can rebuild. */
     outlineChanged?: () => void;
+    /** 单独成段、指向 AI 笔记的链接显示为卡片（ADR 0051）；edit 回到这一行的原文。 */
+    embed?: (id: string, label: string, edit: () => void) => HTMLElement;
 }
 class InlineWidget extends WidgetType {
     constructor(private html: string, private activate: (view: EditorView, event: MouseEvent) => void, private className = "", private preview?: (anchor: HTMLElement) => void) { super(); }
@@ -35,6 +38,12 @@ class InlineWidget extends WidgetType {
         el.addEventListener("mouseenter", () => this.preview!(el));
         el.addEventListener("focusin", () => this.preview!(el));
     } return el; }
+    override ignoreEvent(): boolean { return true; }
+}
+class EmbedWidget extends WidgetType {
+    constructor(private id: string, private label: string, private build: (id: string, label: string, edit: () => void) => HTMLElement, private edit: () => void) { super(); }
+    override eq(other: EmbedWidget): boolean { return this.id === other.id && this.label === other.label; }
+    toDOM(): HTMLElement { return this.build(this.id, this.label, this.edit); }
     override ignoreEvent(): boolean { return true; }
 }
 class HiddenDefinition extends WidgetType {
@@ -212,6 +221,17 @@ export class NoteEditor {
         for (const formula of formulas) {
             const html = renderMath(formula.tex, formula.display);
             if (html) preview(formula.from, formula.to, html, false, t("Edit formula"));
+        }
+        if (this.options.embed) {
+            const embed = this.options.embed;
+            for (let number = 1; number <= state.doc.lines; number++) {
+                const line = state.doc.line(number), target = line.text.includes("ain_") ? aiNoteLine(line.text) : undefined;
+                if (!target || selected(line.from, line.to) || isBlocked(line.from) || previews.some(r => line.from < r.to && line.to > r.from) || model.definitions.some(d => line.from >= d.from && line.from < d.to))
+                    continue;
+                const from = line.from;
+                add(line.from, line.to, Decoration.replace({ block: true, widget: new EmbedWidget(target.id, target.label, embed, () => this.focus(from)) }));
+                previews.push({ from: line.from, to: line.to });
+            }
         }
         const opaque = [...previews, ...formulaRanges];
         const inPreview = (from: number, to = from + 1) => previews.some(range => from < range.to && to > range.from);
