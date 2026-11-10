@@ -81,6 +81,17 @@
 /* ───────────── 基础 ───────────── */
 *, *::before, *::after { box-sizing: border-box; }
 html, body { height: 100%; }
+
+/* 滚动条：没有轨道和框，只有一根浮在背景上的细圆条，悬停时加深。
+   Chrome/Safari 用 ::-webkit-scrollbar；Firefox 走 scrollbar-color（Chrome 设了 scrollbar-color 会忽略前者，所以只给 Firefox）。 */
+:root { --scroll-thumb: rgb(28 34 32 / 22%); --scroll-thumb-hover: rgb(28 34 32 / 40%); }
+:root[data-theme="dark"] { --scroll-thumb: rgb(230 235 232 / 22%); --scroll-thumb-hover: rgb(230 235 232 / 38%); }
+::-webkit-scrollbar { width: 10px; height: 10px; background: transparent; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner, ::-webkit-scrollbar-track-piece { background: transparent; border: 0; box-shadow: none; }
+::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 999px; background: var(--scroll-thumb) padding-box; min-height: 32px; }
+::-webkit-scrollbar-thumb:hover { background-color: var(--scroll-thumb-hover); }
+::-webkit-scrollbar-button { display: none; }
+@supports not selector(::-webkit-scrollbar) { * { scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) transparent; } }
 body {
   margin: 0;
   background: var(--paper);
@@ -607,6 +618,10 @@ div.note-rich-preview { padding:4px 0; }
 }
 .dialog[open] { display: flex; flex-direction: column; animation: pop .16s var(--ease); }
 .dialog-wide { width: min(720px, calc(100vw - 32px)); }
+.dialog-narrow { width: min(420px, calc(100vw - 32px)); }
+.dialog-confirm .dialog-body:has(.confirm-body:empty) { display: none; }
+.dialog-confirm .dialog-foot { border-top: 0; background: none; padding-top: 4px; }
+.confirm-body p { margin: 0; color: var(--ink-2); line-height: 1.6; overflow-wrap: anywhere; }
 .dialog::backdrop { background: rgb(18 22 20 / 38%); backdrop-filter: blur(2px); }
 .dialog-head { display: flex; align-items: center; gap: 8px; padding: 14px 16px 6px 20px; }
 .dialog-head h2 { flex: 1; font-size: var(--fs-lg); }

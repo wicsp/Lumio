@@ -5,7 +5,7 @@ import { markdown } from "@codemirror/lang-markdown";
 import { syntaxTree } from "@codemirror/language";
 import { autocompletion, completionKeymap, selectedCompletion, closeCompletion, pickedCompletion, type Completion } from "@codemirror/autocomplete";
 import type { KnowledgeReferencesResult, KnowledgeContext } from "@lumio/schema";
-import { h, clear, highlightedText } from "./dom.ts";
+import { h, clear, confirmDialog, highlightedText } from "./dom.ts";
 import { matchTerms, matchRanges } from "./note-matches.ts";
 import { t } from "./i18n.ts";
 import { renderMarkdown, renderInline, renderMath, renderRichBlock } from "./utils/markdown.ts";
@@ -338,7 +338,7 @@ export class NoteEditor {
         if (model.issues.length)
             this.refs.append(h("p", { class: "field-hint" }, t("Check footnotes (missing, duplicate or unused): {0}", model.issues.join(", "))));
         for (const def of model.definitions.filter(d => !labels.includes(d.label)))
-            this.refs.append(h("div", { class: "note-unused-reference" }, h("span", {}, def.label), h("button", { type: "button", class: "btn btn-small", onclick: () => this.showReference(def.label) }, t("Edit footnote")), h("button", { type: "button", class: "btn btn-small", onclick: () => { if (this.view.state.readOnly || !confirm(t("Remove this unused footnote and its text?")))
+            this.refs.append(h("div", { class: "note-unused-reference" }, h("span", {}, def.label), h("button", { type: "button", class: "btn btn-small", onclick: () => this.showReference(def.label) }, t("Edit footnote")), h("button", { type: "button", class: "btn btn-small", onclick: async () => { if (this.view.state.readOnly || !(await confirmDialog({ title: t("Remove this unused footnote and its text?"), confirm: t("Remove"), danger: true })) || this.view.state.readOnly)
                     return; this.view.dispatch({ changes: { from: def.from, to: def.to, insert: "" }, userEvent: "delete" }); } }, t("Remove unused footnote"))));
     }
 }

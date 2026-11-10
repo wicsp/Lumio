@@ -11,7 +11,7 @@ import { errorText, isConflict, type Client, type HubExtras } from "../api.ts";
 import { attentionCard, attentionFor } from "../attention-card.ts";
 import { answerCommand, commentCommand, dispatchCommand, engineTargets, formatTime, newRequestId, workPatchCommand } from "../commands.ts";
 import { nextTargetText } from "../delegate.ts";
-import { autosize, clear, failure, field, h, icon, openDialog, openMenu, select, statusIcon, toast, type MenuItem } from "../dom.ts";
+import { autosize, clear, confirmDialog, failure, field, h, icon, openDialog, openMenu, promptDialog, select, statusIcon, toast, type MenuItem } from "../dom.ts";
 import { ago, dateInputValue, dueLabel, isoFromDateInput } from "../format.ts";
 import { PROJECT_LABELS } from "../labels.ts";
 import { checkpointCommand, openPlanEditor, planProgress, stageLabel } from "../plan.ts";
@@ -424,10 +424,10 @@ export class WorkEditor {
     if (this.busy || this.record.type !== "task" || !(await this.flush())) return;
     let note: string | undefined;
     if (action === "external") {
-      note = prompt(t("What are you waiting for?"))?.trim();
+      note = await promptDialog({ title: t("What are you waiting for?"), placeholder: t("e.g. a reply from someone, a delivery…"), confirm: t("Continue") });
       if (!note) return;
     }
-    if (this.record.turn.reason === "working" && action !== "external" && !confirm(t("An agent is still working on this task. Stop its round and continue?"))) return;
+    if (this.record.turn.reason === "working" && action !== "external" && !(await confirmDialog({ title: t("Stop the running round?"), message: t("An agent is still working on this task. Stop its round and continue?"), confirm: t("Continue"), danger: true }))) return;
     this.setBusy(true); control.classList.add("prop-saving");
     try {
       await this.commit(turnActionCommand(this.record, action, note));
