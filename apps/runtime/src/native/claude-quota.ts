@@ -221,17 +221,20 @@ async function probeEnvironment(stateDir: string, signal = new AbortController()
     throw new ProbeError("version_unsupported");
   const version = await shortCommand([executable, "--version"], cwd, env, signal);
   if (version.code || version.output.trim() !== supportedVersion) throw new ProbeError("version_unsupported");
-  return { root, cwd, executable, env };
+  return { root, cwd, executable, env, loginKeychain: join(home, "Library/Keychains/login.keychain-db") };
 }
 
 export async function queryClaudeQuota(stateDir: string, signal: AbortSignal, expected?: string): Promise<ClaudeBackgroundResult> {
   try {
-    const { root, cwd, executable, env } = await probeEnvironment(stateDir, signal);
+    const { root, cwd, executable, env, loginKeychain } = await probeEnvironment(stateDir, signal);
     for (const name of ["managed-settings.json", "managed-settings.d", "managed-mcp.json"]) {
       const present = await lstat(join(managedDirectory, name)).then(() => true, (e: NodeJS.ErrnoException) => e.code !== "ENOENT");
       if (present) return failure("version_unsupported");
     }
+    // The official CLI delegates Keychain access to Apple's security tool.
+    // Grant read access to the login database only, without opening its parent directory.
     const profile = seatbelt(root, executable, [managedDirectory]) +
+      `(allow file-read* (literal ${JSON.stringify(loginKeychain)}))` +
       `(deny process-exec (require-not (require-any (literal ${JSON.stringify(executable)}) (literal "/usr/bin/security"))))`;
     const argv = ["/usr/bin/sandbox-exec", "-p", profile, executable, ...flags];
     const info = await shortCommand([...argv, "auth", "status"], cwd, env, signal);
