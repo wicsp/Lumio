@@ -4,7 +4,7 @@
  * - 描述与结构化字段分成两个独立命令（schema 不允许混在一个 patch 里）。
  * - 每个命令都带 expected_revision 和新的 request_id；委派与交接是单独命令（ADR 0032，见 turn.ts）。
  */
-import type { ExecutionRoutine, ExecutionRoutineCommandRequest, WorkCommandRequest, WorkProject, WorkTask } from "@lumio/schema";
+import type { ExecutionRoutine, ExecutionRoutineCommandRequest, StagePermissions, WorkCommandRequest, WorkProject, WorkTask } from "@lumio/schema";
 import { t, locale } from "./i18n.ts";
 
 export function newRequestId(prefix = "web"): string {
@@ -71,6 +71,29 @@ export function dispatchCommand(task: Pick<WorkTask, "id" | "revision">, target:
 export function answerCommand(task: Pick<WorkTask, "id" | "revision">, target: string | undefined, comment: string, requestId = newRequestId()): WorkCommandRequest {
   return { request_id: requestId, operation: { op: "work.task.dispatch", args: {
     task: task.id, ...(target ? { to: target } : {}), expected_revision: task.revision, comment: comment.trim() } } } as WorkCommandRequest;
+}
+
+/** 批准 agent 的权限申请（ADR 0049 第 3 节，H1-9）：只能批准申请里有的项；scope 为 next_round 或 task。 */
+export function grantCommand(task: Pick<WorkTask, "id" | "revision">, permissions: StagePermissions, scope: "next_round" | "task", requestId = newRequestId()): WorkCommandRequest {
+  return { request_id: requestId, operation: { op: "work.task.grant", args: { task: task.id, expected_revision: task.revision, permissions, scope } } };
+}
+
+/** 申请里的每一项（git、write、full、secret:名称），用于勾选与显示。 */
+export type PermissionItem = "git" | "write" | "full" | `secret:${string}`;
+export function permissionItems(permission: StagePermissions): PermissionItem[] {
+  return [...(permission.access === "full" || permission.access === "write" ? [permission.access] : []), ...(permission.git ? ["git" as const] : []),
+    ...(permission.secrets ?? []).map(name => `secret:${name}` as const)];
+}
+export function itemsPermission(items: readonly PermissionItem[]): StagePermissions {
+  const secrets = items.filter(item => item.startsWith("secret:")).map(item => item.slice(7));
+  return { ...(items.includes("full") ? { access: "full" as const } : items.includes("write") ? { access: "write" as const } : {}),
+    ...(items.includes("git") ? { git: true } : {}), ...(secrets.length ? { secrets } : {}) };
+}
+export function permissionItemLabel(item: PermissionItem): string {
+  if (item === "git") return t("Write Git (fetch, commit, push)");
+  if (item === "write") return t("Edit the working directory");
+  if (item === "full") return t("Full access without a sandbox");
+  return t("Use the secret “{0}”", item.slice(7));
 }
 
 /** 执行器登记的引擎 → 可选目标 engine@device。 */

@@ -2,10 +2,13 @@
  * 「需要你处理」的一张卡片（ADR 0030、0032）：等你回答 / 等你验收 / 执行失败 / 交接计划的检查点。
  * 今日、任务页和执行详情共用。每个操作都先读任务的当前版本再提交，冲突时说明而不覆盖。
  * 「我自己来」把任务交回给你（原因 todo）：提醒消失，任务仍在你手里。
+ * 权限申请（ADR 0049 第 3 节，H1-9）：等你回答且这一轮的结果带 permission 时，卡片换成批准表单：
+ * 只能勾选申请里有的项，选择只给下一轮还是这个任务（有计划时为这一步）以后都给；拒绝就写明原因并继续。
  */
 import type { WorkAttention } from "@lumio/schema";
 import { errorText, isConflict, type Client, type HubExtras } from "./api.ts";
-import { answerCommand, engineTargets, formatTime, newRequestId } from "./commands.ts";
+import { answerCommand, engineTargets, formatTime, grantCommand, itemsPermission, newRequestId, permissionItemLabel, permissionItems, type PermissionItem } from "./commands.ts";
+import type { StagePermissions } from "@lumio/schema";
 import { agentStages, checkpointCommand, type CheckpointAction } from "./plan.ts";
 import { finishCommand, handCommand } from "./turn.ts";
 import { autosize, clear, failure, h, icon, openMenu, select, toast } from "./dom.ts";
@@ -134,7 +137,7 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
     actions.append(...(end ? [finish, back, hold] : [go, back, finish, hold]));
   };
 
-  let body: Node | null = null;
+  let body: HTMLElement | null = null;
   const question = (source: string) => {
     const content = h("div", { class: "attn-question markdown" });
     content.innerHTML = renderMarkdown(source);
@@ -143,6 +146,14 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
   if (item.kind === "question") {
     const answer = composer(t("Answer and continue"), true, t("Your answer…"));
     body = h("div", { class: "attn-body" }, question(item.question ?? t("The agent is waiting for your input.")), answer.form);
+    // 读这一轮的结果；带权限申请时换成批准表单（读取失败时保留回答框）。
+    void ctx.client.job(item.job).then(job => {
+      const requested = job.status === "waiting_for_human" ? job.result?.permission : undefined;
+      if (!requested || !body || !card.contains(body)) return;
+      const next = permissionRequest(requested, job.result?.report);
+      body.replaceWith(next); body = next;
+      label.textContent = t("Asking for permission");
+    }, () => undefined);
   } else {
     if (item.prompt) body = question(item.prompt);
     else if (item.summary) body = h("p", { class: "attn-summary" }, item.summary);
@@ -169,17 +180,51 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
     }
   }
 
+  /** 权限申请：理由取自汇报（agent 在申请前写明为什么需要）。 */
+  function permissionRequest(requested: StagePermissions, reason?: string): HTMLElement {
+    const items = permissionItems(requested);
+    const boxes = items.map(value => ({ value, box: h("input", { type: "checkbox", checked: true, name: `grant-${value}` }) }));
+    const scope = select("grant-scope", [["next_round", t("Only the next round")], ["task", planned ? t("This step, from now on") : t("This task, from now on")]], "next_round");
+    const approve = h("button", { type: "submit", class: "btn btn-primary btn-small" }, icon("check"), t("Approve and continue"));
+    const refuse = h("button", { type: "button", class: "btn btn-small" }, icon("close"), t("Refuse…"));
+    const form = h("form", { class: "attn-composer attn-grant" },
+      h("p", { class: "attn-grant-title" }, t("{0} is asking for:", item.agent ?? t("The agent"))),
+      h("ul", { class: "attn-grant-items" }, ...boxes.map(({ value, box }) => h("li", {}, h("label", { class: "check-field" }, box, h("span", {}, permissionItemLabel(value)))))),
+      h("label", { class: "attn-back" }, t("For"), scope),
+      h("p", { class: "field-hint" }, t("Approving continues the same session with the new permission. Choose only what you are comfortable with.")),
+      h("div", { class: "attn-composer-foot" }, refuse, approve));
+    let requestId = newRequestId(), previous = "";
+    form.addEventListener("submit", event => {
+      event.preventDefault();
+      const chosen = boxes.filter(({ box }) => box.checked).map(({ value }) => value) as PermissionItem[];
+      if (!chosen.length) { clear(error, failure(t("Choose at least one permission, or refuse."))); return; }
+      const key = `${chosen.join(",")}|${scope.value}`;
+      if (previous && previous !== key) requestId = newRequestId();
+      previous = key;
+      void run(async () => {
+        await ctx.client.workCommand(grantCommand(await currentTask(), itemsPermission(chosen), scope.value as "next_round" | "task", requestId));
+        toast(t("Permission approved"));
+        return t("Approved. {0} is continuing with the new permission.", item.agent ?? t("the agent"));
+      });
+    });
+    refuse.addEventListener("click", () => {
+      const next = composer(t("Refuse and continue"), true, t("Why not, and what should it do instead?"));
+      form.replaceWith(next.form); next.focus();
+    });
+    return h("div", { class: "attn-body" }, reason ? question(reason) : null, form);
+  }
+
   const meta = [t("Round {0}", item.round), item.agent, ago(item.since)].filter(Boolean).join(t(" · "));
-  const label = item.kind === "review" && item.prompt ? t("Checkpoint") : item.kind === "review" && item.stage === "end" ? t("Plan finished · ready for your review") : t(kind.label);
+  const label = h("p", { class: "attn-kind" }, item.kind === "review" && item.prompt ? t("Checkpoint") : item.kind === "review" && item.stage === "end" ? t("Plan finished · ready for your review") : t(kind.label));
   card.append(
     h("header", { class: "attn-head" },
       h("span", { class: "attn-icon" }, icon(kind.glyph)),
       h("div", { class: "attn-heading" },
-        h("p", { class: "attn-kind" }, label),
+        label,
         where === "today" ? h("button", { type: "button", class: "attn-title", onclick: () => ctx.navigate("work", item.task) }, item.title) : null,
         h("p", { class: "attn-meta", title: formatTime(item.since) }, meta)),
       where !== "job" ? h("button", { type: "button", class: "text-btn attn-report", onclick: () => ctx.navigate("execution", item.job) }, t("View run")) : null),
-    ...[body, item.kind === "question" ? null : actions, status, error].filter((node): node is Node => node !== null));
+    ...[body as Node | null, item.kind === "question" ? null : actions, status, error].filter((node): node is Node => node !== null));
   return card;
 }
 

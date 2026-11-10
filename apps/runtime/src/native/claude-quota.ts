@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { chmod, lstat, mkdir, realpath } from "node:fs/promises";
-import { homedir } from "node:os";
+import { userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { ClaudeBackgroundResult, type ClaudeQuotaIssue } from "@lumio/schema";
 import { NativeProcessScope } from "./process-scope.ts";
@@ -194,8 +194,9 @@ async function shortCommand(argv: string[], cwd: string, env: NodeJS.ProcessEnv,
   } finally { reader.releaseLock(); await child.exited.catch(() => {}); }
 }
 
-async function probeEnvironment(stateDir: string, home = homedir(), signal = new AbortController().signal) {
+async function probeEnvironment(stateDir: string, signal = new AbortController().signal) {
   if (process.platform !== "darwin") throw new ProbeError("version_unsupported");
+  const home = userInfo().homedir;
   const root = join(await realpath(stateDir), "claude-quota");
   const cwd = join(root, "work"), config = join(root, "config");
   for (const path of [root, cwd, config, join(root, "tmp")]) {
@@ -211,7 +212,9 @@ async function probeEnvironment(stateDir: string, home = homedir(), signal = new
   const found = installed ?? Bun.which("claude");
   if (!found) throw new ProbeError("version_unsupported");
   const executable = installed ?? await realpath(found).catch(() => { throw new ProbeError("version_unsupported"); });
-  const env = { ...isolatedEnvironment(root, root, executable), PATH: `/usr/bin:/bin:/usr/sbin:/sbin:${dirname(executable)}`,
+  // macOS locates the user's login Keychain through HOME. Claude selects its
+  // own separate credential entry through CLAUDE_CONFIG_DIR.
+  const env = { ...isolatedEnvironment(root, root, executable), HOME: home, PATH: `/usr/bin:/bin:/usr/sbin:/sbin:${dirname(executable)}`,
     CLAUDE_CONFIG_DIR: config, CLAUDE_CODE_TMPDIR: join(root, "tmp"), TERM: "xterm-256color", TZ: "UTC", CLAUDE_CODE_SKIP_PROMPT_HISTORY: "1",
     DISABLE_AUTOUPDATER: "1", DISABLE_TELEMETRY: "1" };
   if ((await shortCommand(["/usr/bin/codesign", "--verify", "--strict", `-R=${signature}`, executable], cwd, env, signal)).code)
@@ -223,7 +226,7 @@ async function probeEnvironment(stateDir: string, home = homedir(), signal = new
 
 export async function queryClaudeQuota(stateDir: string, signal: AbortSignal, expected?: string): Promise<ClaudeBackgroundResult> {
   try {
-    const { root, cwd, executable, env } = await probeEnvironment(stateDir, homedir(), signal);
+    const { root, cwd, executable, env } = await probeEnvironment(stateDir, signal);
     for (const name of ["managed-settings.json", "managed-settings.d", "managed-mcp.json"]) {
       const present = await lstat(join(managedDirectory, name)).then(() => true, (e: NodeJS.ErrnoException) => e.code !== "ENOENT");
       if (present) return failure("version_unsupported");

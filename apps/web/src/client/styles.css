@@ -1465,3 +1465,12 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 .proposal-hook { display: block; font-size: var(--fs-xs); color: var(--ink); overflow-wrap: anywhere; }
 .proposal-warn { display: flex; gap: 6px; align-items: center; color: var(--ochre); font-size: var(--fs-sm); margin-top: 4px; }
 .proposal-warn .icon { width: 14px; height: 14px; flex: none; }
+
+/* H1-9：权限申请卡片 */
+.attn-grant { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 0; }
+.attn-grant-title { font-weight: 600; font-size: var(--fs-sm); }
+.attn-grant .attn-back { white-space: nowrap; }
+.attn-grant .attn-composer-foot { justify-content: flex-end; padding: 4px 0 8px; }
+.attn-grant .attn-composer-foot .btn { margin-left: 0; }
+.attn-grant-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.attn-grant .check-field { min-height: 24px; }
