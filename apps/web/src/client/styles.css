@@ -214,6 +214,43 @@ kbd { padding: 0 5px; border: 1px solid var(--line); border-bottom-width: 2px; b
 .connection-dot.off { background: var(--ink-4); box-shadow: 0 0 0 3px var(--sunken); }
 .mobile-flex { display: none !important; }
 .connection-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 3px var(--green-wash); }
+
+/* 侧栏 AI 用量指示器：平时灰色，低于阈值变黄，用完变红；收起侧栏时只剩圆环。 */
+.usage-glance { display: flex; flex-direction: column; padding: 6px 0 4px; border-top: 1px solid var(--line); }
+.usage-glance[hidden] { display: none; }
+.usage-rows { display: flex; flex-direction: column; gap: 1px; }
+.usage-row { display: flex; align-items: center; gap: 8px; width: 100%; height: 26px; padding: 0 8px 0 10px; border: 0; border-radius: var(--r-sm); background: none; color: var(--ink-3); font-size: var(--fs-xs); text-align: left; }
+.usage-row:hover, .usage-row[aria-expanded="true"] { background: var(--hover); color: var(--ink-2); }
+.usage-name { width: 64px; flex: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.usage-bars { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 3px; }
+.usage-bar { display: block; height: 3px; border-radius: 2px; background: var(--sunken); overflow: hidden; }
+.usage-bar > i { display: block; height: 100%; border-radius: 2px; background: var(--ink-4); }
+.usage-value { flex: none; min-width: 34px; display: inline-flex; justify-content: flex-end; font-variant-numeric: tabular-nums; }
+.usage-value .icon { width: 13px; height: 13px; color: var(--ink-4); }
+.usage-row[data-level="low"] { color: var(--ochre); }
+.usage-row[data-level="low"] .usage-bar > i { background: var(--ochre); }
+.usage-row[data-level="empty"] { color: var(--red); }
+.usage-row[data-level="empty"] .usage-bar > i { background: var(--red); }
+.usage-ring { display: none; align-items: center; justify-content: center; width: 28px; height: 28px; margin: 2px 0 2px 6px; padding: 0; border: 0; border-radius: 50%; background: none; }
+.usage-ring:hover { background: var(--hover); }
+.usage-ring svg { width: 22px; height: 22px; transform: rotate(-90deg); }
+.usage-ring circle { fill: none; stroke-width: 3; }
+.usage-ring-track { stroke: var(--line-strong); }
+.usage-ring-fill { stroke: var(--ink-4); stroke-linecap: round; }
+.usage-ring[data-level="low"] .usage-ring-fill { stroke: var(--ochre); }
+.usage-ring[data-level="empty"] .usage-ring-fill { stroke: var(--red); }
+.usage-ring[data-level="issue"] .usage-ring-fill { stroke: var(--ink-3); }
+.menu.usage-pop { width: 290px; max-width: calc(100vw - 16px); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; font-size: var(--fs-sm); }
+.usage-pop:focus { outline: none; }
+.usage-pop-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.usage-pop-status { margin: 0; }
+.usage-pop .ai-quota-window { margin: 0; }
+.usage-pop .button-row { margin-top: 2px; }
+@media (min-width: 861px) {
+  .sidebar-collapsed .sidebar .usage-rows { display: none; }
+  .sidebar-collapsed .sidebar .usage-ring { display: flex; }
+  .sidebar-collapsed .sidebar .usage-glance { border-top-color: transparent; }
+}
 .who { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--r-sm); }
 .who-avatar { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--ink); color: var(--paper); font-size: 11px; font-weight: 600; }
 .who-name { font-weight: 550; }
