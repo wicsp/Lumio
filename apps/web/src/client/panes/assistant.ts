@@ -499,7 +499,7 @@ export class AssistantPane {
         memories.length
           ? h("div", { class: "memory-list" }, ...memories.map(memory => h("article", { class: "memory-item" }, icon("memory"), h("p", {}, memory.content),
               h("span", { title: formatTime(memory.created) }, ago(memory.created)),
-              h("button", { type: "button", class: "icon-btn row-delete", title: t("Forget"), "aria-label": t("Forget"), onclick: () => this.forget(memory) }, icon("trash")))))
+              h("button", { type: "button", class: "icon-btn row-delete", title: t("Forget"), "aria-label": t("Forget memory {0}", memory.content.slice(0, 80)), onclick: () => this.forget(memory) }, icon("trash")))))
           : empty(t("No memories yet. Write down preferences or facts you want the assistant to keep in mind."))));
     } catch (cause) {
       if (this.active && generation === this.generation) clear(this.messages, failure(errorText(cause), () => this.loadMemories()));

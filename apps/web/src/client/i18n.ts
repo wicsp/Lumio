@@ -535,6 +535,7 @@ export const ZH: Record<string, string> = {
   "Follow system": "跟随系统",
   "For example: lead with the conclusion, then explain; answer in English.": "例如：先给结论，再解释理由；回答用中文。",
   "For example: list the experiments still missing for the rebuttal": "例如：帮我列出 rebuttal 还缺哪些实验",
+  "Forget memory {0}": "遗忘记忆「{0}」",
   "Forget": "遗忘",
   "Forget this memory?": "遗忘这条记忆？",
   "Forgotten": "已遗忘",

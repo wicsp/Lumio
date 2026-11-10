@@ -321,7 +321,7 @@ export class KnowledgePane {
       title.addEventListener("compositionend",()=>titleChanged(false));
       title.addEventListener("keydown", event => {
         if (event.isComposing) return;
-        if (event.key === "Enter") { event.preventDefault(); title.blur(); }
+        if (event.key === "Enter") event.preventDefault();
         if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
           event.preventDefault();
           if (!this.saver?.error) void this.saver?.save();
