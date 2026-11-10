@@ -16,6 +16,7 @@
 ## 统一 AI 配置与原生 Assistant（ADR 0041、0042、0047）
 
 > 删除配置的契约扩展见 [ADR 0043](../adr/0043-ai-configuration-deletion.md)（Proposed，待批准；现行接口仍只有创建和修改）。
+> Claude Code 订阅额度的后台查询提案见 [ADR 0053](../adr/0053-claude-code-background-quota.md)（Proposed，待批准）。
 
 - Connection 负责来源/设备与私有凭据，Profile 负责引擎/模型/原生思考档位，用途绑定负责权限；共用 Profile 不共用工具与沙箱。API 连接当前在 Hub，Codex 连接在指定 Runtime。旧 API 设置保留兼容。
 - TypeSafe Jev Connection 使用固定的官方 System One API 地址，由 Hub 保存私有 API 密钥。现阶段支持连接管理，保存和读取不调用推理，且不能用于聊天 Profile（ADR 0046）。
