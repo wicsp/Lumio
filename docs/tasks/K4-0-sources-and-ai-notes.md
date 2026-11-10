@@ -18,12 +18,14 @@ AI 写的知识与人写的笔记在文件层面分开；任何知识都能记�
 
 | 编号 | 内容 | 负责 | 改动范围 |
 |---|---|---|---|
-| K4-1 | 契约：`ai-note` 类型与 `ain` 前缀、`VAULT_LAYOUT` 增加 `ai/notes/`、公共字段 `derived_from`（ID 或 URL，post 放宽）、能力 `knowledge.ainote.create` / `knowledge.ainote.update` 的参数与结果 | Claude 起草（ADR 已批准） | `packages/schema` |
+| K4-1 | 契约：`ai-note` 类型与 `ain` 前缀、`VAULT_LAYOUT` 增加 `ai/notes/`、公共字段 `derived_from`（ID 或 URL，post 放宽）、能力 `knowledge.ainote.create` / `knowledge.ainote.update` 的参数与结果、`lumio:` 链接解析 | Claude 起草（ADR 已批准） | `packages/schema` |
 | K4-2 | 知识与索引：补全器支持 `ai-note`；索引保存 `derived_from` 反向关系与正文 `lumio:<ID>` 跨模块引用；AI 笔记出链不计入人的链接图与引用导出、图谱可区分；不再向知识笔记写 AI 区块 | 后端（Codex） | `packages/knowledge`、`packages/storage` |
-| K4-3 | Hub：两项 agent 能力（直接执行并记录执行者、带 SHA-256 版本、`derived_from` 可见性检查、只能写 `ai/notes/`）；`GET` 解析任意 ID 到可见摘要（供 `lumio:` 链接与来源展示）；删除对话/任务时返回被知识引用的数量；内置助手与原生会话 MCP 接上新能力 | 后端（Codex） | `apps/hub`、`packages/assistant`（如需） |
+| K4-3 | Hub：两项 agent 能力，连同 CLI 命令与 skill 一起登记进 `CAPABILITIES`（K4-1 只定义了参数与结果，见 `AI_NOTE_CAPABILITY_NAMES`）（直接执行并记录执行者、带 SHA-256 版本、`derived_from` 可见性检查、只能写 `ai/notes/`）；`GET` 解析任意 ID 到可见摘要（供 `lumio:` 链接与来源展示）；删除对话/任务时返回被知识引用的数量；内置助手与原生会话 MCP 接上新能力 | 后端（Codex） | `apps/hub`、`packages/assistant`（如需） |
 | K4-4 | Web：渲染 `lumio:` 链接与来源列表（不可见/已删除状态）；单独成段指向 AI 笔记的链接渲染为标明 AI 的可折叠卡片；AI 笔记详情页显示来源与生成者；删除确认显示引用数 | 前端（Claude） | `packages/api-client`、`apps/web` |
 
 K4-2、K4-3 依赖 K4-1；K4-4 依赖 K4-3 的接口。
+
+实施状态：K4-1 契约见 PR（`packages/schema`：`AiNote`、`ID_PREFIXES["ai-note"]`、`DerivedFrom`、`LumioLink`、`KnowledgeAiNote*`）。`VAULT_LAYOUT` 的 `ai/notes/` 在 K4-2 加入；在此之前 `entityDirectory("ai-note")` 会报未知目录。
 
 ## 验收要点
 
