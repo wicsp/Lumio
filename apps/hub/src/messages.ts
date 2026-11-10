@@ -104,7 +104,15 @@ export const en = {
   "target.offline": (targets: unknown) => `Offline targets (execution waits until they reconnect): ${String(targets)}`,
 
   "notifications.https_required": "Push notifications require an HTTPS contact address. Set LUMIO_PUBLIC_URL to an HTTPS URL, or subscribe from an allowed HTTPS page that sends its Origin header.",
-  "work.plan_dispatch_failed": (stage: unknown, code: unknown) => `Could not delegate plan stage ${String(stage)} (${String(code)}); human action required.`,
+  "target.offline_planned": (targets: unknown) => `Offline plan targets must reconnect before their stages can start (${String(targets)}).`,
+  "target.advisory": (targets: unknown) => `These targets cannot enforce stage permissions (${String(targets)}).`,
+  "target.stage_runtime_missing": (target: unknown) => `The runtime for ${String(target)} is not registered. Pair the runtime first.`,
+  "target.stage_engine_missing": (engine: unknown, runtime: unknown) => `Runtime ${String(runtime)} has not registered the ${String(engine)} engine.`,
+  "target.stage_offline": (target: unknown) => `Target ${String(target)} is offline. Reconnect its runtime and retry.`,
+  "target.stage_permissions_unsupported": (target: unknown) => `Runtime for ${String(target)} does not support stage permissions. Upgrade it and retry.`,
+  "target.stage_hooks_unsupported": (target: unknown) => `Runtime for ${String(target)} does not support stage hooks. Upgrade it and retry.`,
+  "target.stage_git_version": (target: unknown, version: unknown) => `Sandboxed Git access requires verified Codex 0.166.0. ${String(target)} reports ${String(version)}.`,
+  "work.plan_dispatch_failed": (stage: unknown, detail: unknown) => `Could not delegate stage ${String(stage)}. ${String(detail)}`,
   "work.plan_agent": "Delegate only to the agent in the current plan stage; handle checkpoints with task checkpoint.",
   "work.plan_max_rounds": (limit: unknown) => `Plan stopped: reached the limit of ${String(limit)} rounds; human review required.`,
   "work.human_only": "Only a human can handle checkpoints or manage plan templates.",
@@ -709,9 +717,18 @@ Key: ${String(p2)}`,
   "modules.specify_an_agent_e_g_pi_server": "Specify an agent, e.g. pi@server",
   "modules.the_specified_runtime_is_not_registered_pair_it_first": "The specified runtime is not registered; pair it first",
   "modules.round_workspace_write": "This round uses the workspace-write sandbox. You can edit files in the working directory. Git metadata is protected, including in worktrees.",
+  "modules.round_read": "This round uses a read-only sandbox. Workspace files and Git metadata cannot be written.",
+  "modules.round_read_git": "This round uses a read-only sandbox with an exception for this checkout's Git metadata.",
+  "modules.round_write_git": "This round can edit the working directory and this checkout's Git metadata.",
+  "modules.round_full": "This round runs without an OS sandbox under the runtime account. Follow the approved stage scope.",
+  "modules.round_git_approved": "Git writes are approved for this stage within the assigned scope.",
+  "modules.round_git_restricted": "Git writes were not approved for this stage.",
+  "modules.round_advisory": (access: unknown) => `This engine cannot enforce the declared ${String(access)} access or Git restrictions. Follow the declared limits.`,
+  "modules.round_stage_secrets": "The runtime supplies the credentials configured for this stage at launch.",
+  "modules.round_no_stage_secrets": "Lumio supplies no stage-specific secrets for this round.",
   "modules.round_no_sandbox": "This engine runs as the runtime account without an OS sandbox. Files and Git operations are subject to that account's access. Follow the working directory and stage limits above.",
   "modules.you_are_completing_round_of_a_user_task_work_only_in_the_working_dir": (p0: unknown, p1: unknown, p2: unknown) => `You are completing round ${String(p0)} of a user task. Do only the work assigned for this round and its current stage, if any. Work only in the working directory and do not access the Lumio knowledge directory.
-${String(p1)} Lumio supplies no stage-specific secrets for this round.
+${String(p1)}
 If a required operation is blocked, tell the user exactly what access you need and why. For ordinary-account access such as Git writes, use <lumio-question>What access is needed and why</lumio-question> and end the round for a decision. Do not try to bypass the restriction.
 For system commands that require root, use \`lumio-runtime sudo -- <absolute program path> [arguments]\` and wait for human approval. If the runtime has no privileged helper configured, report that blocker to the user.
 When you need more information or confirmation, ask one clear question using <lumio-question>Question</lumio-question> and end the round. When finished, report as Result / Changes / Verification. Leave task completion to Lumio and the user.
@@ -988,7 +1005,15 @@ export const zh: typeof en = {
   "target.offline": (targets: unknown) => `离线目标（上线后开始执行）：${String(targets)}`,
 
   "notifications.https_required": "推送通知需要 HTTPS 联系地址。请将 LUMIO_PUBLIC_URL 设置为 HTTPS 地址，或从允许访问的 HTTPS 页面订阅并携带 Origin 请求头。",
-  "work.plan_dispatch_failed": (stage: unknown, code: unknown) => `无法委派计划阶段 ${String(stage)}（${String(code)}），需要人处理。`,
+  "target.offline_planned": (targets: unknown) => `离线的计划目标需要重新上线才能开始阶段（${String(targets)}）。`,
+  "target.advisory": (targets: unknown) => `以下目标无法强制阶段权限（${String(targets)}）。`,
+  "target.stage_runtime_missing": (target: unknown) => `${String(target)} 所在的执行器尚未登记，请先配对。`,
+  "target.stage_engine_missing": (engine: unknown, runtime: unknown) => `执行器 ${String(runtime)} 未登记 ${String(engine)} 引擎。`,
+  "target.stage_offline": (target: unknown) => `目标 ${String(target)} 已离线，请在执行器上线后重试。`,
+  "target.stage_permissions_unsupported": (target: unknown) => `${String(target)} 所在的执行器不支持阶段权限，请升级后重试。`,
+  "target.stage_hooks_unsupported": (target: unknown) => `${String(target)} 所在的执行器不支持阶段钩子，请升级后重试。`,
+  "target.stage_git_version": (target: unknown, version: unknown) => `沙箱内的 Git 权限需要已验证的 Codex 0.166.0，${String(target)} 当前报告 ${String(version)}。`,
+  "work.plan_dispatch_failed": (stage: unknown, detail: unknown) => `无法委派阶段 ${String(stage)}。 ${String(detail)}`,
   "work.plan_agent": "只能委派给计划当前阶段的 agent；检查点请用 task checkpoint 处理。",
   "work.plan_max_rounds": (limit: unknown) => `计划已停止：达到 ${String(limit)} 轮上限，需要人验收。`,
   "work.human_only": "只有人能处理检查点或管理计划模板。",
@@ -1593,9 +1618,18 @@ ${String(p0)}`,
   "modules.specify_an_agent_e_g_pi_server": "请指定 agent，例如 pi@server",
   "modules.the_specified_runtime_is_not_registered_pair_it_first": "指定的执行器尚未登记，请先配对执行器",
   "modules.round_workspace_write": "本轮使用 workspace-write 沙箱。可以编辑工作目录内的文件，Git 元数据受保护，包括 worktree 的 Git 元数据。",
+  "modules.round_read": "本轮使用只读沙箱，工作区文件与 Git 元数据都不可写。",
+  "modules.round_read_git": "本轮使用只读沙箱，允许写入当前工作树的 Git 元数据。",
+  "modules.round_write_git": "本轮可以编辑工作目录并写入当前工作树的 Git 元数据。",
+  "modules.round_full": "本轮以执行器账号运行，没有操作系统沙箱。请遵守已批准的阶段范围。",
+  "modules.round_git_approved": "本阶段可在已分配的范围内写入 Git。",
+  "modules.round_git_restricted": "本阶段未批准写入 Git。",
+  "modules.round_advisory": (access: unknown) => `此引擎无法强制执行声明的 ${String(access)} 权限或 Git 限制，请遵守声明的权限范围。`,
+  "modules.round_stage_secrets": "执行器会在启动时提供为本阶段配置的凭据。",
+  "modules.round_no_stage_secrets": "Lumio 本轮没有注入阶段专用密钥。",
   "modules.round_no_sandbox": "此引擎以执行器账号运行，没有操作系统沙箱。文件和 Git 操作受该账号权限约束，仍须遵守上述工作目录和阶段范围。",
   "modules.you_are_completing_round_of_a_user_task_work_only_in_the_working_dir": (p0: unknown, p1: unknown, p2: unknown) => `你正在完成用户任务的第 ${String(p0)} 轮。只做本轮交代的工作，有阶段时只做当前阶段。只在工作目录内工作，不读写 Lumio 知识库。
-${String(p1)} Lumio 本轮没有注入阶段专用密钥。
+${String(p1)}
 如果必要操作受阻，向用户说明具体需要什么权限以及原因。写 Git 等普通账号权限用 <lumio-question>所需权限和理由</lumio-question> 申请，结束本轮等待用户决定。不要绕过权限限制。
 确实需要 root 的系统命令使用 \`lumio-runtime sudo -- <程序绝对路径> [参数]\` 并等待人工批准。如果执行器未配置高权限助手，向用户说明这一阻塞。
 需要补充信息或确认时，用 <lumio-question>问题</lumio-question> 提出一个明确问题并结束本轮。做完按「结果 / 改动 / 验证」汇报，任务结局由 Lumio 和用户处理。
