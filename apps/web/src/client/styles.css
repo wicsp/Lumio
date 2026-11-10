@@ -1301,26 +1301,33 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 /* Align prerequisite icons with their action label. */
 .dep-list > .text-btn { display: inline-flex; align-items: center; gap: 4px; min-height: 24px; white-space: nowrap; }
 
-/* 原生 Codex 会话面板（M1-0）：放在输入框上方，和对话的其他卡片同一套外观。 */
-.native-panel { display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; padding: 12px 14px; max-height: 38vh; overflow: auto;
-  border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); box-shadow: 0 1px 2px rgb(0 0 0 / 4%); font-size: var(--fs-sm); }
-.native-panel:empty, .native-panel > :empty { display: none; }
-.native-status { display: flex; align-items: center; gap: 6px; color: var(--ink-2); }
-.native-status strong { color: var(--ink); font-weight: 600; }
-.native-panel .button-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.native-panel select { height: 28px; max-width: 100%; min-width: 0; padding: 0 24px 0 8px; border: 0; border-radius: var(--r-md); background-color: var(--sunken); font-size: var(--fs-xs); }
-.native-panel pre { margin: 6px 0 0; padding: 8px 10px; border-radius: var(--r-md); background: var(--sunken); white-space: pre-wrap; overflow-wrap: anywhere; font: var(--fs-xs)/1.55 var(--mono); }
-.native-panel .native-approval { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-left: 3px solid var(--ochre); border-radius: 0 var(--r-md) var(--r-md) 0; background: var(--ochre-wash); }
-.native-panel .native-approval > strong { color: var(--ochre); }
-.native-history { display: flex; flex-direction: column; gap: 4px; }
-.native-history details { border-radius: var(--r-md); }
-.native-history summary { cursor: pointer; padding: 3px 0; color: var(--ink-3); font-size: var(--fs-xs); }
+/* Codex 状态留在输入框边上，详细活动在对话内按需展开。 */
+.native-panel { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; font-size: var(--fs-sm); }
+.native-panel > :empty { display: none; }
+.native-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-height: 28px; padding: 0 4px; }
+.native-status { display: flex; align-items: center; gap: 6px; color: var(--ink-3); font-size: var(--fs-xs); }
+.native-status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.native-advanced { position: relative; margin-left: auto; font-size: var(--fs-xs); }
+.native-advanced > summary { cursor: pointer; color: var(--ink-3); }
+.native-advanced > button { position: absolute; z-index: 1; bottom: calc(100% + 6px); right: 0; white-space: nowrap; background: var(--surface); box-shadow: var(--shadow-pop); }
+.native-panel .button-row, .codex-auth .button-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.native-panel select { height: 28px; max-width: 150px; min-width: 0; padding: 0 24px 0 8px; border: 0; border-radius: var(--r-md); background-color: var(--sunken); font-size: var(--fs-xs); }
+.native-panel pre, .native-history pre { margin: 0; padding: 8px 10px; border-radius: var(--r-md); background: var(--sunken); white-space: pre-wrap; overflow-wrap: anywhere; font: var(--fs-xs)/1.55 var(--mono); }
+.native-approval { display: flex; flex-direction: column; gap: 8px; max-height: 36vh; overflow: auto; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--ochre-wash); }
+.native-approval > strong { color: var(--ochre); }
+.native-approval > pre { max-height: 14vh; overflow: auto; }
+.native-history { max-width: 704px; margin: 0 auto 16px; padding: 0 12px; color: var(--ink-3); font-size: var(--fs-sm); }
+.native-history summary { cursor: pointer; padding: 4px 0; overflow-wrap: anywhere; }
 .native-history summary:hover { color: var(--ink); }
-.native-code { display: inline-block; margin-left: 8px; padding: 4px 10px; border-radius: var(--r-md); background: var(--sunken); font: 600 var(--fs-md) var(--mono); letter-spacing: .08em; user-select: all; }
+.native-history-list { padding-left: 14px; }
+.native-code { display: inline-block; padding: 4px 10px; border-radius: var(--r-md); background: var(--sunken); font: 600 var(--fs-md) var(--mono); letter-spacing: .08em; user-select: all; }
 .native-panel .check-field { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
 .native-panel textarea { min-height: 52px; }
+.codex-auth { display: grid; justify-items: start; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); }
+.codex-auth-head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 6px 12px; width: 100%; }
+.codex-auth-state { font-size: var(--fs-xs); color: var(--ink-3); }
 /* 输入框底部的 Profile 选择与模型输入同样是轻量的胶囊样式 */
 .composer-foot select { height: 26px; max-width: 200px; min-width: 0; padding: 0 22px 0 8px; border: 0; border-radius: var(--r-md); background-color: var(--sunken); color: var(--ink-2); font-size: var(--fs-xs); }
 .composer-foot select:hover { color: var(--ink); }
 .composer-foot select:disabled { opacity: .6; }
-@media (max-width: 600px) { .native-panel { max-height: 32vh; padding: 10px; } .composer-foot { flex-wrap: wrap; } .composer-foot select { max-width: 150px; } }
+@media (max-width: 600px) { .native-history { margin-inline: 16px; } .composer-foot { flex-wrap: wrap; } .composer-foot select { max-width: 150px; } }
