@@ -10,6 +10,8 @@
 > **已批准、本地验收中**：[ADR 0034](adr/0034-knowledge-creation-and-authoring.md) 第 1–5 节（知识新建入口与模板，[K1-0](tasks/K1-0-knowledge-authoring.md)）与
 > [ADR 0035](adr/0035-live-note-editing-and-related-notes.md) 第 1–8 节（实时编辑、相关推荐、`[[` 候选与上标脚注，[K2-0](tasks/K2-0-live-note-editing.md)）均于 2026-11-06 获批准并已合并（#99），规则已写入 [`design/knowledge.md`](design/knowledge.md)。PDF 与 RAG 不在本期。
 
+> **已批准、未实现**：[ADR 0051](adr/0051-resource-anchors-ai-notes.md)（资源锚点、`derived_from`、独立的 AI 笔记），规则见 [`design/knowledge.md`](design/knowledge.md)「来源与 AI 笔记」，实施见 [K4-0](tasks/K4-0-sources-and-ai-notes.md)。
+
 ## 0. 目标与非目标
 
 **目标**：在一个地方管理论文笔记、外部资料、想法、项目与任务、实验结果、发布内容和个人资产；
@@ -125,9 +127,9 @@ Foundation 提供 ID 和错误；Platform 提供终端、诊断、下载与升�
 - **ADR 的生命周期**（ADR 0013）：`Proposed` 随便改 → `Accepted` 修改要人类批准并记修订记录 →
   `Implemented` 定稿，要改就写新的 ADR；部分实现时，已实现的小节先定稿。
 - **设计文档与 ADR 同步**（ADR 0015）：改 ADR 的 PR 必须同时改本文件或对应分册；反过来，改设计文档不要求写 ADR（ADR 0036）。
-- **同一工作树单会话写入，独立 worktree 与独立分支允许并行开发和测试**（V0-0）；用 `git fetch` 更新远端引用，从明确的已提交版本建立干净的工作树，不触碰其他会话的未提交改动。测试状态、数据库、端口与客户端目录隔离；部署、服务重启、发布等共享操作串行协调。结束时检查、提交并推送自己的改动，安全归档不再使用的 worktree；完整规则见 AGENTS.md 第 9 条。
-- **主线开发**：功能分支经交叉 review 和完整 CI 合入 `main`。本机仅部署到日常实例 7420，默认从主线构建。正式发布使用主线上已验收提交的 `v*` 标签。见 [主线开发与本机部署](local-deployment.md)。
-- **分工**：后端默认 Codex，前端默认 Claude，`packages/schema` 由 Claude 起草、人类批准；交叉 review（AGENTS.md）。
+- **同一工作树单会话写入，独立 worktree 与独立分支允许并行开发和测试**（V0-0）；用 `git fetch` 更新远端引用，从明确的已提交版本建立干净的工作树，不触碰其他会话的未提交改动。测试状态、数据库、端口与客户端目录隔离；部署、服务重启、发布等共享操作串行协调。结束时检查、提交并推送自己的改动，安全归档不再使用的 worktree；完整规则见 AGENTS.md 第 10 条。
+- **主线开发**：功能分支经独立 review、完整 CI 和人类验收合入 `main`；由谁 review、何时合并由 Lumio 交接计划或人类安排，仓库规则不指定（ADR 0049）。本机仅部署到日常实例 7420，默认从主线构建。正式发布使用主线上已验收提交的 `v*` 标签。见 [主线开发与本机部署](local-deployment.md)。
+- **分工**：习惯上后端 Codex、前端 Claude，`packages/schema` 由 Claude 起草、人类批准；这是默认习惯，不是委派规则（AGENTS.md、ADR 0049）。
 - **任务说明**（`docs/tasks/`）：一个纵向切片一份，承载这个切片的具体需求；写明要读哪些分册；PR 合并时把实现了的 ADR 小节标为已实现。
 
 ## 旧节号对照

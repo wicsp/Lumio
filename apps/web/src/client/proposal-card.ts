@@ -41,7 +41,10 @@ export interface ProposalContext { client: Client; navigate: Navigate; changed()
 
 /** 今日与审批页共用的卡片。 */
 export function proposalCard(proposal: WorkProposal, ctx: ProposalContext): HTMLElement {
-  const task = proposal.operation.args.operation.args.task;
+  const args = proposal.operation.args.operation.args;
+  // 保存计划模板的提议（ADR 0049）由 H1-7 做专门的预览卡片；在那之前只显示理由。
+  if (!("task" in args)) return h("article", { class: "attn attn-ochre" }, proposal.reason);
+  const task = args.task;
   const heading = h("button", { type: "button", class: "attn-title", onclick: () => ctx.navigate("work", task) }, proposal.reason);
   void Promise.all([actorName(ctx.client, proposal.author), ctx.client.workTask(task).then(detail => detail.task.title, () => proposal.reason)])
     .then(([author, title]) => { heading.textContent = proposalTitle(proposal, author, title); });

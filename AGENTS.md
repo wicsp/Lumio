@@ -25,10 +25,13 @@
 5. **不引入新依赖**，除非在 PR 描述里写明理由和替代方案。
 6. **不碰 vault 数据**：测试一律用 `fixtures/` 里的合成数据，不读写真实 vault。
 7. **不在代码/配置里写真实密钥**，只用占位符（如 `${secret:openai}`），由运行时注入。
-8. **提交前必须通过 `bun run check`**。功能分支从最新的 `origin/main` 开，按功能提 PR，交叉 review 和完整 CI 通过后合入 `main`。
-   本机仅部署到日常实例 7420；默认从 `main` 构建。正式发布从 `main` 上已验收的提交打 `v*` 标签。
-   详见 [主线开发与本机部署](docs/local-deployment.md)。
-9. **同一个工作树同一时间只允许一个会话写入；独立 worktree 和独立分支允许并行开发与测试。**（V0-0）
+8. **提交前必须通过 `bun run check`**。功能分支从最新的 `origin/main` 开，按功能提 PR。
+   合入 `main` 的关卡：独立 review（review 者不是作者）、完整 CI 通过、人类验收。本机试用与部署方法见 [主线开发与本机部署](docs/local-deployment.md)。
+   正式发布从 `main` 上已验收的提交打 `v*` 标签。
+9. **只做被交代的这一步。**（ADR 0049）由谁 review、何时试用、何时合并由调用方决定（Lumio 交接计划或人类），本文件不指定。
+   - 你的任务说明或 Lumio 阶段说明交代了什么就做什么；没有交代下一步时，做完交回人，**不自行找其他 agent review，不自行合并**。
+   - 缺权限时按需申请，说明要什么、为什么，等人批准（申请方式见 Lumio skill 与每一轮的说明）；不绕过执行环境的限制。
+10. **同一个工作树同一时间只允许一个会话写入；独立 worktree 和独立分支允许并行开发与测试。**（V0-0）
    - 开始前检查工作树、分支、`git status` 与已有 worktree；用 `git fetch` 更新远端引用，从明确的已提交版本开始。
      只检查并要求自己要使用的工作树干净，不要求其他 worktree 干净。主工作树有人工作时，使用独立 worktree。
    - 不覆盖、暂存、提交、清理或搬移其他会话的改动；不在其他会话的工作树中 pull、切分支或执行 reset/clean。
@@ -53,7 +56,8 @@
 - 后端（默认 Codex/GPT）：`packages/core`、`apps/cli`、`apps/hub`、`apps/runtime`。
 - 前端（默认 Claude）：`packages/api-client`、`apps/web`、`apps/chrome-ext`、`apps/mobile`、`apps/feishu-bot`。
 - `packages/schema`：由 Claude 起草，人类批准。
-- 交叉 review：一方写的 PR 由另一方 review，争议点标出来交给人类。
+- 以上是作者习惯的默认分工，**不是**委派规则：实际由谁实现、由谁 review 以 Lumio 交接计划或人类的安排为准（ADR 0049）。
+- review 时：争议点标出来交给人类。
 
 ## 完成一项任务时
 在回复里列出：改了哪些 package/app、是否动了契约、新增了哪些依赖、怎么验证的。

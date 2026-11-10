@@ -31,6 +31,8 @@ export const ID_PREFIXES = {
   // ADR 0031（R4-1）：流程模板、推送设备
   workflow_template: "wft",
   push_device: "pdev",
+  // ADR 0051（K4-1）：AI 笔记。键与实体 type 同名（知识实体按 type 取前缀）
+  "ai-note": "ain",
 } as const;
 
 const ULID = "[0-9A-HJKMNP-TV-Z]{26}";
@@ -45,6 +47,30 @@ export const Id = z
 /** 指定前缀的 ID，例如 `idOf("pap")` 只接受论文 ID。 */
 export const idOf = (prefix: (typeof ID_PREFIXES)[keyof typeof ID_PREFIXES]) =>
   z.string().regex(new RegExp(`^${prefix}_${ULID}$`), `ID 必须是 ${prefix}_<ULID>`);
+
+/**
+ * 正文里引用非知识资源的链接地址：`lumio:<ID>`（ADR 0051 第 3 节）。
+ * 只存 ID、不存 Hub 地址；ID 前缀全局唯一，能推出所属模块。
+ */
+export const LUMIO_LINK_SCHEME = "lumio:";
+export const LumioLink = z
+  .string()
+  .regex(new RegExp(`^lumio:(${ALL_PREFIXES})_${ULID}$`), "必须是 lumio:<前缀>_<ULID>")
+  .describe("lumio:<ID>，例如 lumio:amsg_01J9Z3...");
+/** 由 ID 生成 `lumio:<ID>`。 */
+export const lumioLink = (id: string): string => `${LUMIO_LINK_SCHEME}${id}`;
+/** 从 `lumio:<ID>` 取出 ID；不是合法的 Lumio 链接时返回 undefined。 */
+export function idOfLumioLink(href: string): string | undefined {
+  return LumioLink.safeParse(href).success ? href.slice(LUMIO_LINK_SCHEME.length) : undefined;
+}
+
+/**
+ * 知识的来源（ADR 0051 第 2 节）：Lumio ID（任何模块，粒度可到消息 `amsg_`、Job、日志事件）或 http(s) URL。
+ * 只说明"从哪里来"，不计入链接图。
+ */
+export const DerivedFrom = z
+  .union([Id, z.url({ protocol: /^https?$/ })])
+  .describe("Lumio ID（如 amsg_…、job_…、src_…）或 http(s) URL");
 
 /** ISO 8601 时间，必须带时区。 */
 export const Timestamp = z.iso.datetime({ offset: true });
@@ -73,6 +99,7 @@ export const Base = z.looseObject({
   created: Timestamp,
   updated: Timestamp,
   tags: withDefault(z.array(z.string()), []),
+  derived_from: optional(z.array(DerivedFrom)).describe("来源：Lumio ID 或 URL（ADR 0051）；不计入链接图"),
   // related 已删除（ADR 0018）：链接写在正文的 [[ ]] 里。旧笔记里的 related 作为未知字段原样保留，不再计入链接图。
 });
 
