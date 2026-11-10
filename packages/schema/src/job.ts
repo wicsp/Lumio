@@ -96,6 +96,8 @@ export const JobResult = z.strictObject({
     .describe("实际使用的 agent、版本与隔离级别"),
   report: z.string().optional().describe("agent 最后的汇报原文"),
   question: z.string().optional().describe("status 为 waiting_for_human 时，agent 提的问题"),
+  privileged_unavailable: z.strictObject({ program: z.string().min(1).max(512) }).optional()
+    .describe("这一轮里 agent 请求过高权限命令，但执行器没有配置高权限助手；只记第一次请求的程序（不含参数），用于提示人去安装"),
   permission: StagePermissions.optional()
     .describe("status 为 waiting_for_human 时，agent 申请的权限（汇报里的 <lumio-permission>，ADR 0049 第 3 节）；理由在 report 中"),
   session_id: SessionId.optional().describe("下一轮接着这个会话继续"),
@@ -115,8 +117,11 @@ export const Job = z.strictObject({
 
 // ───────────────────────── 执行器登记与同步 ─────────────────────────
 
-/** 执行器可选能力（ADR 0049）：按阶段权限启动 agent、运行钩子、提取权限申请。 */
-export const RUNTIME_FEATURES = ["stage_permissions", "hooks", "permission_request"] as const;
+/**
+ * 执行器可选能力（ADR 0049）：按阶段权限启动 agent、运行钩子、提取权限申请；
+ * privileged_helper：已配置高权限助手（ADR 0020），人可在设置里看到哪台执行器还没装。
+ */
+export const RUNTIME_FEATURES = ["stage_permissions", "hooks", "permission_request", "privileged_helper"] as const;
 
 /** 执行器启动时登记自己的能力。 */
 export const RuntimeRegistration = z.strictObject({

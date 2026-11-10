@@ -7,6 +7,14 @@ export type Lang = "en" | "zh";
 const KEY = "lumio.web.lang";
 
 export const ZH: Record<string, string> = {
+  "Administrator helper: installed": "管理员权限助手：已安装",
+  "Administrator helper: not installed": "管理员权限助手：未安装",
+  "Administrator helper: unknown (update this runtime to see)": "管理员权限助手：未知（升级这台执行器后可见）",
+  "Only needed when an agent must install software or change system settings on {0}. Without it, everything else still works. To install, run this once in a terminal on {0}; it asks for that machine's password, and each request still needs your approval.": "只有 agent 需要在 {0} 上装软件、改系统设置时才用得上，不装也能正常使用其他功能。要安装的话，在 {0} 的终端里运行一次下面这行，会要求输入那台机器的密码；装好后每次使用仍要你批准。",
+  "{0} wanted to run {1} as administrator, but {2} has no administrator helper yet.": "{0} 想以管理员身份运行 {1}，但 {2} 还没装管理员权限助手。",
+  "The agent wanted to run {0} as administrator, but this runtime has no administrator helper yet.": "agent 想以管理员身份运行 {0}，但这台执行器还没装管理员权限助手。",
+  "To allow requests like this, run the line below once in a terminal on {0} (it asks for that machine's password). Each request still needs your approval. Then retry or answer to continue.": "要允许这类请求，在 {0} 的终端里运行一次下面这行（会要求输入那台机器的密码），每次使用仍要你批准。装好后点重试或回答继续。",
+  "To allow requests like this, run the line below once in a terminal on that machine (it asks for its password). Each request still needs your approval. Then retry or answer to continue.": "要允许这类请求，在那台机器的终端里运行一次下面这行（会要求输入密码），每次使用仍要你批准。装好后点重试或回答继续。",
   "Asking for permission": "申请权限",
   "Only the next round": "只给下一轮",
   "This step, from now on": "这一步以后都给",

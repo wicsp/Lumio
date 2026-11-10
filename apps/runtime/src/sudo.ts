@@ -18,6 +18,8 @@ export class SudoGate {
   private pending = new Set<Promise<void>>();
   private sockets = new Set<Socket>();
   private conflicts = new Set<string>();
+  /** 没有配置高权限助手时，每一轮第一次请求的程序；随结果交回，提示人安装（不含参数）。 */
+  private unavailable = new Map<string, string>();
   readonly path: string;
   constructor(private config: RuntimeConfig, private queue: Queue, private actor: () => string | undefined,
     private fetcher: typeof fetch, private signal: AbortSignal, private log: (line: string) => void) {
@@ -53,7 +55,10 @@ export class SudoGate {
     this.jobs.set(token, { spec, controller: new AbortController() });
     return { LUMIO_SUDO_SOCKET: this.path, LUMIO_SUDO_TOKEN: token };
   }
+  /** 这一轮是否因为没有高权限助手而被拒绝过（结果交回前读取）。 */
+  unavailableFor(job: string): string | undefined { return this.unavailable.get(job); }
   end(job: string) {
+    this.unavailable.delete(job);
     for (const [token, entry] of this.jobs) if (entry.spec.id === job) { entry.controller.abort(); this.jobs.delete(token); }
   }
   private request(path: string, body: unknown, signal: AbortSignal) {
@@ -64,7 +69,11 @@ export class SudoGate {
     let value: { token?: string; argv?: unknown }; try { value = JSON.parse(input); } catch { write(socket, { message: msg("sudo.invalid_request"), code: 2 }); return; }
     const entry = typeof value.token === "string" ? this.jobs.get(value.token) : undefined;
     if (!entry || entry.controller.signal.aborted) { write(socket, { message: msg("sudo.only_available_within_a_round_dispatched_by_the_runtime"), code: 2 }); return; }
-    if (!this.config.sudoCommand.length) { write(socket, { message: msg("sudo.privileged_helper_not_configured"), code: 2 }); return; }
+    if (!this.config.sudoCommand.length) {
+      const program = Array.isArray(value.argv) && typeof value.argv[0] === "string" && value.argv[0] ? value.argv[0].slice(0, 512) : "?";
+      if (!this.unavailable.has(entry.spec.id)) this.unavailable.set(entry.spec.id, program);
+      write(socket, { message: msg("sudo.privileged_helper_not_configured"), code: 2 }); return;
+    }
     const actor = this.actor() ?? entry.spec.runtime;
     const parsed = OperationRequest.safeParse({ operation: { op: "exec.privileged", args: { runtime: actor, job: entry.spec.id, argv: value.argv } }, reason: msg("sudo.agent_request_for_round", entry.spec.source?.round ?? 1) });
     if (!parsed.success || parsed.data.operation.op !== "exec.privileged" || !isAbsolute(parsed.data.operation.args.argv[0]!) || parsed.data.operation.args.argv.some((a) => a.includes("\0"))) {

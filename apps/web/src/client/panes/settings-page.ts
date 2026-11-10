@@ -7,6 +7,7 @@ import type { RuntimeInfo } from "@lumio/schema";
 import { errorText, type Session } from "../api.ts";
 import { clear, h, icon } from "../dom.ts";
 import { ago } from "../format.ts";
+import { helperState, installCommandBlock } from "../privileged-helper.ts";
 import { lang, setLang, t, type Lang } from "../i18n.ts";
 import { onTheme, setTheme, themeChoice, type ThemeChoice } from "../theme.ts";
 import { LANGS, THEMES } from "../settings.ts";
@@ -207,10 +208,20 @@ export class SettingsPane {
     }
     if (!this.active) return;
     if (!runtimes.length) { clear(rows, h("p", { class: "set-empty" }, t("No runtimes yet. Run lumio runtime add <name> to pair a machine."))); return; }
-    clear(rows, ...runtimes.map(runtime => h("div", { class: "set-row" },
-      h("span", { class: `connection-dot${runtime.online ? "" : " off"}` }),
-      h("span", { class: "set-label" }, runtime.registration.name,
-        h("span", { class: "set-sub" }, runtime.registration.engines.map(engine => engine.name).join(", ") || t("No agents"))),
-      h("span", { class: "set-value muted" }, runtime.online ? t("Online") : t("Last seen {0}", ago(runtime.last_seen))))));
+    clear(rows, ...runtimes.flatMap(runtime => {
+      const helper = helperState(runtime.registration);
+      const row = h("div", { class: "set-row" },
+        h("span", { class: `connection-dot${runtime.online ? "" : " off"}` }),
+        h("span", { class: "set-label" }, runtime.registration.name,
+          h("span", { class: "set-sub" }, runtime.registration.engines.map(engine => engine.name).join(", ") || t("No agents")),
+          h("span", { class: "set-sub" }, helper === "installed" ? t("Administrator helper: installed")
+            : helper === "missing" ? t("Administrator helper: not installed") : t("Administrator helper: unknown (update this runtime to see)"))),
+        h("span", { class: "set-value muted" }, runtime.online ? t("Online") : t("Last seen {0}", ago(runtime.last_seen))));
+      if (helper !== "missing") return [row];
+      // 没装助手时说明它的用途，并给出可复制的安装命令（ADR 0020）。
+      return [row, h("div", { class: "set-row helper-row" },
+        h("p", { class: "field-hint" }, t("Only needed when an agent must install software or change system settings on {0}. Without it, everything else still works. To install, run this once in a terminal on {0}; it asks for that machine's password, and each request still needs your approval.", runtime.registration.name)),
+        installCommandBlock())];
+    }));
   }
 }
