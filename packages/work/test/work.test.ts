@@ -485,3 +485,120 @@ test("reverse relationships exclude trash and parent alone never implies a depen
   f.command("work.task.delete", { task: dependent.id, expected_revision: 1 });
   expect(f.service.detail(a.id)).toMatchObject({ children: [], dependents: [] });
 });
+
+const parallelPlan: HandoffPlan = { stages: [
+  { kind: "agent", id: "implement", agent: "codex@mac", instruction: "Implement" },
+  { kind: "agent", id: "first-review", agent: "claude-code@mac", instruction: "First review", access: "read", back_to: "implement" },
+  { kind: "agent", id: "second-review", agent: "claude-code@mac", instruction: "Second review", access: "read", after: ["implement"] },
+  { kind: "checkpoint", id: "approve", prompt: "Approve?", after: ["first-review", "second-review"] },
+  { kind: "agent", id: "merge", agent: "codex@mac", instruction: "Merge" },
+] };
+function fanOut(f: ReturnType<typeof fixture>, task: string) {
+  f.command("work.task.dispatch", { task });
+  deliver(f, task);
+  const { turn, plan } = f.service.task(task);
+  expect(turn.holder).toBe("agents");
+  expect(turn.parallel?.map(branch => branch.stage)).toEqual(["first-review", "second-review"]);
+  expect(plan).toMatchObject({ stage: "first-review", active: ["first-review", "second-review"], done: ["implement"], rounds: 3 });
+  return turn.parallel!.map(branch => f.job(branch.job));
+}
+
+test("a parallel send-back waits for all reports, resets descendants and runs both reviews again", () => {
+  const f = fixture(), task = planned(f, parallelPlan);
+  const [first, second] = fanOut(f, task);
+  const changes = f.result(first!, "done", "Correct synthetic finding A\n<lumio-outcome>changes</lumio-outcome>");
+  expect(f.service.task(task)).toMatchObject({ plan: { stage: "second-review", rounds: 3 }, turn: { holder: "claude-code@mac", stage: "second-review", job: second!.spec.id } });
+  expect(f.service.task(task).plan?.active).toBeUndefined();
+  f.service.applyResult(changes);
+  f.result(second!, "done", "Synthetic finding B");
+  const rerun = f.service.detail(task);
+  expect(rerun.task).toMatchObject({ plan: { stage: "implement", done: [], rounds: 4 }, turn: { holder: "codex@mac" } });
+  expect(rerun.executions.at(-1)?.input_snapshot).toContain("Correct synthetic finding A");
+  expect(rerun.executions.at(-1)?.input_snapshot).toContain("Synthetic finding B");
+  deliver(f, task);
+  const next = f.service.task(task);
+  expect(next.plan?.active).toEqual(["first-review", "second-review"]);
+  f.result(f.job(next.turn.parallel![1]!.job), "done");
+  expect(f.service.task(task).turn.stage).toBe("first-review");
+  f.result(f.job(next.turn.parallel![0]!.job), "done");
+  expect(f.service.task(task)).toMatchObject({ plan: { stage: "approve", rounds: 6 }, turn: { holder: "human", reason: "review" } });
+});
+
+test("parallel questions and failures are surfaced after peers drain and each retry is isolated", () => {
+  const f = fixture(), task = planned(f, parallelPlan), [first, second] = fanOut(f, task);
+  f.result(first!, "waiting_for_human");
+  expect(f.service.task(task).turn).toMatchObject({ reason: "working", stage: "second-review" });
+  f.result(second!, "failed");
+  expect(f.service.task(task).turn).toMatchObject({ reason: "answer", stage: "first-review", job: first!.spec.id });
+  f.command("work.task.dispatch", { task, comment: "Synthetic answer" });
+  expect(f.service.task(task).turn).toMatchObject({ reason: "working", stage: "first-review", round: 4 });
+  expect(f.service.detail(task).executions.at(-1)?.input_snapshot).toContain("Synthetic answer");
+  deliver(f, task);
+  expect(f.service.task(task).turn).toMatchObject({ reason: "failed", stage: "second-review", job: second!.spec.id });
+  f.command("work.task.checkpoint", { task, stage: "second-review", action: "continue" });
+  deliver(f, task);
+  expect(f.service.task(task).turn).toMatchObject({ reason: "review", stage: "approve" });
+});
+
+test("a ready dependent can start while an unrelated branch continues", () => {
+  const f = fixture(), task = planned(f, { stages: [
+    { kind: "agent", id: "slow", agent: "codex@mac", instruction: "Slow", access: "read" },
+    { kind: "agent", id: "fast", agent: "codex@mac", instruction: "Fast", access: "read", after: [] },
+    { kind: "agent", id: "dependent", agent: "claude-code@mac", instruction: "Depends on fast" },
+  ] });
+  f.command("work.task.dispatch", { task });
+  const [slow, fast] = f.service.task(task).turn.parallel!;
+  f.result(f.job(fast!.job), "done");
+  const overlap = f.service.task(task).turn.parallel!;
+  expect(overlap.map(branch => branch.stage)).toEqual(["slow", "dependent"]);
+  f.result(f.job(overlap[1]!.job), "done");
+  expect(f.service.task(task).turn.stage).toBe("slow");
+  f.result(f.job(slow!.job), "done");
+  expect(f.service.task(task).turn.stage).toBe("end");
+});
+
+test("parallel rounds share the cap and write concurrency is rejected by the approved contract", () => {
+  const f = fixture(), task = planned(f, { ...parallelPlan, max_rounds: 2 });
+  f.command("work.task.dispatch", { task });
+  deliver(f, task);
+  expect(f.service.task(task).turn).toMatchObject({ reason: "working", stage: "first-review" });
+  deliver(f, task);
+  expect(f.service.task(task)).toMatchObject({ turn: { reason: "review", stage: "second-review" }, plan: { rounds: 2 } });
+  const revision = f.service.task(task).revision;
+  const invalid = { ...parallelPlan, stages: parallelPlan.stages.map(stage => stage.kind === "agent" ? { ...stage, access: "write" } : stage) };
+  expect(() => f.command("work.task.plan.set", { task, expected_revision: revision, plan: invalid })).toThrow("INVALID");
+});
+
+test("auto finish requires human checkpoint clearance and successful remaining stages", () => {
+  const system = "act_00000000000000000000000999";
+  const f = fixture(system), task = planned(f, { ...parallelPlan, finish: "auto" });
+  const [first, second] = fanOut(f, task);
+  f.result(first!, "done"); f.result(second!, "done");
+  expect(f.service.task(task)).toMatchObject({ outcome: "open", turn: { reason: "review", stage: "approve" } });
+  f.command("work.task.checkpoint", { task, stage: "approve", action: "continue" });
+  deliver(f, task, "Synthetic failure", "failed");
+  expect(f.service.task(task)).toMatchObject({ outcome: "open", turn: { reason: "failed", stage: "merge" } });
+  f.command("work.task.dispatch", { task }); deliver(f, task);
+  expect(f.service.task(task)).toMatchObject({ outcome: "done", plan: { stage: "end", done: parallelPlan.stages.map(stage => stage.id) }, turn: { holder: "nobody" } });
+  expect(f.service.detail(task).turns.at(-1)).toMatchObject({ by: system, outcome: "done" });
+  const next = f.create("Synthetic task");
+  expect(() => f.command("work.task.plan.set", { task: next.id, expected_revision: next.revision, plan: { ...parallelPlan, finish: "auto" }, from: "merge" })).toThrow("INVALID");
+  expect(() => f.command("work.task.plan.set", { task: next.id, expected_revision: next.revision, plan: { finish: "auto", stages: [parallelPlan.stages[0]] } })).toThrow("INVALID");
+});
+
+test("a project default validates the template and can be cleared explicitly or on deletion", () => {
+  const f = fixture(), saved = f.command("work.plan_template.save", { name: "Synthetic template", plan: parallelPlan });
+  if (saved.kind !== "template") throw new Error("template expected");
+  const id = saved.template.id;
+  const created = f.command("work.project.create", { title: "Synthetic project", default_plan: id });
+  if (created.kind !== "project") throw new Error("project expected");
+  const project = created.project.id;
+  expect(f.service.project(project).default_plan).toBe(id);
+  f.command("work.project.update", { project, expected_revision: 1, patch: { default_plan: null } });
+  expect(f.service.project(project).default_plan).toBeUndefined();
+  f.command("work.project.update", { project, expected_revision: 2, patch: { default_plan: id } });
+  f.command("work.plan_template.delete", { template: id });
+  expect(f.service.project(project)).toMatchObject({ revision: 4 });
+  expect(f.service.project(project).default_plan).toBeUndefined();
+  expect(() => f.command("work.project.create", { title: "Invalid default", default_plan: id })).toThrow("NOT_FOUND");
+});

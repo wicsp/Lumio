@@ -50,6 +50,7 @@ export class SqliteWorkStore implements WorkStore {
       const columns = db.query<{ name: string }, []>("PRAGMA table_info(work_projects)").all();
       if (!columns.some(column => column.name === "workdir")) db.exec("ALTER TABLE work_projects ADD COLUMN workdir TEXT");
       if (!columns.some(column => column.name === "default_target")) db.exec("ALTER TABLE work_projects ADD COLUMN default_target TEXT");
+      if (!columns.some(column => column.name === "default_plan")) db.exec("ALTER TABLE work_projects ADD COLUMN default_plan TEXT");
     }).immediate();
   }
   transaction<T>(action: () => T): T { return this.db.transaction(action)(); }
@@ -66,12 +67,12 @@ export class SqliteWorkStore implements WorkStore {
   }
   putProject(input: WorkProject): void {
     const value = WorkProject.parse(input);
-    this.db.query(`INSERT INTO work_projects(id,title,description,revision,status,created,updated,tags,goal,repo,deadline,created_by,updated_by,workdir,default_target)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    this.db.query(`INSERT INTO work_projects(id,title,description,revision,status,created,updated,tags,goal,repo,deadline,created_by,updated_by,workdir,default_target,default_plan)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(id) DO UPDATE SET title=excluded.title,description=excluded.description,revision=excluded.revision,
-      status=excluded.status,updated=excluded.updated,tags=excluded.tags,goal=excluded.goal,repo=excluded.repo,workdir=excluded.workdir,default_target=excluded.default_target,deadline=excluded.deadline,updated_by=excluded.updated_by`).run(
+      status=excluded.status,updated=excluded.updated,tags=excluded.tags,goal=excluded.goal,repo=excluded.repo,workdir=excluded.workdir,default_target=excluded.default_target,default_plan=excluded.default_plan,deadline=excluded.deadline,updated_by=excluded.updated_by`).run(
       value.id, value.title, value.description, value.revision, value.status, value.created, value.updated,
-      JSON.stringify(value.tags), value.goal ?? null, value.repo ?? null, value.deadline ?? null, value.created_by ?? null, value.updated_by ?? null, value.workdir ?? null, value.default_target ?? null);
+      JSON.stringify(value.tags), value.goal ?? null, value.repo ?? null, value.deadline ?? null, value.created_by ?? null, value.updated_by ?? null, value.workdir ?? null, value.default_target ?? null, value.default_plan ?? null);
   }
 
   private readTask(row: Record<string, unknown> | null, batchDependencies?: Map<string, string[]>): WorkTask | undefined {

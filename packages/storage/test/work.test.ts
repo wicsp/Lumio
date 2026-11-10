@@ -125,3 +125,23 @@ test("existing projects gain a nullable default and derived targets stay out of 
     expect(store.receipt(actor, "synthetic-target-receipt")?.result).not.toHaveProperty("task.next_target");
   } finally { db.close(); }
 });
+
+test("project defaults persist across adapter reopen and existing projects remain readable", () => {
+  const db = new Database(":memory:");
+  try {
+    const f = fixture(db);
+    const project = f.command("work.project.create", { title: "Synthetic project" });
+    if (project.kind !== "project") throw Error("Expected a project");
+    db.exec("ALTER TABLE work_projects DROP COLUMN default_plan");
+    const store = new SqliteWorkStore(db);
+    expect(store.project(project.project.id)).toEqual(project.project);
+    const saved = f.command("work.plan_template.save", { name: "Synthetic default", plan: {
+      stages: [{ kind: "agent", id: "implement", agent: "codex@mac", instruction: "Implement" }],
+    } });
+    if (saved.kind !== "template") throw Error("Expected a template");
+    f.command("work.project.update", { project: project.project.id, expected_revision: 1, patch: { default_plan: saved.template.id } });
+    expect(new SqliteWorkStore(db).project(project.project.id)?.default_plan).toBe(saved.template.id);
+    f.command("work.project.update", { project: project.project.id, expected_revision: 2, patch: { default_plan: null } });
+    expect(new SqliteWorkStore(db).project(project.project.id)?.default_plan).toBeUndefined();
+  } finally { db.close(); }
+});

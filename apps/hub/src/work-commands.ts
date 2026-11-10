@@ -24,6 +24,7 @@ export class WorkCommands {
     let targets: string[] = [];
     switch (operation.op) {
       case "work.task.plan.set":
+      case "work.plan_template.save":
         targets = operation.args.plan?.stages.flatMap(stage => stage.kind === "agent" ? [stage.agent] : []) ?? [];
         break;
       case "work.task.dispatch": {
@@ -60,17 +61,21 @@ export class WorkCommands {
       const replay = this.work.replay(request, identity.actor.id);
       if (replay) return replay;
       if (decision.result === "needs_approval") {
-        if (operation.op !== "work.task.dispatch" && operation.op !== "work.task.plan.set") throw new HubError("INVALID", { key: "capability.invalid", args: [] });
+        if (operation.op !== "work.task.dispatch" && operation.op !== "work.task.plan.set" && operation.op !== "work.plan_template.save") throw new HubError("INVALID", { key: "capability.invalid", args: [] });
         const { request: frozenRequest, source } = this.work.proposalRequest(request);
         const frozen = WorkCommandProposal.parse({ op: "work.command", args: frozenRequest });
-        const task = this.work.task(operation.args.task);
+        const subject = operation.op === "work.plan_template.save" ? operation.args.name : this.work.task(operation.args.task).title;
         const offline = this.offlineTargets(frozen.args.operation);
-        const reason = [`${operation.op}: ${task.title}`, ...(offline.length ? [msg("target.offline", offline.join(", "))] : [])].join("\n").slice(0, 2000);
+        const reason = [`${operation.op}: ${subject}`, ...(offline.length ? [msg("target.offline", offline.join(", "))] : [])].join("\n").slice(0, 2000);
         const proposal = this.store.createProposal(frozen, reason, identity.actor.id);
         for (const previous of this.store.proposals("pending", identity.actor.id)) {
           if (previous.id === proposal.id || previous.operation.op !== "work.command") continue;
           const old = previous.operation.args.operation;
-          if (old.op === operation.op && old.args.task === operation.args.task) this.store.withdrawProposal(previous.id, identity, proposal.id);
+          if (old.op !== operation.op) continue;
+          const sameSubject = old.op === "work.plan_template.save" && operation.op === "work.plan_template.save"
+            ? old.args.template === operation.args.template && (old.args.template !== undefined || old.args.name === operation.args.name)
+            : "task" in old.args && "task" in operation.args && old.args.task === operation.args.task;
+          if (sameSubject) this.store.withdrawProposal(previous.id, identity, proposal.id);
         }
         this.store.db.query("INSERT INTO work_proposal_requests(actor,request,operation,proposal,target_source) VALUES (?,?,?,?,?)").run(identity.actor.id, request.request_id, JSON.stringify(operation), proposal.id, source ?? null);
         this.store.audit(identity, operation.op, decision.result, proposal.id, "pending_approval");
