@@ -7,6 +7,8 @@ import { writingContext } from "../note-text.ts";
 import { matchTerms } from "../note-matches.ts";
 import type { KnowledgeContext, KnowledgeDocument, KnowledgeRelatedResult } from "@lumio/schema";
 import { KnowledgeCreate } from "./knowledge-create.ts";
+import { aiNoteCard, hydrateAiEmbeds } from "../ai-note-embed.ts";
+import { resourceStatusText } from "../resources.ts";
 /**
  * 知识（ADR 0034、0035）：新建、实时编辑、推荐与链接/反向链接。
  * 私密内容默认隐藏，需显式打开；关闭时清空已显示的详情并丢弃迟到的私密响应。
@@ -23,9 +25,9 @@ import { t, translated } from "../i18n.ts";
 import { renderedOutline } from "../article-outline.ts";
 import { SideRail, type RailEntry } from "../side-rail.ts";
 
-const TYPE_LABEL: Record<string, string> = translated({ paper: "Paper", idea: "Idea", experiment: "Experiment", source: "Source", post: "Post", asset: "Asset", project: "Old project", task: "Old task", routine: "Old routine" });
+const TYPE_LABEL: Record<string, string> = translated({ paper: "Paper", idea: "Idea", experiment: "Experiment", source: "Source", post: "Post", asset: "Asset", "ai-note": "AI", project: "Old project", task: "Old task", routine: "Old routine" });
 const LEGACY = new Set(["project", "task", "routine"]);
-const EDITABLE = new Set(["paper", "source", "idea", "experiment", "post"]);
+const EDITABLE = new Set(["paper", "source", "idea", "experiment", "post", "ai-note"]);
 
 function editableId(note: NoteDetail["note"]): string | undefined {
   return EDITABLE.has(note.type) && !note.path.startsWith("life/") ? note.id : undefined;
@@ -229,6 +231,9 @@ export class KnowledgePane {
     const attribution = [Array.isArray(fm.authors) ? fm.authors.filter(value => typeof value === "string").join(", ") : typeof fm.author === "string" ? fm.author : "", typeof fm.year === "number" ? String(fm.year) : typeof fm.site === "string" ? fm.site : ""].filter(Boolean).join(" · ");
     const body = h("div", { class: "markdown" });
     body.innerHTML = renderMarkdown(note.body); // renderMarkdown 已转义全部原文，只生成受控标签
+    hydrateAiEmbeds(body, this.client, { open: id => void this.open(id) });
+    const ai = note.note.type === "ai-note";
+    const model = ai && typeof fm.model === "string" ? fm.model : "";
     const list = (title: string, items: LinksResult["outgoing"]) => h("section", {}, h("h3", {}, t("{0} ({1})", title, items.length)),
       items.length ? h("ul", {}, ...items.map(l => h("li", {}, l.note ? h("a", { href: "#", "data-note": l.note.id ?? l.note.path }, l.note.title) : h("span", { class: "muted" }, t("{0} (not found)", l.target)))))
         : h("p", { class: "muted" }, t("None")));
@@ -237,12 +242,33 @@ export class KnowledgePane {
       h("h1", { class: "reader-title" }, note.note.title),
       h("div", { class: "reader-meta" }, h("span", { class: "pill" }, kindLabel), attribution && h("span", {}, attribution), sourceUrl && h("a", { href: sourceUrl, target: "_blank", rel: "noopener noreferrer nofollow", class: "btn btn-small" }, icon("external"), t("Open source")), note.note.citekey && h("span", { class: "pill" }, note.note.citekey),
         h("button", { type: "button", class: "btn btn-small", title: t("Show how this note links to others"), onclick: () => this.openGraph(note.note.id ?? note.note.path, note.note.title) }, icon("graph"), t("Graph"))),
+      ai && h("p", { class: "ai-note-notice" }, icon("bot"), h("span", {}, model ? t("Written by AI ({0}). Your own notes embed it with a link on its own line.", model) : t("Written by AI. Your own notes embed it with a link on its own line."))),
+      this.sources(fm.derived_from),
       body,
       links && h("footer", { class: "backlinks" }, list(t("Links to"), links.outgoing), list(t("Linked from"), links.incoming))));
     this.detail.scrollTop = 0;
     this.outlineEntries = () => renderedOutline(this.detail, body); this.outline.refresh();
     if(editableId(note.note))void this.enableEditing(note);
     else this.detail.querySelector("article")?.append(h("p",{class:"field-hint"},t("This note is read-only here. Check its metadata or edit it in your external editor.")));
+  }
+  /** 来源（derived_from，ADR 0051）：ID 经 Hub 查可见标题，URL 直接打开。 */
+  private sources(value: unknown): HTMLElement | undefined {
+    const items = Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+    if (!items.length) return undefined;
+    const generation = this.generation, includePrivate = this.includePrivate;
+    const rows = items.map(item => {
+      const external = safeExternalUrl(item);
+      if (external) return h("li", {}, h("a", { href: external, target: "_blank", rel: "noopener noreferrer nofollow" }, item));
+      const label = h("a", { href: "#", class: "resource-link", "data-resource": item }, item);
+      const row = h("li", {}, label);
+      void this.client.resource(item, { includePrivate }).then(summary => {
+        if (generation !== this.generation) return;
+        if (summary.status === "visible") label.textContent = summary.title;
+        else { label.classList.add("is-unavailable"); row.append(h("span", { class: "muted" }, ` · ${resourceStatusText(summary.status)}`)); }
+      }, () => undefined);
+      return row;
+    });
+    return h("section", { class: "note-sources" }, h("h3", {}, t("Sources")), h("ul", {}, ...rows));
   }
   /**
    * 关系图：以这篇笔记为中心，沿出链与反链画一层或两层（只读现有链接接口）。
@@ -307,7 +333,7 @@ export class KnowledgePane {
       this.linksRevision=doc.revision;
       const context=()=>writingContext(title.value,this.editor?.value??doc.document.body,this.editor?.position??0);
       this.editor=new NoteEditor({value:saver.body,change:(text,position,composing)=>{this.saver!.change(title.value,text);clearTimeout(this.saveTimer);if(!composing&&!this.saver!.error)this.saveTimer=setTimeout(()=>void this.saver?.save(),800);this.recommend(writingContext(title.value,text,position));},context:()=>this.recommend(context()),
-        referenceContext:position=>writingContext(title.value,this.editor!.value,position),references:(query,position)=>this.client.noteReferences({source_id:note.note.id!,query,context:writingContext(title.value,this.editor!.value,position)}),open:ref=>void this.open(this.resolveReference(ref)),save:()=>{clearTimeout(this.saveTimer);if(!this.saver?.error)void this.saver?.save();},outlineChanged:()=>this.outline.refresh()});
+        referenceContext:position=>writingContext(title.value,this.editor!.value,position),references:(query,position)=>this.client.noteReferences({source_id:note.note.id!,query,context:writingContext(title.value,this.editor!.value,position)}),open:ref=>void this.open(this.resolveReference(ref)),embed:(id,label,edit)=>aiNoteCard(this.client,id,label,{open:target=>void this.open(target),edit}),save:()=>{clearTimeout(this.saveTimer);if(!this.saver?.error)void this.saver?.save();},outlineChanged:()=>this.outline.refresh()});
       const titleChanged = (composing: boolean) => {
         if (!composing && /[\r\n]/.test(title.value)) title.value = title.value.replace(/[\r\n]+/g, " ");
         fitTitle();

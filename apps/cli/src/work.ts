@@ -13,19 +13,35 @@ import { WORK_OPTIONS as options } from "./command-definitions.ts";
 
 const usage = () => msg("work.usage_lumio_task_new_list_show_update_edit_status_assign_comment_con");
 
+function workClient() {
+  const fetchWithAdvisories = Object.assign(async (...args: Parameters<typeof fetch>) => {
+    const response = await fetch(...args);
+    const targets = response.headers.get("X-Lumio-Advisory-Targets");
+    if (response.ok && targets) console.error(msg("targets.advisory", targets));
+    return response;
+  }, { preconnect: fetch.preconnect });
+  return createClient({ ...hubCredentials(), language: language(), fetch: fetchWithAdvisories,
+    onOfflineTargets: targets => console.error(msg("targets.offline", targets.join(", "))) });
+}
+
 /** Returns undefined only when an old task command must use the v1 compatibility path. */
 export async function runWork(kind: "task" | "project", args: string[], log: (line: string) => void): Promise<number | undefined> {
   if (kind === "task" && args.includes("--legacy")) return;
   const { values, positionals } = parseArgs({ args, allowPositionals: true, strict: true, options });
   const [action, reference, ...rest] = positionals;
   const defaultTarget = values["default-target"];
+  const defaultPlan = values["default-plan"];
+  if (defaultPlan !== undefined) {
+    if (kind !== "project" || action !== "update" || values.patch !== undefined) throw new Error(msg("work.default_plan_usage"));
+    if (defaultPlan !== "" && !idOf("wft").safeParse(defaultPlan).success) throw new Error(msg("work.default_plan_id"));
+  }
   if (values.ready && values.blocked) throw new Error(msg("work.readiness_exclusive"));
   if (!action || !["new", "create", "list", "show", "update", "edit", "status", "assign", "comment", "continue", "hand", "finish", "cancel", "reopen", "ack", "plan", "checkpoint"].includes(action)) {
     if (kind === "task") return;
     throw new Error(usage());
   }
   if (kind === "task" && ["status", "assign", "ack"].includes(action)) throw new Error(msg("work.use_turn_commands"));
-  const client = createClient({ ...hubCredentials(), language: language(), onOfflineTargets: targets => console.error(msg("targets.offline", targets.join(", "))) });
+  const client = workClient();
   const emit = (value: unknown) => log(values.json ? JSON.stringify(value) : typeof value === "string" ? value : JSON.stringify(value, null, 2));
   const send = async (op: string, payload: Record<string, unknown>): Promise<WorkCommandResult> => client.workCommand(WorkCommandRequest.parse({
     request_id: values["request-id"] ?? randomUUID(), operation: { op, args: payload },
@@ -35,10 +51,13 @@ export async function runWork(kind: "task" | "project", args: string[], log: (li
     if (kind === "task" && action === "plan") {
       const taskId = rest[0];
       if (!["set", "show"].includes(reference ?? "") || rest.length !== 1 || !taskId || (reference === "set" && !values.file)) throw new Error(msg("work.plan_usage"));
-      const task = (await client.workTask(taskId)).task;
-      if (reference === "show") emit(task.plan ?? null);
-      else emit(await send("work.task.plan.set", { task: taskId, expected_revision: values.revision === undefined ? task.revision : Number(values.revision),
-        plan: await readPlan(values.file!, true), from: values.from }));
+      if (reference === "show") emit((await client.workTask(taskId)).task.plan ?? null);
+      else {
+        const plan = await readPlan(values.file!, true);
+        const task = (await client.workTask(taskId)).task;
+        emit(await send("work.task.plan.set", { task: taskId, expected_revision: values.revision === undefined ? task.revision : Number(values.revision),
+          plan, from: values.from }));
+      }
       return 0;
     }
     if (kind === "task" && action === "checkpoint") {
@@ -143,7 +162,7 @@ export async function runWork(kind: "task" | "project", args: string[], log: (li
     } else if (values.patch) {
       try { patch = JSON.parse(values.patch); } catch { throw new Error(msg("execution-routines.patch_must_be_a_json_object")); }
     } else if (action === "update") {
-      const fields = current.type === "project" ? { goal: values.goal, repo: values.repo, deadline: values.deadline, workdir: values.workdir, default_target: defaultTarget === "" ? null : defaultTarget }
+      const fields = current.type === "project" ? { goal: values.goal, repo: values.repo, deadline: values.deadline, workdir: values.workdir, default_target: defaultTarget === "" ? null : defaultTarget, default_plan: defaultPlan === "" ? null : defaultPlan }
         : { project: values.project, parent: values.parent, dependencies: values.depends?.split(",").filter(Boolean), due: values.due, workdir: values.workdir, model: values.model,
           gpus: values.gpus?.split(",").map(Number), timeout_minutes: values.timeout === undefined ? undefined : Number(values.timeout) };
       patch = Object.fromEntries(Object.entries({ ...fields, description: values.file ? await readFile(values.file, "utf8") : values.description }).filter(([, value]) => value !== undefined));
@@ -159,10 +178,16 @@ export async function runWork(kind: "task" | "project", args: string[], log: (li
 
 async function readPlan(path: string, nullable = false): Promise<HandoffPlan | null> {
   const content = await readFile(path, "utf8");
-  try {
-    const value: unknown = JSON.parse(content);
-    return nullable && value === null ? null : HandoffPlan.parse(value);
-  } catch { throw new Error(msg("work.invalid_plan_file")); }
+  let value: unknown;
+  try { value = JSON.parse(content); }
+  catch { throw new Error(msg("work.invalid_plan_json")); }
+  if (nullable && value === null) return null;
+  const parsed = HandoffPlan.safeParse(value);
+  if (!parsed.success) {
+    const details = parsed.error.issues.map(issue => [issue.path.join("."), issue.message].filter(Boolean).join(": ")).join("\n");
+    throw new Error(msg("work.invalid_plan_file", details));
+  }
+  return parsed.data;
 }
 
 export async function runPlanTemplates(args: string[], log: (line: string) => void): Promise<number> {
@@ -172,7 +197,7 @@ export async function runPlanTemplates(args: string[], log: (line: string) => vo
   const [action, reference, ...rest] = positionals;
   if (rest.length || !["list", "save", "delete"].includes(action ?? "") || (action === "list" ? Boolean(reference) : !reference)
     || (action === "save" && !values.file)) throw new Error(msg("work.template_usage"));
-  const client = createClient({ ...hubCredentials(), language: language() });
+  const client = workClient();
   const requestId = values["request-id"] ?? randomUUID();
   if (action === "list") {
     const templates = await client.workPlanTemplates();
@@ -180,7 +205,8 @@ export async function runPlanTemplates(args: string[], log: (line: string) => vo
   } else {
     const value = action === "save" ? await client.saveWorkPlanTemplate({ name: reference!, plan: (await readPlan(values.file!))!, template: values.template }, requestId)
       : await client.deleteWorkPlanTemplate(reference!, requestId);
-    log(JSON.stringify(value, null, values.json ? undefined : 2));
+    if (value.kind === "proposal" && !values.json) log(msg("work.template_proposed", value.proposal));
+    else log(JSON.stringify(value, null, values.json ? undefined : 2));
   }
   return 0;
 }
