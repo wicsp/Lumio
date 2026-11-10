@@ -11,6 +11,7 @@ library/   papers/ → paper     sources/ → source     refs.bib（生成物）
 research/  ideas/ → idea       experiments/ → experiment     reports/（暂不扫描）
 plan/      projects/ → project tasks/ → task  routines/ → routine
 create/    posts/ → post
+ai/        notes/ → ai-note（AI 写的知识，ADR 0051）
 life/      assets/ → asset（私密）
 files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是实体，不扫描
 ```
@@ -24,7 +25,7 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 
 本表描述知识目录中的文件格式；Project/Task/Routine 保留旧格式兼容，新业务对象与数据库规则见 [work.md](work.md)。
 
-所有实体共有：`id`（`<前缀>_<ULID>`）、`type`、`title`、`created`、`updated`（ISO 8601 带时区）、`tags`。（`related` 已删除，旧笔记里的值原样保留但不计入链接图，ADR 0018。）
+所有实体共有：`id`（`<前缀>_<ULID>`）、`type`、`title`、`created`、`updated`（ISO 8601 带时区）、`tags`，以及可选的 `derived_from`（来源：Lumio ID 或 URL，ADR 0051）。（`related` 已删除，旧笔记里的值原样保留但不计入链接图，ADR 0018。）
 
 | 类型 | 前缀 | 要点 |
 |---|---|---|
@@ -36,6 +37,7 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 | routine | `rtn` | 例行任务：`schedule`（5 段 cron）、`assignee`（agent）、`context`（none/previous）与执行配置；每次结果追加在笔记里（ADR 0019） |
 | experiment | `exp` | `project` 必填；`hypothesis`、`metrics`、`artifacts` |
 | post | `post` | `format` 必填（无默认值）；`media` 按角色命名；`targets` 每个平台一个，发布结果由程序写入 |
+| ai-note | `ain` | AI 写的知识；`generated_by`（写入者 `act_…`，Hub 填）、`model`；见下文「来源与 AI 笔记」（ADR 0051） |
 | asset | `ast` | `kind` 必填；订阅、卡、账户、域名、保险、证件等；**私密**；禁止存完整卡号、CVV、密码、余额、证件号 |
 
 字段的完整定义以 `packages/schema` 为准。
@@ -70,13 +72,21 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 - **改名**：用任何编辑器改名都可以（有的编辑器会自动更新链接）；造成的断链由 `lumio check` 列出，不自动修复；以后官方 GUI 经 Hub 改名并同时更新引用（ADR 0018）。
 - 解析不到的标为悬空链接，不报错；代码块里的 `[[ ]]` 忽略。
 - 导出参考文献时从正文找引用：`lumio export bib --from <笔记>` 只导出该笔记里 `[[citekey]]`、指向论文笔记的 Markdown 链接或 `\cite{citekey}` 引用到的论文（ADR 0018）。
-- AI 生成的内容写在正文的标记区块里（ADR 0012）：
-  ```
-  <!-- lumio:ai start name=summary model=<模型> generated=<时间> -->
-  ……
-  <!-- lumio:ai end name=summary -->
-  ```
-  AI 只能整体重写区块内部；人想保留的内容要移到区块外。**区块内的 `[[ ]]` 不计入人的链接图。**
+- 知识笔记不再新增 `<!-- lumio:ai -->` 区块（ADR 0051 取代 ADR 0012 第 3 节对知识笔记的规则）；解析器继续识别已有区块，
+  **区块内的链接不计入链接图、不参与引用导出**。旧任务/例行任务笔记的兼容写回不变。
+
+## 来源与 AI 笔记（ADR 0051；已批准，未实现）
+
+- **只有知识长期整理和检索**：对话、执行记录不进知识检索，也不做自动匹配；有价值的内容由 AI 或人写成知识，并记下来源。
+- **`derived_from`**：任何知识都可填，元素是 Lumio ID（前缀全局唯一，可推出模块，粒度可到消息 `amsg_`、Job、日志事件）或 URL；
+  AI 写入时由 Lumio 填写。不计入链接图；索引保存反向关系（可重建）。post 原有同名字段含义不变，放宽为 ID 或 URL。
+- **正文引用非知识资源**：`[文字](lumio:<ID>)`。Web 经权限检查后打开；进入跨模块引用表，不进链接图与全库图谱。知识之间仍用 `[[ ]]` 或相对路径链接。
+- **AI 笔记**（`ai/notes/`，类型 `ai-note`）：AI 写的知识一律放这里，一份一件事，重新生成即更新同一份。
+  人的笔记用**单独成段的普通链接**嵌入 AI 笔记，Web 渲染为标明 AI 的可折叠卡片，不新增语法；人正文里的文字归人，嵌入的不归人。
+  人指向 AI 笔记的链接计入链接图；AI 笔记正文里的链接不计入人的链接图，引用导出不取 AI 笔记。
+- 人可在 Web 修改 AI 笔记，作者不变；AI 更新须带读到的版本，人改过则冲突。搜索与相关推荐包含 AI 笔记并标明。
+- **被引用资源的删除**：删除对话、任务等时提示被多少知识引用；仍可删除，知识中显示"已在回收站/已删除"，恢复后复原。对话与执行记录默认长期保留。
+- agent 写 AI 笔记的权限见 [security.md](security.md)。
 
 ## 全库知识图谱（ADR 0040，K3）
 

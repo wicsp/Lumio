@@ -10,6 +10,8 @@
 > **已批准、本地验收中**：[ADR 0034](adr/0034-knowledge-creation-and-authoring.md) 第 1–5 节（知识新建入口与模板，[K1-0](tasks/K1-0-knowledge-authoring.md)）与
 > [ADR 0035](adr/0035-live-note-editing-and-related-notes.md) 第 1–8 节（实时编辑、相关推荐、`[[` 候选与上标脚注，[K2-0](tasks/K2-0-live-note-editing.md)）均于 2026-11-06 获批准并已合并（#99），规则已写入 [`design/knowledge.md`](design/knowledge.md)。PDF 与 RAG 不在本期。
 
+> **已批准、未实现**：[ADR 0051](adr/0051-resource-anchors-ai-notes.md)（资源锚点、`derived_from`、独立的 AI 笔记），规则见 [`design/knowledge.md`](design/knowledge.md)「来源与 AI 笔记」，实施见 [K4-0](tasks/K4-0-sources-and-ai-notes.md)。
+
 ## 0. 目标与非目标
 
 **目标**：在一个地方管理论文笔记、外部资料、想法、项目与任务、实验结果、发布内容和个人资产；
