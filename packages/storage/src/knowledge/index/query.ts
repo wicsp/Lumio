@@ -37,6 +37,14 @@ export async function searchNotes(root: string, query: string, options: SearchOp
   });
 }
 
+export async function noteById(root: string, id: string, options: QueryOptions = {}): Promise<NoteRef | undefined> {
+  return withIndex(root, options, db => {
+    const rows = db.query<NoteRow, [string, number]>("SELECT * FROM notes WHERE id=? AND (private=0 OR ?=1) LIMIT 2")
+      .all(id, Number(options.includePrivate ?? false));
+    return rows.length === 1 ? noteRef(rows[0]!) : undefined;
+  });
+}
+
 export async function showNote(root: string, reference: string, options: QueryOptions = {}): Promise<NoteDetail> {
   return withIndex(root, options, (db) => {
     const row = resolveReference(db, reference, options.includePrivate);
@@ -48,16 +56,19 @@ export async function noteLinks(root: string, reference: string, options: QueryO
   return withIndex(root, options, (db) => {
     const row = resolveReference(db, reference, options.includePrivate);
     type Edge = { from_path: string; source: Link["source"]; target: string; resolved_path: string | null };
-    const outgoing = db.query<Edge, [string]>("SELECT * FROM links WHERE from_path=? ORDER BY rowid").all(row.path).map((edge): Link => {
+    const out = (table: "links" | "ai_links") => db.query<Edge, [string]>(`SELECT * FROM ${table} WHERE from_path=? ORDER BY rowid`).all(row.path).map((edge): Link => {
       const target = edge.resolved_path ? db.query<NoteRow, [string]>("SELECT * FROM notes WHERE path=?").get(edge.resolved_path) : null;
       const visible = target && (!target.private || options.includePrivate);
       return { source: edge.source, target: edge.target, dangling: !visible, ...(visible ? { note: noteRef(target) } : {}) };
     });
-    const incoming = db.query<Edge, [string]>("SELECT * FROM links WHERE resolved_path=? ORDER BY from_path, rowid").all(row.path).flatMap((edge) => {
+    const into = (table: "links" | "ai_links") => db.query<Edge, [string]>(`SELECT * FROM ${table} WHERE resolved_path=? ORDER BY from_path, rowid`).all(row.path).flatMap((edge) => {
       const from = db.query<NoteRow, [string]>("SELECT * FROM notes WHERE path=?").get(edge.from_path)!;
       return from.private && !options.includePrivate ? [] : [{ source: edge.source, target: edge.target, dangling: false, note: noteRef(from) }];
     });
-    return LinksResult.parse({ note: noteRef(row), outgoing, incoming });
+    // ADR 0053：AI 笔记的链接单独列出，缺失表示没有。
+    const aiOutgoing = out("ai_links"), aiIncoming = into("ai_links");
+    return LinksResult.parse({ note: noteRef(row), outgoing: out("links"), incoming: into("links"),
+      ...(aiOutgoing.length ? { ai_outgoing: aiOutgoing } : {}), ...(aiIncoming.length ? { ai_incoming: aiIncoming } : {}) });
   });
 }
 
@@ -66,6 +77,7 @@ export async function collectCitations(root: string, reference: string, options:
   const msg = options.text ?? ((key: string, ...args: unknown[]) => key.replace(/\$\{(\d+)\}/g, (_, index: string) => String(args[Number(index)])));
   return withIndex(root, options, (db) => {
     const row = resolveReference(db, reference);
+    if (row.type === "ai-note") return { papers: [], warnings: [] };
     const { citations, ignored } = extractCitations(row.body, row.path);
     const papers = new Map<string, NoteRef>();
     const warnings: string[] = ignored ? [msg("${0} citations inside AI blocks were excluded", ignored)] : [];
@@ -99,6 +111,20 @@ export async function checkLinks(root: string, options: QueryOptions = {}): Prom
     }));
     return CheckResult.parse({ dangling, total: dangling.length });
   });
+}
+
+/** Count visible notes referencing any of the supplied resources, once per note. */
+export async function countKnowledgeReferences(root: string, targets: readonly string[], options: QueryOptions = {}): Promise<number> {
+  if (!targets.length) return 0;
+  return withIndex(root, options, db => db.query<{ count: number }, { targets: string; includePrivate: number }>(`
+    WITH targets AS (SELECT value FROM json_each($targets)), refs AS (
+      SELECT from_path FROM derived_from WHERE target IN (SELECT value FROM targets)
+      UNION
+      SELECT from_path FROM resource_links WHERE target IN (SELECT value FROM targets)
+    )
+    SELECT count(*) AS count FROM refs JOIN notes n ON n.path=refs.from_path
+    WHERE n.private=0 OR $includePrivate=1
+  `).get({ targets: JSON.stringify(targets), includePrivate: Number(options.includePrivate ?? false) })!.count);
 }
 
 /** Paths only: raw sensitive text is never stored or returned. */

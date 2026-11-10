@@ -1,4 +1,4 @@
-import { AIQuotaSnapshot, AIQuotaSettings, AIQuotaView, AIQuotaViews, ClaudeQuotaBindings, ClaudeQuotaSample } from "./ai-usage.ts";
+import { AIQuotaSnapshot, AIQuotaSettings, AIQuotaView, AIQuotaViews, ClaudeQuotaBindings, ClaudeQuotaSample, ClaudeBackgroundResult } from "./ai-usage.ts";
 import {AIConnection,AIConnectionInput,AIProfile,AIProfileInput,AIUsageBinding,AIConfiguration,AIModel,AIRuntime,NativeAccountBinding,NativeConnectionAction,NativeConnectionView,NativeSession,NativeRuntimeView,NativeApproval,NativeAction,NativeCreate,NativeEventData,NativeEventRecord,NativeRuntimeCommand,NativeRuntimeMessage,NativeMCPRequest,NativeMCPResult} from "./ai.ts";
 import { KnowledgeDocument, KnowledgeUpdateRequest, KnowledgeUpdateResult, KnowledgeContext, KnowledgeRelatedRequest, KnowledgeRelatedResult, KnowledgeReferencesRequest, KnowledgeReferencesResult } from "./knowledge-editing.ts";
 /**
@@ -40,7 +40,7 @@ import {
   AssistantConfigUpdate, AssistantConfigView,
 } from "./assistant.ts";
 import { AgentInfo, AgentRevokeRequest, AgentTokenIssued, AgentTokenRequest, JobAccess } from "./access.ts";
-import { CapabilityChange } from "./capabilities.ts";
+import { CapabilityChange, KnowledgeAiNoteCommand } from "./capabilities.ts";
 import { HandoffPlan, PlanRun, PlanTemplate } from "./plan.ts";
 import { NotificationEvent, PushDevice, PushDeviceUpdate, PushPublicKey, PushSubscriptionInput, PushTestResult } from "./notifications.ts";
 import { ExecutionRoutine, ExecutionRoutineCommandRequest, ExecutionRoutineInfo } from "./execution.ts";
@@ -55,7 +55,7 @@ import { Operation } from "./operation.ts";
 import { PrivilegedApproval, PrivilegedReport, PrivilegedStatus } from "./privileged.ts";
 import { CliConfig, ClientInvite, ClientInviteRequest, ClientJoin, ClientJoinRequest, HubSigningKey, RuntimeInvite, RuntimeInviteRequest, RuntimeJoin, RuntimeJoinRequest } from "./setup.ts";
 import { Proposal } from "./proposal.ts";
-import { CheckResult, LinksResult, NoteDetail, SearchResult } from "./query.ts";
+import { CheckResult, LinksResult, NoteDetail, ResourceSummary, SearchResult } from "./query.ts";
 
 /** 需要导出为 JSON Schema 的全部契约，键名即输出文件名。 */
 import { KnowledgeTemplateRequest, KnowledgeTemplateResult, PaperResolveRequest, PaperResolveResult, KnowledgeCreateRequest, KnowledgeCreateResult } from "./knowledge-authoring.ts";
@@ -65,7 +65,7 @@ import { KnowledgeGraphArgs, KnowledgeGraph, KnowledgeGraphEdge } from "./knowle
 export const CONTRACTS = {
   "ai-connection": AIConnection, "ai-connection-input": AIConnectionInput, "ai-profile": AIProfile, "ai-profile-input": AIProfileInput, "ai-usage-binding": AIUsageBinding, "ai-configuration": AIConfiguration, "ai-model": AIModel, "ai-runtime": AIRuntime,
   "ai-quota-snapshot": AIQuotaSnapshot, "ai-quota-settings": AIQuotaSettings, "ai-quota-view": AIQuotaView, "ai-quota-views": AIQuotaViews,
-  "claude-quota-bindings": ClaudeQuotaBindings, "claude-quota-sample": ClaudeQuotaSample,
+  "claude-quota-bindings": ClaudeQuotaBindings, "claude-quota-sample": ClaudeQuotaSample, "claude-background-result": ClaudeBackgroundResult,
   "native-account-binding": NativeAccountBinding, "native-connection-action": NativeConnectionAction, "native-connection-view": NativeConnectionView,
   "native-session": NativeSession, "native-runtime-view": NativeRuntimeView, "native-approval": NativeApproval, "native-action": NativeAction, "native-create": NativeCreate, "native-event": NativeEventData, "native-event-record": NativeEventRecord, "native-runtime-command": NativeRuntimeCommand, "native-runtime-message": NativeRuntimeMessage, "native-mcp-request": NativeMCPRequest, "native-mcp-result": NativeMCPResult,
   "knowledge-graph-args": KnowledgeGraphArgs,
@@ -96,6 +96,8 @@ export const CONTRACTS = {
   post: Post,
   asset: Asset,
   "ai-note": AiNote,
+  "ai-note-command": KnowledgeAiNoteCommand,
+  "resource-summary": ResourceSummary,
   job: Job,
   "job-spec": JobSpec,
   "job-result": JobResult,

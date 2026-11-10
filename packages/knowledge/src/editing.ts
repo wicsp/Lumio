@@ -4,13 +4,18 @@ import { parseDocument } from "yaml";
 import { isDeepStrictEqual } from "node:util";
 import { posix } from "node:path";
 import { parseFrontmatter } from "./frontmatter.ts";
-export const EDITABLE_KNOWLEDGE_TYPES = ["paper", "source", "idea", "experiment", "post"] as const;
+export const EDITABLE_KNOWLEDGE_TYPES = ["paper", "source", "idea", "experiment", "post", "ai-note"] as const;
 export function editableMetadata(data: Record<string, unknown>, type: string): boolean {
     return (EDITABLE_KNOWLEDGE_TYPES as readonly string[]).includes(type) && data.type === type && Entity.safeParse(data).success;
 }
-export function editKnowledgeDocument(bytes: Buffer, title: string, body: string, updated: string): Buffer {
+export interface KnowledgeMetadataEdits {
+    tags?: string[];
+    derived_from?: string[];
+}
+export function editKnowledgeDocument(bytes: Buffer, title: string, body: string, updated: string, metadata: KnowledgeMetadataEdits = {}): Buffer {
     const parsed = parseFrontmatter(bytes), raw = bytes.toString("utf8");
-    if (parsed.data.title === title && parsed.body.toString("utf8") === body)
+    const fields = Object.entries(metadata).filter(([key, value]) => !isDeepStrictEqual(parsed.data[key], value));
+    if (!fields.length && parsed.data.title === title && parsed.body.toString("utf8") === body)
         return bytes;
     const match = /^(\uFEFF?---[^\S\r\n]*\r?\n)([\s\S]*?)(^---[^\S\r\n]*(?:\r?\n|$))/m.exec(raw);
     if (!match || match.index !== 0)
@@ -18,11 +23,15 @@ export function editKnowledgeDocument(bytes: Buffer, title: string, body: string
     const doc = parseDocument(match[2]!, { keepSourceTokens: true });
     doc.set("title", title);
     doc.set("updated", updated);
-    const expected = { ...parsed.data, title, updated };
+    for (const [key, value] of fields)
+        doc.set(key, value);
+    const expected = { ...parsed.data, ...metadata, title, updated };
     if (doc.errors.length || !isDeepStrictEqual(doc.toJS({ maxAliasCount: 100 }), expected))
         throw new CoreError("NOTE_NOT_EDITABLE", { key: "frontmatter.could_not_generate_frontmatter", args: [] });
     const header = doc.toString({ lineWidth: 0 });
-    const result = Buffer.from(match[1] + header.replace(/\r?\n/g, match[1]!.endsWith("\r\n") ? "\r\n" : "\n") + match[3] + body);
+    const newline = match[1]!.endsWith("\r\n") ? "\r\n" : "\n";
+    const closing = match[3]! + (body && !match[3]!.endsWith("\n") ? newline : "");
+    const result = Buffer.from(match[1] + header.replace(/\r?\n/g, newline) + closing + body);
     if (!isDeepStrictEqual(parseFrontmatter(result).data, expected))
         throw new CoreError("NOTE_NOT_EDITABLE", { key: "frontmatter.could_not_generate_frontmatter", args: [] });
     return result;

@@ -1,10 +1,11 @@
 import { mkdir } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { NativeRuntimeCommand, NativeRuntimeMessage } from "@lumio/schema";
+import { NativeRuntimeCommand, NativeRuntimeMessage, type ClaudeBackgroundResult } from "@lumio/schema";
 import type { RuntimeConfig } from "../config.ts";
 import { NativeLocalStore } from "./store.ts";
 import { NativeManager } from "./manager.ts";
 import { ConnectionAuth } from "./connection-auth.ts";
+import { queryClaudeQuota } from "./claude-quota.ts";
 /** Two authenticated HTTP legs; durable events and commands retain independent semantics. */
 export async function runNativeChannel(
   config: RuntimeConfig,
@@ -17,6 +18,7 @@ export async function runNativeChannel(
   let flushing = false,
     pendingFlush = false;
   let controller: AbortController | undefined;
+  let claudeFlight: { account?: string; result: Promise<ClaudeBackgroundResult> } | undefined;
   const post = async (value: unknown) => {
     const r = await fetch(`${config.url}/v2/runtime/native/events`, {
       method: "POST",
@@ -72,6 +74,7 @@ export async function runNativeChannel(
         if (!channel) throw new Error("Native handshake unavailable");
         const connectionAuth = response.headers.get("x-lumio-native-connection-auth") === "1";
         const connectionUsage = response.headers.get("x-lumio-native-connection-usage") === "1" && connectionAuth;
+        const claudeUsage = response.headers.get("x-lumio-native-claude-usage") === "1" && process.platform === "darwin";
         await post(
           NativeRuntimeMessage.parse({
             type: "hello",
@@ -81,6 +84,7 @@ export async function runNativeChannel(
             isolation: process.platform === "darwin" ? "macos-seatbelt" : "unsupported",
             ...(connectionAuth ? { connection_auth: true } : {}),
             ...(connectionUsage ? { connection_usage: true } : {}),
+            ...(claudeUsage ? { claude_usage: true } : {}),
           }),
         );
         flush();
@@ -99,6 +103,21 @@ export async function runNativeChannel(
               buffer = buffer.slice(end + 1);
               if (!line.trim()) continue;
               const c = NativeRuntimeCommand.parse(JSON.parse(line));
+              if (c.type === "claude_usage") {
+                if (!claudeUsage) throw new Error("Claude usage was not negotiated");
+                if (!claudeFlight) {
+                  claudeFlight = { account: c.account,
+                    result: queryClaudeQuota(config.stateDir, AbortSignal.any([signal, current.signal]), c.account)
+                      .finally(() => { claudeFlight = undefined; }) };
+                }
+                const query = claudeFlight.account === c.account ? claudeFlight.result
+                  : Promise.resolve({ status: "failed", issue: "timeout" } as const);
+                void query.then(result => {
+                  if (current.signal.aborted || signal.aborted || controller !== current) return;
+                  return post(NativeRuntimeMessage.parse({ type: "claude_usage", command: c.command, connection: c.connection, generation: c.generation, result }));
+                }).catch(() => current.abort());
+                continue;
+              }
               if (c.type === "connection_usage") {
                 if (!connectionUsage) throw new Error("Connection usage was not negotiated");
                 void accounts.usage(c.connection, c.owner).then(result => {
@@ -143,6 +162,7 @@ export async function runNativeChannel(
     }
   } finally {
     controller?.abort();
+    await claudeFlight?.result;
     await manager.stop();
     await accounts.stop();
     store.close();

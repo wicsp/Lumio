@@ -1,10 +1,12 @@
 import { NativeSessionPanel } from "../native-session.ts";
 import { assistantProfiles, defaultAssistantProfile } from "../assistant-profile.ts";
+import { ChatProgress } from "../chat-progress.ts";
+import { effortLabel } from "../labels.ts";
 /**
  * 助手：对话历史、流式回复、停止接收与中断后核查；显式记忆。
  * 中断或结果不明时只核对已保存记录，不自动重发；同样的草稿重发时复用 request_id。
  */
-import type { AIProfile, NativeCreate, AssistantConversation, AssistantConversationDetail, AssistantMemory, AssistantChatRequest, AssistantToolCall } from "@lumio/schema";
+import type { AIConnection, AIProfile, NativeCreate, NativeEventRecord, AssistantConversation, AssistantConversationDetail, AssistantMemory, AssistantChatRequest, AssistantToolCall } from "@lumio/schema";
 import { errorText, type Client, type HubExtras } from "../api.ts";
 import { formatTime, newRequestId } from "../commands.ts";
 import { autosize, clear, empty, failure, h, icon, loading, openDialog, toast } from "../dom.ts";
@@ -17,9 +19,12 @@ import { drafts, textDraft } from "../drafts.ts";
 import { t, translated } from "../i18n.ts";
 import { MessageRail } from "../side-rail.ts";
 import { confirmDelete } from "../trash-actions.ts";
+import { MESSAGE_SEPARATOR, knowledgeReferences, referenceConsequence } from "../resources.ts";
 
 const TURN_LABEL: Record<string, string> = translated({ running: "Still working", done: "Done", failed: "Didn't finish", unknown: "Result unknown — check before retrying", cancelled: "Cancelled" });
 const SUGGESTIONS = ["Help me prioritize what to work on today", "How should I organize this week's experiment results?", "Draft an outline for the rebuttal"];
+const DEEPSEEK_MODELS = ["deepseek-flash", "deepseek-v4-pro"];
+const DEEPSEEK_EFFORTS = ["low", "high", "max"];
 
 export class AssistantPane {
   private layout = h("div", { class: "chat" });
@@ -28,7 +33,14 @@ export class AssistantPane {
   private messages = h("div", { class: "messages", role: "log", "aria-label": t("Conversation messages") });
   private text = autosize(h("textarea", { name: "chat-message", rows: "1", placeholder: t("Ask anything, or think through the next step…"), "aria-label": t("Message") }));
   private profiles: AIProfile[] = [];
+  private connections: AIConnection[] = [];
   private profile = h("select", { "aria-label": t("AI profile"), disabled: true });
+  private apiModel = h("select", { "aria-label": t("Model") });
+  private apiEffort = h("select", { "aria-label": t("Thinking effort") });
+  private apiControls = h("div", { class: "chat-turn-controls", hidden: true }, this.apiModel, this.apiEffort);
+  private apiControlsProfile?: string;
+  private progress = new Map<string, ChatProgress>();
+  private nativeTurn?: string;
   private profileStatus = h("div", { role: "status" });
   private profileLoad?: Promise<void>;
   private profilesLoaded = false;
@@ -59,7 +71,10 @@ export class AssistantPane {
   private nativeCreate?: NativeCreate;
   private firstNativeSend?: { conversation: string; message: string };
 
-  constructor(private root: HTMLElement, private client: Client, private hub: HubExtras, private navigate: Navigate = () => {}) {
+  /** 打开对话后要定位的消息（来自 lumio:amsg_… 链接，ADR 0051）。 */
+  private targetMessage?: string;
+
+  constructor(private root: HTMLElement, private client: Client, private hub: HubExtras, private navigate: Navigate = () => {}, initial?: string) {
     this.disposeReferences = referenceInput(this.text,client);
     this.native = new NativeSessionPanel(client, ready => {
       this.nativeReady = ready;
@@ -70,13 +85,16 @@ export class AssistantPane {
         this.firstNativeSend = undefined;
         if (unchanged) void this.submit();
       }
-    }, () => this.navigate("settings", "ai"));
+    }, () => this.navigate("settings", "ai"), record => this.onNativeProgress(record));
     this.profile.addEventListener("change", () => {
       this.selectedProfile = this.profile.value;
+      this.renderApiControls();
       this.updateComposer();
     });
     this.composer = h("form", { class: "composer" }, this.text,
-      h("div", { class: "composer-foot" }, this.profile, this.stop, this.send));
+      h("div", { class: "composer-foot" },
+        h("div", { class: "chat-turn-controls" }, this.profile, this.apiControls, this.native.controls, this.native.advanced),
+        this.stop, this.send));
     this.composer.addEventListener("submit", event => { event.preventDefault(); void this.submit(); });
     this.text.addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); this.composer.requestSubmit(); } });
     this.dock = h("div", { class: "chat-dock" }, this.native.element, this.notice, this.profileStatus, this.composer);
@@ -101,6 +119,17 @@ export class AssistantPane {
     this.showWelcome();
     void this.loadConversations();
     this.text.focus();
+    if (initial) this.open(initial);
+  }
+
+  /** `conv_…` 或 `conv_…@amsg_…`：打开对话，并定位到那条消息。 */
+  open(reference: string): void {
+    const [conversation, message] = reference.split(MESSAGE_SEPARATOR, 2);
+    if (!conversation?.startsWith("conv_")) return;
+    if (this.sending) { toast(t("The current reply is still streaming.")); return; }
+    this.targetMessage = message;
+    if (this.current === conversation && !message) return;
+    void this.openConversation(conversation, true);
   }
 
   dispose(): void { this.native.dispose();this.messageNav.dispose(); this.disposeReferences(); this.captureDraft(); this.active = false; this.generation++; this.controller?.abort(); }
@@ -135,6 +164,7 @@ export class AssistantPane {
     return this.profileLoad ??= this.client.aiConfiguration().then(config => {
       if (!this.active) return;
       this.profiles = config.profiles;
+      this.connections = config.connections;
       this.profilesLoaded = true;
       this.renderProfiles();
     }).catch(cause => {
@@ -144,10 +174,37 @@ export class AssistantPane {
 
   private renderProfiles(): void {
     const options = assistantProfiles(this.profiles, !!this.current, this.boundProfile);
-    clear(this.profile, ...options.map(profile => h("option", { value: profile.id }, profile.name)));
+    // Without a saved default nothing is preselected; say so instead of showing an empty pill.
+    clear(this.profile, h("option", { value: "", disabled: true, hidden: true }, t("Choose a profile")),
+      ...options.map(profile => h("option", { value: profile.id }, profile.name)));
     this.profile.value = this.selectedProfile ?? (this.current ? "" : defaultAssistantProfile(options));
     this.profile.hidden = !options.length;
+    this.renderApiControls();
     this.updateComposer();
+  }
+
+  private renderApiControls(): void {
+    const profile = this.profiles.find(value => value.id === this.profile.value);
+    const connection = this.connections.find(value => value.id === profile?.connection);
+    this.apiControls.hidden = profile?.engine !== "lumio";
+    if (!profile || this.apiControls.hidden) {
+      this.apiControlsProfile = undefined;
+      return;
+    }
+    const deepseek = connection?.kind === "deepseek" && !!connection.base_url
+      && new URL(connection.base_url).origin === "https://api.deepseek.com";
+    const models = [...new Set([profile.model, ...(deepseek ? DEEPSEEK_MODELS : []),
+      ...this.profiles.filter(value => value.connection === profile.connection).map(value => value.model)])];
+    const same = this.apiControlsProfile === profile.id;
+    const model = same && models.includes(this.apiModel.value) ? this.apiModel.value : profile.model;
+    const effort = same ? this.apiEffort.value : "";
+    this.apiControlsProfile = profile.id;
+    clear(this.apiModel, ...models.map(value => h("option", { value, selected: value === model }, value)));
+    clear(this.apiEffort, h("option", { value: "" }, profile.effort
+      ? t("Default effort ({0})", effortLabel(profile.effort)) : t("Default effort")),
+      ...(deepseek ? DEEPSEEK_EFFORTS.map(value => h("option", { value, selected: value === effort }, effortLabel(value))) : []));
+    this.apiModel.disabled = models.length < 2;
+    this.apiEffort.disabled = !deepseek;
   }
 
   private updateComposer(): void {
@@ -196,7 +253,10 @@ export class AssistantPane {
     this.firstNativeSend = undefined;
     this.captureDraft();
     this.current = this.selectedProfile = this.boundProfile = undefined;
+    this.apiControlsProfile = undefined;
     this.native.bind(undefined);
+    this.progress.clear();
+    this.nativeTurn = undefined;
     this.restoreDraft();
     this.renderProfiles();
     this.setBusy(false);
@@ -230,7 +290,7 @@ export class AssistantPane {
         h("button", { type: "button", class: "convo", disabled: this.sending, onclick: () => void this.openConversation(c.id) },
           h("strong", {}, c.title), h("span", { title: formatTime(c.updated) }, ago(c.updated))),
         h("button", { type: "button", class: "icon-btn row-delete", title: t("Delete conversation"), "aria-label": t("Delete conversation {0}", c.title),
-          disabled: this.sending, onclick: () => this.confirmDelete(c) }, icon("trash")))),
+          disabled: this.sending, onclick: () => void this.confirmDelete(c) }, icon("trash")))),
         !conversations.length && h("p", { class: "state" }, t("No conversations yet")));
       this.markCurrent();
       return conversations;
@@ -240,12 +300,14 @@ export class AssistantPane {
     }
   }
 
-  /** 删除对话（ADR 0038）：移入回收站；从中保存的记忆不受影响。 */
-  private confirmDelete(conversation: AssistantConversation): void {
+  /** 删除对话（ADR 0038）：移入回收站；从中保存的记忆不受影响；提示被多少知识引用（ADR 0051）。 */
+  private async confirmDelete(conversation: AssistantConversation): Promise<void> {
     if (this.sending) return;
+    const references = await knowledgeReferences(this.client, conversation.id);
+    if (!this.active || this.sending || document.querySelector("dialog[open]")) return;
     confirmDelete(this.client, {
       title: t("Delete this conversation?"), name: conversation.title,
-      consequences: [t("Memories saved from it are kept.")],
+      consequences: [t("Memories saved from it are kept."), ...referenceConsequence(references)],
       run: async requestId => (await this.client.deleteConversation(conversation.id, { request_id: requestId })).item,
       deleted: () => {
         this.store.remove(`chat:${conversation.id}`);
@@ -256,8 +318,9 @@ export class AssistantPane {
     });
   }
 
-  private async openConversation(id: string): Promise<void> {
+  private async openConversation(id: string, keepTarget = false): Promise<void> {
     if (this.sending) return;
+    if (!keepTarget) this.targetMessage = undefined;
     if (this.mode !== "chat") this.switchMode("chat");
     if (this.mode !== "chat") return;
     const generation = ++this.generation;
@@ -265,7 +328,10 @@ export class AssistantPane {
     if (this.current !== id) {
       this.firstNativeSend = undefined;
       this.selectedProfile = this.boundProfile = undefined;
+      this.apiControlsProfile = undefined;
       this.native.bind(undefined);
+      this.progress.clear();
+      this.nativeTurn = undefined;
     }
     this.current = id;
     this.conversationLoading = true;
@@ -282,9 +348,28 @@ export class AssistantPane {
     }
   }
 
-  private userBubble(text: string): HTMLElement { const body=h("div",{class:"msg-user markdown"});body.innerHTML=renderMarkdown(text);return body; }
+  private userBubble(text: string, id?: string): HTMLElement { const body=h("div",{class:"msg-user markdown",...(id?{"data-message":id}:{})});body.innerHTML=renderMarkdown(text);return body; }
   private assistantBlock(content: Node): HTMLElement {
     return h("div", { class: "msg-assistant" }, h("span", { class: "brand-mark", "aria-hidden": "true" }), h("div", {}, content));
+  }
+
+  private turnProgress(turn: string, native: boolean): ChatProgress {
+    let progress = this.progress.get(turn);
+    if (!progress) {
+      progress = new ChatProgress(native ? "Thinking summary" : "Thinking process");
+      this.progress.set(turn, progress);
+    }
+    return progress;
+  }
+
+  private onNativeProgress({ turn, event }: NativeEventRecord): void {
+    if (event.type === "state" && event.view.state !== "running" && this.nativeTurn) {
+      this.progress.get(this.nativeTurn)?.finish();
+    }
+    if (!turn) return;
+    const progress = this.turnProgress(turn, true);
+    if (event.type === "reasoning") progress.reasoning(event.delta, turn === this.nativeTurn && this.native.session?.view.state === "running");
+    else if (event.type === "text" || event.type === "complete" || (event.type === "tool" && event.status === "running")) progress.finish();
   }
 
   private renderDetail(detail: AssistantConversationDetail, tools: AssistantToolCall[] = []): void {
@@ -293,6 +378,8 @@ export class AssistantPane {
     this.selectedProfile ??= detail.conversation.profile;
     this.boundProfile = detail.conversation.native_session ? detail.conversation.profile : undefined;
     this.native.bind(detail.conversation.native_session);
+    const turn = detail.turns.at(-1);
+    this.nativeTurn = detail.conversation.native_session && turn?.status === "running" ? turn.id : undefined;
     this.renderProfiles();
     const calls = new Map(tools.map(call => [call.id, call]));
     let toolGroup: HTMLElement | undefined;
@@ -307,20 +394,30 @@ export class AssistantPane {
       }
       if (message.role === "assistant" && !message.content.trim()) return [];
       toolGroup = undefined;
-      if (message.role === "user") return [this.userBubble(message.content)];
+      if (message.role === "user") return [this.userBubble(message.content, message.id),
+        ...(message.turn ? [this.turnProgress(message.turn, !!detail.conversation.native_session).element] : [])];
       // 工具调用之间的中间回复可以没有文字（ADR 0025）；不显示空气泡。
       if (message.role === "assistant" && !message.content.trim()) return [];
       const content = h("div", { class: "markdown" });
       content.innerHTML = renderMarkdown(message.content);
-      return [message.role === "assistant" ? this.assistantBlock(content) : h("div", { class: "msg-tool" }, icon("terminal"), t(" Tool result"), content)];
+      const block = message.role === "assistant" ? this.assistantBlock(content) : h("div", { class: "msg-tool" }, icon("terminal"), t(" Tool result"), content);
+      block.dataset.message = message.id;
+      return [block];
     }));
-    const turn = detail.turns.at(-1);
     this.serverRunning = turn?.status === "running";
     this.setBusy(this.sending);
     if (turn && turn.status !== "done") clear(this.notice, h("div", { class: "notice" }, icon("alert"), h("span", {}, `${TURN_LABEL[turn.status]}${turn.error ? `：${turn.error}` : ""}`)));
     else clear(this.notice);
     this.markCurrent();
-    this.scrollToLatest();
+    const wanted = this.targetMessage;
+    this.targetMessage = undefined;
+    const target = wanted ? this.messages.querySelector<HTMLElement>(`[data-message="${CSS.escape(wanted)}"]`) : null;
+    if (wanted && !target) toast(t("That message isn't shown in this conversation."));
+    if (target) {
+      target.classList.add("is-target");
+      target.scrollIntoView({ block: "center" });
+      setTimeout(() => target.classList.remove("is-target"), 2400);
+    } else this.scrollToLatest();
   }
 
   private async refresh(): Promise<void> {
@@ -371,7 +468,11 @@ export class AssistantPane {
       return;
     }
     const input: Omit<AssistantChatRequest, "request_id"> = {
-      profile: selected.id, ...this.native.settings(), conversation: this.current, message: this.text.value.trim(),
+      profile: selected.id, conversation: this.current, message: this.text.value.trim(),
+      ...(selected.engine === "codex" ? this.native.settings() : {
+        ...(this.apiModel.value && this.apiModel.value !== selected.model ? { model: this.apiModel.value } : {}),
+        ...(this.apiEffort.value ? { effort: this.apiEffort.value } : {}),
+      }),
     };
     const previous = this.uncertain;
     const same = previous && previous.message === input.message && previous.conversation === input.conversation
@@ -386,7 +487,12 @@ export class AssistantPane {
     const content = h("div", { class: "markdown stream-text streaming" });
     const tools = h("div", { class: "msg-tools", role: "status" });
     const shown = new Map<string, HTMLElement>();
-    this.messages.append(this.userBubble(request.message), this.assistantBlock(h("div", {}, content, tools)));
+    const native = selected.engine === "codex";
+    let progress = new ChatProgress(native ? "Thinking summary" : "Thinking process");
+    let streamTurn: string | undefined;
+    progress.waiting();
+    // Progress sits in the reply's own row, so waiting and thinking line up with the answer that follows.
+    this.messages.append(this.userBubble(request.message), this.assistantBlock(h("div", {}, progress.element, content, tools)));
     this.scroller.scrollTop = this.scroller.scrollHeight;
     let complete = false, streamedText = "";
     let renderTimer: ReturnType<typeof setTimeout> | undefined;
@@ -398,13 +504,26 @@ export class AssistantPane {
       if (nearBottom) this.scroller.scrollTop = this.scroller.scrollHeight;
     };
     try {
-      for await (const event of this.client.assistantEvents(request, this.controller.signal)) {
+      for await (const event of this.client.assistantEvents(request, this.controller.signal, true)) {
         if (!this.active) return;
+        if (!streamTurn) {
+          streamTurn = event.turn;
+          const existing = this.progress.get(streamTurn);
+          if (existing) {
+            progress.element.replaceWith(existing.element);
+            progress = existing;
+          } else this.progress.set(streamTurn, progress);
+          if (native) this.nativeTurn = streamTurn;
+        }
+        if (event.type === "model_waiting") progress.waiting();
+        else if (event.type === "reasoning") progress.reasoning(event.delta);
         if (event.type === "token") {
+          if (!native && event.delta) progress.finish();
           streamedText += event.delta;
           if (!renderTimer) renderTimer = setTimeout(renderStream, 80);
         }
         else if (event.type === "tool") {
+          progress.finish();
           const view = toolCallView(event.tool, this.client, this.navigate);
           const previous = shown.get(event.tool.id);
           if (previous) previous.replaceWith(view); else tools.append(view);
@@ -418,6 +537,8 @@ export class AssistantPane {
     } catch (cause) {
       if (this.active) clear(this.notice, h("div", { class: "notice" }, icon("alert"), h("span", {}, this.controller.signal.aborted ? t("Stopped receiving. Checking what was saved…") : t("{0} Checking what was saved…", errorText(cause)))));
     } finally {
+      progress.finish();
+      this.nativeTurn = undefined;
       clearTimeout(renderTimer); renderStream();
       content.classList.remove("streaming");
       if (this.active) {

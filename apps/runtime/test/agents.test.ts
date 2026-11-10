@@ -11,7 +11,7 @@ const ctx = { lastMessageFile: "/state/logs/job.last.txt" };
 const run = (fields: object = {}) => AgentRun.parse({ kind: "agent", engine: "codex", prompt: "做事", ...fields });
 
 test("codex: workspace-write sandbox, JSON events, last message file; resume uses exec resume", () => {
-  expect(ADAPTERS.codex.argv(run({ model: "m1" }), ctx)).toEqual(["exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--json",
+  expect(ADAPTERS.codex.argv(run({ model: "m1" }), ctx)).toEqual(["exec", "-c", 'approval_policy="never"', "--skip-git-repo-check", "--sandbox", "workspace-write", "--json",
     "--output-last-message", ctx.lastMessageFile, "-m", "m1", "做事"]);
   expect(ADAPTERS.codex.argv(run({ session: { id: "thr-1", resume: true } }), ctx).slice(0, 2)).toEqual(["exec", "resume"]);
   expect(ADAPTERS.codex.argv(run({ session: { id: "thr-1", resume: true } }), ctx).slice(-2)).toEqual(["thr-1", "做事"]);
@@ -58,10 +58,23 @@ test("Codex resumed rounds use the resume parser's supported flags and preserve 
   // Codex 0.163.0 exec resume --help：子命令有 --config/-c，没有 --sandbox。
   // 用严格子命令语法校验，旧实现会因 unknown --sandbox 直接失败。
   const parsed = parseArgs({ args: argv.slice(2), allowPositionals: true, strict: true, options: {
-    "skip-git-repo-check": { type: "boolean" }, config: { type: "string", short: "c" }, json: { type: "boolean" },
+    "skip-git-repo-check": { type: "boolean" }, config: { type: "string", short: "c", multiple: true }, json: { type: "boolean" },
     "output-last-message": { type: "string" }, model: { type: "string", short: "m" },
   } });
-  expect(parsed.values.config).toBe('sandbox_mode="workspace-write"');
+  expect(parsed.values.config).toContain('sandbox_mode="workspace-write"');
   expect(parsed.values.json).toBe(true); expect(parsed.values["output-last-message"]).toBe(ctx.lastMessageFile);
   expect(parsed.positionals).toEqual(["thread-previous", "做事"]);
+});
+
+test("Codex receives per-round sandbox settings, including for resumed sessions", () => {
+  const session = { id: "thread-previous", resume: true };
+  expect(ADAPTERS.codex.argv(run({ permissions: { access: "read" } }), ctx)).toContain("read-only");
+  expect(ADAPTERS.codex.argv(run({ permissions: { access: "full" }, session }), ctx)).toContain('sandbox_mode="danger-full-access"');
+  const gitPaths = ["/shared/.git", "/shared/.git/worktrees/task"];
+  const args = ADAPTERS.codex.argv(run({ permissions: { access: "read", git: true }, session }), { ...ctx, gitPaths });
+  expect(args).toContain('default_permissions="lumio-stage"');
+  const profile = args.find(arg => arg.startsWith("permissions.lumio-stage="));
+  expect(profile).toContain('extends=":read-only"');
+  expect(profile).toContain('"/shared/.git/worktrees/task"="write"');
+  expect(args).not.toContain("--sandbox");
 });

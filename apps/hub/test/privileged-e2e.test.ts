@@ -97,7 +97,12 @@ test("unsupported runtime and outside-job invocation exit 2 without creating pro
   });
   expect(JSON.parse(invalid).code).toBe(2);
   const j = await submit(); const result = await done(j.spec.id);
-  expect(JSON.parse(result.report!).code).toBe(2); expect(result.report).toContain("does not support privileged commands"); expect(hub.store.proposals("pending")).toHaveLength(0); expect(await calls()).toHaveLength(0);
+  const report = JSON.parse(result.report!);
+  expect(report.code).toBe(2);
+  expect(report.err).toContain("This runtime has no privileged helper configured");
+  expect(report.err).toContain("sudo lumio-runtime install-sudo-helper");
+  expect(report.err).toContain("infra/sudo-helper.md");
+  expect(hub.store.proposals("pending")).toHaveLength(0); expect(await calls()).toHaveLength(0);
 });
 
 test("job cancellation ends waiting requests and invalidates subsequent human approval", async () => {

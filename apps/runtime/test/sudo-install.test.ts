@@ -39,9 +39,9 @@ async function fixture() {
   const options = { platform: "linux", uid: 0, env: { SUDO_USER: "synthetic" }, binary, paths, owner: process.getuid!(), group: process.getgid!(), interactive: true, confirm: async () => true, run, fetch: fetcher, log: (line: string) => logs.push(line) };
   return { root, home, file, binary, paths, options, commands, logs, key, info, failVisudo: () => { visudo = 1; }, failRestart: () => { restart = 1; } };
 }
-test("sudo installer refuses non-Linux, non-root, absent SUDO_USER, non-interactive, unconfirmed fingerprint and invalid sudoers without installing", async () => {
+test("sudo installer refuses unsupported platforms, non-root, absent SUDO_USER, non-interactive, unconfirmed fingerprint and invalid sudoers without installing", async () => {
   const f = await fixture();
-  for (const override of [{ platform: "darwin" }, { uid: 123 }, { env: {} }, { interactive: false }, { confirm: async () => false }]) {
+  for (const override of [{ platform: "win32" }, { uid: 123 }, { env: {} }, { interactive: false }, { confirm: async () => false }]) {
     await expect(installSudoHelper([], { ...f.options, ...override })).rejects.toThrow();
     for (const path of [f.paths.binary, f.paths.config, f.paths.sudoers, f.paths.state]) expect(await Bun.file(path).exists()).toBe(false);
   }
@@ -70,4 +70,27 @@ test("mismatching computed fingerprint is rejected before confirmation or filesy
   const f = await fixture();
   await expect(installSudoHelper([], { ...f.options, fetch: (async () => Response.json({ ...f.key, fingerprint: "0000-0000-0000-0000" })) as unknown as typeof fetch, confirm: async () => { throw new Error("must not confirm"); } })).rejects.toThrow("指纹不匹配");
   expect(await Bun.file(f.paths.binary).exists()).toBe(false);
+});
+
+test("macOS installs with canonical system paths and refreshes the launch agent as the runtime user", async () => {
+  const f = await fixture();
+  const run: RunCommand = async argv => {
+    if (argv[0] === "/usr/bin/dscacheutil") {
+      f.commands.push(argv);
+      return { code: 0, stdout: `name: synthetic\nuid: 501\ngid: 20\ndir: ${f.home}\n`, stderr: "" };
+    }
+    return f.options.run(argv);
+  };
+  const options = { ...f.options, platform: "darwin", run };
+  await installSudoHelper([], options);
+  const paths = await import("../src/sudo-paths.ts");
+  expect(paths.sudoPaths("darwin")).toMatchObject({ config: "/Library/Lumio/sudo.json", sudoers: "/private/etc/sudoers.d/lumio" });
+  const reload = f.commands.find(argv => argv.includes("install-service"));
+  expect(reload?.slice(0, 5)).toEqual(["/usr/bin/sudo", "-u", "synthetic", "--", "/usr/bin/env"]);
+  expect(reload?.slice(-3)).toEqual([f.binary, "runtime", "install-service"]);
+  expect(parseEnvironment(await readFile(f.file, "utf8")).LUMIO_RUNTIME_SUDO_COMMAND).toContain(f.paths.binary);
+  await writeFile(join(f.paths.state, "used"), "used-proposal\n", { mode: 0o600 });
+  await installSudoHelper(["--uninstall"], options);
+  expect(await readFile(join(f.paths.state, "used"), "utf8")).toBe("used-proposal\n");
+  expect(parseEnvironment(await readFile(f.file, "utf8")).LUMIO_RUNTIME_SUDO_COMMAND).toBeUndefined();
 });

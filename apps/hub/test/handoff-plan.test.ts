@@ -59,7 +59,7 @@ async function startRuntime() {
     LUMIO_RUNTIME_NAME: "mac", LUMIO_RUNTIME_STATE_DIR: join(temp, "runtime"), LUMIO_RUNTIME_POLL_SECONDS: "0.05",
     SYNTHETIC_AGENT_LOG: join(temp, "agent-log.jsonl"), SYNTHETIC_REVIEW_COUNT: join(temp, "review-count"),
   }, stdout: "pipe", stderr: "pipe" });
-  await eventually(async () => RuntimeInfo.array().parse(await (await request("/v1/runtimes")).json()).some(value => value.registration.name === "mac"));
+  await eventually(async () => RuntimeInfo.array().parse(await (await request("/v1/runtimes")).json()).some(value => value.registration.name === "mac" && value.registration.features?.includes("permission_request")));
 }
 async function cli(args: string[], language = "en", token = human) {
   const child = Bun.spawn([process.execPath, new URL("../../cli/src/main.ts", import.meta.url).pathname, ...args], {
@@ -111,6 +111,13 @@ test("fake agents run implementation → review (one send-back) → checkpoint c
   expect(detail.executions.map(value => value.round)).toEqual([1, 2, 3, 4, 5]);
   const invocations = (await readFile(join(temp, "agent-log.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
   expect(invocations.map(value => [value.engine, value.stage])).toEqual([["codex", "implement"], ["claude", "review"], ["codex", "implement"], ["claude", "review"], ["claude", "merge"]]);
+  for (const { engine, prompt } of invocations) {
+    expect(prompt).toContain("Do only the work assigned for this round and its current stage");
+    expect(prompt).toContain(engine === "codex" ? "Git metadata is protected" : "without an OS sandbox");
+    expect(prompt).toContain("no stage-specific secrets");
+    expect(prompt).toContain("<lumio-permission>git</lumio-permission>");
+    expect(prompt).toContain("For system commands that require root, use `lumio-runtime sudo --");
+  }
   expect(invocations[2].prompt).toContain("Fix the synthetic edge case");
   const system = hub.store.workActor();
   const autoTurns = detail.turns.filter(turn => turn.by === system.id);
@@ -161,7 +168,6 @@ for (const language of ["en", "zh"]) test(`CLI plan/template commands, human-onl
   expect((await request("/v2/work/plan-templates", undefined, runtime)).status).toBe(403);
   for (const operation of [
     { op: "work.task.checkpoint", args: { task, stage: "approve", action: "continue" } },
-    { op: "work.plan_template.save", args: { name: "Forbidden", plan } },
     { op: "work.plan_template.delete", args: { template: template.template.id } },
   ]) expect((await request("/v2/work/commands", { request_id: `synthetic-denied-${++sequence}`, operation }, agent)).status).toBe(403);
   const proposed = await cli(["task", "plan", "set", task, "--file", path, "--json"], language, agent);
@@ -213,4 +219,59 @@ test("an unavailable approved agent stops for human handling without replaying t
   expect(detail.task.turn.note).toContain("review");
   expect(detail.executions).toHaveLength(1); expect(detail.executions[0]?.applied).toBe(true);
   expect(detail.comments).toHaveLength(1);
+});
+
+test("an agent proposes saving a plan template and only human approval persists it", async () => {
+  const operation = { op: "work.plan_template.save", args: { name: "Synthetic proposed plan", plan } };
+  const input = { request_id: "synthetic-template-proposal", operation };
+  const response = await request("/v2/work/commands", input, agent);
+  expect(response.status).toBe(202);
+  const result = WorkCommandResult.parse(await response.json());
+  if (result.kind !== "proposal") throw new Error("proposal expected");
+  expect(await (await request("/v2/work/commands", input, agent)).json()).toEqual(result);
+  expect(await client().workPlanTemplates()).toEqual([]);
+  const accept = `/v1/proposals/${result.proposal}/accept`;
+  expect((await request(accept, {}, agent)).status).toBe(403);
+  expect((await request(accept, {})).status).toBe(200);
+  expect(await client().workPlanTemplates()).toMatchObject([{ name: "Synthetic proposed plan", plan }]);
+  expect((await request(accept, {})).status).toBe(409);
+});
+
+test("Hub persists parallel turns, resumes the interrupted branch and cancels active siblings", async () => {
+  const registered = hub.store.runtimes(new Date()).find(value => value.actor === runtimeActor)!;
+  hub.store.registerRuntime(runtimeActor, { ...registered.registration, features: ["stage_permissions"] }, new Date());
+  const graph = HandoffPlan.parse({ stages: [
+    { kind: "agent", id: "first", agent: "codex@mac", instruction: "First", access: "read" },
+    { kind: "agent", id: "second", agent: "codex@mac", instruction: "Second", access: "read", after: [] },
+  ] });
+  const task = await createTask(graph);
+  await command("work.task.dispatch", { task });
+  const [first, second] = (await client().workTask(task)).task.turn.parallel!;
+  const jobs = Job.array().parse(await (await request(`/v1/jobs?task=${task}`)).json());
+  expect(jobs.map(job => job.spec.source?.previous)).toEqual([undefined, undefined]);
+  await request("/v1/runtime/ack", { accepted: [first!.job, second!.job] }, runtime);
+  const result = async (id: string, status: "done" | "waiting_for_human") => {
+    const job = jobs.find(job => job.spec.id === id)!;
+    const response = await request("/v1/runtime/results", { job: id, lease: job.spec.lease, status,
+      finished: new Date().toISOString(), report: "Synthetic result", session_id: `synthetic-session-${id}`,
+      ...(status === "waiting_for_human" ? { question: "Synthetic question?" } : {}) }, runtime);
+    expect(response.status).toBe(200);
+    hub.modules.reconcile();
+  };
+  await result(first!.job, "waiting_for_human");
+  expect((await client().workTask(task)).task.turn.stage).toBe("second");
+  await hub.stop();
+  hub = await startHub({ ...readConfig({ LUMIO_STATE_DIR: join(temp, "hub") }), localRuntime: "mac", port: 0 }, { log() {} });
+  await result(second!.job, "done");
+  expect((await client().workTask(task)).task.turn).toMatchObject({ stage: "first", reason: "answer" });
+  const resumed = await command("work.task.dispatch", { task, comment: "Synthetic answer" });
+  expect(resumed).toMatchObject({ kind: "job", job: { spec: { source: { previous: first!.job },
+    run: { session: { id: `synthetic-session-${first!.job}`, resume: true } } } } });
+
+  const cancelled = await createTask(graph);
+  await command("work.task.dispatch", { task: cancelled });
+  const current = (await client().workTask(cancelled)).task;
+  await command("work.task.finish", { task: cancelled, expected_revision: current.revision, outcome: "cancelled" });
+  expect(Job.array().parse(await (await request(`/v1/jobs?task=${cancelled}`)).json()).map(job => job.status)).toEqual(["cancelled", "cancelled"]);
+  expect((await client().workTask(cancelled)).task.plan?.active).toBeUndefined();
 });

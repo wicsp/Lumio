@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AIQuotaSnapshot } from "./ai-usage.ts";
+import { AIQuotaSnapshot, ClaudeQuotaAccount, ClaudeBackgroundResult } from "./ai-usage.ts";
 import { idOf, Timestamp, Revision, RequestId, RuntimeName } from "./common.ts";
 /** ADR 0041/0042: shared model configuration; credentials never appear in a view. */
 export const TYPESAFE_JEV_BASE_URL = "https://api.typesafe.ai/v1";
@@ -51,6 +51,8 @@ export const CodexQuotaResult = z.union([
 ]);
 export type CodexQuotaResult = z.infer<typeof CodexQuotaResult>;
 export const NativeRuntimeCommand = z.discriminatedUnion("type", [
+    z.strictObject({ type: z.literal("claude_usage"), command: z.string().uuid(), connection: idOf("aic"),
+        generation: z.string().uuid(), account: ClaudeQuotaAccount.optional() }),
     z.strictObject({ type: z.literal("connection_usage"), command: z.string().uuid(), connection: idOf("aic"), owner: idOf("act") }),
     z.strictObject({ type: z.literal("connection_auth"), command: z.string().uuid(), connection: idOf("aic"), owner: idOf("act"), action: z.enum(["status", "login", "cancel", "logout"]) }),
     z.strictObject({ type: z.literal("open"), command: z.string(), session: NativeSession, hub_url: z.string().url(), mcp_token: z.string().min(16) }),
@@ -59,7 +61,9 @@ export const NativeRuntimeCommand = z.discriminatedUnion("type", [
     z.strictObject({ type: z.literal("ack"), session: idOf("ais"), sequence: z.number().int().nonnegative() })
 ]);
 export const NativeRuntimeMessage = z.discriminatedUnion("type", [
-    z.strictObject({ type: z.literal("hello"), protocol: z.literal(1), instance: z.string(), version: z.string(), isolation: z.enum(["macos-seatbelt", "unsupported"]), connection_auth: z.literal(true).optional(), connection_usage: z.literal(true).optional() }),
+    z.strictObject({ type: z.literal("hello"), protocol: z.literal(1), instance: z.string(), version: z.string(), isolation: z.enum(["macos-seatbelt", "unsupported"]), connection_auth: z.literal(true).optional(), connection_usage: z.literal(true).optional(), claude_usage: z.literal(true).optional() }),
+    z.strictObject({ type: z.literal("claude_usage"), command: z.string().uuid(), connection: idOf("aic"),
+        generation: z.string().uuid(), result: ClaudeBackgroundResult }),
     z.strictObject({ type: z.literal("connection_usage"), command: z.string().uuid(), connection: idOf("aic"), result: CodexQuotaResult }),
     z.strictObject({ type: z.literal("connection_auth"), command: z.string().uuid(), connection: idOf("aic"), owner: idOf("act"), view: NativeConnectionView }),
     z.strictObject({ type: z.literal("event"), session: idOf("ais"), sequence: z.number().int().positive(), turn: idOf("turn").optional(), event: NativeEventData }),

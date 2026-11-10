@@ -16,7 +16,7 @@ import { ago, dateInputValue, dueLabel, isoFromDateInput } from "../format.ts";
 import { PROJECT_LABELS } from "../labels.ts";
 import { checkpointCommand, openPlanEditor, planProgress, stageLabel } from "../plan.ts";
 import { MessageRail } from "../side-rail.ts";
-import { TURN_ACTION_DONE, TURN_ACTION_ICONS, TURN_ACTION_LABELS, TURN_GROUPS, TURN_GROUP_LABELS, isBlocked, reasonLabel, turnActionCommand, turnActions, turnGroup, turnIcon, turnText, type TurnAction } from "../turn.ts";
+import { TURN_ACTION_DONE, TURN_ACTION_ICONS, TURN_ACTION_LABELS, TURN_GROUPS, TURN_GROUP_LABELS, isBlocked, reasonLabel, turnActionCommand, turnActions, turnGroup, turnIcon, turnText, workingAgent, type TurnAction } from "../turn.ts";
 import { allTags, blockingTitles, childProgress, normalizeTag, parentCandidates, prerequisiteCandidates, prerequisiteState, type PrerequisiteState } from "../task-structure.ts";
 import { renderMarkdown } from "../utils/markdown.ts";
 import { referenceInput } from "../reference-input.ts";
@@ -230,6 +230,7 @@ export class WorkEditor {
       row(t("Due"), "calendar", this.dateInput("deadline", r.deadline));
       row(t("Working directory"), "terminal", this.textInput("workdir", r.workdir, t("~ (runtime's home directory)")));
       row(t("Default agent"), "bot", this.defaultTargetControl(r));
+      row(t("Default plan"), "route", this.defaultPlanControl(r));
       row(t("Repository"), "link", this.textInput("repo", r.repo, t("URL or path, for reference")));
     }
     if (r.type === "task") {
@@ -255,6 +256,29 @@ export class WorkEditor {
         openMenu(button, items, value => {
           if ((value || undefined) === current) return;
           void this.patch({ default_target: value || null }, button, value ? t("Default agent set to {0}", value) : t("Default agent cleared"));
+        });
+      } catch (cause) { this.showFailure(cause); }
+    });
+    return button;
+  }
+
+  /** 项目默认计划（ADR 0049 第 6 节）：在 Today 点「委托」、任务还没有计划时套用。选项来自计划模板。 */
+  private defaultPlanControl(project: WorkProject): HTMLElement {
+    const current = project.default_plan;
+    const label = h("span", {}, current ? t("Loading…") : t("None"));
+    const button = h("button", { type: "button", class: `prop-btn${current ? "" : " placeholder-value"}`, title: t("When you delegate a task of this project that has no plan yet, this plan is applied first.") },
+      icon("route"), label);
+    if (current) void this.client.workPlanTemplates().then(list => { label.textContent = list.find(item => item.id === current)?.name ?? t("{0} (deleted)", current); }, () => { label.textContent = current; });
+    button.addEventListener("click", async () => {
+      try {
+        const templates = await this.client.workPlanTemplates();
+        const items = [{ value: "", label: t("No default plan"), selected: !current },
+          ...templates.map(item => ({ value: item.id, label: item.name, selected: item.id === current, icon: icon("route") }))];
+        if (!templates.length) items.push({ value: "-", label: t("No templates yet — save one from a task's plan editor"), selected: false });
+        openMenu(button, items, value => {
+          if (value === "-" || (value || undefined) === current) return;
+          const name = templates.find(item => item.id === value)?.name;
+          void this.patch({ default_plan: value || null }, button, name ? t("Default plan set to {0}", name) : t("Default plan cleared"));
         });
       } catch (cause) { this.showFailure(cause); }
     });
@@ -608,7 +632,7 @@ export class WorkEditor {
     if (!(await this.flush())) return;
     const task = this.record;
     if (task.outcome !== "open") { toast(t("Reopen the task before delegating it."), "error"); return; }
-    if (task.turn.reason === "working") { toast(t("{0} is still working on this task.", task.turn.holder), "error"); return; }
+    if (task.turn.reason === "working") { toast(t("{0} is still working on this task.", task.turn.parallel ? task.turn.parallel.map(branch => branch.agent).join(t(", ")) : task.turn.holder), "error"); return; }
     if (task.turn.holder === "nobody") { toast(t("This task is on hold. Choose “I'll handle it” first."), "error"); return; }
     if (isBlocked(task)) { toast(t("Prerequisites not done: {0}", blockingTitles(task, this.byId).join(t(", "))), "error"); return; }
     const run = task.plan;
@@ -768,10 +792,11 @@ export function describeTurn(change: WorkTaskDetail["turns"][number], plan?: { s
   if (change.outcome === "open") return ["refresh", t("Reopened")];
   const to = change.to, from = change.from;
   const stage = to.stage ? plan?.stages.find(value => value.id === to.stage) : undefined;
+  if (to.parallel) return ["play", t("Running in parallel: {0}", to.parallel.map(branch => t("{0} (step {1}, round {2})", branch.agent, branch.stage, branch.round)).join(t(", ")))];
   if (to.reason === "working") return ["play", to.stage ? t("Delegated to {0} (round {1}, step {2})", to.holder, to.round ?? "?", to.stage) : t("Delegated to {0} (round {1})", to.holder, to.round ?? "?")];
   if (to.holder === "external") return ["clock", to.note ? t("Waiting on others: {0}", to.note) : t("Waiting on others")];
   if (to.holder === "nobody") return ["pause", t("Put on hold")];
-  const agent = from.reason === "working" ? from.holder : undefined;
+  const agent = workingAgent(from, to.stage);
   switch (to.reason) {
     case "answer": return ["help", agent ? t("{0} asked a question", agent) : t("Waiting for your answer")];
     case "failed": return ["alert", to.note ? t("Round failed: {0}", to.note) : t("Round failed")];
@@ -798,5 +823,6 @@ export function continueTarget(input: WorkTaskDetail): string | undefined {
     const stage = task.plan.stage === "end" ? undefined : task.plan.plan.stages.find(value => value.id === task.plan!.stage);
     return stage?.kind === "agent" ? stage.agent : undefined;
   }
-  return input.turns.filter(change => change.to.reason === "working").at(-1)?.to.holder;
+  const last = input.turns.filter(change => change.to.reason === "working").at(-1)?.to;
+  return last ? workingAgent(last, task.turn.stage) : undefined;
 }

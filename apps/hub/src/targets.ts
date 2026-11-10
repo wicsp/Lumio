@@ -1,5 +1,6 @@
-import { ExecutionTarget, parseAssignee, DISPATCH_TARGET_SOURCES } from "@lumio/schema";
+import { ExecutionTarget, parseAssignee, DISPATCH_TARGET_SOURCES, type AgentRun, type RuntimeInfo, type StagePermissions } from "@lumio/schema";
 import type { HubStore } from "./store.ts";
+import { PlanDispatchUnavailable } from "@lumio/work";
 import { HubError } from "./errors.ts";
 
 export function executionTargets(store: HubStore, now = new Date()): ExecutionTarget[] {
@@ -13,4 +14,24 @@ export function validateTarget(store: HubStore, localRuntime: string | undefined
   const found = parsed === "human" ? undefined : targets.find(value => value.runtime === (parsed.device ?? localRuntime) && value.engine === parsed.agent);
   if (!found) throw new HubError("INVALID", { key: source === "project" ? "target.invalid_project_default" : "target.invalid", args: [target, targets.map(value => value.target).join(", ")] });
   return found;
+}
+
+export function stageDispatchOptions(stage: StagePermissions & Pick<AgentRun, "hooks">, runtime: RuntimeInfo, engine: RuntimeInfo["registration"]["engines"][number]): Pick<AgentRun, "permissions" | "hooks"> {
+  const { access = "write", git = false, secrets, hooks } = stage;
+  const features = runtime.registration.features ?? [];
+  const target = `${engine.name}@${runtime.registration.name}`;
+  if (!runtime.online) throw new PlanDispatchUnavailable({ key: "target.stage_offline", args: [target] });
+  if ((access !== "write" || git || secrets?.length) && !features.includes("stage_permissions")) {
+    throw new PlanDispatchUnavailable({ key: "target.stage_permissions_unsupported", args: [target] });
+  }
+  if (engine.name === "codex" && git && access !== "full" && engine.version !== "0.166.0") {
+    throw new PlanDispatchUnavailable({ key: "target.stage_git_version", args: [target, engine.version] });
+  }
+  if ((hooks?.before || hooks?.after) && !features.includes("hooks")) {
+    throw new PlanDispatchUnavailable({ key: "target.stage_hooks_unsupported", args: [target] });
+  }
+  return {
+    ...(features.includes("stage_permissions") ? { permissions: { access, git, ...(secrets?.length ? { secrets } : {}) } } : {}),
+    ...(hooks?.before || hooks?.after ? { hooks } : {}),
+  };
 }

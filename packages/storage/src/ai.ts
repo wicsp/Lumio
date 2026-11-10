@@ -1,10 +1,12 @@
 import type { Database } from "bun:sqlite";
-import { AIConnection, AIProfile, NativeSession, NativeEventData, AIQuotaSettings, AIQuotaSnapshot, AIQuotaStatus } from "@lumio/schema";
+import { AIConnection, AIProfile, NativeSession, NativeEventData, AIQuotaSettings, AIQuotaSnapshot, AIQuotaStatus, type ClaudeQuotaIssue } from "@lumio/schema";
 
 export interface StoredAIQuota {
   settings: AIQuotaSettings;
   generation?: string;
   binding?: string;
+  claudeAccount?: string;
+  claudeIssue?: ClaudeQuotaIssue;
   snapshot?: AIQuotaSnapshot;
   status?: AIQuotaStatus;
   alerted?: Record<string, string>;

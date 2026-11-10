@@ -1,0 +1,50 @@
+{
+  "stages": [
+    {
+      "kind": "agent",
+      "id": "implement",
+      "agent": "codex@synthetic",
+      "instruction": "Implement the synthetic change",
+      "after": [],
+      "access": "write",
+      "git": true
+    },
+    {
+      "kind": "agent",
+      "id": "review-a",
+      "agent": "claude-code@synthetic",
+      "instruction": "Check the synthetic implementation",
+      "after": ["implement"],
+      "access": "read",
+      "back_to": "implement"
+    },
+    {
+      "kind": "agent",
+      "id": "review-b",
+      "agent": "codex@synthetic",
+      "instruction": "Check the synthetic tests",
+      "after": ["implement"],
+      "access": "read"
+    },
+    {
+      "kind": "checkpoint",
+      "id": "accept",
+      "prompt": "Accept the synthetic change?",
+      "after": ["review-a", "review-b"]
+    },
+    {
+      "kind": "agent",
+      "id": "publish",
+      "agent": "codex@synthetic",
+      "instruction": "Publish the synthetic change",
+      "access": "full",
+      "secrets": ["synthetic-publish"],
+      "hooks": {
+        "before": { "argv": ["/usr/bin/true"], "timeout_minutes": 5 },
+        "after": { "argv": ["/usr/bin/true"] }
+      }
+    }
+  ],
+  "max_rounds": 12,
+  "finish": "auto"
+}

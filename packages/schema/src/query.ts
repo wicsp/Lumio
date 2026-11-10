@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Id } from "./common.ts";
+import { Id, Sha256, Timestamp } from "./common.ts";
 import { Citekey } from "./entities.ts";
 
 /**
@@ -48,6 +48,9 @@ export const LinksResult = z.strictObject({
   note: NoteRef,
   outgoing: z.array(Link),
   incoming: z.array(Link.extend({ note: NoteRef }).describe("反向链接：哪些笔记链接到了这里")),
+  // ADR 0053：AI 笔记正文里的链接单独列出，不计入人的链接图、全库图谱与引用导出。缺失表示没有。
+  ai_outgoing: z.array(Link).min(1).optional().describe("这篇 AI 笔记正文里的链接（只有 AI 笔记有）"),
+  ai_incoming: z.array(Link.extend({ note: NoteRef })).min(1).optional().describe("哪些 AI 笔记提到了这里"),
 });
 
 /**
@@ -70,6 +73,7 @@ export const NoteDetail = z.strictObject({
   note: NoteRef,
   frontmatter: z.record(z.string(), z.unknown()),
   body: z.string(),
+  revision: Sha256.optional().describe("File revision for versioned AI note updates"),
 });
 
 export type NoteRef = z.infer<typeof NoteRef>;
@@ -79,3 +83,16 @@ export type Link = z.infer<typeof Link>;
 export type LinksResult = z.infer<typeof LinksResult>;
 export type NoteDetail = z.infer<typeof NoteDetail>;
 export type CheckResult = z.infer<typeof CheckResult>;
+
+/** A resource anchor exposes only the metadata the caller can see. */
+export const KnowledgeReferenceCount = z.number().int().nonnegative();
+export const ResourceSummary = z.discriminatedUnion("status", [
+  z.strictObject({
+    id: Id, status: z.literal("visible"), title: z.string(),
+    parent: Id.optional().describe("Conversation, task or job containing the anchor"),
+    timestamp: Timestamp.optional(),
+    knowledge_references: KnowledgeReferenceCount.optional(),
+  }),
+  z.strictObject({ id: Id, status: z.enum(["trashed", "deleted", "unavailable"]) }),
+]);
+export type ResourceSummary = z.infer<typeof ResourceSummary>;

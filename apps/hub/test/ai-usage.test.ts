@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AIConnection, AIQuotaView, AIQuotaViews, ClaudeQuotaBindings, ClaudeQuotaSample, NotificationEvent, RuntimeRegistration } from "@lumio/schema";
+import { AIConnection, AIQuotaView, AIQuotaViews, ClaudeQuotaBindings, ClaudeQuotaSample, NativeRuntimeCommand, NativeRuntimeMessage, NotificationEvent, RuntimeRegistration } from "@lumio/schema";
 import balanceFixture from "../../../fixtures/ai-usage/deepseek.json";
 import { readConfig } from "../src/config.ts";
 import { startHub } from "../src/server.ts";
@@ -158,5 +158,65 @@ test("Claude samples are owner- and Runtime-bound, reject old generations, and n
     expect(rebound.claude_binding?.generation).not.toBe(binding.generation);
     expect(rebound.snapshot).toBeUndefined();
     expect((await send(next)).status).toBe(404);
+  } finally { await f.close(); }
+});
+
+test("Claude background quota refreshes every fifteen minutes without a browser and rejects account changes", async () => {
+  const f = await fixture();
+  try {
+    const runtime = f.actor("fixture-mac", "runtime");
+    const native = f.hub.modules.native;
+    const connection = await f.connection({ name: "Claude subscription", kind: "claude-code-subscription", host: "fixture-mac" });
+    const read = async () => AIQuotaViews.parse(await (await f.request("/v2/ai/usage")).json())[0]!;
+    const account = "a".repeat(64);
+    let observed = account;
+    const requests: Extract<NativeRuntimeCommand, { type: "claude_usage" }>[] = [];
+    const socket = {
+      id: "fixture-socket", data: { runtime: runtime.id }, close() {}, terminate() {},
+      send(line: string) {
+        const command = NativeRuntimeCommand.parse(JSON.parse(line));
+        if (command.type !== "claude_usage") return;
+        requests.push(command);
+        const reply = NativeRuntimeMessage.parse({
+          type: "claude_usage", command: command.command, connection: command.connection, generation: command.generation,
+          result: { status: "ready", account: observed, windows: [{ id: "five_hour", minutes: 300, used_percent: 63 }] },
+        });
+        queueMicrotask(() => native.channelMessage(socket, JSON.stringify(reply)));
+      },
+    };
+    native.channelOpen(socket);
+    native.channelMessage(socket, JSON.stringify({ type: "hello", protocol: 1, instance: "fixture",
+      version: "fixture", isolation: "macos-seatbelt", claude_usage: true }));
+    const first = await parseView(await f.request(path(connection.id, "settings"), "PUT", {
+      claude_mode: "background", monitor: true, thresholds: {},
+    }));
+    const next = (ms: number) => {
+      f.advance(ms);
+      f.hub.store.registerRuntime(runtime.id, RuntimeRegistration.parse({
+        name: "fixture-mac", protocol_version: 2, engines: [], tags: [], max_concurrent: 1,
+      }), f.now());
+      native.usage.tick();
+    };
+    next(15_000);
+    expect((await read()).snapshot).toMatchObject({ source: "claude-code", collection: "background", sampled_at: f.now().toISOString() });
+    expect(requests[0]).toMatchObject({ generation: first.claude_binding?.generation });
+    expect(requests[0]?.account).toBeUndefined();
+    next(14 * 60_000);
+    expect(requests).toHaveLength(1);
+    next(60_000);
+    expect((await read()).snapshot?.sampled_at).toBe(f.now().toISOString());
+    expect(requests[1]?.account).toBe(account);
+    observed = "b".repeat(64);
+    next(15 * 60_000);
+    expect(await read()).toMatchObject({ status: "credentials", claude_issue: "account_changed" });
+    expect((await read()).snapshot).toBeUndefined();
+    next(15 * 60_000);
+    expect(requests).toHaveLength(3);
+    const rebound = await parseView(await f.request(path(connection.id, "bind"), "POST"));
+    expect(rebound.claude_binding?.generation).not.toBe(first.claude_binding?.generation);
+    expect((await f.request(path(connection.id, "refresh"), "POST", undefined, f.outsider.token)).status).toBe(404);
+    next(15_000);
+    expect((await read()).status).toBe("ready");
+    expect(requests[3]?.account).toBeUndefined();
   } finally { await f.close(); }
 });

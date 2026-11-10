@@ -8,6 +8,7 @@
   原始 stdout/stderr 的 JSONL output 负载用 base64 表达，避免二进制和 UTF-8 分块造成内容损坏。
 - 活跃日志末行不完整可报告；封存日志截断、行损坏、事件重复或缺失必须失败。恢复中断运行只封存完整前缀并记 recovery，Job 仍由数据库标为 unknown，不从日志重新执行。
 - 自有日志归档 MIME 为 `application/vnd.lumio.runlog+jsonl`，按完整运行流再次校验；原始输出以 text/plain 独立归档。
+- 按事件 ID 定位运行使用业务库中的派生索引：查询未命中时只补扫尚未建索引的已归档日志，每份归档扫描一次，可由归档重建（ADR 0053）。
 - Runtime 为文件保留独立交付记录；Hub 校验大小与 SHA-256，先发布字节再登记 ready。登记冲突保留文件待核查，重复交付不重复登记。
   Job 结果确认与文件确认互不替代，上传失败不阻塞结果交回；确认后原始文件仍留在 Runtime。
 - 文件接口在 `/v2/execution/` 下；runtime 只能上传自己已接手的 Job 的文件。读取只授予 human，私密产物需显式 include_private。
@@ -46,10 +47,13 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
   `context: previous` 时带上上一次的摘要。执行器离线错过的只补跑最近一次，其余在结果里注明跳过了几次。
   结果按时间追加在这篇笔记的 `run-<日期时间>` AI 区块里。`lumio routine list` 列出计划；
   `lumio routine followup <例行任务> <日期>`（操作 `routine.followup`）从某一次开出普通任务：执行配置照抄，`assignee: human`。
-- **高权限申请**（ADR 0020）：每轮单独的本地 socket 凭据经 `lumio runtime sudo -- <绝对路径程序>` 发起；人用 `lumio proposals` 查看并批准或拒绝。批准后 Hub 签发 10 分钟有效的一次性凭据，root 助手独立验证并在执行前记为已用；输出只返回调用者，执行状态离线时保留交回。安装见 `infra/sudo-helper.md`。
+- **高权限申请**（ADR 0020）：每轮单独的本地 socket 凭据经 `lumio runtime sudo -- <绝对路径程序>` 发起；人用 `lumio proposals` 查看并批准或拒绝。批准后 Hub 签发 10 分钟有效的一次性凭据，root 助手独立验证并在执行前记为已用；输出只返回调用者，执行状态离线时保留交回。Linux 与 macOS 安装见 `infra/sudo-helper.md`。
 - **适配器**：`codex exec`、`claude -p`、`pi -p` 的非交互模式；锁定验证过的版本；如实声明隔离级别（`os`/`none`）。
   不经过 shell；command 类型只执行登记过的程序；密钥在执行节点上才解析。
-- **不做**：跨设备调用工具、每一轮单独的权限、上下文管理、模型路由；留给以后自研的 agent（作为执行器里的一种引擎接入）。
+- **阶段权限与钩子**（ADR 0049，H1-4）：Codex 默认使用工作区写入沙箱，可按阶段改为只读或显式全权限；Git 写入授权只覆盖已验证版本上当前 checkout 的元数据。无 OS 沙箱的引擎由执行器账号权限约束。
+  在执行器环境中通过 `LUMIO_SECRET_<名称>` 配置阶段密钥（名称中的 `-` 写成大写 `H`，例如 `LUMIO_SECRET_githubHmerge`），同名变量只注入声明它的 agent 轮次，汇报和日志脱敏。前后钩子以执行器账号在工作目录按 argv 运行，输出进入轮次日志，失败或超时结束该轮。
+- **普通权限申请**（ADR 0049，H1-9）：执行器从 agent 汇报末尾的独立 `<lumio-permission>` 行提取权限，按等待人决定交回并保留理由。
+- **不做**：跨设备调用工具、上下文管理、模型路由；留给以后自研的 agent（作为执行器里的一种引擎接入）。
 
 ## 数据库 Routine 与设备（ADR 0025）
 
@@ -65,4 +69,4 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
 - Runtime 的原生 Assistant 通道与 Job2 并列，显式启用；Runtime 主动发起认证 HTTP 命令流并 POST 持久事件，按 Session 序号确认去重。断线只补事件，不重发 turn 或工具。
 - 每个 Session 独占进程和托管目录，按需恢复原线程；支持连接授权的 Runtime 复用连接登录。当前只允许已验证 macOS/Codex 0.166.0，隔离不满足拒绝运行。一次仅一轮，审批绑定进程实例，停止时监督整个已观察进程范围。
 - Job/Routine 后续沿用 Connection/Profile/用途绑定；本次不升级 Job 协议或把旧摘要执行改成交互会话。
-- **连接额度上报（ADR 0052）**：Codex 复用连接级认证通道，在双方协商支持后按需查询账户额度。Claude Code 状态栏在本机仅保存规范化读数，Runtime 取得指定给自己的绑定后上报，不需要开启 Codex 原生会话。上报不包含 Claude 凭据、会话内容或完整状态栏数据。
+- **连接额度上报（ADR 0052、0054）**：Codex 复用连接级认证通道，在双方协商支持后按需查询账户额度。Claude Code 状态栏在本机仅保存规范化读数，Runtime 取得指定给自己的绑定后上报，不需要开启 Codex 原生会话。Claude Code 后台查询由具备能力的 macOS Runtime 在专用登录环境调用原版 CLI 的内置 `/usage`。短时伪终端禁用项目扩展，验证订阅身份并按连接和代次回传规范化读数。专用环境由用户用官方 CLI 登录。上报只包含规范化读数、绑定信息和失败类别。

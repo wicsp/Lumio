@@ -5,14 +5,16 @@
 ## 数据库 Work（ADR 0025、0032）
 
 - `/v2/work/commands` 使用 `WorkCommandRequest` 与 `WorkCommandResult`；Task/Project 查询返回严格业务对象，不含路径。
-- **任务模型**（ADR 0032，R4-2）：任务只回答三个问题——结局（open / done / cancelled，只有人能改）、轮到谁（你 / 某个 agent / 外部 / 无人，附原因：todo、answer、review、failed、working、waiting、on_hold）、发生过什么（讨论、轮次、交接记录，只追加）。没有状态与负责人字段。「需要你处理」= 轮到你且原因是 answer、review 或 failed。一轮结束：提问 → answer，失败 → failed，取消 → todo，交付 → 没有交接计划时 review，有计划时进入下一步。每一轮的输入只放摘要与 ID，agent 用 skill 沿 ID 取回更多（Inline & Spill）。
+- **任务模型**（ADR 0032，R4-2）：任务只回答三个问题——结局（open / done / cancelled，由人决定，可经检查点授权自动完成）、轮到谁（你 / 某个 agent / 外部 / 无人，附原因：todo、answer、review、failed、working、waiting、on_hold）、发生过什么（讨论、轮次、交接记录，只追加）。没有状态与负责人字段。「需要你处理」= 轮到你且原因是 answer、review 或 failed。一轮结束：提问 → answer，失败 → failed，取消 → todo，交付 → 没有交接计划时 review，有计划时进入下一步。每一轮的输入只放摘要与 ID，agent 用 skill 沿 ID 取回更多（Inline & Spill）。
 - **交接计划**（ADR 0032 第 5 节，R4-3）：agent 步骤（可声明 `back_to`，汇报里单独一行 `<lumio-outcome>changes</lumio-outcome>` 时打回）与检查点；一轮交付后由 Hub 系统身份自动委派下一步，或在检查点 / 计划结束时轮到人（review）。只委派给计划写明的 agent；计划内轮数达到上限（缺省 8）时轮到人。检查点的继续 / 打回 / 完成 / 搁置只有人能做，对过时的步骤操作被拒绝。计划模板只有人能管理。agent 设置计划与委派都只能提议，人批准后以提议作者身份、按提议时的版本执行。
-  **扩展中（ADR 0049，H1，未实现）**：计划扩展为有向无环的交接图（`after` 汇合，第一版只允许只读阶段并行）；agent 阶段可声明权限（`access` read / write / full、`git`、`secrets`）与可选的 `before` / `after` 钩子；
-  含检查点的计划可设 `finish: auto`，走完自动完成；项目可设默认计划；agent 可提议保存计划模板；派出前检查执行者与权限；agent 可用 `<lumio-permission>` 按需申请阶段权限，人批准后续接会话。
+  **交接图（ADR 0049，H1-3）**：节点的前驱都完成后可以开始；缺省前驱是列表中的上一步。检查点独占，同一时刻最多一个声明可写的阶段。并行中的提问、失败或打回先等已在执行的分支结束，再按对应阶段处理。打回重置目标和它的后继，轮数上限计入每个 agent 轮次。含检查点的计划可设 `finish: auto`，由人通过检查点后走完即完成。项目可存默认计划，agent 可提议保存计划模板。
+  **派出前检查（H1-5）**。Hub 核对本阶段的执行器登记、引擎、在线状态与所需阶段能力。缺失时停在该阶段并交回人（failed），不创建 Job。无沙箱的引擎只能按声明的范围自律，保存与派出时提示无法强制。密钥由执行器在启动时查找，Hub 只传名字。
+  **套用项目默认计划（H1-5）**。人未指定执行者、任务也没有计划时，委托在同一事务中复制项目模板并开始第一个就绪阶段；若先到检查点，则等待人工决定。显式委托和原单轮提问的续接沿用其目标。
+  **阶段权限申请（ADR 0049，H1-9）**。执行器从汇报提取权限申请，Hub 通过等待答复的轮次提供理由与已申请权限。只有人能按任务版本批准所申请的权限，可限下一轮或保存到任务的当前阶段（无计划时保存到任务）。续接原轮次，拒绝时通过带说明的答复续接。
 - **通知**（ADR 0031 第 4 节，R4-4）：Hub 内统一 `notify()`，在业务事务里写入待发事件并按事件 ID 去重。工作与审批事件包括新出现「轮到人且原因为 answer / review / failed」与新的待批准提议。AI 连接用量事件按 [Assistant 设计](assistant.md) 中的监控设置发给连接所有者（ADR 0052）。每个事件最多发一次。Web Push 的 VAPID 私钥私密保存，JWT 一定带 https 的 `sub`（`LUMIO_PUBLIC_URL`，否则订阅页面的 Origin），TTL 24 小时；推送服务返回 404/410 时移除设备；推送地址与密钥不出现在响应、日志与审计中。
 - **工作目录与目标**（ADR 0033，R4-8）：一轮的工作目录在委派时按「任务 → 项目 → `~`」确定，项目的 `repo` 只供参考并写进每轮输入；
   委派目标与计划里的 agent 在提交时校验，`execution.target.list` 列出可委派的目标。
-- **默认执行者**（ADR 0044，E1）：项目可设 `default_target`。不带 `to` 委派时依次用：计划步骤的 agent → 最近一轮的 agent → 项目 `default_target` → INVALID；
+- **默认执行者**（ADR 0044，E1）：项目可设 `default_target`。未套用项目默认计划时，不带 `to` 的委派依次使用任务计划步骤的 agent、最近一轮的 agent、项目 `default_target`，都没有时返回 INVALID；
   即第一次用项目默认，之后谁做过就一直是谁，直到人手动换。任务读取出口推导只读的 `next_target`（同一套解析，不存储、不可提交），派出结果带实际目标与来源。
   同一作者对同一任务的同类 Work 提议会取代它之前的待批准提议（`withdrawn` + `superseded_by`），作者也可以撤回自己的提议。
 - **删除与回收站**（ADR 0038，D1）：`work.task.delete` / `work.project.delete` 只有人能做，带 `expected_revision`，结果为 `trashed`。删除即移入回收站，30 天后永久删除，期间可恢复或彻底删除；回收站中的对象不出现在任何列表、搜索、概览和助手结果中，按 ID 读取返回 NOT_FOUND（`reason: trashed`）。
@@ -24,8 +26,8 @@
   详情推导直接后续 `dependents` 与直接子任务 `children`，排除回收站。列表可组合 readiness（ready = open 且不阻塞；blocked = open 且阻塞）、精确标签、直接父任务、项目与文字筛选，依赖批量读取。
   `blocked_by` 不接受 create / patch 提交，写入任务与幂等回执前剔除，不进入迁移、备份或存储导出；幂等重试保留原命令结果版本并重新推导当前前置事实。
 - Task/Project 描述在数据库中；依赖、讨论、执行关联各有明确归属。保存描述或计划不隐式委派。
-- 更新带 `expected_revision`；请求用 `request_id` 去重。委派在同一事务内保存 Job、Work 关联和请求回执；同一任务默认只有一轮待完成。
-- 运行结果作为 Work 进展追加一次，同时按结果交回给人，不自动把 Task 标成 done。旧 v1 委派接口拒绝操作数据库任务。
+- 更新带 `expected_revision`；请求用 `request_id` 去重。委派在同一事务内保存 Job、Work 关联和请求回执；同一任务默认只有一轮待完成，交接图允许已就绪的分支并行。
+- 运行结果作为 Work 进展追加一次，按交接计划推进或交回给人。旧 v1 委派接口拒绝操作数据库任务。
 - 一轮里的提问与验收（ADR 0030、0032）：agent 用 `<lumio-question>` 提问并结束本轮；`/v2/work/attention` 只按 turn 选择轮到人且原因为 answer / review / failed 的任务。
   `work.task.hand to=human` 把原因改为 todo（我自己来）；旧的已查看命令与字段已删除。`work.task.dispatch` 可带 `comment`，回答与派出在同一事务。
 - Work 的交接规则集中在 `packages/work`，每次变化追加 `TaskTurnChange`，一轮结果的自动交接使用 Hub 的稳定系统身份；完成或取消同时取消当前轮次，迟到结果不会抢回交接。

@@ -1,4 +1,4 @@
-import type { Link } from "@lumio/schema";
+import { idOfLumioLink, LUMIO_LINK_SCHEME, type Link } from "@lumio/schema";
 import { posix } from "node:path";
 
 export type RawLink = { source: "wikilink"; target: string }
@@ -62,8 +62,7 @@ function destination(text: string, opening: number): { target: string; end: numb
   return text[cursor] === ")" ? { target, end: cursor } : undefined;
 }
 
-function markdownLinks(text: string, fromPath: string): RawLink[] {
-  const links: RawLink[] = [];
+function* markdownDestinations(text: string): Generator<string> {
   for (let cursor = 0; cursor < text.length; cursor++) {
     if (text[cursor] !== "[" || text[cursor + 1] === "[" || text[cursor - 1] === "[" || escaped(text, cursor)) continue;
     const image = text[cursor - 1] === "!" && !escaped(text, cursor - 1);
@@ -78,14 +77,8 @@ function markdownLinks(text: string, fromPath: string): RawLink[] {
     if (!parsed) continue;
     cursor = parsed.end;
     if (image) continue;
-    let target = parsed.target.replace(/\\([!"#$%&'()*+,\-./:;<=>?@[\]\\^_`{|}~])/g, "$1").split(/[?#]/, 1)[0]!;
-    try { target = decodeURIComponent(target); } catch { /* Keep malformed URL escapes verbatim. */ }
-    if (!target || target.endsWith("/") || target.includes("\0") || target.startsWith("//") || /^[a-z][a-z\d+.-]*:/i.test(target)) continue;
-    const extension = posix.extname(target);
-    if (extension && extension !== ".md") continue;
-    links.push({ source: "markdown", target, fromPath });
+    yield parsed.target.replace(/\\([!"#$%&'()*+,\-./:;<=>?@[\]\\^_`{|}~])/g, "$1");
   }
-  return links;
 }
 
 function withoutCode(body: string): string {
@@ -139,14 +132,32 @@ export function extractCitations(body: string, fromPath = ""): { citations: Cita
 export function extractLinks(frontmatter: Record<string, unknown>, body: string, fromPath = ""): RawLink[] {
   // 链接只来自正文（ADR 0018、0022）；frontmatter 里遗留的 related 不再计入。
   void frontmatter;
-  const links: RawLink[] = [];
+  return extractKnowledgeLinks(body, fromPath).links;
+}
+
+/** Cross-module destinations are separate from the human link graph and citations. */
+export function extractKnowledgeLinks(body: string, fromPath: string): { links: RawLink[]; resourceIds: string[] } {
+  const links: RawLink[] = [], resourceIds: string[] = [];
   const human = withoutCode(body)
     .replace(/<!--\s*lumio:ai start\b[^>]*-->[\s\S]*?(?:<!--\s*lumio:ai end\b[^>]*-->|$)/g, "");
   for (const match of human.matchAll(/\[\[([^\]\n]+)\]\]/g)) {
     const target = match[1]!.split(/[|#]/, 1)[0]!.trim();
     if (target) links.push({ source: "wikilink", target });
   }
-  return [...links, ...markdownLinks(human, fromPath)];
+  for (const href of markdownDestinations(human)) {
+    const id = href.startsWith(LUMIO_LINK_SCHEME) ? idOfLumioLink(href) : undefined;
+    if (id) {
+      resourceIds.push(id);
+      continue;
+    }
+    let target = href.split(/[?#]/, 1)[0]!;
+    try { target = decodeURIComponent(target); } catch { /* Keep malformed URL escapes verbatim. */ }
+    if (!target || target.endsWith("/") || target.includes("\0") || target.startsWith("//") || /^[a-z][a-z\d+.-]*:/i.test(target)) continue;
+    const extension = posix.extname(target);
+    if (extension && extension !== ".md") continue;
+    links.push({ source: "markdown", target, fromPath });
+  }
+  return { links, resourceIds };
 }
 
 /** Search snippets contain text, with Markdown/HTML presentation removed. */

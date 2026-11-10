@@ -4,7 +4,9 @@
  * 支持安全的 Markdown 子集、管道表格及 LaTeX 公式。
  * 原文中的 HTML 一律转义；外部链接只允许 http(s)；图片不加载，只显示替代文字；
  * 相对 .md 链接与 wikilink 变成工作台内的跳转（data-note），不是浏览器导航。
+ * `lumio:<ID>` 链接变成资源跳转（data-resource，ADR 0051），由工作台按可见性打开。
  */
+import { idOfLumioLink } from "@lumio/schema";
 import { t } from "../i18n.ts";
 import katex from "katex";
 import { mathAt, richBlocks, type RichBlock } from "./markdown-extra.ts";
@@ -85,8 +87,10 @@ export function renderInline(text: string): string {
       out += target ? `<a href="#" class="note-link" data-note="${escapeHtml(target)}">${escapeHtml(label)}</a>` : escapeHtml(m[0]);
     } else if (m[4] !== undefined) out += `<span class="img-placeholder">[${escapeHtml(t("Image: {0}", m[3] || t("Untitled")))}]</span>`;
     else if (m[6] !== undefined) {
-      const external = safeExternalUrl(m[6]); const note = external ? undefined : noteLinkTarget(m[6]);
-      if (external) out += `<a href="${escapeHtml(external)}" target="_blank" rel="noopener noreferrer nofollow">${escapeHtml(m[5]!)}</a>`;
+      const resource = idOfLumioLink(m[6].trim());
+      const external = resource ? undefined : safeExternalUrl(m[6]); const note = external || resource ? undefined : noteLinkTarget(m[6]);
+      if (resource) out += `<a href="#" class="resource-link" data-resource="${escapeHtml(resource)}">${escapeHtml(m[5]!)}</a>`;
+      else if (external) out += `<a href="${escapeHtml(external)}" target="_blank" rel="noopener noreferrer nofollow">${escapeHtml(m[5]!)}</a>`;
       else if (note) out += `<a href="#" class="note-link" data-note="${escapeHtml(note)}">${escapeHtml(m[5]!)}</a>`;
       else out += escapeHtml(m[5]!);
     } else out += `<strong>${renderInline(m[7]!)}</strong>`;

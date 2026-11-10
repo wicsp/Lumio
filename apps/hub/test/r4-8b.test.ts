@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ApiError, Proposal, WorkCommandResult, ExecutionTarget, Job, WorkProject, WorkTask, WorkTaskDetail } from "@lumio/schema";
+import { ApiError, Proposal, WorkCommandResult, ExecutionTarget, HandoffPlan, Job, RuntimeRegistration, WorkProject, WorkTask, WorkTaskDetail } from "@lumio/schema";
 import { startHub } from "../src/server.ts";
 import { readConfig } from "../src/config.ts";
 import { HubStore } from "../src/store.ts";
@@ -42,6 +42,8 @@ test("directory precedence, repo snapshots, changed project directory, clear, an
     if (t.project) expect(r.job.spec.run.kind === "agent" && r.job.spec.run.prompt).toContain("Repository: https://example.test/repo");
   }
   const t = await task({ project: p.id });
+  const mac = hub.store.runtimes(new Date())[0]!;
+  hub.store.registerRuntime(mac.actor, mac.registration, new Date());
   await applied("work.task.plan.set", { task: t.id, expected_revision: t.revision, plan: { stages: [{ kind: "agent", id: "one", agent: "codex@mac", instruction: "Synthetic one" }, { kind: "agent", id: "two", agent: "codex@mac", instruction: "Synthetic two" }] } });
   const first = await applied("work.task.dispatch", { task: t.id }); if (first.kind !== "job") throw Error();
   await applied("work.project.update", { project: p.id, expected_revision: p.revision, patch: { workdir: "/synthetic/new" } });
@@ -52,6 +54,24 @@ test("directory precedence, repo snapshots, changed project directory, clear, an
   expect(jobs.every(j => j.spec.run.kind === "agent" && j.spec.run.prompt.includes("Repository: https://example.test/repo"))).toBe(true);
   await applied("work.project.update", { project: p.id, expected_revision: p.revision + 1, patch: { workdir: null } });
   expect((await client().workProject(p.id)).workdir).toBeUndefined();
+});
+test("Chinese dispatch explains the round's scope and available permissions", async () => {
+  const t = await task({ description: "合成任务描述" });
+  const response = await fetch(new URL("/v2/work/commands", base()), {
+    method: "POST",
+    headers: { Authorization: `Bearer ${human}`, "Content-Type": "application/json", "Accept-Language": "zh-CN" },
+    body: JSON.stringify({ request_id: "synthetic-zh-round-permissions", operation: { op: "work.task.dispatch", args: { task: t.id, to: "codex@mac" } } }),
+  });
+  expect(response.status).toBe(200);
+  const result = WorkCommandResult.parse(await response.json());
+  if (result.kind !== "job" || result.job.spec.run.kind !== "agent") throw Error("agent job expected");
+  const { prompt } = result.job.spec.run;
+  expect(prompt).toContain("只做本轮交代的工作，有阶段时只做当前阶段");
+  expect(prompt).toContain("Git 元数据受保护");
+  expect(prompt).toContain("没有注入阶段专用密钥");
+  expect(prompt).toContain("<lumio-question>所需权限和理由</lumio-question>");
+  expect(prompt).toContain("确实需要 root 的系统命令使用 `lumio-runtime sudo --");
+  expect(prompt).toContain("合成任务描述");
 });
 test("target discovery, validation before proposals, offline acceptance, and runtime denial", async () => {
   const list = ExecutionTarget.array().parse(await client().targets()); expect(list).toMatchObject([{ target: "codex@mac", online: false }]);
@@ -158,6 +178,8 @@ test("implicit dispatch and task reads share plan, last round, and project prece
     status: "done", finished: new Date().toISOString(), report: "Synthetic completion" }, runtime);
   expect(done.status).toBe(200);
   hub.modules.reconcile();
+  const current = hub.store.runtimes(new Date())[0]!;
+  hub.store.registerRuntime(current.actor, current.registration, new Date());
   const plan = { stages: [{ kind: "agent", id: "first", agent: "codex", instruction: "Synthetic plan" }] };
   const planned = await applied("work.task.plan.set", { task: t.id, expected_revision: (await show(t.id)).task.revision, plan });
   expect(planned).toMatchObject({ task: { next_target: { target: "codex@mac", source: "plan" } } });
@@ -218,5 +240,173 @@ test("an agent's implicit proposal preserves its shown target and source through
   expect((await api(`/v1/proposals/${proposal.id}/accept`, {})).status).toBe(200);
   const result = hub.modules.workStore.receipt(proposal.author, request)?.result;
   expect(result).toMatchObject({ kind: "job", target: "codex@mac", target_source: "project" });
+  expect(await client().jobs(undefined, t.id)).toHaveLength(1);
+});
+
+const stage = (id: string, fields: Record<string, unknown> = {}) => ({ kind: "agent", id, agent: "codex@mac", instruction: `Synthetic ${id}`, ...fields });
+function register(changes: Partial<RuntimeRegistration> = {}, now = new Date()) {
+  const mac = hub.store.runtimes(new Date())[0]!;
+  return hub.store.registerRuntime(mac.actor, RuntimeRegistration.parse({ ...mac.registration, ...changes }), now);
+}
+async function setPlan(t: WorkTask, value: unknown) {
+  const plan = HandoffPlan.parse(value);
+  return applied("work.task.plan.set", { task: t.id, expected_revision: t.revision, plan });
+}
+async function answerJob(job: Job, status: "done" | "waiting_for_human") {
+  expect((await api("/v1/runtime/ack", { accepted: [job.spec.id] }, runtime)).status).toBe(200);
+  const result = { job: job.spec.id, lease: job.spec.lease, status, finished: new Date().toISOString(), report: "Synthetic result",
+    ...(status === "waiting_for_human" ? { question: "Synthetic question?", session_id: "synthetic-existing-session" } : {}) };
+  expect((await api("/v1/runtime/results", result, runtime)).status).toBe(200);
+  hub.modules.reconcile();
+}
+
+test("planned dispatch stops on missing or offline registration with no new round", async () => {
+  const t = await task();
+  await setPlan(t, { stages: [stage("one")] });
+  const input = { task: t.id, comment: "Synthetic comment pending dispatch" };
+  const failed = WorkCommandResult.parse(await (await command("work.task.dispatch", input, human, "synthetic-offline-stage")).json());
+  expect(failed).toMatchObject({ kind: "task", task: { turn: { holder: "human", reason: "failed", stage: "one", note: expect.stringContaining("codex@mac is offline") },
+    plan: { rounds: 0 } } });
+  expect(hub.modules.work.detail(t.id).comments).toEqual([]);
+  expect(await client().jobs(undefined, t.id)).toEqual([]);
+
+  register({ engines: [] });
+  const missingEngine = await applied("work.task.dispatch", { task: t.id });
+  expect(missingEngine).toMatchObject({ task: { turn: { reason: "failed", note: expect.stringContaining("has not registered the codex engine") } } });
+  hub.store.db.query("DELETE FROM runtimes WHERE name=?").run("mac");
+  const missingRuntime = await applied("work.task.dispatch", { task: t.id });
+  expect(missingRuntime).toMatchObject({ task: { turn: { reason: "failed", note: expect.stringContaining("is not registered") } } });
+  expect(await client().jobs(undefined, t.id)).toEqual([]);
+  expect(WorkCommandResult.parse(await (await command("work.task.dispatch", input, human, "synthetic-offline-stage")).json())).toEqual(failed);
+});
+
+test("preflight sends permissions and hooks only to capable runtimes and uses the verified Git version", async () => {
+  const t = await task();
+  const hooks = { before: { argv: ["/bin/echo", "synthetic hook"], timeout_minutes: 2 } };
+  const permissions = { access: "read", git: true, secrets: ["synthetic-credential"] };
+  await setPlan(t, { stages: [stage("verified", { ...permissions, hooks })] });
+  const original = register();
+  const unsupported = await applied("work.task.dispatch", { task: t.id });
+  expect(unsupported).toMatchObject({ task: { turn: { reason: "failed", note: expect.stringContaining("does not support stage permissions") } } });
+  register({ features: ["stage_permissions", "hooks"] });
+  const unverified = await applied("work.task.dispatch", { task: t.id });
+  expect(unverified).toMatchObject({ task: { turn: { reason: "failed", note: expect.stringContaining("requires verified Codex 0.166.0") } } });
+  const engines = original.registration.engines.map(engine => ({ ...engine, version: "0.166.0" }));
+  register({ engines, features: ["stage_permissions"] });
+  const noHooks = await applied("work.task.dispatch", { task: t.id });
+  expect(noHooks).toMatchObject({ task: { turn: { reason: "failed", note: expect.stringContaining("does not support stage hooks") } } });
+  expect(await client().jobs(undefined, t.id)).toEqual([]);
+  register({ features: ["stage_permissions", "hooks"] });
+  const started = await applied("work.task.dispatch", { task: t.id });
+  expect(started).toMatchObject({ kind: "job", job: { spec: { run: { permissions, hooks } } } });
+  if (started.kind !== "job" || started.job.spec.run.kind !== "agent") throw new Error("Agent Job expected");
+  expect(started.job.spec.run.prompt).toStartWith("Lumio stage ID: verified\n");
+  expect(started.job.spec.run.prompt).toContain("read-only sandbox with an exception");
+  expect(started.job.spec.run.prompt).not.toContain("synthetic-credential");
+  expect(started.job.spec.run.prompt).not.toContain("Lumio supplies no stage-specific secrets");
+
+  register({ features: undefined });
+  const legacy = await task();
+  await setPlan(legacy, { stages: [stage("legacy")] });
+  const compatible = await applied("work.task.dispatch", { task: legacy.id });
+  if (compatible.kind !== "job" || compatible.job.spec.run.kind !== "agent") throw new Error("Agent Job expected");
+  expect(compatible.job.spec.run.permissions).toBeUndefined();
+  expect(compatible.job.spec.run.hooks).toBeUndefined();
+});
+
+test("a later stage checks current runtime status and parallel initial failure rolls back sibling jobs", async () => {
+  register({ features: ["stage_permissions"] });
+  const parallel = await task();
+  await setPlan(parallel, { stages: [stage("one", { access: "read" }),
+    stage("two", { after: [], access: "read", hooks: { before: { argv: ["/bin/echo", "synthetic"] } } })] });
+  const failed = await applied("work.task.dispatch", { task: parallel.id, comment: "Synthetic initial dispatch" });
+  expect(failed).toMatchObject({ kind: "task", task: { plan: { rounds: 0, stage: "two" },
+    turn: { holder: "human", reason: "failed", stage: "two", note: expect.stringContaining("stage hooks") } } });
+  expect(await client().jobs(undefined, parallel.id)).toEqual([]);
+  expect(hub.modules.work.detail(parallel.id).comments).toEqual([]);
+  register({ features: ["stage_permissions", "hooks"] });
+  expect((await applied("work.task.dispatch", { task: parallel.id })).kind).toBe("job");
+  expect(hub.modules.work.task(parallel.id).turn.parallel).toHaveLength(2);
+
+  const linear = await task();
+  await setPlan(linear, { stages: [stage("before"), stage("after")] });
+  const started = await applied("work.task.dispatch", { task: linear.id });
+  if (started.kind !== "job") throw new Error("Job expected");
+  register({}, new Date(0));
+  await answerJob(started.job, "done");
+  expect(hub.modules.work.task(linear.id)).toMatchObject({ plan: { stage: "after", rounds: 1 },
+    turn: { holder: "human", reason: "failed", stage: "after", note: expect.stringContaining("is offline") } });
+  expect(await client().jobs(undefined, linear.id)).toHaveLength(1);
+});
+
+test("unsandboxed engines warn on plan save, proposal and dispatch without claiming enforcement", async () => {
+  const current = hub.store.runtimes(new Date())[0]!;
+  register({ features: ["stage_permissions"], engines: [...current.registration.engines, { name: "pi", version: "1.4.0", sandbox: "none" }] });
+  const t = await task(), plan = HandoffPlan.parse({ stages: [stage("advisory", { agent: "pi@mac", access: "read" })] });
+  const set = await command("work.task.plan.set", { task: t.id, expected_revision: t.revision, plan });
+  expect(set.status).toBe(200);
+  expect(set.headers.get("X-Lumio-Advisory-Targets")).toBe("pi@mac");
+  const proposal = await command("work.plan_template.save", { name: "Synthetic advisory", plan }, agent);
+  expect(proposal.status).toBe(202);
+  expect(proposal.headers.get("X-Lumio-Advisory-Targets")).toBe("pi@mac");
+  const proposed = WorkCommandResult.parse(await proposal.json());
+  if (proposed.kind !== "proposal") throw new Error("Proposal expected");
+  expect(hub.store.proposal(proposed.proposal)?.reason).toContain("cannot enforce stage permissions");
+
+  const response = await command("work.task.dispatch", { task: t.id });
+  expect(response.headers.get("X-Lumio-Advisory-Targets")).toBe("pi@mac");
+  const job = WorkCommandResult.parse(await response.json());
+  if (job.kind !== "job" || job.job.spec.run.kind !== "agent") throw new Error("Agent Job expected");
+  expect(job.job.spec.run.prompt).toContain("cannot enforce the declared read access");
+});
+
+test("only a human implicit dispatch attaches and snapshots the project default plan", async () => {
+  register();
+  const plan = HandoffPlan.parse({ stages: [stage("template")] });
+  const saved = await applied("work.plan_template.save", { name: "Synthetic default", plan });
+  if (saved.kind !== "template") throw new Error("Template expected");
+  const p = await project({ default_plan: saved.template.id });
+  const direct = await task({ project: p.id });
+  expect(direct.next_target).toEqual({ source: "project", target: "codex@mac" });
+  const input = { task: direct.id, expected_revision: direct.revision };
+  const started = WorkCommandResult.parse(await (await command("work.task.dispatch", input, human, "synthetic-project-template")).json());
+  expect(started).toMatchObject({ kind: "job", target_source: "plan" });
+  expect(WorkCommandResult.parse(await (await command("work.task.dispatch", input, human, "synthetic-project-template")).json())).toEqual(started);
+  const owner = hub.store.actors().find(value => value.name === "owner")!;
+  expect(hub.modules.work.task(direct.id)).toMatchObject({ plan: { plan, stage: "template", approved: { by: owner.id }, rounds: 1 },
+    revision: direct.revision + 1 });
+  const edited = HandoffPlan.parse({ stages: [stage("changed")] });
+  await applied("work.plan_template.save", { template: saved.template.id, name: "Synthetic default", plan: edited });
+  expect(hub.modules.work.task(direct.id).plan?.plan).toEqual(plan);
+
+  const manual = await task({ project: p.id });
+  const oneRound = await applied("work.task.dispatch", { task: manual.id, to: "codex@mac" });
+  if (oneRound.kind !== "job") throw new Error("Job expected");
+  await answerJob(oneRound.job, "waiting_for_human");
+  const continued = await applied("work.task.dispatch", { task: manual.id, comment: "Synthetic answer" });
+  expect(continued).toMatchObject({ kind: "job", target_source: "last_round", job: { spec: { run: { session: { id: "synthetic-existing-session", resume: true } } } } });
+  expect(hub.modules.work.task(manual.id).plan).toBeUndefined();
+
+  const delegated = await task({ project: p.id });
+  expect((await command("work.task.dispatch", { task: delegated.id }, agent)).status).toBe(400);
+  const suggestion = await proposed("work.task.dispatch", { task: delegated.id, to: "codex@mac" });
+  expect((await api(`/v1/proposals/${suggestion}/accept`, {})).status).toBe(200);
+  expect(hub.modules.work.task(delegated.id).plan).toBeUndefined();
+
+  const blocked = await task({ project: p.id, dependencies: [(await task()).id] });
+  expect((await command("work.task.dispatch", { task: blocked.id })).status).toBe(409);
+  expect(hub.modules.work.task(blocked.id).plan).toBeUndefined();
+});
+
+test("a project default can begin at a human checkpoint without a Job", async () => {
+  register();
+  const plan = HandoffPlan.parse({ stages: [{ kind: "checkpoint", id: "approve", prompt: "Approve the synthetic launch?" }, stage("work")] });
+  const saved = await applied("work.plan_template.save", { name: "Synthetic checkpoint default", plan });
+  if (saved.kind !== "template") throw new Error("Template expected");
+  const p = await project({ default_plan: saved.template.id }), t = await task({ project: p.id });
+  const started = await applied("work.task.dispatch", { task: t.id });
+  expect(started).toMatchObject({ kind: "task", task: { plan: { stage: "approve", rounds: 0 }, turn: { reason: "review", stage: "approve" } } });
+  expect(await client().jobs(undefined, t.id)).toEqual([]);
+  expect((await applied("work.task.checkpoint", { task: t.id, stage: "approve", action: "continue" })).kind).toBe("task");
   expect(await client().jobs(undefined, t.id)).toHaveLength(1);
 });

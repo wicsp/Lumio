@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { AIConnectionInput, AIQuotaSettings, AIQuotaSnapshot, ClaudeQuotaSample, NativeRuntimeMessage } from "../src/index.ts";
+import { AIConnectionInput, AIQuotaSettings, AIQuotaSnapshot, ClaudeQuotaSample, NativeRuntimeCommand, NativeRuntimeMessage } from "../src/index.ts";
 
 test("Claude subscription connections and samples reject provider secrets and raw session fields", () => {
   const connection = { name: "Fixture", kind: "claude-code-subscription", host: "fixture-mac" };
@@ -22,4 +22,15 @@ test("quota contracts preserve decimal amounts, validate ranges, and allow old n
   expect(AIQuotaSettings.safeParse({ monitor: true, thresholds: { CNY: "-1" } }).success).toBe(false);
   expect(AIQuotaSettings.safeParse({ monitor: true, thresholds: { remaining_percent: 100.1 } }).success).toBe(false);
   expect(NativeRuntimeMessage.safeParse({ type: "hello", protocol: 1, instance: "old", version: "1", isolation: "macos-seatbelt" }).success).toBe(true);
+});
+
+test("Claude background commands accept only the account fingerprint and normalized results", () => {
+  const binding = { connection: "aic_01ARZ3NDEKTSV4RRFFQ69G5FAV", generation: crypto.randomUUID() };
+  const command = { type: "claude_usage", command: crypto.randomUUID(), ...binding, account: "a".repeat(64) };
+  expect(NativeRuntimeCommand.safeParse(command).success).toBe(true);
+  expect(NativeRuntimeCommand.safeParse({ ...command, account: "fixture@example.test" }).success).toBe(false);
+  const { account, ...envelope } = command;
+  const result = { status: "ready", account, windows: [{ id: "five_hour", used_percent: 34 }] };
+  expect(NativeRuntimeMessage.safeParse({ ...envelope, result }).success).toBe(true);
+  expect(NativeRuntimeMessage.safeParse({ ...envelope, result: { ...result, raw: "synthetic" } }).success).toBe(false);
 });

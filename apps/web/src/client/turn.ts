@@ -43,6 +43,7 @@ export function turnText(task: WorkTask): string {
   if (turn.holder === "human") return t("Your turn · {0}", REASON_LABELS[turn.reason] ?? turn.reason);
   if (turn.holder === "external") return turn.note ? t("Waiting on others: {0}", turn.note) : t("Waiting on others");
   if (turn.holder === "nobody") return t("On hold");
+  if (turn.parallel) return t("{0} agents are working in parallel: {1}", turn.parallel.length, turn.parallel.map(branch => branch.agent).join(t(", ")));
   return turn.round ? t("{0} is working (round {1})", turn.holder, turn.round) : t("{0} is working", turn.holder);
 }
 
@@ -92,3 +93,10 @@ export function turnActionCommand(task: WorkTask, action: TurnAction, note?: str
 export const TURN_ACTION_DONE: Record<TurnAction, string> = translated({
   mine: "It's your turn now.", external: "Marked as waiting on others.", hold: "Put on hold.", done: "Task marked done.", cancel: "Task cancelled.", reopen: "Task reopened.",
 });
+
+/** 正在执行的 agent：并行时取指定阶段（缺省第一个）的分支（ADR 0049）。 */
+export function workingAgent(turn: WorkTask["turn"], stage?: string): string | undefined {
+  if (turn.reason !== "working") return undefined;
+  if (turn.parallel) return (turn.parallel.find(branch => branch.stage === stage) ?? turn.parallel[0])?.agent;
+  return turn.holder;
+}

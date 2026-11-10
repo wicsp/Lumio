@@ -1,5 +1,5 @@
 import { text as msg } from "./messages.ts";
-import { type Actor } from "@lumio/schema";
+import { AI_NOTE_CAPABILITY_NAMES, type Actor } from "@lumio/schema";
 
 export const PAIRING_OPERATIONS = ["runtime.invite", "runtime.join", "client.invite", "client.join", "runtime.remove", "runtime.signing-key"] as const;
 export type PairingOperation = typeof PAIRING_OPERATIONS[number];
@@ -9,15 +9,15 @@ export type QueryOperation = (typeof QUERY_OPERATIONS)[number];
 export const EXISTING_OPERATIONS = [...QUERY_OPERATIONS, "health", "operations", "actors", "proposals", "proposal.accept", "proposal.reject", "task.dispatch", "routine.followup", "routines", "exec.privileged"] as const;
 export const RUNTIME_OPERATIONS = ["runtime.register", "runtime.sync", "runtime.ack", "runtime.results", "runtimes", "runtime.privileged.status", "runtime.privileged.report"] as const;
 export const JOB_OPERATIONS = ["job.submit", "jobs", "job.show", "job.cancel"] as const;
-export const V2_OPERATIONS = ["knowledge.graph", "knowledge.delete", "assistant.delete", "trash.list", "trash.restore", "trash.purge", "knowledge.document", "knowledge.update", "knowledge.related", "knowledge.references", "knowledge.template", "knowledge.resolve", "knowledge.create", "notifications.push", "agents.manage", "work.plan_templates.read", "work.read", "work.command", "execution.read", "execution.command", "execution.archive", "assistant.read", "assistant.chat", "assistant.memory.read", "assistant.memory.command", "assistant.config", "assistant.undo"] as const;
+export const V2_OPERATIONS = ["resource.read", "knowledge.ai-note", "knowledge.graph", "knowledge.delete", "assistant.delete", "trash.list", "trash.restore", "trash.purge", "knowledge.document", "knowledge.update", "knowledge.related", "knowledge.references", "knowledge.template", "knowledge.resolve", "knowledge.create", "notifications.push", "agents.manage", "work.plan_templates.read", "work.read", "work.command", "execution.read", "execution.command", "execution.archive", "assistant.read", "assistant.chat", "assistant.memory.read", "assistant.memory.command", "assistant.config", "assistant.undo"] as const;
 export interface AuthorizationRequest { operation: (typeof EXISTING_OPERATIONS)[number] | (typeof RUNTIME_OPERATIONS)[number] | (typeof JOB_OPERATIONS)[number] | (typeof V2_OPERATIONS)[number] | PairingOperation | string; args?: Record<string, unknown>; command?: string; includePrivate?: boolean }
 export type Decision = { result: "allow" } | { result: "deny"; reason: string } | { result: "needs_approval" };
 
 // One rule table is the only place that decides access. Public health is explicit.
 export const AUTHORIZATION_RULES = [
-  ...(["human", "agent", "runtime"] as const).flatMap((role) => V2_OPERATIONS.flatMap((operation) => (["execution.read", "knowledge.graph"].includes(operation) ? [false, true] : [false]).map((includePrivate) => ({
+  ...(["human", "agent", "runtime"] as const).flatMap((role) => V2_OPERATIONS.flatMap((operation) => (["resource.read", "execution.read", "knowledge.graph"].includes(operation) ? [false, true] : [false]).map((includePrivate) => ({
     role, operation, includePrivate,
-    decision: (operation === "execution.archive" ? role === "runtime" : role === "human" || (role === "agent" && !includePrivate && ["work.read", "work.command", "execution.read"].includes(operation))) ? { result: "allow" as const } : { result: "deny" as const, reason: role === "agent" && includePrivate ? "agent-cannot-read-private" : role === "agent" && /\.(delete|archive)$/.test(operation) ? "agent-cannot-delete-or-archive" : role === "agent" && operation === "execution.command" ? "agent-cannot-change-routines" : msg("server.request_not_authorized") },
+    decision: (operation === "execution.archive" ? role === "runtime" : role === "human" || (role === "agent" && !includePrivate && ["resource.read", "knowledge.ai-note", "work.read", "work.command", "execution.read"].includes(operation))) ? { result: "allow" as const } : { result: "deny" as const, reason: role === "agent" && includePrivate ? "agent-cannot-read-private" : role === "agent" && /\.(delete|archive)$/.test(operation) ? "agent-cannot-delete-or-archive" : role === "agent" && operation === "execution.command" ? "agent-cannot-change-routines" : msg("server.request_not_authorized") },
   })))),
   ...PAIRING_OPERATIONS.flatMap((operation) => ([null, "human", "agent", "runtime"] as const).map((role) => ({
     role, operation, includePrivate: false,
@@ -60,13 +60,13 @@ export const AUTHORIZATION_RULES = [
   ] as const),
 ] as const;
 
-const LOW_RISK_WRITES = ["work.task.create", "work.task.update", "work.task.comment", "work.project.create", "work.project.update"];
+const LOW_RISK_WRITES = [...AI_NOTE_CAPABILITY_NAMES, "work.task.create", "work.task.update", "work.task.comment", "work.project.create", "work.project.update"];
 
 /** Argument-sensitive rules share the same decision point for HTTP and in-process tools. */
 function agentCommand(operation: string, args: Record<string, unknown> = {}): Decision {
   let reason: string | undefined;
   if (operation === "approval.proposal.withdraw") return { result: "allow" };
-  if (operation === "work.task.dispatch" || operation === "work.task.plan.set") return { result: "needs_approval" };
+  if (operation === "work.task.dispatch" || operation === "work.task.plan.set" || operation === "work.plan_template.save") return { result: "needs_approval" };
   if (operation === "work.task.hand") return args.to === "human" || args.to === "external" ? { result: "allow" } : { result: "deny", reason: "agent-cannot-hand-to-nobody" };
   if (operation.endsWith(".dispatch") || operation === "job.submit") reason = "agent-cannot-dispatch-tasks";
   else if (operation.includes("routine")) reason = "agent-cannot-change-routines";

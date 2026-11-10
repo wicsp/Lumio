@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   AIQuotaSettings, AIQuotaSnapshot, AIQuotaView, ClaudeQuotaBindings, ClaudeQuotaSample,
-  type AIConnection, type AIQuotaStatus, type CodexQuotaResult, type NativeAccountBinding,
+  type AIConnection, type AIQuotaStatus, type ClaudeBackgroundResult, type CodexQuotaResult, type NativeAccountBinding,
   type NotificationEvent,
 } from "@lumio/schema";
 import type { SqliteAIStore, StoredAIQuota } from "@lumio/storage";
@@ -85,9 +85,12 @@ export class AIUsage {
   constructor(
     private readonly store: SqliteAIStore,
     private readonly hub: HubStore,
-    private readonly codex: {
+    private readonly runtimeQuota: {
       state(runtime: string): "offline" | "unsupported" | "ready";
       read(connection: AIConnection, runtime: string): Promise<CodexQuotaResult | { status: "offline" }>;
+      claudeState(runtime: string): "offline" | "unsupported" | "ready";
+      readClaude(connection: AIConnection, runtime: string, generation: string, account?: string):
+        Promise<ClaudeBackgroundResult | { status: "offline" }>;
     },
     private readonly notify: (event: NotificationEvent) => void,
     private readonly signal: AbortSignal,
@@ -112,21 +115,26 @@ export class AIUsage {
     } else if (connection.kind === "codex-account") {
       const runtime = this.runtime(connection);
       if (!runtime?.online) return "offline";
-      const state = this.codex.state(runtime.actor);
+      const state = this.runtimeQuota.state(runtime.actor);
       if (state !== "ready") return state;
     } else if (connection.kind === "claude-code-subscription") {
       if (!stored.generation) return "waiting";
       const runtime = this.runtime(connection);
       if (!runtime?.online || stored.binding !== runtime.actor) return "offline";
-      const seen = this.claudeSeen.get(runtime.actor);
-      if (seen === undefined || this.now().getTime() - seen > 180_000) return stored.snapshot ? "stale" : "waiting";
+      if (stored.settings.claude_mode === "background") {
+        const state = this.runtimeQuota.claudeState(runtime.actor);
+        if (state !== "ready") return state;
+      } else {
+        const seen = this.claudeSeen.get(runtime.actor);
+        if (seen === undefined || this.now().getTime() - seen > 180_000) return stored.snapshot ? "stale" : "waiting";
+      }
     } else return "unsupported";
     if (stored.status && stored.status !== "ready") return stored.status;
     const snapshot = stored.snapshot;
     if (!snapshot) return "waiting";
     const now = this.now().getTime();
     const age = now - Date.parse(snapshot.sampled_at);
-    if (age > (snapshot.source === "claude-code" ? CLAUDE_FRESH : 2 * POLL) ||
+    if (age > (snapshot.source === "claude-code" && !snapshot.collection ? CLAUDE_FRESH : 2 * POLL) ||
         (snapshot.source !== "deepseek" && snapshot.windows.some(window => window.resets_at && Date.parse(window.resets_at) <= now)))
       return "stale";
     return "ready";
@@ -143,6 +151,7 @@ export class AIUsage {
       connection: connection.id, status, snapshot, settings: stored.settings,
       attention: !!snapshot && status === "ready" && ((snapshot.source === "deepseek" && !snapshot.available) ||
         lowItems(snapshot, stored.settings, this.now().getTime()).size > 0),
+      claude_issue: matching ? stored.claudeIssue : undefined,
       claude_binding: matching && stored.generation ? { connection: connection.id, generation: stored.generation } : undefined,
     });
   }
@@ -157,7 +166,7 @@ export class AIUsage {
     const low = lowItems(snapshot, stored.settings, now);
     const observed = snapshot.source === "deepseek" ? snapshot.balances.map(balance => balance.currency) :
       snapshot.windows.filter(window => window.used_percent !== undefined && (!window.resets_at || Date.parse(window.resets_at) > now)).map(window => window.id);
-    const fresh = now - Date.parse(snapshot.sampled_at) <= (snapshot.source === "claude-code" ? CLAUDE_FRESH : 2 * POLL);
+    const fresh = now - Date.parse(snapshot.sampled_at) <= (snapshot.source === "claude-code" && !snapshot.collection ? CLAUDE_FRESH : 2 * POLL);
     for (const id of fresh ? observed : []) {
       const marker = low.get(id);
       if (marker === undefined) alerted.delete(id);
@@ -190,8 +199,38 @@ export class AIUsage {
     this.authEpoch.set(id, randomUUID());
   }
 
+  private async collectClaude(connection: AIConnection): Promise<void> {
+    const stored = this.store.quota(connection.id);
+    const runtime = this.runtime(connection);
+    if (stored.settings.claude_mode !== "background" || !stored.generation || !runtime?.online ||
+        runtime.actor !== stored.binding || this.runtimeQuota.claudeState(runtime.actor) !== "ready") return;
+    const result = await this.runtimeQuota.readClaude(connection, runtime.actor, stored.generation, stored.claudeAccount);
+    const active = this.store.connection(connection.id);
+    if (this.signal.aborted || !active || active.owner !== connection.owner || this.runtime(active)?.actor !== runtime.actor) return;
+    this.store.db.transaction(() => {
+      const current = this.store.quota(connection.id);
+      if (current.generation !== stored.generation || current.binding !== runtime.actor || current.settings.claude_mode !== "background") return;
+      if (result.status === "offline") return;
+      const mismatch = result.status === "ready" && current.claudeAccount && current.claudeAccount !== result.account;
+      if (result.status === "ready" && !mismatch) {
+        this.success(active, { ...current, claudeAccount: result.account, claudeIssue: undefined },
+          { source: "claude-code", collection: "background", sampled_at: this.now().toISOString(), windows: result.windows });
+        return;
+      }
+      const issue = result.status === "failed" ? result.issue : "account_changed";
+      const credentials = ["account_changed", "account_unverified", "login_required"].includes(issue);
+      this.failed(active, { ...current, claudeIssue: issue, ...(credentials ? { snapshot: undefined, alerted: undefined } : {}) },
+        credentials ? "credentials" : issue === "version_unsupported" ? "unsupported" : "error");
+      if (credentials || ["version_unsupported", "trust_required", "rate_limited"].includes(issue)) {
+        const failed = this.store.quota(active.id);
+        this.store.putQuota(active.id, { ...failed, next: this.now().getTime() + POLL });
+      }
+    }).immediate();
+  }
+
   private async collect(connection: AIConnection) {
     if (this.signal.aborted) return;
+    if (connection.kind === "claude-code-subscription") return this.collectClaude(connection);
     const runtime = connection.kind === "codex-account" ? this.runtime(connection) : undefined;
     const epoch = this.authEpoch.get(connection.id);
     const current = () => {
@@ -219,8 +258,8 @@ export class AIUsage {
         if (snapshot) this.success(connection, stored, snapshot);
         else this.failed(connection, stored, state);
       }).immediate();
-    } else if (runtime?.online && this.codex.state(runtime.actor) === "ready") {
-      const result = await this.codex.read(connection, runtime.actor);
+    } else if (runtime?.online && this.runtimeQuota.state(runtime.actor) === "ready") {
+      const result = await this.runtimeQuota.read(connection, runtime.actor);
       if (!current()) return;
       this.store.db.transaction(() => {
         let stored = this.store.quota(connection.id);
@@ -246,7 +285,8 @@ export class AIUsage {
     this.nextTick = now + 15_000;
     for (const connection of this.store.quotaConnections()) {
       const quota = this.store.quota(connection.id);
-      if (!quota.settings.monitor || (quota.next ?? 0) > now || connection.kind === "claude-code-subscription") continue;
+      if (!quota.settings.monitor || (quota.next ?? 0) > now ||
+          (connection.kind === "claude-code-subscription" && (quota.settings.claude_mode !== "background" || quota.claudeIssue === "account_changed"))) continue;
       void this.refresh(connection).catch(() => {});
     }
   }
@@ -264,7 +304,8 @@ export class AIUsage {
     if (!match) throw error("NOT_FOUND", "ai.connection_missing");
     const connection = this.owned(owner, match[1]!);
     const action = match[2];
-    if (action === "refresh" && request.method === "POST" && ["deepseek", "codex-account"].includes(connection.kind)) {
+    if (action === "refresh" && request.method === "POST" && (["deepseek", "codex-account"].includes(connection.kind) ||
+        (connection.kind === "claude-code-subscription" && this.store.quota(connection.id).settings.claude_mode === "background"))) {
       await this.refresh(connection);
     } else if (action === "settings" && request.method === "PUT") {
       const settings = AIQuotaSettings.safeParse(await limitedJson(request.body).catch(() => null));
@@ -272,12 +313,21 @@ export class AIUsage {
         throw error("INVALID");
       this.owned(owner, connection.id);
       const stored = this.store.quota(connection.id);
+      if (connection.kind !== "claude-code-subscription" && settings.data.claude_mode) throw error("INVALID");
       const previous = stored.settings;
+      const mode = settings.data.claude_mode ?? previous.claude_mode;
+      const updatedSettings = { ...settings.data, claude_mode: mode };
+      if ((mode ?? "sample") !== (previous.claude_mode ?? "sample")) {
+        const runtime = this.runtime(connection);
+        if (!runtime) throw error("CONFLICT", "native.runtime_offline");
+        this.store.putQuota(connection.id, { settings: updatedSettings, binding: runtime.actor, generation: randomUUID() });
+        return Response.json(this.view(connection), { headers });
+      }
       const thresholds = previous.thresholds;
       const updated = settings.data.thresholds;
       const changed = previous.monitor !== settings.data.monitor || thresholds.CNY !== updated.CNY ||
         thresholds.USD !== updated.USD || thresholds.remaining_percent !== updated.remaining_percent;
-      this.store.putQuota(connection.id, { ...stored, settings: settings.data,
+      this.store.putQuota(connection.id, { ...stored, settings: updatedSettings,
         ...(changed ? { alerted: undefined, next: undefined, failures: undefined } : {}) });
     } else if (action === "bind" && request.method === "POST" && connection.kind === "claude-code-subscription") {
       const runtime = this.runtime(connection);
@@ -296,7 +346,7 @@ export class AIUsage {
       const bindings = this.store.quotaConnections().flatMap(connection => {
         const quota = this.store.quota(connection.id);
         return connection.kind === "claude-code-subscription" && connection.host === runtime.registration.name &&
-          quota.binding === actor && quota.generation ? [{ connection: connection.id, generation: quota.generation }] : [];
+          quota.binding === actor && quota.generation && quota.settings.claude_mode !== "background" ? [{ connection: connection.id, generation: quota.generation }] : [];
       });
       this.claudeSeen.set(actor, this.now().getTime());
       return Response.json(ClaudeQuotaBindings.parse(bindings), { headers: { "Cache-Control": "no-store" } });
@@ -308,7 +358,7 @@ export class AIUsage {
     const connection = this.store.connection(id);
     const stored = this.store.quota(id);
     if (connection?.kind !== "claude-code-subscription" || connection.host !== runtime.registration.name ||
-        stored.binding !== actor || stored.generation !== generation) throw error("NOT_FOUND", "ai.connection_missing");
+        stored.binding !== actor || stored.generation !== generation || stored.settings.claude_mode === "background") throw error("NOT_FOUND", "ai.connection_missing");
     this.claudeSeen.set(actor, this.now().getTime());
     if (stored.snapshot?.source !== "claude-code" || JSON.stringify(stored.snapshot.windows) !== JSON.stringify(windows))
       this.store.db.transaction(() => this.success(connection, stored, { source: "claude-code", sampled_at, windows })).immediate();

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { cp, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AgentInfo, AgentTokenIssued, CAPABILITIES, CliConfig } from "@lumio/schema";
+import { AI_NOTE_CAPABILITY_NAMES, AgentInfo, AgentTokenIssued, CAPABILITIES, CliConfig, KnowledgeAiNoteResult, NoteDetail } from "@lumio/schema";
 import { CAPABILITY_COMMANDS } from "../../../skills/lumio/commands.ts";
 import { SKILL_PATHS } from "../../../skills/lumio/install.ts";
 import { generateSkill } from "../../../scripts/gen-skill.ts";
@@ -57,6 +57,12 @@ test("every catalog capability has an executable CLI command returning its resul
   const hits = search.hits.length ? search.hits : (JSON.parse((await cli(["search", "", "--json"])).stdout) as typeof search).hits;
   const note = hits[0]!.note, ref = note.id ?? note.path.split("/").at(-1)!.replace(/\.md$/, "");
   await run("knowledge.note.show", ["show", ref]); await run("knowledge.note.links", ["links", ref]);
+  const file = join(temp, "ai-note.md");
+  await writeFile(file, "Synthetic AI note body");
+  const ai = KnowledgeAiNoteResult.parse(await run(AI_NOTE_CAPABILITY_NAMES[0], ["ai-note", "create", "Synthetic AI note", "--file", file, "--sources", JSON.stringify([task.task.id])]));
+  const aiDetail = NoteDetail.parse(await run("knowledge.note.show", ["show", ai.note.id!]));
+  expect(aiDetail.revision).toBe(ai.revision);
+  await run(AI_NOTE_CAPABILITY_NAMES[1], ["ai-note", "update", ai.note.id!, "--revision", aiDetail.revision!, "--title", "Updated AI note"]);
   await run("execution.job.list", ["job", "list", "--task", task.task.id, "--limit", "5"]);
   // Submit a synthetic command through the human interface to exercise a nonempty Job result.
   const auth = { Authorization: `Bearer ${human}`, "Content-Type": "application/json" };

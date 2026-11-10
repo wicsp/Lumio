@@ -1,16 +1,24 @@
+import { mergeStageGrant, withinRequest, type PendingStageGrant } from "./stage-grants.ts";
+export { mergeStageGrant, type PendingStageGrant } from "./stage-grants.ts";
 import { nextTurn, type TurnAction, type PlannedDelivery } from "./turn.ts";
+import { completedStages, graphPlan, graphProgress, readyStages, resetStages, workingBranches, type PlanBranch } from "./plan-progress.ts";
 export { nextTurn, migrateTurn, type LegacyTurnFacts, type PlannedDelivery } from "./turn.ts";
 import {
   WorkProject, WorkTask, WorkComment, WorkExecution, WorkTaskDetail,
-  WorkCommandRequest, WorkCommandResult, TaskTurnChange, Turn, PlanTemplate, DEFAULT_PLAN_MAX_ROUNDS, textContainsCardNumber,
+  WorkCommandRequest, WorkCommandResult, TaskTurnChange, Turn, StagePermissions, PlanTemplate, DEFAULT_PLAN_MAX_ROUNDS, textContainsCardNumber,
   type WorkTaskListArgs, type PlanRun, TrashItem, TRASH_RETENTION_DAYS, TRASHED_REASON,
-  type ActorRole, type ID_PREFIXES, type Job, DISPATCH_TARGET_SOURCES,
+  type ActorRole, type ID_PREFIXES, type Job, type HandoffPlan, planAncestors, planSinks, DISPATCH_TARGET_SOURCES,
 } from "@lumio/schema";
 
 export class WorkError extends Error {
   constructor(public readonly code: "INVALID" | "NOT_FOUND" | "CONFLICT" | "INTERNAL" | "FORBIDDEN", public readonly params: { key: string; args: readonly unknown[] }, public readonly reason?: string) {
     super(code); this.name = "WorkError";
   }
+}
+
+/** An expected planned-stage preflight refusal supplied by the dispatch adapter. */
+export class PlanDispatchUnavailable extends WorkError {
+  constructor(params: WorkError["params"]) { super("CONFLICT", params); }
 }
 
 export interface WorkStore {
@@ -20,6 +28,8 @@ export interface WorkStore {
   task(id: string): WorkTask | undefined;
   tasks(): WorkTask[];
   putTask(value: WorkTask): void;
+  pendingGrant(task: string): PendingStageGrant | undefined;
+  putPendingGrant(task: string, grant?: PendingStageGrant): void;
   comments(task: string): WorkComment[];
   putComment(value: WorkComment): void;
   executions(task?: string): WorkExecution[];
@@ -44,14 +54,14 @@ export interface WorkCaller { role: ActorRole; job?: string }
 
 export interface WorkContext {
   systemActor?: string;
-  auditPlan?(change: TaskTurnChange, plan: PlanRun): void;
+  auditPlan?(change: TaskTurnChange, plan: PlanRun, checkpoint?: CheckpointDecision): void;
   job?(id: string): Job | undefined;
   text?: (key: string, ...args: unknown[]) => string;
   now(): Date;
   id(prefix: (typeof ID_PREFIXES)[keyof typeof ID_PREFIXES]): string;
   localRuntime?: string;
   validateTarget?(target: string, source?: TargetSource): void;
-  dispatch?(task: WorkTask, input: string, round: number, to?: string): Job;
+  dispatch?(task: WorkTask, input: string, round: number, to?: string, previous?: string | null, roundGrant?: StagePermissions): Job;
   cancel?(task: string): string | void;
   agentsForJobs?(jobs: string[]): Map<string, string>;
 }
@@ -59,6 +69,14 @@ export interface WorkContext {
 type NextTarget = NonNullable<WorkTask["next_target"]>;
 type TargetSource = (typeof DISPATCH_TARGET_SOURCES)[number];
 type DispatchTarget = { target: string; source: TargetSource };
+type DispatchedRound = { job: Job; target: string; target_source: TargetSource };
+type GraphStep = { turn: Turn; plan: PlanRun; outcome?: "done"; dispatched?: DispatchedRound };
+type CheckpointDecision = { stage: string; action: "continue" | "send_back" | "finish" | "hold"; by: string };
+type GraphDispatch = { to?: string; approvedSource?: TargetSource; only?: string; comment?: string };
+
+function requestsChanges(report?: string): boolean {
+  return report?.split(/\r?\n/).some(line => line.trim() === "<lumio-outcome>changes</lumio-outcome>") ?? false;
+}
 
 function latestExecution(executions: WorkExecution[]): WorkExecution | undefined {
   return executions.reduce<WorkExecution | undefined>((latest, value) => !latest || value.round > latest.round ? value : latest, undefined);
@@ -118,21 +136,28 @@ export class WorkService {
       && (!query || `${task.title}\n${task.description}\n${task.tags.join(" ")}`.toLocaleLowerCase().includes(query)));
     if (!tasks.length) return tasks;
     const projects = new Map(this.store.projects().filter(project => !hidden.has(project.id)).map(project => [project.id, project]));
+    const templates = [...projects.values()].some(project => project.default_plan)
+      ? new Map(this.planTemplates().map(template => [template.id, template.plan])) : undefined;
     const latestJobs = this.store.latestJobs();
     const jobs = tasks.flatMap(task => {
       const job = latestJobs.get(task.id);
       return job ? [job] : [];
     });
     const agents = this.context.agentsForJobs?.(jobs);
-    return tasks.map(task => ({ ...task, next_target: this.nextTarget(task, latestJobs.get(task.id),
-      job => agents?.get(job), id => projects.get(id)?.default_target) }));
+    return tasks.map(task => {
+      const project = task.project ? projects.get(task.project) : undefined;
+      const plan = project?.default_plan ? templates?.get(project.default_plan) : undefined;
+      return { ...task, next_target: this.nextTarget(task, latestJobs.get(task.id), job => agents?.get(job), project?.default_target, plan) };
+    });
   }
   private withReadiness(task: WorkTask, lookup = (id: string) => this.store.trash(id) ? undefined : this.store.task(id)): WorkTask {
     return { ...task, blocked_by: task.dependencies.filter(id => lookup(id)?.outcome === "open") };
   }
   private withTaskFacts(task: WorkTask, current = task, executions = this.store.executions(current.id)): WorkTask {
+    const project = current.project && !this.store.trash(current.project) ? this.store.project(current.project) : undefined;
+    const template = !current.plan && project?.default_plan ? this.planTemplates().find(value => value.id === project.default_plan) : undefined;
     return { ...this.withReadiness(task), next_target: this.nextTarget(current, latestExecution(executions)?.job,
-      job => this.context.agentsForJobs?.([job]).get(job), id => this.store.trash(id) ? undefined : this.store.project(id)?.default_target) };
+      job => this.context.agentsForJobs?.([job]).get(job), project?.default_target, template?.plan) };
   }
   private requireReady(task: WorkTask, ids = this.withReadiness(task).blocked_by!): void {
     if (ids.length) throw new WorkError("CONFLICT", { key: "work.blocked_dependencies", args: [ids.map(id => `${id}: ${this.store.task(id)!.title}`).join(", ")] });
@@ -173,12 +198,18 @@ export class WorkService {
     const change = nextTurn(action, at, task, this.plannedDelivery);
     const plan = task.plan && change.turn.stage ? { ...task.plan, stage: change.turn.stage,
       rounds: task.plan.rounds + Number(change.turn.reason === "working" && change.turn.job !== task.turn.job) } : task.plan;
-    const updated = WorkTask.parse({ ...task, ...change, plan, revision: task.revision + 1, updated: at, updated_by: by });
+    return this.recordTransition(task, change, by, at, change.turn.reason === "working" || !plan?.active
+      ? plan : { ...plan, active: undefined });
+  }
+  private recordTransition(task: WorkTask, { turn, outcome }: { turn: Turn; outcome?: WorkTask["outcome"] },
+    by: string, at: string, plan = task.plan, checkpoint?: CheckpointDecision): WorkTask {
+    const updated = WorkTask.parse({ ...task, turn, ...(outcome === undefined ? {} : { outcome }), plan, revision: task.revision + 1, updated: at, updated_by: by });
     this.store.putTask(updated);
+    if ((outcome && outcome !== "open") || turn.holder === "nobody") this.store.putPendingGrant(task.id);
     const record = TaskTurnChange.parse({ task: task.id, at, by, from: task.turn, to: updated.turn,
-      ...(change.outcome !== undefined ? { outcome: change.outcome } : {}) });
+      ...(outcome !== undefined ? { outcome } : {}) });
     this.store.putTurn(record);
-    if (plan && updated.turn.stage) this.context.auditPlan?.(record, plan);
+    if (plan && (updated.turn.stage || checkpoint)) this.context.auditPlan?.(record, plan, checkpoint);
     return updated;
   }
   private snapshot(task: WorkTask, latest?: WorkExecution): string {
@@ -236,6 +267,11 @@ export class WorkService {
   /** Freeze the observed version and delegation target before presenting a proposal. */
   proposalRequest(input: WorkCommandRequest): { request: WorkCommandRequest; source?: TargetSource } {
     const request = WorkCommandRequest.parse(input), operation = request.operation;
+    if (operation.op === "work.plan_template.save") {
+      this.validatePlan(operation.args.plan);
+      if (operation.args.template) this.requireTemplate(operation.args.template);
+      return { request };
+    }
     if (operation.op !== "work.task.dispatch" && operation.op !== "work.task.plan.set") throw new WorkError("INVALID", { key: "index.invalid_work_command_parameters", args: [] });
     const task = this.visibleTask(operation.args.task);
     if (operation.args.expected_revision !== undefined && operation.args.expected_revision !== task.revision) throw new WorkError("CONFLICT", { key: "index.task_changed_reload_before_dispatching", args: [] });
@@ -257,68 +293,108 @@ export class WorkService {
     return task.plan?.plan.stages.find(stage => stage.id === task.plan?.stage);
   }
   private nextTarget(task: WorkTask, lastJob: string | undefined, agentForJob: (job: string) => string | undefined,
-    projectDefault: (project: string) => string | undefined): NextTarget | undefined {
+    projectDefault?: string, defaultPlan?: HandoffPlan): NextTarget | undefined {
     const stage = this.planStage(task);
     if (task.plan) return stage?.kind === "agent" ? { target: this.qualifyTarget(stage.agent), source: "plan" } : undefined;
+    if (defaultPlan && task.turn.reason !== "answer" && !(task.turn.reason === "failed" && this.store.pendingGrant(task.id))) {
+      const first = readyStages(defaultPlan, new Set())[0];
+      return first?.kind === "agent" ? { target: this.qualifyTarget(first.agent), source: "project" } : undefined;
+    }
     if (lastJob) {
       const target = agentForJob(lastJob);
       return target ? { target: this.qualifyTarget(target), source: "last_round" } : undefined;
     }
-    const target = task.project ? projectDefault(task.project) : undefined;
-    return target ? { target: this.qualifyTarget(target), source: "project" } : undefined;
+    return projectDefault ? { target: this.qualifyTarget(projectDefault), source: "project" } : undefined;
   }
-  private taskTarget(task: WorkTask, lastJob: string | undefined, explicit?: string, approvedSource?: TargetSource): DispatchTarget {
+  private taskTarget(task: WorkTask, lastJob: string | undefined, explicit?: string, approvedSource?: TargetSource, checkPlanRegistration = true): DispatchTarget {
     const stage = this.planStage(task);
     if (explicit !== undefined) {
       const target = this.qualifyTarget(explicit), source = approvedSource ?? "explicit";
-      this.context.validateTarget?.(target, source);
+      if (!task.plan || checkPlanRegistration) this.context.validateTarget?.(target, source);
       if (task.plan && (stage?.kind !== "agent" || target !== this.qualifyTarget(stage.agent))) {
         throw new WorkError("CONFLICT", { key: "work.plan_agent", args: [] });
       }
       return { target, source };
     }
     if (task.plan && stage?.kind !== "agent") throw new WorkError("CONFLICT", { key: "work.plan_agent", args: [] });
-    const target = this.nextTarget(task, lastJob, job => this.context.agentsForJobs?.([job]).get(job), id => this.project(id).default_target);
+    const target = this.nextTarget(task, lastJob, job => this.context.agentsForJobs?.([job]).get(job),
+      !task.plan && !lastJob && task.project ? this.project(task.project).default_target : undefined);
     if (!target) throw new WorkError("INVALID", { key: "index.specify_an_agent_assignee_e_g_pi_server", args: [] });
-    this.context.validateTarget?.(target.target, target.source);
+    if (!task.plan || checkPlanRegistration) this.context.validateTarget?.(target.target, target.source);
     return target;
   }
 
-  private validatePlan(plan: import("@lumio/schema").HandoffPlan | null): void {
+  private validatePlan(plan: HandoffPlan | null): void {
     for (const stage of plan?.stages ?? []) if (stage.kind === "agent") this.context.validateTarget?.(stage.agent);
   }
 
+  private requireTemplate(id: string): PlanTemplate {
+    const template = this.planTemplates().find(value => value.id === id);
+    if (!template) throw new WorkError("NOT_FOUND", { key: "work.template_not_found", args: [] });
+    return template;
+  }
+
+  private initialPlan(plan: HandoffPlan, approved: PlanRun["approved"], from?: string): PlanRun {
+    const run: PlanRun = { plan, approved, stage: from ?? plan.stages[0]!.id, rounds: 0 };
+    if (!graphPlan(plan)) return run;
+    const done = from ? planAncestors(plan.stages).get(from)! : new Set<string>();
+    if (plan.finish === "auto" && plan.stages.some(stage => stage.kind === "checkpoint" && done.has(stage.id))) {
+      throw new WorkError("INVALID", { key: "index.invalid_work_command_parameters", args: [] });
+    }
+    return graphProgress(run, done, from ?? readyStages(plan, done)[0]!.id);
+  }
+
   private reviewTurn(task: WorkTask, stage: string, at: string, note?: string): Turn {
-    const latest = this.store.executions(task.id).at(-1);
+    const latest = latestExecution(this.store.executions(task.id));
     return Turn.parse({ holder: "human", reason: "review", since: at, stage, note,
       round: latest?.round, job: latest?.job });
   }
 
   /** The same safeguards apply to initial delegation, retries and automatic plan handoffs. */
   private startRound(task: WorkTask, actor: string, at: string, options: {
-    to?: string; comment?: string; automatic?: boolean; approvedSource?: TargetSource;
-  }): { turn: Turn; dispatched?: { job: Job; target: string; target_source: TargetSource } } {
-    const { to, comment, automatic, approvedSource } = options;
-    if (task.outcome !== "open" || task.turn.holder === "nobody" || (task.turn.reason === "working" && !automatic)) {
-      throw new WorkError("CONFLICT", { key: "index.task_is_done_cancelled_or_paused", args: [] });
-    }
-    this.requireReady(task);
+    to?: string; comment?: string; automatic?: boolean; approvedSource?: TargetSource; previous?: string | null;
+  }): { turn: Turn; dispatched?: DispatchedRound } {
+    const { to, comment, automatic, approvedSource, previous } = options;
+    this.checkDispatch(task, automatic);
     const executions = this.store.executions(task.id);
-    if (executions.some(execution => !execution.applied)) throw new WorkError("CONFLICT", { key: "index.this_task_already_has_a_running_round_or_pending_result", args: [] });
     const latest = latestExecution(executions);
-    const { target, source } = this.taskTarget(task, latest?.job, to, approvedSource);
+    const { target, source } = this.taskTarget(task, latest?.job, to, approvedSource, false);
     if (task.plan && task.plan.rounds >= (task.plan.plan.max_rounds ?? DEFAULT_PLAN_MAX_ROUNDS)) {
       return { turn: this.reviewTurn(task, task.plan.stage, at, this.msg("work.plan_max_rounds", task.plan.plan.max_rounds ?? DEFAULT_PLAN_MAX_ROUNDS)) };
     }
     if (!this.context.dispatch) throw new WorkError("INTERNAL", { key: "index.execution_capability_is_not_configured", args: [] });
     if (comment !== undefined) this.store.putComment(WorkComment.parse({ id: this.context.id("wmsg"), task: task.id, author: actor, body: comment, created: at }));
-    const snapshot = this.snapshot(task, latest), round = (latest?.round ?? 0) + 1;
-    const job = this.context.dispatch(task, snapshot, round, target);
+    const prior = previous ? executions.find(execution => execution.job === previous) : latest;
+    const snapshot = this.snapshot(task, prior), round = (latest?.round ?? 0) + 1;
+    const pending = task.turn.holder === "human" ? this.store.pendingGrant(task.id) : undefined;
+    const grant = pending && pending.stage === task.plan?.stage && previous !== null && prior?.job === pending.job ? pending : undefined;
+    const job = this.context.dispatch(task, snapshot, round, target, previous, grant?.permissions);
     this.store.putExecution(WorkExecution.parse({ task: task.id, job: job.spec.id, round, input_revision: task.revision,
       input_snapshot: snapshot, created: at, applied: false }));
-    const note = task.plan ? `Plan ${task.plan.approved.at} by ${task.plan.approved.by}; stage ${task.plan.stage}` : undefined;
+    if (grant) this.store.putPendingGrant(task.id);
+    const note = task.plan ? this.planNote(task.plan, task.plan.stage) : undefined;
     return { dispatched: { job, target, target_source: source }, turn: nextTurn({ kind: "dispatch", to: target, round, job: job.spec.id,
       stage: task.plan?.stage, note }, at).turn };
+  }
+
+  private checkDispatch(task: WorkTask, automatic?: boolean): void {
+    if (task.outcome !== "open" || task.turn.holder === "nobody" || (task.turn.reason === "working" && !automatic)) {
+      throw new WorkError("CONFLICT", { key: "index.task_is_done_cancelled_or_paused", args: [] });
+    }
+    this.requireReady(task);
+    if ((!automatic || !task.plan || !graphPlan(task.plan.plan)) && this.store.executions(task.id).some(execution => !execution.applied)) {
+      throw new WorkError("CONFLICT", { key: "index.this_task_already_has_a_running_round_or_pending_result", args: [] });
+    }
+  }
+
+  private planNote(run: PlanRun, stage: string): string {
+    return `Plan ${run.approved.at} by ${run.approved.by}; stage ${stage}`;
+  }
+
+  private failedPlanTurn(task: WorkTask, stage: string, at: string, cause: unknown, code: string): Turn {
+    const detail = cause instanceof PlanDispatchUnavailable ? this.msg(cause.params.key, ...cause.params.args) : code;
+    const note = this.msg("work.plan_dispatch_failed", stage, detail).slice(0, 200);
+    return Turn.parse({ ...this.reviewTurn(task, stage, at, note), reason: "failed" });
   }
 
   private planTurn(task: WorkTask, stageId: string, actor: string, at: string): Turn {
@@ -334,15 +410,133 @@ export class WorkService {
       // Storage/audit faults still roll back result application and remain retryable.
       const code = cause instanceof Error && "code" in cause ? cause.code : undefined;
       if (code !== "INVALID" && code !== "NOT_FOUND" && code !== "CONFLICT") throw cause;
-      return Turn.parse({ ...this.reviewTurn(task, stage.id, at), reason: "failed", note: this.msg("work.plan_dispatch_failed", stage.id, code) });
+      return this.failedPlanTurn(task, stage.id, at, cause, code);
     }
   }
 
   private plannedDelivery: PlannedDelivery = (task, action, at) => {
     const run = task.plan!, index = run.plan.stages.findIndex(stage => stage.id === run.stage), current = run.plan.stages[index];
-    const back = current?.kind === "agent" && action.report?.split(/\r?\n/).some(line => line.trim() === "<lumio-outcome>changes</lumio-outcome>") ? current.back_to : undefined;
+    const back = current?.kind === "agent" && requestsChanges(action.report) ? current.back_to : undefined;
     return this.planTurn(task, back ?? run.plan.stages[index + 1]?.id ?? "end", this.context.systemActor ?? run.approved.by, at);
   };
+
+  /** Join the existing execution and turn histories to find the last round per stage of this plan. */
+  private graphAttempts(task: WorkTask, run: PlanRun): Map<string, { branch: PlanBranch; execution: WorkExecution }> {
+    const executions = run.rounds > 0 ? this.store.executions(task.id).sort((a, b) => a.round - b.round).slice(-run.rounds) : [];
+    const byJob = new Map(executions.map(execution => [execution.job, execution]));
+    const attempts = new Map<string, { branch: PlanBranch; execution: WorkExecution }>();
+    for (const change of this.store.turns(task.id)) {
+      for (const branch of workingBranches(change.to)) {
+        const execution = byJob.get(branch.job);
+        if (execution && (attempts.get(branch.stage)?.branch.round ?? 0) < branch.round) {
+          attempts.set(branch.stage, { branch, execution });
+        }
+      }
+    }
+    return attempts;
+  }
+
+  private graphWorking(run: PlanRun, done: ReadonlySet<string>, active: PlanBranch[], at: string, note?: string): GraphStep {
+    const first = active[0]!;
+    const turn = active.length > 1
+      ? Turn.parse({ holder: "agents", reason: "working", since: at, stage: first.stage, parallel: active })
+      : nextTurn({ kind: "dispatch", to: first.agent, stage: first.stage, round: first.round, job: first.job, note }, at).turn;
+    return { plan: graphProgress(run, done, first.stage, active), turn };
+  }
+
+  private advanceGraph(task: WorkTask, run: PlanRun, done: Set<string>, active: PlanBranch[], actor: string, at: string,
+    options: { start?: GraphDispatch; settled?: Job; prefer?: string; skipStops?: boolean } = {}): GraphStep {
+    const review = (stage: string, note?: string): GraphStep => ({
+      plan: graphProgress(run, done, stage), turn: this.reviewTurn(task, stage, at, note),
+    });
+    const attempts = this.graphAttempts(task, run);
+    let ready = readyStages(run.plan, done, active);
+    let prefer = options.prefer;
+    if (!options.start && !options.skipStops) {
+      // A question, failure or send-back stops new launches while in-flight peers drain.
+      // Old results from a reset descendant no longer apply after its ancestor has run again.
+      const ancestors = planAncestors(run.plan.stages);
+      const stopped = ready.flatMap(stage => {
+        const attempt = attempts.get(stage.id);
+        if (stage.kind !== "agent" || !attempt?.execution.applied
+          || [...ancestors.get(stage.id)!].some(id => (attempts.get(id)?.branch.round ?? 0) > attempt.branch.round)) return [];
+        const job = attempt.branch.job === options.settled?.spec.id ? options.settled : this.context.job?.(attempt.branch.job);
+        if (!job) return [];
+        const back = job.status === "done" && requestsChanges(job.result?.report) ? stage.back_to : undefined;
+        return job.status === "done" && !back ? [] : [{ branch: attempt.branch, status: job.status, back }];
+      }).sort((a, b) => a.branch.round - b.branch.round);
+      if (stopped.length && active.length) return this.graphWorking(run, done, active, at);
+      const attention = stopped.find(result => !result.back);
+      if (attention) {
+        const { branch, status } = attention;
+        const turn = nextTurn({ kind: "result", status, job: branch.job, round: branch.round }, at).turn;
+        return { plan: graphProgress(run, done, branch.stage), turn: Turn.parse({ ...turn, stage: branch.stage }) };
+      }
+      if (stopped.length) {
+        for (const result of stopped) done.add(result.branch.stage);
+        resetStages(run.plan, done, stopped.flatMap(result => result.back ? [result.back] : []));
+        prefer = stopped[0]!.back;
+        ready = readyStages(run.plan, done);
+      }
+    }
+
+    if (!ready.length) {
+      if (active.length) return this.graphWorking(run, done, active, at);
+      if (run.plan.finish !== "auto" || !planSinks(run.plan.stages).every(id => done.has(id))) return review("end");
+      if (this.withReadiness(task).blocked_by!.length) {
+        const result = review("end", this.msg("work.plan_dispatch_failed", "end", "CONFLICT"));
+        return { ...result, turn: Turn.parse({ ...result.turn, reason: "failed" }) };
+      }
+      return { plan: graphProgress(run, done, "end"), outcome: "done",
+        turn: Turn.parse({ ...nextTurn({ kind: "finish", outcome: "done" }, at).turn, stage: "end" }) };
+    }
+
+    const first = ready.find(stage => stage.id === (options.start?.only ?? prefer)) ?? ready[0]!;
+    if (first.kind === "checkpoint") {
+      if (options.start) throw new WorkError("CONFLICT", { key: "work.plan_agent", args: [] });
+      return review(first.id, first.prompt);
+    }
+    const limit = run.plan.max_rounds ?? DEFAULT_PLAN_MAX_ROUNDS;
+    if (run.rounds >= limit) {
+      return active.length ? this.graphWorking(run, done, active, at) : review(first.id, this.msg("work.plan_max_rounds", limit));
+    }
+    const candidates = options.start?.only ? [first] : [first, ...ready.filter(stage => stage.id !== first.id)];
+    let failedStage = first.id;
+    try {
+      return this.store.transaction(() => {
+        const branches = [...active];
+        const comment = options.start?.comment;
+        if (comment !== undefined) this.store.putComment(WorkComment.parse({ id: this.context.id("wmsg"), task: task.id, author: actor, body: comment, created: at }));
+        let dispatched: DispatchedRound | undefined;
+        for (const stage of candidates.slice(0, limit - run.rounds)) {
+          failedStage = stage.id;
+          const branchRun = graphProgress({ ...run, rounds: run.rounds + branches.length - active.length }, done, stage.id);
+          const result = this.startRound({ ...task, plan: branchRun }, actor, at, { automatic: true,
+            previous: attempts.get(stage.id)?.branch.job ?? null,
+            ...(stage.id === first.id ? { to: options.start?.to, approvedSource: options.start?.approvedSource } : {}) });
+          const branch = workingBranches(result.turn)[0]!;
+          branches.push(branch);
+          dispatched ??= result.dispatched;
+        }
+        const progress = { ...run, rounds: run.rounds + branches.length - active.length };
+        return { ...this.graphWorking(progress, done, branches, at, this.planNote(run, branches[0]!.stage)), dispatched };
+      });
+    } catch (cause) {
+      const code = cause instanceof Error && "code" in cause ? cause.code : undefined;
+      if ((options.start && !(cause instanceof PlanDispatchUnavailable)) || (code !== "INVALID" && code !== "NOT_FOUND" && code !== "CONFLICT")) throw cause;
+      if (active.length) return this.graphWorking(run, done, active, at);
+      return { plan: graphProgress(run, done, failedStage), turn: this.failedPlanTurn(task, failedStage, at, cause, code) };
+    }
+  }
+
+  private applyGraphResult(task: WorkTask, branch: PlanBranch, job: Job, actor: string, at: string): void {
+    const run = task.plan!, done = completedStages(run);
+    const stage = run.plan.stages.find(node => node.id === branch.stage);
+    if (job.status === "done" && !(stage?.kind === "agent" && stage.back_to && requestsChanges(job.result?.report))) done.add(branch.stage);
+    const active = workingBranches(task.turn).filter(value => value.job !== branch.job);
+    const next = this.advanceGraph(task, run, done, active, actor, at, { settled: job });
+    this.recordTransition(task, next, actor, at, next.plan);
+  }
 
   replay(request: WorkCommandRequest, actor: string): WorkCommandResult | undefined {
     const previous = this.store.receipt(actor, request.request_id);
@@ -370,9 +564,10 @@ export class WorkService {
       switch (operation.op) {
         case "work.project.create": {
           if (operation.args.default_target) this.context.validateTarget?.(operation.args.default_target);
+          if (operation.args.default_plan) this.requireTemplate(operation.args.default_plan);
           const project = WorkProject.parse({ schema_version: 2, type: "project", id: this.context.id("prj"),
             title: operation.args.title, description: operation.args.description ?? "", tags: operation.args.tags ?? [],
-            goal: operation.args.goal, repo: operation.args.repo, workdir: operation.args.workdir, default_target: operation.args.default_target, deadline: operation.args.deadline,
+            goal: operation.args.goal, repo: operation.args.repo, workdir: operation.args.workdir, default_target: operation.args.default_target, default_plan: operation.args.default_plan, deadline: operation.args.deadline,
             revision: 1, status: "planning", created: time, updated: time, created_by: actor, updated_by: actor });
           this.store.putProject(project); result = { kind: "project", project }; break;
         }
@@ -380,6 +575,7 @@ export class WorkService {
           const current = this.project(operation.args.project);
           if (current.revision !== operation.args.expected_revision) throw new WorkError("CONFLICT", { key: "index.project_changed_reload_before_saving", args: [] });
           if (operation.args.patch.default_target) this.context.validateTarget?.(operation.args.patch.default_target);
+          if (operation.args.patch.default_plan) this.requireTemplate(operation.args.patch.default_plan);
           const project = WorkProject.parse({ ...patch(current, operation.args.patch), revision: current.revision + 1, updated: time, updated_by: actor });
           this.store.putProject(project); result = { kind: "project", project }; break;
         }
@@ -412,17 +608,18 @@ export class WorkService {
           if (operation.op === "work.task.hand") {
             // A self-handoff leaves the round alive to deliver its final report. Check the pending
             // execution as well as turn: an earlier handoff may already have moved turn elsewhere.
-            const pending = this.store.executions(task.id).find(execution => {
+            const pending = this.store.executions(task.id).filter(execution => {
               const job = this.context.job?.(execution.job);
               return !execution.applied && (!job || (!job.result && ["queued", "assigned", "running"].includes(job.status)));
             });
-            const job = pending?.job ?? (task.turn.reason === "working" ? task.turn.job : undefined);
+            const job = pending[0]?.job ?? (task.turn.reason === "working" ? task.turn.job : undefined);
             if (job && caller.role !== "human") {
               const ownRound = caller.role === "agent" ? caller.job === job : this.context.job?.(job)?.spec.runtime === actor;
-              if (!ownRound) throw new WorkError("CONFLICT", { key: "work.hand_other_round", args: [] });
+              if (!ownRound || pending.length > 1) throw new WorkError("CONFLICT", { key: "work.hand_other_round", args: [] });
             }
             if (job && caller.role === "human") this.context.cancel?.(task.id);
           } else if (operation.op === "work.task.finish") this.context.cancel?.(task.id);
+          if (operation.op === "work.task.hand") this.store.putPendingGrant(task.id);
           const updated = this.transition(task, action, actor, time);
           this.checkTask(updated, task); result = { kind: "task", task: updated }; break;
         }
@@ -433,8 +630,10 @@ export class WorkService {
           this.validatePlan(plan);
           if (from && (!plan || !plan.stages.some(stage => stage.id === from))) throw new WorkError("INVALID", { key: "index.invalid_work_command_parameters", args: [] });
           if (task.turn.reason === "working" || task.outcome !== "open") throw new WorkError("CONFLICT", { key: "work.invalid_outcome_transition", args: [] });
-          const updated = WorkTask.parse({ ...task, plan: plan ? { plan, approved: { at: time, by: approval?.by ?? actor, ...(approval ? { proposal: approval.proposal } : {}) }, stage: from ?? plan.stages[0]!.id, rounds: 0 } : undefined,
+          const run = plan ? this.initialPlan(plan, { at: time, by: approval?.by ?? actor, proposal: approval?.proposal }, from) : undefined;
+          const updated = WorkTask.parse({ ...task, plan: run,
             revision: task.revision + 1, updated: time, updated_by: actor });
+          this.store.putPendingGrant(task.id);
           this.store.putTask(updated); result = { kind: "task", task: updated }; break;
         }
         case "work.task.checkpoint": {
@@ -445,6 +644,8 @@ export class WorkService {
             throw new WorkError("CONFLICT", { key: "work.checkpoint_changed", args: [] });
           }
           if (comment !== undefined) this.store.putComment(WorkComment.parse({ id: this.context.id("wmsg"), task: task.id, author: actor, body: comment, created: time }));
+          const checkpoint = { stage, action, by: actor };
+          if (action === "send_back") this.store.putPendingGrant(task.id);
           let updated: WorkTask;
           if (action === "finish") {
             updated = this.transition(task, { kind: "finish", outcome: "done" }, actor, time); this.checkTask(updated, task);
@@ -454,32 +655,49 @@ export class WorkService {
             if (action === "send_back" && (!comment?.trim() || !run.plan.stages.some(value => value.id === back_to && value.kind === "agent"))) {
               throw new WorkError("INVALID", { key: "work.checkpoint_back_to", args: [] });
             }
-            if (action === "continue" && stage === "end") throw new WorkError("INVALID", { key: "work.checkpoint_end", args: [] });
-            const target = action === "send_back" ? back_to! : current?.kind === "agent" ? current.id : run.plan.stages[index + 1]?.id ?? "end";
-            updated = this.transition(task, { kind: "plan", turn: this.planTurn(task, target, actor, time) }, actor, time);
+            if (action === "continue" && stage === "end" && (!graphPlan(run.plan) || !current || completedStages(run).has(stage))) {
+              throw new WorkError("INVALID", { key: "work.checkpoint_end", args: [] });
+            }
+            if (graphPlan(run.plan)) {
+              const done = completedStages(run);
+              if (action === "send_back") resetStages(run.plan, done, [back_to!]);
+              else if (current?.kind === "checkpoint") done.add(current.id);
+              const start = action === "continue" && current?.kind === "agent" ? { only: current.id } : undefined;
+              const next = this.advanceGraph(task, run, done, [], actor, time, { start, prefer: back_to, skipStops: action === "send_back" });
+              const by = next.outcome === "done" ? this.context.systemActor ?? actor : actor;
+              updated = this.recordTransition(task, next, by, time, next.plan, checkpoint);
+            } else {
+              const target = action === "send_back" ? back_to! : current?.kind === "agent" ? current.id : run.plan.stages[index + 1]?.id ?? "end";
+              updated = this.transition(task, { kind: "plan", turn: this.planTurn(task, target, actor, time) }, actor, time);
+            }
           }
           result = { kind: "task", task: updated }; break;
         }
         case "work.plan_template.save": {
-          if (caller.role !== "human") throw new WorkError("INVALID", { key: "work.human_only", args: [] });
-          const { template: id, name, plan } = operation.args, previous = id ? this.planTemplates().find(value => value.id === id) : undefined;
-          if (id && !previous) throw new WorkError("NOT_FOUND", { key: "work.template_not_found", args: [] });
+          if (caller.role !== "human" && !(caller.role === "agent" && approval)) throw new WorkError("INVALID", { key: "work.human_only", args: [] });
+          const { template: id, name, plan } = operation.args, previous = id ? this.requireTemplate(id) : undefined;
+          this.validatePlan(plan);
           const template = PlanTemplate.parse({ id: id ?? this.context.id("wft"), name, plan, created: previous?.created ?? time, updated: time });
           this.store.putPlanTemplate(template); result = { kind: "template", template }; break;
         }
         case "work.plan_template.delete": {
           if (caller.role !== "human") throw new WorkError("INVALID", { key: "work.human_only", args: [] });
           const id = operation.args.template;
-          if (!this.planTemplates().some(value => value.id === id)) throw new WorkError("NOT_FOUND", { key: "work.template_not_found", args: [] });
+          this.requireTemplate(id);
+          for (const project of this.store.projects().filter(value => value.default_plan === id)) {
+            this.store.putProject({ ...project, default_plan: undefined, revision: project.revision + 1, updated: time, updated_by: actor });
+          }
           this.store.deletePlanTemplate(id); result = { kind: "removed", id }; break;
         }
         case "work.task.delete": {
           const task = this.visibleTask(operation.args.task);
           if (task.revision !== operation.args.expected_revision) throw new WorkError("CONFLICT", { key: "index.task_changed_reload_before_saving", args: [] });
           const stopped = this.context.cancel?.(task.id) || undefined;
+          this.store.putPendingGrant(task.id);
           if (task.turn.reason === "working") {
             // Settle the round without changing the task's outcome or advancing its plan.
-            this.transition(task, { kind: "result", status: "cancelled", job: task.turn.job!, round: task.turn.round! }, actor, time);
+            const branch = workingBranches(task.turn)[0];
+            this.transition(task, { kind: "result", status: "cancelled", job: branch?.job ?? task.turn.job!, round: branch?.round ?? task.turn.round! }, actor, time);
           } else this.store.putTask({ ...task, revision: task.revision + 1, updated: time, updated_by: actor });
           const item = this.trashItem({ kind: "task", id: task.id, title: task.title, project: task.project, stopped_job: stopped }, actor, time);
           result = { kind: "trashed", item }; break;
@@ -494,20 +712,98 @@ export class WorkService {
           result = { kind: "trashed", item }; break;
         }
         case "work.task.grant":
-          // ADR 0049 第 3 节：契约已就位，执行由 H1-9 实现。
-          throw new WorkError("INVALID", { key: "index.invalid_work_command_parameters", args: [] }, "work.task.grant is not implemented yet (H1-9)");
+          result = this.grantTask(operation, actor, time, caller); break;
         case "work.task.dispatch": {
           const task = this.visibleTask(operation.args.task);
-          if (operation.args.expected_revision !== undefined && task.revision !== operation.args.expected_revision) throw new WorkError("CONFLICT", { key: "index.task_changed_reload_before_dispatching", args: [] });
-          const started = this.startRound(task, actor, time, { to: operation.args.to, comment: operation.args.comment, approvedSource: approval?.targetSource });
-          const updated = this.transition(task, { kind: "plan", turn: started.turn }, actor, time);
-          result = started.dispatched ? { kind: "job", ...started.dispatched } : { kind: "task", task: updated }; break;
+          if (operation.args.expected_revision !== undefined && task.revision !== operation.args.expected_revision) {
+            throw new WorkError("CONFLICT", { key: "index.task_changed_reload_before_dispatching", args: [] });
+          }
+          result = this.dispatchTask(task, operation.args, actor, time, caller, approval?.targetSource); break;
         }
       }
       result = WorkCommandResult.parse(result);
       this.store.putReceipt(actor, request.request_id, serialized, result);
       return result.kind === "task" ? { ...result, task: this.withTaskFacts(result.task) } : result;
     });
+  }
+
+  private grantTask(operation: Extract<WorkCommandRequest["operation"], { op: "work.task.grant" }>,
+    actor: string, at: string, caller: WorkCaller): WorkCommandResult {
+    if (caller.role !== "human") throw new WorkError("FORBIDDEN", { key: "work.permission_human_only", args: [] });
+    const args = operation.args, task = this.visibleTask(args.task);
+    if (task.revision !== args.expected_revision) throw new WorkError("CONFLICT", { key: "index.task_changed_reload_before_dispatching", args: [] });
+    const pending = task.turn.job && task.turn.holder === "human" && task.turn.reason === "answer" && task.outcome === "open"
+      ? this.context.job?.(task.turn.job) : undefined;
+    const requested = pending?.status === "waiting_for_human" && pending.spec.source?.task === task.id
+      && pending.spec.run.kind === "agent" ? pending.result?.permission : undefined;
+    if (!pending || !requested) throw new WorkError("CONFLICT", { key: "work.no_pending_permission_request", args: [] });
+    if (!withinRequest(args.permissions, requested)) throw new WorkError("INVALID", { key: "work.permission_not_requested", args: [] });
+
+    const stage = this.planStage(task);
+    if (task.plan && (stage?.kind !== "agent" || task.turn.stage !== stage.id)) {
+      throw new WorkError("CONFLICT", { key: "work.no_pending_permission_request", args: [] });
+    }
+    let updated = task;
+    if (args.scope === "task") {
+      const base = stage?.kind === "agent" ? { access: stage.access, git: stage.git, secrets: stage.secrets } : task.grants;
+      const permissions = StagePermissions.safeParse(mergeStageGrant(base, args.permissions));
+      if (!permissions.success) throw new WorkError("INVALID", { key: "work.permission_conflicts_with_plan", args: [] });
+      const parsed = WorkTask.safeParse(task.plan ? { ...task, plan: { ...task.plan, plan: { ...task.plan.plan,
+        stages: task.plan.plan.stages.map(node => node.id === stage!.id ? { ...node, ...permissions.data } : node),
+      } } } : { ...task, grants: permissions.data });
+      if (!parsed.success) throw new WorkError("INVALID", { key: "work.permission_conflicts_with_plan", args: [] });
+      updated = parsed.data;
+    }
+
+    if (args.scope === "next_round" || args.continue !== false) {
+      const previous = this.store.pendingGrant(task.id);
+      const permissions = StagePermissions.safeParse(mergeStageGrant(previous?.job === pending.spec.id ? previous.permissions : undefined, args.permissions));
+      if (!permissions.success) throw new WorkError("INVALID", { key: "work.permission_conflicts_with_plan", args: [] });
+      this.store.putPendingGrant(task.id, { job: pending.spec.id, stage: stage?.id, permissions: permissions.data });
+    }
+    if (args.continue !== false) return this.dispatchTask(updated, {}, actor, at, caller);
+    updated = WorkTask.parse({ ...updated, revision: task.revision + 1, updated: at, updated_by: actor });
+    this.store.putTask(updated);
+    return { kind: "task", task: updated };
+  }
+
+  private dispatchTask(task: WorkTask, { to, comment }: { to?: string; comment?: string },
+    actor: string, at: string, caller: WorkCaller, approvedSource?: TargetSource): WorkCommandResult {
+    if (caller.role === "human" && to === undefined && !task.plan && task.project && task.turn.reason !== "answer" && !this.store.pendingGrant(task.id)) {
+      const id = this.project(task.project).default_plan;
+      if (id) {
+        this.checkDispatch(task);
+        task = { ...task, plan: this.initialPlan(this.requireTemplate(id).plan, { at, by: actor }) };
+        const first = this.planStage(task);
+        if (first?.kind === "checkpoint") {
+          return { kind: "task", task: this.recordTransition(task, { turn: this.reviewTurn(task, first.id, at, first.prompt) }, actor, at) };
+        }
+      }
+    }
+    if (task.plan && graphPlan(task.plan.plan)) {
+      this.checkDispatch(task);
+      const run = task.plan;
+      if (this.planStage(task)?.kind !== "agent") throw new WorkError("CONFLICT", { key: "work.plan_agent", args: [] });
+      const retry = run.rounds > 0 && task.turn.stage === run.stage && task.turn.reason !== "review";
+      const next = this.advanceGraph(task, run, completedStages(run), [], actor, at, { prefer: run.stage,
+        start: { to, comment, approvedSource, only: retry ? run.stage : undefined } });
+      const updated = this.recordTransition(task, next, actor, at, next.plan);
+      return next.dispatched ? { kind: "job", ...next.dispatched } : { kind: "task", task: updated };
+    }
+    let started: ReturnType<WorkService["startRound"]>;
+    try {
+      started = this.store.transaction(() => this.startRound(task, actor, at, { to, comment, approvedSource }));
+    } catch (cause) {
+      if (!(cause instanceof PlanDispatchUnavailable)) throw cause;
+      if (task.plan) started = { turn: this.failedPlanTurn(task, task.plan.stage, at, cause, cause.code) };
+      else {
+        const latest = latestExecution(this.store.executions(task.id));
+        started = { turn: Turn.parse({ holder: "human", reason: "failed", since: at,
+          job: latest?.job, round: latest?.round, note: this.msg(cause.params.key, ...cause.params.args).slice(0, 200) }) };
+      }
+    }
+    const updated = this.transition(task, { kind: "plan", turn: started.turn }, actor, at);
+    return started.dispatched ? { kind: "job", ...started.dispatched } : { kind: "task", task: updated };
   }
 
   private trashItem(input: Omit<TrashItem, "deleted_at" | "deleted_by" | "expires_at">, actor: string, time: string): TrashItem {
@@ -530,7 +826,7 @@ export class WorkService {
     });
   }
 
-  /** A terminal result appends progress and hands back exactly once; it never finishes the task. */
+  /** A terminal result appends progress and advances the current turn exactly once. */
   applyResult(job: Job): void {
     if (!["done", "waiting_for_human", "failed", "unknown", "cancelled"].includes(job.status)) return;
     this.store.transaction(() => {
@@ -547,9 +843,13 @@ export class WorkService {
       this.store.putComment(WorkComment.parse({ id: this.context.id("wmsg"), task: execution.task, author: job.spec.runtime,
         body: shown, created: this.context.now().toISOString() }));
       this.store.putExecution({ ...execution, applied: true });
-      if (!this.store.trash(task.id) && task.outcome === "open" && task.turn.reason === "working" && task.turn.job === job.spec.id) {
-        this.transition(task, { kind: "result", status: job.status, round: execution.round, job: job.spec.id, report: job.result?.report },
-          this.context.systemActor ?? job.spec.runtime, this.context.now().toISOString());
+      if (this.store.trash(task.id) || task.outcome !== "open" || task.turn.reason !== "working") return;
+      const actor = this.context.systemActor ?? job.spec.runtime, at = this.context.now().toISOString();
+      if (task.plan && graphPlan(task.plan.plan)) {
+        const branch = workingBranches(task.turn).find(value => value.job === job.spec.id);
+        if (branch) this.applyGraphResult(task, branch, job, actor, at);
+      } else if (task.turn.job === job.spec.id) {
+        this.transition(task, { kind: "result", status: job.status, round: execution.round, job: job.spec.id, report: job.result?.report }, actor, at);
       }
     });
   }

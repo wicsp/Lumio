@@ -1,4 +1,4 @@
-import { CAPABILITIES } from "@lumio/schema";
+import { AI_NOTE_CAPABILITY_NAMES, CAPABILITIES } from "@lumio/schema";
 
 /** Executable spellings shared by command parsing, --help and generated skill documentation. */
 export const WORK_OPTIONS = {
@@ -9,7 +9,7 @@ export const WORK_OPTIONS = {
   timeout: { type: "string" }, patch: { type: "string" }, revision: { type: "string" }, "request-id": { type: "string" },
   comment: { type: "string" }, turn: { type: "string" }, note: { type: "string" },
   from: { type: "string" }, stage: { type: "string" }, action: { type: "string" }, "back-to": { type: "string" },
-  goal: { type: "string" }, repo: { type: "string" }, deadline: { type: "string" }, "default-target": { type: "string" },
+  goal: { type: "string" }, repo: { type: "string" }, deadline: { type: "string" }, "default-target": { type: "string" }, "default-plan": { type: "string" },
 } as const;
 export interface CommandDefinition { path: string; positional?: string; options?: string[]; required?: string[]; capability?: string; aliases?: string[]; tail?: string }
 const write = ["request-id"], body = ["description", "file"], taskFields = ["project", "parent", "depends", "due", "workdir", "model", "gpus", "timeout"], projectFields = ["goal", "repo", "deadline", "workdir", "default-target"];
@@ -17,6 +17,8 @@ const def = (path: string, positional = "", options: string[] = [], capability?:
 export const COMMANDS: CommandDefinition[] = [
   def("search", "<query>", ["type", "limit", "include-private", "vault"], "knowledge.note.search"),
   def("show", "<ref>", ["include-private", "vault"], "knowledge.note.show"), def("links", "<ref>", ["include-private", "vault"], "knowledge.note.links"),
+  def("ai-note create", "<title>", ["file", "tags", "sources", "model", ...write], AI_NOTE_CAPABILITY_NAMES[0], { required: ["file"] }),
+  def("ai-note update", "<id>", ["revision", "title", "file", "tags", "sources", ...write], AI_NOTE_CAPABILITY_NAMES[1], { required: ["revision"] }),
   def("check", "", ["include-private", "vault"]), def("export bib", "<ref>", ["from", "out", "vault"]),
   def("sync", "", ["vault", "dry-run"]), def("new idea", "<title>", ["vault"]), def("new paper", "<arxiv-or-doi>", ["vault", "abbr"]),
   def("targets", "", ["online"], "execution.target.list"), def("attention", "", [], "work.attention.list"),
@@ -32,7 +34,7 @@ export const COMMANDS: CommandDefinition[] = [
   def("task checkpoint", "<id>", ["stage", "action", "back-to", "comment", ...write], undefined, { required: ["stage", "action"] }),
   def("project new", "<title>", [...body, ...projectFields, ...write], "work.project.create", { aliases: ["project create"] }),
   def("project list", "", ["status"], "work.project.list"), def("project show", "<id>", [], "work.project.show"),
-  def("project update", "<id>", ["patch", "revision", ...body, ...projectFields, ...write], "work.project.update"),
+  def("project update", "<id>", ["patch", "revision", ...body, ...projectFields, "default-plan", ...write], "work.project.update"),
   def("project edit", "<id>", ["file", "revision", ...write]), def("project status", "<id> [<status>]", ["status", "revision", ...write]),
   def("plan-template list"), def("plan-template save", "<name>", ["file", "template", ...write], undefined, { required: ["file"] }), def("plan-template delete", "<id>", write),
   def("job list", "", ["status", "task", "routine", "limit"], "execution.job.list"), def("job show", "<id>", [], "execution.job.show"),

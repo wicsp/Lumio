@@ -2,9 +2,9 @@ import { createHash } from "node:crypto";
 import { readFile, realpath } from "node:fs/promises";
 import { join, basename } from "node:path";
 import type { Database } from "bun:sqlite";
-import { KnowledgeDocument, KnowledgeUpdateRequest, KnowledgeUpdateResult, KnowledgeRelatedRequest, KnowledgeRelatedResult, KnowledgeReferencesRequest, KnowledgeReferencesResult, type NoteDetail } from "@lumio/schema";
+import { AiNote, KnowledgeAiNoteUpdateArgs, KnowledgeAiNoteResult, RequestId, KnowledgeDocument, KnowledgeUpdateRequest, KnowledgeUpdateResult, KnowledgeRelatedRequest, KnowledgeRelatedResult, KnowledgeReferencesRequest, KnowledgeReferencesResult, type NoteDetail } from "@lumio/schema";
 import { CoreError } from "@lumio/foundation";
-import { editableMetadata, editKnowledgeDocument, parseFrontmatter, lexicalTerms, searchableText, rankRelated, referenceText, entityDirectory } from "@lumio/knowledge";
+import { editableMetadata, editKnowledgeDocument, parseFrontmatter, lexicalTerms, searchableText, rankRelated, referenceText, entityDirectory, aiNoteSources, type KnowledgeMetadataEdits } from "@lumio/knowledge";
 import { withIndex, noteRef, type NoteRow, type IndexOptions } from "./index/store.ts";
 import { vaultFileAt } from "./vault.ts";
 import { writeFileAtomic } from "./write.ts";
@@ -42,19 +42,45 @@ interface Receipt {
     result: string;
     ready: number;
 }
+interface EditingHooks {
+    now: Date;
+    validate(bytes: Buffer): void;
+    finalize(note: NoteDetail, bytes: Buffer, actor: string): Promise<void>;
+    audit(note: NoteDetail, actor: string): void;
+    beforeWrite?(): Promise<void>;
+}
+interface AiNoteEdit {
+    currentSource?: string;
+    tags?: string[];
+    sources?: string[];
+    validateSources?(sources: readonly string[]): Promise<void>;
+}
 export class KnowledgeEditingStore {
     constructor(private db: Database, private root: string, private options: IndexOptions = {}) {
         db.exec(`CREATE TABLE IF NOT EXISTS knowledge_edits(actor TEXT NOT NULL,request_id TEXT NOT NULL,fingerprint TEXT NOT NULL,path TEXT NOT NULL,before TEXT NOT NULL,after TEXT NOT NULL,result TEXT NOT NULL,ready INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(actor,request_id));
    CREATE UNIQUE INDEX IF NOT EXISTS knowledge_edit_pending ON knowledge_edits(path) WHERE ready=0;`);
     }
-    async update(actor: string, id: string, input: KnowledgeUpdateRequest, hooks: {
-        now: Date;
-        validate(bytes: Buffer): void;
-        finalize(note: NoteDetail, bytes: Buffer): Promise<void>;
-        audit(note: NoteDetail, actor: string): void;
-        beforeWrite?(): Promise<void>;
-    }): Promise<KnowledgeUpdateResult> {
-        const request = KnowledgeUpdateRequest.parse(input), root = await realpath(this.root), fingerprint = hash(JSON.stringify({ root, id, ...request }));
+    async update(actor: string, id: string, input: KnowledgeUpdateRequest, hooks: EditingHooks): Promise<KnowledgeUpdateResult> {
+        return this.save(actor, id, KnowledgeUpdateRequest.parse(input), hooks);
+    }
+    async updateAiNote(
+        actor: string, requestId: string, input: KnowledgeAiNoteUpdateArgs,
+        hooks: EditingHooks & Pick<AiNoteEdit, "validateSources">, currentSource?: string,
+    ): Promise<KnowledgeAiNoteResult> {
+        const { note, tags, derived_from, ...request } = KnowledgeAiNoteUpdateArgs.parse(input);
+        const result = await this.save(actor, note, { request_id: RequestId.parse(requestId), ...request }, hooks, {
+            tags, sources: derived_from, currentSource, validateSources: hooks.validateSources,
+        });
+        return KnowledgeAiNoteResult.parse({ note: result.document.note, revision: result.revision });
+    }
+    private async save(
+        actor: string, id: string,
+        request: Omit<KnowledgeUpdateRequest, "title" | "body"> & Partial<Pick<KnowledgeUpdateRequest, "title" | "body">>,
+        hooks: EditingHooks, ai?: AiNoteEdit,
+    ): Promise<KnowledgeUpdateResult> {
+        const root = await realpath(this.root);
+        const { validateSources, ...aiArgs } = ai ?? {};
+        const fingerprint = hash(JSON.stringify({ root, id, ...request, ...(ai ? { ai: aiArgs } : {}) }));
         let receipt = this.db.query<Receipt, [
             string,
             string
@@ -68,6 +94,8 @@ export class KnowledgeEditingStore {
         let row: NoteRow, before: Buffer, current: KnowledgeDocument;
         try {
             row = await indexed(root, id, this.options);
+            if (ai && row.type !== "ai-note")
+                fail("NOTE_NOT_EDITABLE");
             if (receipt && receipt.path !== row.path)
                 fail("REVISION_CONFLICT");
             before = await bytesAt(root, row.path);
@@ -84,7 +112,18 @@ export class KnowledgeEditingStore {
         if (!receipt) {
             if (current.revision !== request.expected_revision)
                 fail("REVISION_CONFLICT");
-            const after = editKnowledgeDocument(before, request.title, request.body, hooks.now.toISOString());
+            const { note, body, frontmatter } = current.document;
+            const metadata: KnowledgeMetadataEdits = {};
+            if (ai) {
+                const stored = AiNote.parse(frontmatter).derived_from;
+                const sources = aiNoteSources(ai.sources ?? stored, ai.currentSource);
+                if (sources !== stored)
+                    metadata.derived_from = sources;
+                if (ai.tags !== undefined)
+                    metadata.tags = ai.tags;
+                await validateSources?.(sources ?? []);
+            }
+            const after = editKnowledgeDocument(before, request.title ?? note.title, request.body ?? body, hooks.now.toISOString(), metadata);
             hooks.validate(after);
             const result = KnowledgeUpdateResult.parse({ ...document(row, after), request_id: request.request_id });
             const stale = this.db.query<Receipt, [
@@ -97,6 +136,10 @@ export class KnowledgeEditingStore {
                 string,
                 string
             ]>("SELECT * FROM knowledge_edits WHERE actor=? AND request_id=?").get(actor, request.request_id)!;
+        }
+        else if (validateSources) {
+            const pending = KnowledgeUpdateResult.parse(JSON.parse(receipt.result));
+            await validateSources(AiNote.parse(pending.document.frontmatter).derived_from ?? []);
         }
         const result = KnowledgeUpdateResult.parse(JSON.parse(receipt.result)), after = Buffer.from(receipt.after), old = Buffer.from(receipt.before);
         hooks.validate(after);
@@ -127,7 +170,7 @@ export class KnowledgeEditingStore {
             fail("REVISION_CONFLICT");
         }
         if (!old.equals(after))
-            await hooks.finalize(result.document, after);
+            await hooks.finalize(result.document, after, actor);
         this.db.transaction(() => { hooks.audit(result.document, actor); this.db.query("UPDATE knowledge_edits SET ready=1 WHERE actor=? AND request_id=?").run(actor, request.request_id); })();
         return result;
     }
@@ -137,7 +180,7 @@ export class KnowledgeEditingStore {
      * complete its index, audit and receipt; original or third-party bytes end it so its own retry reports a conflict.
      */
     private async settle(stale: Receipt, current: Buffer, hooks: {
-        finalize(note: NoteDetail, bytes: Buffer): Promise<void>;
+        finalize(note: NoteDetail, bytes: Buffer, actor: string): Promise<void>;
         audit(note: NoteDetail, actor: string): void;
     }): Promise<void> {
         const after = Buffer.from(stale.after);
@@ -147,7 +190,7 @@ export class KnowledgeEditingStore {
         }
         const result = KnowledgeUpdateResult.parse(JSON.parse(stale.result));
         if (!Buffer.from(stale.before).equals(after))
-            await hooks.finalize(result.document, after);
+            await hooks.finalize(result.document, after, stale.actor);
         this.db.transaction(() => { hooks.audit(result.document, stale.actor); this.db.query("UPDATE knowledge_edits SET ready=1 WHERE actor=? AND request_id=?").run(stale.actor, stale.request_id); })();
     }
     private abandon(actor: string, request: string): void { this.db.query("UPDATE knowledge_edits SET ready=-1 WHERE actor=? AND request_id=?").run(actor, request); }
@@ -162,7 +205,7 @@ async function candidates(root: string, context: {
         return [];
     return withIndex(root, options, db => {
         const longer = terms.filter(t => Array.from(t).length >= 3).slice(0, 12), shorter = terms.filter(t => Array.from(t).length < 3).slice(0, 12);
-        const filter = "n.private=0 AND n.type IN ('paper','source','idea','experiment','post') AND (? IS NULL OR n.id!=? OR n.id IS NULL)";
+        const filter = "n.private=0 AND n.type IN ('paper','source','idea','experiment','post','ai-note') AND (? IS NULL OR n.id!=? OR n.id IS NULL)";
         const rows: NoteRow[] = [];
         if (longer.length)
             rows.push(...db.query<NoteRow, [

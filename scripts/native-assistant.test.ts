@@ -76,6 +76,7 @@ async function fixture(options: {
                                 result: await accounts.usage(c.connection, c.owner) });
                             continue;
                         }
+                        if (c.type === "claude_usage") throw new Error("Unexpected Claude quota command");
                         if (options.official && c.type === "open") {
                             const home = join(local, "native", c.session.id, "codex");
                             await mkdir(home, { recursive: true, mode: 0o700 });

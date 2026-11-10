@@ -11,6 +11,7 @@ import {
   type NativeConnectionView,
   type AIConnection,
   type CodexQuotaResult,
+  type ClaudeBackgroundResult,
   CAPABILITIES,
   toolName,
   AssistantConversation,
@@ -26,7 +27,7 @@ import type { AssistantContext } from "@lumio/assistant";
 import type { AssistantService } from "@lumio/assistant";
 import type { SqliteAssistantStore } from "@lumio/storage";
 import type { AIConfigurationService } from "./ai-config.ts";
-import { assistantToolDescription, type Capabilities } from "./capabilities.ts";
+import { assistantToolDescription, isAiNoteCapability, type Capabilities } from "./capabilities.ts";
 import { AIUsage } from "./ai-usage.ts";
 import type { Notifications } from "./notifications.ts";
 interface NativeModules {
@@ -34,6 +35,7 @@ interface NativeModules {
   assistant: AssistantService;
   assistantStore: SqliteAssistantStore;
   capabilities: Capabilities;
+  resources: import("./resources.ts").Resources;
   signal: AbortSignal;
   notifications: Notifications;
 }
@@ -69,6 +71,7 @@ export class NativeAssistant {
       isolation?: string;
       connectionAuth?: boolean;
       connectionUsage?: boolean;
+      claudeUsage?: boolean;
     }
   >();
   private active = new Map<string, Active>();
@@ -80,6 +83,10 @@ export class NativeAssistant {
     connection: string;
     runtime: string;
     finish: (result: CodexQuotaResult | { status: "offline" }) => void;
+  }>();
+  private claudePending = new Map<string, {
+    connection: string; runtime: string; generation: string;
+    finish: (result: ClaudeBackgroundResult | { status: "offline" }) => void;
   }>();
   readonly usage: AIUsage;
   constructor(
@@ -95,6 +102,11 @@ export class NativeAssistant {
         return !link?.ready ? "offline" : link.connectionUsage ? "ready" : "unsupported";
       },
       read: (connection, runtime) => this.readQuota(connection, runtime),
+      claudeState: runtime => {
+        const link = this.sockets.get(runtime);
+        return !link?.ready ? "offline" : link.claudeUsage ? "ready" : "unsupported";
+      },
+      readClaude: (connection, runtime, generation, account) => this.readClaudeQuota(connection, runtime, generation, account),
     }, event => modules.notifications.notify(event), modules.signal, usageOptions.fetch, usageOptions.now);
     for (const s of ai.sessions()) {
       if (
@@ -190,6 +202,21 @@ export class NativeAssistant {
       catch { finish({ status: "offline" }); }
     });
   }
+  private readClaudeQuota(connection: AIConnection, runtime: string, generation: string, account?: string):
+    Promise<ClaudeBackgroundResult | { status: "offline" }> {
+    const command = randomUUID();
+    return new Promise(resolve => {
+      const finish = (result: ClaudeBackgroundResult | { status: "offline" }) => {
+        clearTimeout(timer);
+        this.claudePending.delete(command);
+        resolve(result);
+      };
+      const timer = setTimeout(() => finish({ status: "failed", issue: "timeout" }), 36000);
+      this.claudePending.set(command, { connection: connection.id, runtime, generation, finish });
+      try { this.send(runtime, { type: "claude_usage", command, connection: connection.id, generation, account }); }
+      catch { finish({ status: "offline" }); }
+    });
+  }
   private online(runtime: string) {
     return this.sockets.get(runtime)?.ready === true;
   }
@@ -261,7 +288,7 @@ export class NativeAssistant {
     });
     return new Response(stream, {
       headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-store", "X-Lumio-Native-Channel": id,
-        "X-Lumio-Native-Connection-Auth": "1", "X-Lumio-Native-Connection-Usage": "1" },
+        "X-Lumio-Native-Connection-Auth": "1", "X-Lumio-Native-Connection-Usage": "1", "X-Lumio-Native-Claude-Usage": "1" },
     });
   }
   channelOpen(ws: Socket) {
@@ -274,6 +301,7 @@ export class NativeAssistant {
     this.sockets.delete(ws.data.runtime);
     for (const pending of this.authPending.values()) if (pending.runtime === ws.data.runtime) pending.finish(offline());
     for (const pending of this.usagePending.values()) if (pending.runtime === ws.data.runtime) pending.finish({ status: "offline" });
+    for (const pending of this.claudePending.values()) if (pending.runtime === ws.data.runtime) pending.finish({ status: "offline" });
     for (const [connection, current] of this.authViews) if (current.runtime === ws.data.runtime) this.authViews.delete(connection);
     for (const s of this.ai.sessions().filter((s) => s.runtime === ws.data.runtime && s.view.state !== "closed")) {
       const active = this.active.get(s.id);
@@ -317,6 +345,7 @@ export class NativeAssistant {
       link.isolation = m.isolation;
       link.connectionAuth = m.connection_auth;
       link.connectionUsage = m.connection_auth && m.connection_usage;
+      link.claudeUsage = m.claude_usage;
       for (const s of this.ai
         .sessions()
         .filter((s) => s.runtime === ws.data.runtime && s.view.state !== "closed" && !s.quarantined)) {
@@ -324,6 +353,12 @@ export class NativeAssistant {
           if (!s.connection_auth) this.open(s);
         } catch {}
       }
+      return;
+    }
+    if (m.type === "claude_usage") {
+      const pending = this.claudePending.get(m.command);
+      if (link.claudeUsage && pending?.runtime === ws.data.runtime && pending.connection === m.connection && pending.generation === m.generation)
+        pending.finish(m.result);
       return;
     }
     if (m.type === "connection_usage") {
@@ -773,6 +808,8 @@ export class NativeAssistant {
       !["running", "awaiting_approval"].includes(s.view.state)
     )
       throw problem("native.forbidden", "FORBIDDEN");
+    const conversation = isAiNoteCapability(def.name) ? this.modules.resources.conversationSource(s.owner, active.turn) : undefined;
+    if (isAiNoteCapability(def.name) && !conversation) throw problem("native.forbidden", "FORBIDDEN");
     const old = this.ai.db
       .query<
         {
@@ -811,6 +848,7 @@ export class NativeAssistant {
         input.args,
         { actor, label: `native-${s.id}` },
         input.request_id,
+        { conversation },
       );
       const result = JSON.parse(JSON.stringify(outcome.result ?? null));
       this.ai.db.transaction(() => {
@@ -851,7 +889,8 @@ export class NativeAssistant {
         this.ai.invalidate(s.id);
         await this.interrupt(s.id);
       }
-      throw problem(known ? "native.tool_failed" : "native.unknown", known ? "FORBIDDEN" : "CONFLICT");
+      if (known) throw isAiNoteCapability(def.name) ? e : problem("native.tool_failed", "FORBIDDEN");
+      throw problem("native.unknown", "CONFLICT");
     }
   }
   beforePurge(conversation: string) {
@@ -875,6 +914,7 @@ export class NativeAssistant {
     this.sockets.clear();
     for (const c of links) c.ws.terminate();
     for (const pending of this.usagePending.values()) pending.finish({ status: "offline" });
+    for (const pending of this.claudePending.values()) pending.finish({ status: "offline" });
     await this.usage.stop();
     for (const [id] of this.active) this.complete(id, "unknown", "", "native.unknown");
     await Bun.sleep(0);

@@ -1,9 +1,10 @@
 import type { Database } from "bun:sqlite";
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
+import { createInterface } from "node:readline";
 import { lstat, mkdir, open, link, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { StoredArtifact, SafeRelativePath, type ResourceRef } from "@lumio/schema";
+import { RunLogEvent, StoredArtifact, SafeRelativePath, type ResourceRef } from "@lumio/schema";
 import { StorageError } from "./errors.ts";
 import { validateArchivedRunLog } from "./logs.ts";
 
@@ -24,12 +25,56 @@ export async function fileDigest(path: string): Promise<{ sha256: string; size: 
   for await (const chunk of createReadStream(path)) { digest.update(chunk); size += chunk.length; }
   return { sha256: digest.digest("hex"), size };
 }
+export const RUN_LOG_MEDIA_TYPE = "application/vnd.lumio.runlog+jsonl";
+
+/** 日志事件 ID 在已归档运行日志中的位置（ADR 0053）：派生数据，可由归档文件重建。 */
+export interface RunEventLocation { event: string; run: string; artifact: StoredArtifact; type: string; time: string }
+
 export class SqliteArtifacts {
   private readonly pending = new Map<string, Promise<StoredArtifact>>();
   constructor(private readonly db: Database, readonly root: string) {
     db.exec(`CREATE TABLE IF NOT EXISTS storage_artifacts (id TEXT PRIMARY KEY, owner_module TEXT NOT NULL, owner_id TEXT NOT NULL,
       key TEXT NOT NULL UNIQUE, status TEXT NOT NULL CHECK(status IN ('staged','ready')), record TEXT NOT NULL CHECK(json_valid(record)));
-      CREATE INDEX IF NOT EXISTS storage_artifacts_owner ON storage_artifacts(owner_module,owner_id,status);`);
+      CREATE INDEX IF NOT EXISTS storage_artifacts_owner ON storage_artifacts(owner_module,owner_id,status);
+      CREATE TABLE IF NOT EXISTS storage_run_events (event TEXT PRIMARY KEY, artifact TEXT NOT NULL, run TEXT NOT NULL, type TEXT NOT NULL, time TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS storage_run_events_indexed (artifact TEXT PRIMARY KEY);`);
+  }
+  /**
+   * 按日志事件 ID 找到它所在的运行与归档文件。每份已归档的运行日志只扫描一次，结果存进派生表；
+   * 之后的查询直接命中索引（ADR 0053）。文件缺失或校验失败的归档不建索引，下次再试。
+   */
+  async runEvent(event: string): Promise<RunEventLocation | undefined> {
+    const lookup = () => this.db.query<{ run: string; artifact: string; type: string; time: string; record: string }, [string]>(
+      `SELECT e.run, e.artifact, e.type, e.time, a.record FROM storage_run_events e JOIN storage_artifacts a ON a.id=e.artifact
+       WHERE e.event=? AND a.status='ready'`).get(event);
+    let row = lookup();
+    if (!row) { await this.indexRunEvents(); row = lookup(); }
+    return row ? { event, run: row.run, artifact: StoredArtifact.parse(JSON.parse(row.record)), type: row.type, time: row.time } : undefined;
+  }
+  private async indexRunEvents(): Promise<void> {
+    const pending = this.db.query<{ record: string }, [string]>(
+      `SELECT record FROM storage_artifacts WHERE status='ready' AND json_extract(record,'$.media_type')=?
+       AND id NOT IN (SELECT artifact FROM storage_run_events_indexed) ORDER BY rowid`).all(RUN_LOG_MEDIA_TYPE)
+      .map(row => StoredArtifact.parse(JSON.parse(row.record)));
+    for (const artifact of pending) {
+      let path: string;
+      try { path = await this.path(artifact.id); } catch { continue; }
+      const events: RunLogEvent[] = [];
+      const stream = createReadStream(path), lines = createInterface({ input: stream, crlfDelay: Infinity });
+      try {
+        for await (const line of lines) {
+          let raw: unknown;
+          try { raw = JSON.parse(line); } catch { continue; }
+          const parsed = RunLogEvent.safeParse(raw);
+          if (parsed.success && parsed.data.run === artifact.owner.id) events.push(parsed.data);
+        }
+      } finally { lines.close(); stream.destroy(); }
+      this.db.transaction(() => {
+        const insert = this.db.query("INSERT OR IGNORE INTO storage_run_events(event,artifact,run,type,time) VALUES(?,?,?,?,?)");
+        for (const value of events) insert.run(value.id, artifact.id, value.run, value.type, value.time);
+        this.db.query("INSERT OR IGNORE INTO storage_run_events_indexed(artifact) VALUES(?)").run(artifact.id);
+      })();
+    }
   }
   get(id: string): StoredArtifact {
     const row = this.db.query<{ record: string }, [string]>("SELECT record FROM storage_artifacts WHERE id=?").get(id);
@@ -64,7 +109,7 @@ export class SqliteArtifacts {
     return path;
   }
   private async validate(path: string, value: StoredArtifact): Promise<void> {
-    if (value.media_type === "application/vnd.lumio.runlog+jsonl") await validateArchivedRunLog(path, value.owner.id);
+    if (value.media_type === RUN_LOG_MEDIA_TYPE) await validateArchivedRunLog(path, value.owner.id);
   }
   async drain(): Promise<void> { await Promise.allSettled([...this.pending.values()]); }
   private ready(value: StoredArtifact): StoredArtifact {
