@@ -26,7 +26,7 @@
 6. **不碰 vault 数据**：测试一律用 `fixtures/` 里的合成数据，不读写真实 vault。
 7. **不在代码/配置里写真实密钥**，只用占位符（如 `${secret:openai}`），由运行时注入。
 8. **提交前必须通过 `bun run check`**。功能分支从最新的 `origin/main` 开，按功能提 PR。
-   合入 `main` 的关卡：独立 review（review 者不是作者）、完整 CI 通过、人类验收。本机试用与部署方法见 [主线开发与本机部署](docs/local-deployment.md)。
+   合入 `main` 的关卡：独立 review（review 者不是作者）、完整 CI 通过、人类验收。本机部署方法见 [主线开发与本机部署](docs/local-deployment.md)。
    正式发布从 `main` 上已验收的提交打 `v*` 标签。
 9. **只做被交代的这一步。**（ADR 0049）由谁 review、何时试用、何时合并由调用方决定（Lumio 交接计划或人类），本文件不指定。
    - 你的任务说明或 Lumio 阶段说明交代了什么就做什么；没有交代下一步时，做完交回人，**不自行找其他 agent review，不自行合并**。
