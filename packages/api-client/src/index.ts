@@ -1,3 +1,4 @@
+import { KnowledgeAiNoteCommand, KnowledgeAiNoteResult } from "@lumio/schema";
 import {AIConnection,AIConnectionInput,AIProfile,AIProfileInput,AIConfiguration,AIRuntime,NativeConnectionAction,NativeConnectionView,NativeSession,NativeCreate,NativeAction,NativeEventRecord} from "@lumio/schema";
 import { KnowledgeGraph, KnowledgeGraphArgs, Id, KnowledgeDocument, KnowledgeUpdateRequest, KnowledgeUpdateResult, KnowledgeRelatedRequest, KnowledgeRelatedResult, KnowledgeReferencesRequest, KnowledgeReferencesResult } from "@lumio/schema";
 import { KnowledgeTemplateRequest, KnowledgeTemplateResult, PaperResolveRequest, PaperResolveResult, KnowledgeCreateRequest, KnowledgeCreateResult } from "@lumio/schema";
@@ -90,6 +91,9 @@ export function createClient(options: { url: string; token?: string; language?: 
       const input = validate(KnowledgeGraphArgs, args);
       return request("/v2/knowledge/graph", Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined).map(([key, value]) => [key, String(value)])), KnowledgeGraph);
     },
+    aiNoteCommand(input: KnowledgeAiNoteCommand) {
+      return request("/v2/knowledge/ai-note-commands", {}, KnowledgeAiNoteResult, validate(KnowledgeAiNoteCommand, input));
+    },
     knowledgeDocument(id: string) { return request(`/v2/knowledge/notes/${encodeURIComponent(validate(Id, id))}/document`, {}, KnowledgeDocument); },
     // 删除与回收站（ADR 0038）：只有人可用。任务与项目的删除走 workCommand。
     deleteNote(id: string, input: KnowledgeDeleteRequest) { return request(`/v2/knowledge/notes/${encodeURIComponent(validate(Id, id))}`, {}, TrashResult, validate(KnowledgeDeleteRequest, input), "DELETE"); },
@@ -164,13 +168,14 @@ export function createClient(options: { url: string; token?: string; language?: 
     assistantChat(input: AssistantChatRequest) { return request("/v2/assistant/chat", {}, AssistantChatResult, validate(AssistantChatRequest, input)); },
     conversations() { return request("/v2/assistant/conversations", {}, AssistantConversation.array()); },
     conversation(id: string) { return request(`/v2/assistant/conversations/${validate(idOf("conv"), id)}`, {}, AssistantConversationDetail); },
-    async *assistantEvents(input: AssistantChatRequest, signal?: AbortSignal): AsyncGenerator<AssistantEvent> {
+    async *assistantEvents(input: AssistantChatRequest, signal?: AbortSignal, progress = false): AsyncGenerator<AssistantEvent> {
       const payload = validate(AssistantChatRequest, input);
       let release: (() => Promise<void>) | undefined;
       let status: number | undefined;
       try {
         const response = await fetcher(`${base}/v2/assistant/chat`, { method: "POST", redirect: "error", signal,
-          headers: { ...(options.language ? { "Accept-Language": options.language } : {}), ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}), "Content-Type": "application/json", Accept: "application/x-ndjson" }, body: JSON.stringify(payload) });
+          headers: { ...(options.language ? { "Accept-Language": options.language } : {}), ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
+            ...(progress ? { "X-Lumio-Assistant-Progress": "1" } : {}), "Content-Type": "application/json", Accept: "application/x-ndjson" }, body: JSON.stringify(payload) });
         status = response.status;
         if (!response.ok) throw new ApiClientError(ApiError.parse(await response.json()).error, response.status);
         if (!response.body) throw new Error("missing stream");

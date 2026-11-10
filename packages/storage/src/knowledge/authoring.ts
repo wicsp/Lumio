@@ -2,15 +2,22 @@ import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { lstat, readFile, realpath } from "node:fs/promises";
 import { join } from "node:path";
-import { KnowledgeCreateRequest, KnowledgeCreateResult } from "@lumio/schema";
+import { KnowledgeAiNoteCreateArgs, KnowledgeAiNoteResult, KnowledgeCreateRequest, KnowledgeCreateResult, RequestId } from "@lumio/schema";
 import { CoreError } from "@lumio/foundation";
-import { duplicatePaper, renderKnowledgeNote, type FillContext, type NewNote } from "@lumio/knowledge";
+import { duplicatePaper, renderAiNote, renderKnowledgeNote, type FillContext, type NewNote } from "@lumio/knowledge";
 import { FileKnowledgeRepository } from "./adapter.ts";
 import { saveNewNote } from "./create.ts";
 
 interface Receipt { actor: string; request_id: string; fingerprint: string; vault: string; path: string; content: string; result: string; ready: number; published: number }
-const digest = (value: string) => createHash("sha256").update(value).digest("hex");
+const digest = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
 function conflict(code: string): never { throw new CoreError(code, { key: "create.could_not_create_note_check_that_vault_directory_exists_and_is_writa", args: [] }); }
+
+interface CreationHooks<Result> {
+  validate(note: NewNote): void;
+  published?(result: Result): Promise<void>;
+  finalize(result: Result, content: Buffer): Promise<void>;
+  audit(result: Result): void;
+}
 
 /** Journal lives in hub.sqlite and is backed up with business state; Markdown remains authoritative. */
 export class KnowledgeCreationStore {
@@ -37,22 +44,55 @@ export class KnowledgeCreationStore {
     }
     return readFile(current);
   }
-  /** Hub serializes this with its vault watcher. A prepared receipt survives any later failure. */
-  async create(actor: string, input: KnowledgeCreateRequest, ctx: FillContext, hooks: {
-    validate(note: NewNote): void;
-    published?(result: KnowledgeCreateResult): Promise<void>;
-    finalize(result: KnowledgeCreateResult, content: Buffer): Promise<void>;
-    audit(result: KnowledgeCreateResult): void;
-  }): Promise<KnowledgeCreateResult> {
+  async create(actor: string, input: KnowledgeCreateRequest, ctx: FillContext, hooks: CreationHooks<KnowledgeCreateResult>): Promise<KnowledgeCreateResult> {
     const request = KnowledgeCreateRequest.parse(input);
-    const fingerprint = digest(JSON.stringify(request));
-    let row = this.get(actor, request.request_id);
+    const paper = request.note.kind === "paper" ? request.note : undefined;
+    const suffixes = paper ? ["", ..."bcdefghijklmnopqrstuvwxyz"] : [""];
+    return this.save(actor, request.request_id, digest(JSON.stringify(request)), hooks, {
+      parse: KnowledgeCreateResult.parse,
+      suffixes,
+      render: suffix => renderKnowledgeNote(request, ctx, suffix),
+      checkDuplicates: paper && (async root => {
+        const files = await new FileKnowledgeRepository(this.vault).papers();
+        const pending = this.db.query<{ result: string }, [string]>("SELECT result FROM knowledge_creations WHERE vault=? AND ready=0").all(root);
+        if (duplicatePaper(paper, [...files, ...pending.map(row => ({ frontmatter: JSON.parse(row.result).metadata ?? {} }))])) conflict("DUPLICATE_PAPER");
+      }),
+    });
+  }
+
+  async createAiNote(
+    actor: string, requestId: string, input: KnowledgeAiNoteCreateArgs,
+    ctx: FillContext, hooks: CreationHooks<KnowledgeAiNoteResult>, currentSource?: string,
+  ): Promise<KnowledgeAiNoteResult> {
+    const request = KnowledgeAiNoteCreateArgs.parse(input);
+    const fingerprint = digest(JSON.stringify({ operation: "knowledge.ainote.create", request, currentSource }));
+    return this.save(actor, RequestId.parse(requestId), fingerprint, hooks, {
+      parse: KnowledgeAiNoteResult.parse,
+      suffixes: [""],
+      render: () => {
+        const rendered = renderAiNote(actor, request, ctx, currentSource);
+        return { ...rendered, result: KnowledgeAiNoteResult.parse({ note: rendered.note, revision: digest(rendered.content) }) };
+      },
+    });
+  }
+
+  /** Hub serializes this with its vault watcher. A prepared receipt survives any later failure. */
+  private async save<Result>(
+    actor: string, requestId: string, fingerprint: string, hooks: CreationHooks<Result>,
+    operation: {
+      parse(value: unknown): Result;
+      suffixes: string[];
+      render(suffix: string): NewNote & { result: Result };
+      checkDuplicates?(root: string): Promise<void>;
+    },
+  ): Promise<Result> {
+    let row = this.get(actor, requestId);
     let root: string;
     try { root = await realpath(this.vault); }
     catch { conflict(row ? "NOTE_RECOVERY_CONFLICT" : "NOTE_NOT_CREATED"); }
     if (row && (row.fingerprint !== fingerprint || row.vault !== root)) conflict("REQUEST_CONFLICT");
     if (row && row.ready < 0) conflict("NOTE_RECOVERY_CONFLICT");
-    if (row?.ready === 1) return KnowledgeCreateResult.parse(JSON.parse(row.result));
+    if (row?.ready === 1) return operation.parse(JSON.parse(row.result));
     if (!row) {
       // Creations are serialized, so any pending receipt here is interrupted. A missing file (deleted after publication,
       // or never written) cannot be recovered: retain the receipt, release its path reservation.
@@ -61,32 +101,27 @@ export class KnowledgeCreationStore {
           if (!(await this.existing(pending.path))) this.db.query("UPDATE knowledge_creations SET ready=-1 WHERE actor=? AND request_id=?").run(pending.actor, pending.request_id);
         } catch { /* An unrelated unsafe file stays reserved for manual inspection. */ }
       }
-      if (request.note.kind === "paper") {
-        const files = await new FileKnowledgeRepository(this.vault).papers();
-        const pending = this.db.query<{ result: string }, [string]>("SELECT result FROM knowledge_creations WHERE vault=? AND ready=0").all(root);
-        if (duplicatePaper(request.note, [...files, ...pending.map(row => ({ frontmatter: JSON.parse(row.result).metadata as Record<string, unknown> }))])) conflict("DUPLICATE_PAPER");
-      }
-      const suffixes = request.note.kind === "paper" ? ["", ..."bcdefghijklmnopqrstuvwxyz"] : [""];
-      for (const suffix of suffixes) {
-        const rendered = renderKnowledgeNote(request, ctx, suffix);
+      await operation.checkDuplicates?.(root);
+      for (const suffix of operation.suffixes) {
+        const rendered = operation.render(suffix);
         hooks.validate(rendered);
-        if (await this.existing(rendered.relativePath)) { if (request.note.kind === "paper") continue; conflict("FILE_EXISTS"); }
+        if (await this.existing(rendered.relativePath)) continue;
         const occupied = this.db.query("SELECT 1 FROM knowledge_creations WHERE vault=? AND path=? AND ready=0").get(root, rendered.relativePath);
-        if (occupied) { if (request.note.kind === "paper") continue; conflict("FILE_EXISTS"); }
+        if (occupied) continue;
         this.db.query("INSERT INTO knowledge_creations(actor,request_id,fingerprint,vault,path,content,result) VALUES (?,?,?,?,?,?,?)")
-          .run(actor, request.request_id, fingerprint, root, rendered.relativePath, rendered.content.toString("utf8"), JSON.stringify(rendered.result));
-        row = this.get(actor, request.request_id)!; break;
+          .run(actor, requestId, fingerprint, root, rendered.relativePath, rendered.content.toString("utf8"), JSON.stringify(rendered.result));
+        row = this.get(actor, requestId)!; break;
       }
       if (!row) conflict("FILE_EXISTS");
     }
-    const result = KnowledgeCreateResult.parse(JSON.parse(row.result));
+    const result = operation.parse(JSON.parse(row.result));
     const note = { relativePath: row.path, content: Buffer.from(row.content) };
     hooks.validate(note);
     let bytes: Buffer | undefined;
     try { bytes = await this.existing(row.path); }
     catch { conflict("NOTE_RECOVERY_CONFLICT"); }
     if (!bytes && row.published) {
-      this.db.query("UPDATE knowledge_creations SET ready=-1 WHERE actor=? AND request_id=?").run(actor, request.request_id);
+      this.db.query("UPDATE knowledge_creations SET ready=-1 WHERE actor=? AND request_id=?").run(actor, requestId);
       conflict("NOTE_RECOVERY_CONFLICT");
     }
     if (bytes && !bytes.equals(note.content)) conflict("NOTE_RECOVERY_CONFLICT");
@@ -97,7 +132,7 @@ export class KnowledgeCreationStore {
         try { current = await this.existing(row.path); }
         catch { conflict("NOTE_RECOVERY_CONFLICT"); }
         if (!current || !current.equals(note.content)) {
-          this.db.query("UPDATE knowledge_creations SET ready=-1 WHERE actor=? AND request_id=?").run(actor, request.request_id);
+          this.db.query("UPDATE knowledge_creations SET ready=-1 WHERE actor=? AND request_id=?").run(actor, requestId);
           if (cause instanceof CoreError && cause.code === "FILE_EXISTS") throw cause;
           conflict("NOTE_NOT_CREATED");
         }
@@ -106,12 +141,12 @@ export class KnowledgeCreationStore {
     }
     // From here, failure means possibly saved. Never issue a second note on a retry.
     try {
-      this.db.query("UPDATE knowledge_creations SET published=1 WHERE actor=? AND request_id=?").run(actor, request.request_id);
+      this.db.query("UPDATE knowledge_creations SET published=1 WHERE actor=? AND request_id=?").run(actor, requestId);
       await hooks.published?.(result);
       await hooks.finalize(result, note.content);
       this.db.transaction(() => {
         hooks.audit(result);
-        this.db.query("UPDATE knowledge_creations SET ready=1 WHERE actor=? AND request_id=?").run(actor, request.request_id);
+        this.db.query("UPDATE knowledge_creations SET ready=1 WHERE actor=? AND request_id=?").run(actor, requestId);
       })();
     } catch (cause) {
       throw new CoreError("NOTE_SAVE_UNCERTAIN", { key: "create.could_not_create_note_check_that_vault_directory_exists_and_is_writa", args: [] }, { cause });

@@ -4,6 +4,13 @@ import { AssistantConversation, AssistantMessage, AssistantTurn, AssistantToolCa
 import { AssistantError, type AssistantStore } from "@lumio/assistant";
 import { StorageError } from "./errors.ts";
 
+const conversationAnchors = `
+  SELECT id FROM assistant_conversations WHERE id=$id
+  UNION ALL SELECT id FROM assistant_messages WHERE conversation=$id
+  UNION ALL SELECT id FROM assistant_turns WHERE conversation=$id
+  UNION ALL SELECT id FROM assistant_calls WHERE turn IN (SELECT id FROM assistant_turns WHERE conversation=$id)
+`;
+
 /** Typed Assistant persistence; indexed ownership and lifecycle fields are committed with validated records. */
 export class SqliteAssistantStore implements AssistantStore {
   constructor(private readonly db: Database) {
@@ -12,6 +19,7 @@ export class SqliteAssistantStore implements AssistantStore {
       CREATE TABLE IF NOT EXISTS platform_migrations(name TEXT PRIMARY KEY,applied TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS assistant_conversations(id TEXT PRIMARY KEY,owner TEXT NOT NULL,record TEXT NOT NULL CHECK(json_valid(record)));
       CREATE TABLE IF NOT EXISTS assistant_trash(id TEXT PRIMARY KEY REFERENCES assistant_conversations(id),owner TEXT NOT NULL,record TEXT NOT NULL CHECK(json_valid(record)));
+      CREATE TABLE IF NOT EXISTS assistant_purged_anchors(id TEXT PRIMARY KEY,owner TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS assistant_purged_requests(owner TEXT NOT NULL,request TEXT NOT NULL,PRIMARY KEY(owner,request));
       CREATE INDEX IF NOT EXISTS assistant_conversations_owner ON assistant_conversations(owner);
       CREATE TABLE IF NOT EXISTS assistant_turns(id TEXT PRIMARY KEY,conversation TEXT NOT NULL REFERENCES assistant_conversations(id),
@@ -38,6 +46,10 @@ export class SqliteAssistantStore implements AssistantStore {
   }
   transaction<T>(action: () => T): T { return this.db.transaction(action)(); }
   putModelState(message:string,state:NonNullable<import("@lumio/schema").AssistantModelResponse["continuation"]>):void {this.db.query("INSERT INTO assistant_model_states VALUES(?,?)").run(message,JSON.stringify(state));}
+  memory(id: string): AssistantMemory | undefined {
+    const row = this.db.query<{ record: string }, [string]>("SELECT record FROM assistant_memories WHERE id=?").get(id);
+    return row ? AssistantMemory.parse(JSON.parse(row.record)) : undefined;
+  }
   modelState(message:string):import("@lumio/schema").AssistantModelResponse["continuation"] {const r=this.db.query<{record:string},[string]>("SELECT record FROM assistant_model_states WHERE message=?").get(message);return r?JSON.parse(r.record):undefined;}
   trash(id: string): TrashItem | undefined {
     const row = this.db.query<{ record: string }, [string]>("SELECT record FROM assistant_trash WHERE id=?").get(id);
@@ -52,7 +64,22 @@ export class SqliteAssistantStore implements AssistantStore {
     this.db.query("INSERT INTO assistant_trash VALUES (?,?,?)").run(item.id, item.deleted_by, JSON.stringify(TrashItem.parse(item)));
   }
   removeTrash(id: string): void { this.db.query("DELETE FROM assistant_trash WHERE id=?").run(id); }
+  purgedAnchorOwner(id: string): string | undefined {
+    return this.db.query<{ owner: string }, [string]>("SELECT owner FROM assistant_purged_anchors WHERE id=?").get(id)?.owner;
+  }
+  anchorIds(id: string): string[] {
+    return this.db.query<{ id: string }, { id: string }>(conversationAnchors).all({ id }).map(row => row.id);
+  }
+  userMessage(conversation: string, turn: string): AssistantMessage | undefined {
+    const row = this.db.query<{ record: string }, [string, string]>(`
+      SELECT record FROM assistant_messages WHERE conversation=? AND turn=? AND json_extract(record,'$.role')='user' LIMIT 1
+    `).get(conversation, turn);
+    return row ? AssistantMessage.parse(JSON.parse(row.record)) : undefined;
+  }
   purge(id: string): void {
+    // Retain only the owner and IDs needed to distinguish broken anchors from inaccessible ones.
+    this.db.query(`INSERT OR IGNORE INTO assistant_purged_anchors
+      SELECT anchors.id, conversation.owner FROM assistant_conversations AS conversation JOIN (${conversationAnchors}) AS anchors WHERE conversation.id=$id`).run({ id });
     this.db.query(`INSERT OR IGNORE INTO assistant_purged_requests SELECT owner,request FROM assistant_requests
       WHERE turn IN (SELECT id FROM assistant_turns WHERE conversation=?)`).run(id);
     for (const table of ["assistant_requests", "assistant_calls", "assistant_contexts"]) {
@@ -76,12 +103,20 @@ export class SqliteAssistantStore implements AssistantStore {
     this.db.query("INSERT INTO assistant_conversations(id,owner,record) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET owner=excluded.owner,record=excluded.record")
       .run(value.id, value.owner, JSON.stringify(value));
   }
+  message(id: string): AssistantMessage | undefined {
+    const row = this.db.query<{ record: string }, [string]>("SELECT record FROM assistant_messages WHERE id=?").get(id);
+    return row ? AssistantMessage.parse(JSON.parse(row.record)) : undefined;
+  }
   messages(conversation: string): AssistantMessage[] {
     return this.db.query<{ record: string }, [string]>("SELECT record FROM assistant_messages WHERE conversation=? ORDER BY rowid").all(conversation).map((row) => AssistantMessage.parse(JSON.parse(row.record)));
   }
   putMessage(input: AssistantMessage): void {
     const value = AssistantMessage.parse(input);
     this.db.query("INSERT INTO assistant_messages(id,conversation,turn,record) VALUES(?,?,?,?)").run(value.id, value.conversation, value.turn ?? null, JSON.stringify(value));
+  }
+  turn(id: string): AssistantTurn | undefined {
+    const row = this.db.query<{ record: string }, [string]>("SELECT record FROM assistant_turns WHERE id=?").get(id);
+    return row ? AssistantTurn.parse(JSON.parse(row.record)) : undefined;
   }
   turns(conversation?: string): AssistantTurn[] {
     const rows = conversation === undefined ? this.db.query<{ record: string }, []>("SELECT record FROM assistant_turns ORDER BY rowid").all()
@@ -95,6 +130,10 @@ export class SqliteAssistantStore implements AssistantStore {
   }
   calls(turn: string): AssistantToolCall[] {
     return this.db.query<{ record: string }, [string]>("SELECT record FROM assistant_calls WHERE turn=? ORDER BY rowid").all(turn).map((row) => AssistantToolCall.parse(JSON.parse(row.record)));
+  }
+  call(id: string): AssistantToolCall | undefined {
+    const row = this.db.query<{ record: string }, [string]>("SELECT record FROM assistant_calls WHERE id=?").get(id);
+    return row ? AssistantToolCall.parse(JSON.parse(row.record)) : undefined;
   }
   putCall(input: AssistantToolCall): void {
     const value = AssistantToolCall.parse(input);

@@ -1,4 +1,4 @@
-import { KnowledgeCreateRequest, KnowledgeCreateResult, KnowledgeTemplateRequest, KnowledgeTemplateResult } from "@lumio/schema";
+import { AiNote, KnowledgeAiNoteCreateArgs, KnowledgeCreateRequest, KnowledgeCreateResult, KnowledgeTemplateRequest, KnowledgeTemplateResult, type NoteRef } from "@lumio/schema";
 import { CoreError } from "@lumio/foundation";
 import { entityDirectory } from "./layout.ts";
 import { fillMetadata, type FillContext } from "./fill.ts";
@@ -67,4 +67,32 @@ export function renderKnowledgeNote(input: KnowledgeCreateRequest, ctx: FillCont
   const bytes = Buffer.concat([parseFrontmatter("").render(fm), Buffer.from(content)]);
   const result = KnowledgeCreateResult.parse({ id: fm.id, path: relativePath, metadata: fm });
   return { relativePath, content: bytes, result };
+}
+
+/** The current run or message is appended once without changing an explicit source order. */
+export function aiNoteSources(sources: string[] | undefined, currentSource?: string): string[] | undefined {
+  if (!currentSource || sources?.includes(currentSource)) return sources;
+  return [...(sources ?? []), currentSource];
+}
+
+export function renderAiNote(
+  actor: string, args: KnowledgeAiNoteCreateArgs, ctx: FillContext, currentSource?: string,
+): NewNote & { note: NoteRef } {
+  const { title, body, tags, model, derived_from } = args;
+  const sources = aiNoteSources(derived_from, currentSource);
+  const id = ctx.newId("ain");
+  const timestamp = ctx.now.toISOString();
+  const data = {
+    id, type: "ai-note", title, created: timestamp, updated: timestamp, generated_by: actor,
+    ...(tags !== undefined ? { tags } : {}),
+    ...(model !== undefined ? { model } : {}),
+    ...(sources !== undefined ? { derived_from: sources } : {}),
+  };
+  const parsed = AiNote.safeParse(data);
+  if (!parsed.success) {
+    throw new CoreError("INVALID_METADATA", { key: "create.could_not_generate_valid_idea_metadata", args: [] });
+  }
+  const path = `${entityDirectory("ai-note")}/${id}.md`;
+  const content = Buffer.concat([parseFrontmatter("").render(data), Buffer.from(body)]);
+  return { relativePath: path, content, note: { id, path, type: parsed.data.type, title } };
 }

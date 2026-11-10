@@ -3,18 +3,18 @@ import type { Client } from "./api.ts";
 import { errorText } from "./api.ts";
 import { h, clear, failure, toast } from "./dom.ts";
 import { t } from "./i18n.ts";
+import { effortLabel } from "./labels.ts";
 const LABEL: Record<string, string> = { starting: "Starting Codex", login_required: "Sign in to Codex", ready: "Ready", running: "Working", awaiting_approval: "Waiting for your approval", recovering: "Restoring session", unknown: "Execution outcome needs review", failed: "Session unavailable", closed: "Session closed", offline: "Runtime disconnected" };
 export class NativeSessionPanel {
     readonly element = h("div", { class: "native-panel", hidden: true });
     private status = h("div", { class: "native-status" });
-    private controls = h("div", { class: "button-row" });
-    private advanced = h("details", { class: "native-advanced" });
+    readonly controls = h("div", { class: "chat-turn-controls", hidden: true });
+    readonly advanced = h("details", { class: "native-advanced", hidden: true });
     private restoreAttempted = false;
     private approvals = h("div", {});
     private history = h("div", { class: "native-history-list" });
     readonly activity = h("details", { class: "native-history", hidden: true },
         h("summary", {}, t("Codex activity")), this.history);
-    private toolbar = h("div", { class: "native-toolbar" }, this.status, this.controls, this.advanced);
     private model = h("select", { "aria-label": t("Model") });
     private effort = h("select", { "aria-label": t("Thinking effort") });
     private id?: string;
@@ -22,7 +22,6 @@ export class NativeSessionPanel {
     private timer?: ReturnType<typeof setTimeout>;
     private generation = 0;
     private after = 0;
-    private summary = new Map<string, HTMLElement>();
     private tools = new Map<string, { entry: HTMLDetailsElement; label: HTMLElement; body: HTMLElement }>();
     private optionsKey = "";
     private effortKey = "";
@@ -33,10 +32,16 @@ export class NativeSessionPanel {
     private formKey = "";
     session?: NativeSession;
     get bound(){return !!this.id;}
-    constructor(private client: Client, private ready: (ready: boolean) => void, private openSettings: () => void) { this.element.append(this.approvals, this.toolbar); this.controls.append(this.model, this.effort); this.model.addEventListener("change", () => { this.desiredModel = this.model.value; this.efforts(); }); this.effort.addEventListener("change", () => { this.desiredEffort = this.effort.value; this.efforts(); }); }
+    constructor(private client: Client, private ready: (ready: boolean) => void, private openSettings: () => void,
+        private onEvent: (record: NativeEventRecord) => void) {
+        this.element.append(this.approvals, this.status);
+        this.controls.append(this.model, this.effort);
+        this.model.addEventListener("change", () => { this.desiredModel = this.model.value; this.efforts(); });
+        this.effort.addEventListener("change", () => { this.desiredEffort = this.effort.value; this.efforts(); });
+    }
     dispose() { this.active = false; clearTimeout(this.timer); this.generation++; }
     bind(id?: string, model = "") { if (id === this.id)
-        return; this.generation++; clearTimeout(this.timer); this.busy = false; this.id = id; this.session = undefined; this.after = 0; this.summary.clear(); this.tools.clear(); this.optionsKey = ""; this.effortKey = ""; this.desiredModel = model; this.restoreAttempted = false; this.desiredEffort = ""; this.configured = false; this.formKey = ""; clear(this.history); this.activity.hidden = true; this.activity.open = false; clear(this.status); clear(this.approvals); this.controls.hidden = true; this.advanced.hidden = true; this.advanced.open = false; this.element.hidden = !id; if (id) {
+        return; this.generation++; clearTimeout(this.timer); this.busy = false; this.id = id; this.session = undefined; this.after = 0; this.tools.clear(); this.optionsKey = ""; this.effortKey = ""; this.desiredModel = model; this.restoreAttempted = false; this.desiredEffort = ""; this.configured = false; this.formKey = ""; clear(this.history); this.activity.hidden = true; this.activity.open = false; clear(this.status); clear(this.approvals); this.controls.hidden = true; this.advanced.hidden = true; this.advanced.open = false; this.element.hidden = !id; if (id) {
         this.ready(false);
         void this.poll(this.generation);
     }
@@ -60,7 +65,9 @@ export class NativeSessionPanel {
             void this.action({ action: "resume" }, true);
         }
         for (const e of events) {
+            if (e.sequence <= this.after) continue;
             this.after = e.sequence;
+            this.onEvent(e);
             this.event(e);
         }
     }
@@ -82,7 +89,7 @@ export class NativeSessionPanel {
             this.effortKey = key;
             clear(this.effort, h("option", { value: "" }, t("Default effort")),
                 ...(!valid ? [h("option", { value: this.desiredEffort, selected: true, disabled: true }, t("Choose a supported effort"))] : []),
-                ...choices.map(value => h("option", { value, selected: value === this.desiredEffort }, value)));
+                ...choices.map(value => h("option", { value, selected: value === this.desiredEffort }, effortLabel(value))));
         }
         this.ready(valid && this.session?.view.state === "ready" && !this.session.quarantined);
     }
@@ -90,6 +97,7 @@ export class NativeSessionPanel {
         const label = t(LABEL[s.view.state] ?? "Session unavailable");
         if (this.status.textContent !== label) this.status.textContent = label;
         this.status.dataset.state = s.view.state;
+        this.status.hidden = s.view.state === "ready" || s.view.state === "running";
         const selected = [this.desiredModel, s.profile.model, s.view.model, s.view.default_model]
             .find(value => s.view.models.some(model => model.id === value));
         const optionsKey = JSON.stringify([s.view.models, selected]);
@@ -99,7 +107,7 @@ export class NativeSessionPanel {
         }
         this.controls.hidden = !s.view.models.length;
         this.efforts();
-        this.model.disabled = this.effort.disabled = s.view.state !== "ready";
+        this.model.disabled = this.effort.disabled = s.quarantined || !["ready", "running", "awaiting_approval"].includes(s.view.state);
         if (!this.advanced.firstChild) this.advanced.append(h("summary", {}, t("Advanced")),
             h("button", { type: "button", class: "btn btn-small", onclick: () => {
                 this.advanced.open = false;
@@ -165,16 +173,7 @@ export class NativeSessionPanel {
 
     private event(record: NativeEventRecord) {
         const event = record.event;
-        if (event.type === "reasoning") {
-            const key = record.turn ?? "summary";
-            let body = this.summary.get(key);
-            if (!body) {
-                body = h("pre", {});
-                this.summary.set(key, body);
-                this.history.append(h("details", {}, h("summary", {}, t("Thinking summary")), body));
-            }
-            body.textContent += event.delta;
-        } else if (event.type === "tool") {
+        if (event.type === "tool") {
             const key = `${record.turn ?? ""}:${event.id}`;
             let tool = this.tools.get(key);
             if (!tool) {

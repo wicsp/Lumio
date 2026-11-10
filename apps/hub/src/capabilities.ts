@@ -1,11 +1,14 @@
-import { assertNoteVisible } from "./trash.ts";
+import { CoreError } from "@lumio/foundation";
+import type { AiNotes } from "./ai-notes.ts";
+import type { ConversationSource, Resources } from "./resources.ts";
 import type { WorkCommands } from "./work-commands.ts";
-import { capability, RESPONSE_REASONS, CAPABILITIES, toolName, WorkCommandRequest, WorkAttention, type CapabilityChange, type CapabilityNameOf } from "@lumio/schema";
-import type { AssistantTool } from "@lumio/assistant";
-import { KnowledgeService } from "@lumio/knowledge";
-import { FileKnowledgeRepository } from "@lumio/storage";
 import type { WorkService } from "@lumio/work";
 import type { ExecutionRoutines } from "@lumio/execution";
+import { assertNoteVisible } from "./trash.ts";
+import { AI_NOTE_CAPABILITY_NAMES, KnowledgeAiNoteCommand, capability, RESPONSE_REASONS, CAPABILITIES, toolName, WorkCommandRequest, WorkAttention, type CapabilityChange, type CapabilityNameOf } from "@lumio/schema";
+import type { AssistantTool } from "@lumio/assistant";
+import { KnowledgeService } from "@lumio/knowledge";
+import { FileKnowledgeRepository, readKnowledgeDocument, type SqliteAssistantStore } from "@lumio/storage";
 import type { HubStore, Identity } from "./store.ts";
 import type { HubConfig } from "./config.ts";
 import { authorize } from "./authorize.ts";
@@ -14,7 +17,19 @@ import { Jobs } from "./jobs.ts";
 import { HubError } from "./errors.ts";
 import { text as msg } from "./messages.ts";
 
-interface CapabilityModules { workCommands: WorkCommands; work: WorkService; routines: ExecutionRoutines }
+interface CapabilityModules {
+  workCommands: WorkCommands;
+  work: WorkService;
+  routines: ExecutionRoutines;
+  aiNotes?: AiNotes;
+  resources: Resources;
+  assistantStore: SqliteAssistantStore;
+}
+interface CapabilityOptions { includePrivate?: boolean; chronologicalJobs?: boolean; conversation?: ConversationSource }
+
+export function isAiNoteCapability(name: string): boolean {
+  return AI_NOTE_CAPABILITY_NAMES.some(value => value === name);
+}
 
 export interface CapabilityResult { result: unknown; change?: CapabilityChange; private_read?: boolean }
 
@@ -30,8 +45,8 @@ export class Capabilities {
     private readonly decide: typeof authorize = authorize) {
     this.knowledge = config.vault ? new KnowledgeService(new FileKnowledgeRepository(config.vault, { stateDir: config.stateDir })) : undefined;
   }
-  async execute(name: string, raw: unknown, identity: Identity, requestId?: string, options: { includePrivate?: boolean; chronologicalJobs?: boolean } = {}): Promise<CapabilityResult> {
-    return this.invoke(name, raw, identity, requestId, options.includePrivate, false, options.chronologicalJobs);
+  async execute(name: string, raw: unknown, identity: Identity, requestId?: string, options: CapabilityOptions = {}): Promise<CapabilityResult> {
+    return this.invoke(name, raw, identity, requestId, options.includePrivate, false, options.chronologicalJobs, options.conversation);
   }
   tools(): AssistantTool[] {
     return CAPABILITIES.map(def => ({
@@ -42,24 +57,38 @@ export class Capabilities {
         if (actor.id !== context.actor) throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] });
         const humanOwner = this.store.actors().some(value => value.id === context.owner && value.role === "human");
         // This closure is assembled in process. Owner/delegation never comes from capability arguments or an HTTP token.
-        const outcome = await this.invoke(def.name, args, { actor, label: "assistant-tools" }, context.request, false, humanOwner);
+        let conversation: ConversationSource | undefined;
+        if (isAiNoteCapability(def.name)) {
+          const turn = this.modules.assistantStore.call(context.request)?.turn;
+          conversation = humanOwner && turn ? this.modules.resources.conversationSource(context.owner, turn) : undefined;
+          if (!conversation) throw new HubError("FORBIDDEN", { key: "knowledge.ai_note_source_unavailable", args: [] });
+        }
+        const outcome = await this.invoke(def.name, args, { actor, label: "assistant-tools" }, context.request, false, humanOwner, false, conversation);
         context.record?.({ capability: def.name, change: outcome.change, private_read: outcome.private_read });
         return outcome.result;
       },
     }));
   }
-  private async invoke(name: string, raw: unknown, identity: Identity, requestId?: string, includePrivate = false, humanConversation = false, chronologicalJobs = false): Promise<CapabilityResult> {
+  private async invoke(name: string, raw: unknown, identity: Identity, requestId?: string, includePrivate = false, humanConversation = false, chronologicalJobs = false, conversation?: ConversationSource): Promise<CapabilityResult> {
     const def = capability(name);
     if (!def) throw new HubError("INVALID", { key: "capability.invalid", args: [] });
     const parsed = def.args.safeParse(raw);
     if (!parsed.success) throw new HubError("INVALID", { key: "capability.invalid", args: [] });
     const args = parsed.data as Record<string, unknown>;
-    const operation = def.kind === "write" ? "work.command" : name.startsWith("knowledge.") ? name.split(".")[2]!
+    const aiNote = isAiNoteCapability(name);
+    const operation = aiNote ? "knowledge.ai-note" : def.kind === "write" ? "work.command" : name.startsWith("knowledge.") ? name.split(".")[2]!
       : name.startsWith("work.") ? "work.read" : name === "execution.job.list" ? "jobs" : name === "execution.job.show" ? "job.show" : name === "approval.proposal.list" ? "proposals" : "execution.read";
     const decision = this.decide(identity.actor, { operation, ...(def.kind === "write" ? { command: name, args } : {}), includePrivate });
     if (decision.result !== "allow") {
       this.store.audit(identity, name, decision.result, undefined, "FORBIDDEN");
       throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: decision.result === "deny" ? decision.reason : msg("v2.approval_required") });
+    }
+    if (aiNote) {
+      const input = KnowledgeAiNoteCommand.safeParse({ request_id: requestId, operation: { op: name, args } });
+      if (!input.success) throw new HubError("INVALID", { key: "capability.invalid", args: [] });
+      if (!this.modules.aiNotes) throw new HubError("INVALID", { key: "knowledge.no_vault", args: [] });
+      const result = await this.modules.aiNotes.execute(input.data, identity, conversation);
+      return { result, change: { capability: name, target: result.note.id! } };
     }
     if (name === "approval.proposal.withdraw") return { result: def.result.parse(this.store.withdrawProposal(String(args.proposal), identity)) };
     if (def.kind === "write") {
@@ -86,7 +115,18 @@ export class Capabilities {
         const options = { includePrivate: privateAllowed };
         if (name === "knowledge.note.search") return this.knowledge!.search(String(args.query), { ...options, type: args.type as never, limit: args.limit as number | undefined });
         assertNoteVisible(this.store.db, String(args.ref));
-        if (name === "knowledge.note.show") return this.knowledge!.show(String(args.ref), options);
+        if (name === "knowledge.note.show") {
+          const detail = await this.knowledge!.show(String(args.ref), options);
+          if (detail.note.id) assertNoteVisible(this.store.db, detail.note.id);
+          if (detail.note.type !== "ai-note" || !detail.note.id) return detail;
+          try {
+            const { document, revision } = await readKnowledgeDocument(this.config.vault, detail.note.id, { stateDir: this.config.stateDir });
+            return { ...document, revision };
+          } catch (cause) {
+            if (cause instanceof CoreError && cause.code === "NOTE_NOT_EDITABLE") return detail;
+            throw cause;
+          }
+        }
         return this.knowledge!.links(String(args.ref), options);
       };
       result = await read(includePrivate || humanConversation);

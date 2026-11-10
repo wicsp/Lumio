@@ -25,12 +25,13 @@ import type { AssistantContext } from "@lumio/assistant";
 import type { AssistantService } from "@lumio/assistant";
 import type { SqliteAssistantStore } from "@lumio/storage";
 import type { AIConfigurationService } from "./ai-config.ts";
-import { assistantToolDescription, type Capabilities } from "./capabilities.ts";
+import { assistantToolDescription, isAiNoteCapability, type Capabilities } from "./capabilities.ts";
 interface NativeModules {
   ai: AIConfigurationService;
   assistant: AssistantService;
   assistantStore: SqliteAssistantStore;
   capabilities: Capabilities;
+  resources: import("./resources.ts").Resources;
   signal: AbortSignal;
 }
 import type { HubStore, Identity } from "./store.ts";
@@ -727,6 +728,8 @@ export class NativeAssistant {
       !["running", "awaiting_approval"].includes(s.view.state)
     )
       throw problem("native.forbidden", "FORBIDDEN");
+    const conversation = isAiNoteCapability(def.name) ? this.modules.resources.conversationSource(s.owner, active.turn) : undefined;
+    if (isAiNoteCapability(def.name) && !conversation) throw problem("native.forbidden", "FORBIDDEN");
     const old = this.ai.db
       .query<
         {
@@ -765,6 +768,7 @@ export class NativeAssistant {
         input.args,
         { actor, label: `native-${s.id}` },
         input.request_id,
+        { conversation },
       );
       const result = JSON.parse(JSON.stringify(outcome.result ?? null));
       this.ai.db.transaction(() => {
@@ -805,7 +809,8 @@ export class NativeAssistant {
         this.ai.invalidate(s.id);
         await this.interrupt(s.id);
       }
-      throw problem(known ? "native.tool_failed" : "native.unknown", known ? "FORBIDDEN" : "CONFLICT");
+      if (known) throw isAiNoteCapability(def.name) ? e : problem("native.tool_failed", "FORBIDDEN");
+      throw problem("native.unknown", "CONFLICT");
     }
   }
   beforePurge(conversation: string) {

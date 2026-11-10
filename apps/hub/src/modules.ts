@@ -1,3 +1,5 @@
+import { Resources } from "./resources.ts";
+import type { AiNotes } from "./ai-notes.ts";
 import {AIConfigurationService} from "./ai-config.ts";
 import {NativeAssistant} from "./native-assistant.ts";
 import {SqliteAIStore} from "@lumio/storage";
@@ -36,6 +38,8 @@ export class BusinessModules {
   readonly workCommands: WorkCommands;
   readonly assistant: AssistantService;
   readonly capabilities: Capabilities;
+  readonly resources: Resources;
+  aiNotes?: AiNotes;
   trash!: Trash;
   assistantConfig!: AssistantConfiguration;
   readonly assistantStore: SqliteAssistantStore;
@@ -103,6 +107,7 @@ export class BusinessModules {
       },
     });
     this.workCommands = new WorkCommands(store, this.work, options.authorize ?? authorize, config.localRuntime, now);
+    this.resources = new Resources(this, store, config, options.authorize ?? authorize);
     this.capabilities = new Capabilities(this, store, config, options.authorize);
     this.assistantStore = new SqliteAssistantStore(store.db);
     this.ai=new AIConfigurationService(new SqliteAIStore(store.db),config.assistantModel);

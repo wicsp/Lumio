@@ -1,3 +1,4 @@
+import { runAiNote } from "./ai-notes.ts";
 import { printHelp } from "./help.ts";
 import { errorMessage, text as msg } from "./messages.ts";
 import { language } from "@lumio/platform";
@@ -36,7 +37,7 @@ export interface CliOptions {
 export async function runCli(args: string[], options: CliOptions = {}): Promise<number> {
   try { if (printHelp(args, options.log ?? console.log)) return 0; return await executeCli(args, options); }
   catch (cause) {
-    if (!["targets", "agent", "job", "task", "project", "plan-template", "attention", "chat", "routine", "proposals", "runtime"].includes(args[0] ?? "") || !args.includes("--json")) throw cause;
+    if (!["targets", "agent", "ai-note", "job", "task", "project", "plan-template", "attention", "chat", "routine", "proposals", "runtime"].includes(args[0] ?? "") || !args.includes("--json")) throw cause;
     const error = cause instanceof ApiClientError ? {
       code: cause.code, message: errorMessage(cause), operation: cause.operation, reason: cause.reason, proposal: cause.proposal,
     } : { code: "INVALID", message: cause instanceof Error ? errorMessage(cause) : msg("cli.could_not_execute_command") };
@@ -75,6 +76,7 @@ async function executeCli(args: string[], options: CliOptions): Promise<number> 
     return (await runWork("task", taskArgs, log)) ?? runTasks(taskArgs.filter((arg) => arg !== "--legacy"), log);
   }
   if (args[0] === "project") return (await runWork("project", args.slice(1), log))!;
+  if (args[0] === "ai-note") return runAiNote(args.slice(1), log);
   if (args[0] === "chat") return runAssistant(args.slice(1), log);
   if (args[0] === "routine") return (await runExecutionRoutines(args.slice(1), log)) ?? runRoutines(args.slice(1).filter((arg) => arg !== "--legacy"), log);
   const { values, positionals } = parseArgs({
