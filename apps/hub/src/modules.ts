@@ -5,7 +5,7 @@ import {NativeAssistant} from "./native-assistant.ts";
 import {SqliteAIStore} from "@lumio/storage";
 import { KnowledgeService } from "@lumio/knowledge";
 import type { Trash } from "./trash.ts";
-import { validateTarget } from "./targets.ts";
+import { stageDispatchOptions, validateTarget } from "./targets.ts";
 import { Notifications } from "./notifications.ts";
 import { WorkCommands } from "./work-commands.ts";
 import { text as msg } from "./messages.ts";
@@ -13,7 +13,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { CoreError, newId } from "@lumio/foundation";
 import { parseAssignee, type WorkCommandResult, type AgentRun, type WorkTask } from "@lumio/schema";
-import { WorkService } from "@lumio/work";
+import { PlanDispatchUnavailable, WorkService } from "@lumio/work";
 import { AssistantService, type AssistantModel, type AssistantTool } from "@lumio/assistant";
 import { FileKnowledgeRepository, SqliteWorkStore, SqliteAssistantStore, SqliteRoutineStore, SqliteArtifacts } from "@lumio/storage";
 import { ExecutionRoutines } from "@lumio/execution";
@@ -26,6 +26,23 @@ import type { AssistantConfiguration } from "./assistant-config.ts";
 import { Capabilities } from "./capabilities.ts";
 import { authorize } from "./authorize.ts";
 import { workdirInVault } from "./execution-policy.ts";
+
+function roundPermissions(sandbox: "os" | "none", permissions: AgentRun["permissions"], planned: boolean): string {
+  const access = permissions?.access ?? "write";
+  const git = msg(permissions?.git ? "modules.round_git_approved" : "modules.round_git_restricted");
+  let scope: string;
+  if (sandbox === "none") {
+    scope = msg("modules.round_no_sandbox");
+    if (planned) scope += ` ${msg("modules.round_advisory", access)} ${git}`;
+  } else if (access === "full") {
+    scope = `${msg("modules.round_full")} ${git}`;
+  } else if (permissions?.git) {
+    scope = msg(access === "read" ? "modules.round_read_git" : "modules.round_write_git");
+  } else {
+    scope = msg(access === "read" ? "modules.round_read" : "modules.round_workspace_write");
+  }
+  return `${scope} ${msg(permissions?.secrets?.length ? "modules.round_stage_secrets" : "modules.round_no_stage_secrets")}`;
+}
 
 /** Composition only: domain rules belong to their modules; adapters share one transaction-capable database. */
 export class BusinessModules {
@@ -140,10 +157,20 @@ export class BusinessModules {
   private dispatch(task: WorkTask, input: string, round: number, to: string | undefined, now: Date, previousJob?: string | null) {
     const target = parseAssignee(to ?? "human");
     if (target === "human") throw new HubError("INVALID", { key: "modules.specify_an_agent_e_g_pi_server", args: [] });
-    const runtime = this.store.runtimes(now).find((value) => value.registration.name === (target.device ?? this.config.localRuntime));
-    if (!runtime) throw new HubError("INVALID", { key: "modules.the_specified_runtime_is_not_registered_pair_it_first", args: [] });
-    const engine = runtime.registration.engines.find((value) => value.name === target.agent);
-    if (!engine) throw new HubError("INVALID", { key: "modules.selected_agent_is_not_registered_on_runtime", args: [] });
+    const stage = task.plan?.plan.stages.find(stage => stage.id === task.plan?.stage);
+    const device = target.device ?? this.config.localRuntime;
+    const runtime = this.store.runtimes(now).find(value => value.registration.name === device);
+    if (!runtime) {
+      if (stage?.kind === "agent") throw new PlanDispatchUnavailable({ key: "target.stage_runtime_missing", args: [to] });
+      throw new HubError("INVALID", { key: "modules.the_specified_runtime_is_not_registered_pair_it_first", args: [] });
+    }
+    const engine = runtime.registration.engines.find(value => value.name === target.agent);
+    if (!engine) {
+      if (stage?.kind === "agent") throw new PlanDispatchUnavailable({ key: "target.stage_engine_missing", args: [target.agent, device] });
+      throw new HubError("INVALID", { key: "modules.selected_agent_is_not_registered_on_runtime", args: [] });
+    }
+    const options: Pick<AgentRun, "permissions" | "hooks"> = stage?.kind === "agent" ? stageDispatchOptions(stage, runtime, engine) : {};
+    const roundScope = roundPermissions(engine.sandbox, options.permissions, stage?.kind === "agent");
     const workdir = task.workdir ?? (task.project ? this.work.project(task.project).workdir : undefined) ?? "~";
     if (this.config.vault && runtime.registration.name === this.config.localRuntime && workdirInVault(this.config.vault, workdir)) {
       throw new HubError("INVALID", { key: "modules.working_directory_must_be_outside_the_knowledge_directory", args: [] });
@@ -154,11 +181,11 @@ export class BusinessModules {
     if (previous?.spec.run.kind === "agent" && previous.spec.run.engine === target.agent && previous.spec.runtime === runtime.actor && previous.result?.session_id) {
       session = { id: previous.result.session_id, resume: true };
     } else if (target.agent === "pi" || target.agent === "claude-code") session = { id: randomUUID(), resume: false };
-    const permissions = msg(engine.sandbox === "os" ? "modules.round_workspace_write" : "modules.round_no_sandbox");
+    const prefix = stage?.kind === "agent" ? `Lumio stage ID: ${stage.id}\n` : "";
     return jobs.create({ runtime: runtime.actor, workdir, timeout_seconds: (task.timeout_minutes ?? 120) * 60,
       ...(task.gpus ? { gpus: task.gpus } : {}), source: { task: task.id, round, ...(previous ? { previous: previous.spec.id } : {}) },
-      run: { kind: "agent", engine: target.agent, ...(task.model ? { model: task.model } : {}), ...(session ? { session } : {}),
-        prompt: msg("modules.you_are_completing_round_of_a_user_task_work_only_in_the_working_dir", round, permissions, input) },
+      run: { kind: "agent", engine: target.agent, ...(task.model ? { model: task.model } : {}), ...(session ? { session } : {}), ...options,
+        prompt: prefix + msg("modules.you_are_completing_round_of_a_user_task_work_only_in_the_working_dir", round, roundScope, input) },
     }, now);
   }
   reconcile(): void {

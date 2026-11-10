@@ -184,10 +184,14 @@ export async function handleV2(request: Request, server: Bun.Server<undefined>, 
       if (!parsed.success) throw new HubError("INVALID", { key: "index.invalid_work_command_parameters", args: [] });
       const { operation, request_id } = parsed.data;
       const respond = (result: unknown, status = 200) => {
-        const offline = route.operation === "work.command"
-          ? modules.workCommands.offlineTargets(WorkCommandRequest.parse(body).operation, WorkCommandResult.parse(result))
-          : [];
-        const headers = offline.length ? { "X-Lumio-Offline-Targets": offline.join(", ") } : undefined;
+        const headers = new Headers();
+        if (route.operation === "work.command") {
+          const command = WorkCommandRequest.parse(body).operation, outcome = WorkCommandResult.parse(result);
+          const offline = modules.workCommands.offlineTargets(command, outcome);
+          const advisory = modules.workCommands.advisoryTargets(command, outcome);
+          if (offline.length) headers.set("X-Lumio-Offline-Targets", offline.join(", "));
+          if (advisory.length) headers.set("X-Lumio-Advisory-Targets", advisory.join(", "));
+        }
         return Response.json(result, { status, headers });
       };
       const commandDecision = decision = decide(identity.actor, { operation: route.operation, command: operation.op, args: operation.args });
