@@ -104,8 +104,9 @@ export class WorkCommands {
         this.store.audit(identity, operation.op, decision.result, proposal.id, "pending_approval");
         return WorkCommandResult.parse({ kind: "proposal", proposal: proposal.id });
       }
+      const permissionJob = operation.op === "work.task.grant" ? this.work.task(operation.args.task).turn.job : undefined;
       const value = this.work.command(request, identity.actor.id, undefined, { role: identity.actor.role, job: identity.job });
-      this.store.audit(identity, operation.op, "allow", undefined, "applied");
+      this.store.audit(identity, operation.op === "work.task.grant" ? JSON.stringify({ ...operation, job: permissionJob }) : operation.op, "allow", undefined, "applied");
       return value;
     })();
   }

@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
-import { WorkProject, WorkTask, WorkComment, WorkExecution, TaskTurnChange, WorkCommandResult, PlanTemplate, TrashItem } from "@lumio/schema";
-import { WorkError, type WorkStore } from "@lumio/work";
+import { WorkProject, WorkTask, WorkComment, WorkExecution, TaskTurnChange, WorkCommandResult, PlanTemplate, TrashItem, StagePermissions } from "@lumio/schema";
+import { WorkError, type PendingStageGrant, type WorkStore } from "@lumio/work";
 
 
 /** Each adapter owns only its module's tables; no Knowledge, Execution or actor-table joins. */
@@ -51,6 +51,11 @@ export class SqliteWorkStore implements WorkStore {
       if (!columns.some(column => column.name === "workdir")) db.exec("ALTER TABLE work_projects ADD COLUMN workdir TEXT");
       if (!columns.some(column => column.name === "default_target")) db.exec("ALTER TABLE work_projects ADD COLUMN default_target TEXT");
       if (!columns.some(column => column.name === "default_plan")) db.exec("ALTER TABLE work_projects ADD COLUMN default_plan TEXT");
+      const taskColumns = db.query<{ name: string }, []>("PRAGMA table_info(work_tasks)").all();
+      if (!taskColumns.some(column => column.name === "grants")) db.exec("ALTER TABLE work_tasks ADD COLUMN grants TEXT CHECK(grants IS NULL OR json_valid(grants))");
+      db.exec(`CREATE TABLE IF NOT EXISTS work_pending_grants (
+        task TEXT PRIMARY KEY REFERENCES work_tasks(id), job TEXT NOT NULL, stage TEXT,
+        permissions TEXT NOT NULL CHECK(json_valid(permissions)))`);
     }).immediate();
   }
   transaction<T>(action: () => T): T { return this.db.transaction(action)(); }
@@ -77,9 +82,10 @@ export class SqliteWorkStore implements WorkStore {
 
   private readTask(row: Record<string, unknown> | null, batchDependencies?: Map<string, string[]>): WorkTask | undefined {
     if (!row) return;
-    const { refs, turn, plan, ...fields } = Object.fromEntries(Object.entries(row).filter(([, value]) => value !== null));
+    const { refs, turn, plan, grants, ...fields } = Object.fromEntries(Object.entries(row).filter(([, value]) => value !== null));
     const dependencies = batchDependencies?.get(String(row.id)) ?? (batchDependencies ? [] : this.db.query<{ dependency: string }, [string]>("SELECT dependency FROM work_dependencies WHERE task=? ORDER BY rowid").all(String(row.id)).map((value) => value.dependency));
-    return WorkTask.parse({ ...fields, schema_version: 3, type: "task", turn: JSON.parse(String(turn)), plan: plan ? JSON.parse(String(plan)) : undefined, tags: JSON.parse(String(row.tags)), references: JSON.parse(String(refs)),
+    return WorkTask.parse({ ...fields, schema_version: 3, type: "task", turn: JSON.parse(String(turn)), plan: plan ? JSON.parse(String(plan)) : undefined,
+      grants: grants ? JSON.parse(String(grants)) : undefined, tags: JSON.parse(String(row.tags)), references: JSON.parse(String(refs)),
       gpus: row.gpus === null ? undefined : JSON.parse(String(row.gpus)), dependencies });
   }
   purgedTask(id: string): boolean {
@@ -97,12 +103,12 @@ export class SqliteWorkStore implements WorkStore {
   putTask(input: WorkTask): void {
     const { blocked_by: _blocked, next_target: _target, ...value } = WorkTask.parse(input);
     this.transaction(() => {
-      this.db.query(`INSERT INTO work_tasks(id,title,description,revision,outcome,turn,plan,project,parent,due,created,updated,tags,refs,workdir,model,gpus,timeout_minutes,created_by,updated_by)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        ON CONFLICT(id) DO UPDATE SET title=excluded.title,description=excluded.description,revision=excluded.revision,outcome=excluded.outcome,turn=excluded.turn,plan=excluded.plan,
+      this.db.query(`INSERT INTO work_tasks(id,title,description,revision,outcome,turn,plan,grants,project,parent,due,created,updated,tags,refs,workdir,model,gpus,timeout_minutes,created_by,updated_by)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(id) DO UPDATE SET title=excluded.title,description=excluded.description,revision=excluded.revision,outcome=excluded.outcome,turn=excluded.turn,plan=excluded.plan,grants=excluded.grants,
         project=excluded.project,parent=excluded.parent,due=excluded.due,updated=excluded.updated,tags=excluded.tags,
         refs=excluded.refs,workdir=excluded.workdir,model=excluded.model,gpus=excluded.gpus,timeout_minutes=excluded.timeout_minutes,updated_by=excluded.updated_by`).run(
-        value.id, value.title, value.description, value.revision, value.outcome, JSON.stringify(value.turn), value.plan ? JSON.stringify(value.plan) : null, value.project ?? null, value.parent ?? null,
+        value.id, value.title, value.description, value.revision, value.outcome, JSON.stringify(value.turn), value.plan ? JSON.stringify(value.plan) : null, value.grants ? JSON.stringify(value.grants) : null, value.project ?? null, value.parent ?? null,
         value.due ?? null, value.created, value.updated, JSON.stringify(value.tags), JSON.stringify(value.references),
         value.workdir ?? null, value.model ?? null, value.gpus === undefined ? null : JSON.stringify(value.gpus), value.timeout_minutes ?? null, value.created_by ?? null, value.updated_by ?? null);
       this.db.query("DELETE FROM work_dependencies WHERE task=?").run(value.id);
@@ -113,6 +119,17 @@ export class SqliteWorkStore implements WorkStore {
   comment(id: string): WorkComment | undefined {
     const row = this.db.query("SELECT * FROM work_comments WHERE id=?").get(id);
     return row ? WorkComment.parse(row) : undefined;
+  }
+  pendingGrant(task: string): PendingStageGrant | undefined {
+    const row = this.db.query<{ job: string; stage: string | null; permissions: string }, [string]>(
+      "SELECT job,stage,permissions FROM work_pending_grants WHERE task=?").get(task);
+    return row ? { job: row.job, stage: row.stage ?? undefined, permissions: StagePermissions.parse(JSON.parse(row.permissions)) } : undefined;
+  }
+  putPendingGrant(task: string, grant?: PendingStageGrant): void {
+    if (!grant) { this.db.query("DELETE FROM work_pending_grants WHERE task=?").run(task); return; }
+    this.db.query(`INSERT INTO work_pending_grants(task,job,stage,permissions) VALUES(?,?,?,?)
+      ON CONFLICT(task) DO UPDATE SET job=excluded.job,stage=excluded.stage,permissions=excluded.permissions`)
+      .run(task, grant.job, grant.stage ?? null, JSON.stringify(StagePermissions.parse(grant.permissions)));
   }
   comments(task: string): WorkComment[] {
     return WorkComment.array().parse(this.db.query("SELECT * FROM work_comments WHERE task=? ORDER BY rowid").all(task));
@@ -175,10 +192,11 @@ export class SqliteWorkStore implements WorkStore {
       // Preserve incoming foreign keys and round associations with a scrubbed, invisible ID row.
       for (const table of ["work_comments", "work_turns", "work_dependencies"]) this.db.query(`DELETE FROM ${table} WHERE task=?`).run(id);
       const epoch = "1970-01-01T00:00:00.000Z";
-      this.db.query(`UPDATE work_tasks SET title='',description='',revision=1,outcome='cancelled',turn=?,plan=NULL,
+      this.db.query(`UPDATE work_tasks SET title='',description='',revision=1,outcome='cancelled',turn=?,plan=NULL,grants=NULL,
         project=NULL,parent=NULL,due=NULL,created=?,updated=?,tags='[]',refs='[]',workdir=NULL,model=NULL,gpus=NULL,
         timeout_minutes=NULL,created_by=NULL,updated_by=NULL WHERE id=?`)
         .run(JSON.stringify({ holder: "nobody", reason: "on_hold", since: epoch }), epoch, epoch, id);
+      this.putPendingGrant(id);
       this.db.query("INSERT INTO work_purged_tasks VALUES (?)").run(id);
     }
     this.removeTrash(id);
