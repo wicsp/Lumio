@@ -9,7 +9,7 @@ import { parseFrontmatter } from "@lumio/knowledge";
 import { scanVault } from "../vault.ts";
 import { extractKnowledgeLinks, plainText, resolveMarkdownPath } from "@lumio/knowledge";
 
-const VERSION = 4; // K4-2：增加来源及跨模块引用表，旧索引自动重建
+const VERSION = 5; // 4：来源及跨模块引用表（K4-2）；5：AI 笔记的出链单独成表（ADR 0053）。旧索引自动重建
 export interface IndexOptions {
   text?: (key: string, ...args: unknown[]) => string;
   stateDir?: string;
@@ -58,6 +58,9 @@ function initialize(db: Database, root: string): void {
     CREATE INDEX derived_from_path ON derived_from(from_path);
     CREATE TABLE resource_links (target TEXT NOT NULL, from_path TEXT NOT NULL, PRIMARY KEY(target, from_path));
     CREATE INDEX resource_links_path ON resource_links(from_path);
+    CREATE TABLE ai_links (from_path TEXT NOT NULL, source TEXT NOT NULL, target TEXT NOT NULL, resolved_path TEXT);
+    CREATE INDEX ai_links_from ON ai_links(from_path);
+    CREATE INDEX ai_links_to ON ai_links(resolved_path);
   `);
   db.query("INSERT INTO metadata VALUES (?, ?, ?)").run(VERSION, root, new Date().toISOString());
 }
@@ -97,7 +100,7 @@ async function openStore(path: string, root: string): Promise<Database> {
       ? db.query<{ version: number; vault: string }, []>("SELECT * FROM metadata").get() : null;
     const healthy = Object.values(db.query("PRAGMA quick_check").get() ?? {})[0] === "ok";
     if (healthy && metadata?.version === VERSION && metadata.vault === root
-      && ["files", "notes", "fulltext", "links", "derived_from", "resource_links"].every((name) => tables.some((t) => t.name === name))) {
+      && ["files", "notes", "fulltext", "links", "derived_from", "resource_links", "ai_links"].every((name) => tables.some((t) => t.name === name))) {
       db.exec("INSERT INTO fulltext(fulltext) VALUES ('integrity-check')");
       // Additive derived metadata remains readable by older clients; no business migration.
       if (!db.query<{ name: string }, []>("PRAGMA table_info(metadata)").all().some(column => column.name === "updated_at")) {
@@ -177,6 +180,7 @@ export async function withIndex<T>(root: string, options: IndexOptions, query: (
         database.query("DELETE FROM links WHERE from_path=?").run(path);
         database.query("DELETE FROM derived_from WHERE from_path=?").run(path);
         database.query("DELETE FROM resource_links WHERE from_path=?").run(path);
+        database.query("DELETE FROM ai_links WHERE from_path=?").run(path);
         database.query("DELETE FROM files WHERE path=?").run(path);
       };
       for (const path of removed) remove(path);
@@ -198,19 +202,19 @@ export async function withIndex<T>(root: string, options: IndexOptions, query: (
         }
         const { links, resourceIds } = extractKnowledgeLinks(n.body, n.path);
         for (const id of new Set(resourceIds)) database.query("INSERT INTO resource_links VALUES (?, ?)").run(id, n.path);
-        if (n.type !== "ai-note") {
-          for (const link of links) database.query("INSERT INTO links VALUES (?, ?, ?, NULL)").run(n.path, link.source, link.target);
-        }
+        // AI 笔记的出链不进人的链接图（ADR 0051），单独存放供"AI 笔记提到"查询（ADR 0053）。
+        const table = n.type === "ai-note" ? "ai_links" : "links";
+        for (const link of links) database.query(`INSERT INTO ${table} VALUES (?, ?, ?, NULL)`).run(n.path, link.source, link.target);
       }
-      {
-        database.exec(`UPDATE links SET resolved_path = (SELECT min(path) FROM notes WHERE filename=links.target HAVING count(*)=1)
+      for (const table of ["links", "ai_links"] as const) {
+        database.exec(`UPDATE ${table} SET resolved_path = (SELECT min(path) FROM notes WHERE filename=${table}.target HAVING count(*)=1)
           WHERE source='wikilink'`);
         // Resolve every Markdown edge again: an unchanged source may gain or lose a target.
         const markdown = database.query<{ rowid: number; from_path: string; target: string }, []>(
-          "SELECT rowid, from_path, target FROM links WHERE source='markdown'",
+          `SELECT rowid, from_path, target FROM ${table} WHERE source='markdown'`,
         ).all();
         const find = database.query<{ path: string }, [string]>("SELECT path FROM notes WHERE path=?");
-        const update = database.query("UPDATE links SET resolved_path=? WHERE rowid=?");
+        const update = database.query(`UPDATE ${table} SET resolved_path=? WHERE rowid=?`);
         for (const link of markdown) {
           const path = resolveMarkdownPath(link.from_path, link.target);
           update.run(path ? find.get(path)?.path ?? null : null, link.rowid);

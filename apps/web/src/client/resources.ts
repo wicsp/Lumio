@@ -10,7 +10,8 @@ import type { Navigate, Section } from "./navigation.ts";
 
 const KNOWLEDGE = new Set(["pap", "idea", "src", "exp", "post", "ast", "rpt", "ain"]);
 const ULID = "[0-9A-HJKMNP-TV-Z]{26}";
-const AI_NOTE_ID = new RegExp(`^ain_${ULID}$`);
+/** 文件名为 `ain_<ULID>` 或 `<标题> ain_<ULID>`（ADR 0051、0053）。 */
+const AI_NOTE_NAME = new RegExp(`(?:^|\\s)(ain_${ULID})$`);
 
 export const prefixOf = (id: string): string => id.slice(0, id.indexOf("_"));
 
@@ -64,12 +65,11 @@ export function resourceLinks(root: HTMLElement, client: Client, navigate: Navig
 }
 
 /**
- * 指向 AI 笔记的链接目标：AI 笔记的文件名就是它的 ID（`ai/notes/ain_….md`），
- * 所以 `[[ain_…]]`、`ain_…`、`…/ain_….md` 都能直接认出来，不需要先查询。
+ * 指向 AI 笔记的链接目标：AI 笔记的文件名以它的 ID 结尾（`ai/notes/<标题> ain_….md`，旧文件为 `ain_….md`），
+ * 所以 `[[<标题> ain_…]]`、`ain_…`、`…/ain_….md` 都能直接认出来，不需要先查询。
  */
 export function aiNoteIdOf(target: string): string | undefined {
-  const name = target.split("/").pop()!.replace(/\.md$/, "");
-  return AI_NOTE_ID.test(name) ? name : undefined;
+  return AI_NOTE_NAME.exec(target.split("/").pop()!.replace(/\.md$/, ""))?.[1];
 }
 
 /** 删除前查询被多少知识引用（只对对话与任务返回）；查不到时不阻止删除。 */

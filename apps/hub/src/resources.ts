@@ -1,7 +1,5 @@
-import { createReadStream } from "node:fs";
-import { createInterface } from "node:readline";
 import { StorageError, countKnowledgeReferences, noteById, type SqliteArtifacts, type SqliteAssistantStore, type SqliteRoutineStore, type SqliteWorkStore } from "@lumio/storage";
-import { ResourceSummary, RunLogEvent, TRASHED_REASON } from "@lumio/schema";
+import { ResourceSummary, TRASHED_REASON } from "@lumio/schema";
 import type { HubStore, Identity } from "./store.ts";
 import type { HubConfig } from "./config.ts";
 import type { authorize } from "./authorize.ts";
@@ -103,23 +101,11 @@ export class Resources {
         }
         case "evt": {
           if (!allowed("execution.read", includePrivate)) return unavailable;
-          for (const artifact of artifacts.list()) {
-            if (artifact.owner.module !== "execution" || artifact.status !== "ready" || (artifact.private && !includePrivate)
-              || artifact.media_type !== "application/vnd.lumio.runlog+jsonl" || !this.store.executionStore.get(artifact.owner.id)) continue;
-            const stream = createReadStream(await artifacts.path(artifact.id));
-            const lines = createInterface({ input: stream, crlfDelay: Infinity });
-            try {
-              for await (const line of lines) {
-                if (!line.includes(id)) continue;
-                let raw: unknown;
-                try { raw = JSON.parse(line); } catch { continue; }
-                const event = RunLogEvent.safeParse(raw);
-                if (event.success && event.data.id === id && event.data.run === artifact.owner.id)
-                  return visible(event.data.type, event.data.time, event.data.run);
-              }
-            } finally { lines.close(); stream.destroy(); }
-          }
-          return unavailable;
+          // 事件 ID → 运行的派生索引，每份归档日志只扫描一次（ADR 0053）。
+          const location = await artifacts.runEvent(id);
+          if (!location || location.artifact.owner.module !== "execution" || (location.artifact.private && !includePrivate)
+            || !this.store.executionStore.get(location.run)) return unavailable;
+          return visible(location.type, location.time, location.run);
         }
         case "act": {
           if (!allowed("actors")) return unavailable;

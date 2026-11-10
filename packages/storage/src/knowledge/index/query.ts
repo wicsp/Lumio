@@ -56,16 +56,19 @@ export async function noteLinks(root: string, reference: string, options: QueryO
   return withIndex(root, options, (db) => {
     const row = resolveReference(db, reference, options.includePrivate);
     type Edge = { from_path: string; source: Link["source"]; target: string; resolved_path: string | null };
-    const outgoing = db.query<Edge, [string]>("SELECT * FROM links WHERE from_path=? ORDER BY rowid").all(row.path).map((edge): Link => {
+    const out = (table: "links" | "ai_links") => db.query<Edge, [string]>(`SELECT * FROM ${table} WHERE from_path=? ORDER BY rowid`).all(row.path).map((edge): Link => {
       const target = edge.resolved_path ? db.query<NoteRow, [string]>("SELECT * FROM notes WHERE path=?").get(edge.resolved_path) : null;
       const visible = target && (!target.private || options.includePrivate);
       return { source: edge.source, target: edge.target, dangling: !visible, ...(visible ? { note: noteRef(target) } : {}) };
     });
-    const incoming = db.query<Edge, [string]>("SELECT * FROM links WHERE resolved_path=? ORDER BY from_path, rowid").all(row.path).flatMap((edge) => {
+    const into = (table: "links" | "ai_links") => db.query<Edge, [string]>(`SELECT * FROM ${table} WHERE resolved_path=? ORDER BY from_path, rowid`).all(row.path).flatMap((edge) => {
       const from = db.query<NoteRow, [string]>("SELECT * FROM notes WHERE path=?").get(edge.from_path)!;
       return from.private && !options.includePrivate ? [] : [{ source: edge.source, target: edge.target, dangling: false, note: noteRef(from) }];
     });
-    return LinksResult.parse({ note: noteRef(row), outgoing, incoming });
+    // ADR 0053：AI 笔记的链接单独列出，缺失表示没有。
+    const aiOutgoing = out("ai_links"), aiIncoming = into("ai_links");
+    return LinksResult.parse({ note: noteRef(row), outgoing: out("links"), incoming: into("links"),
+      ...(aiOutgoing.length ? { ai_outgoing: aiOutgoing } : {}), ...(aiIncoming.length ? { ai_incoming: aiIncoming } : {}) });
   });
 }
 
