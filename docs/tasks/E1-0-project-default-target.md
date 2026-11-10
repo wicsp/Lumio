@@ -19,9 +19,9 @@
 | 编号 | 内容 | 负责 | 改动范围 |
 |---|---|---|---|
 | E1-1 ✅ | 契约：`WorkProject.default_target`（含 create / update）；`WorkTask.next_target`（只读推导 `{target, source}`，create / patch 拒绝）；dispatch 结果增加 `target` 与 `target_source`；能力说明文字；`schema:export` | Claude 起草，人类批准 | `packages/schema` |
-| E1-2 | Work / Hub：存储 `default_target`；提交时校验目标；按 ADR 0044 第 2 节解析缺省 `to`；每个任务读取出口推导 `next_target`（列表批量）；结果带来源；新错误文案（中英） | 后端（Codex） | `packages/work`、`packages/storage`、`apps/hub` |
-| E1-3 | CLI 与 skill：`project create/update --default-target`（`""` 清除）；`task show` / `task list` 显示下一次委派的目标与来源；`task dispatch` 不带 `--to` 时打印实际目标 | 后端（Codex） | `apps/cli`、`skills/lumio` |
-| E1-4 | Web：项目详情编辑默认执行者；任务详情显示下一次委派给谁；Today 待办「委托」按钮与换目标小箭头 | 前端（Claude） | `packages/api-client`、`apps/web` |
+| E1-2 ✅ | Work / Hub：存储 `default_target`；提交时校验目标；按 ADR 0044 第 2 节解析缺省 `to`；每个任务读取出口推导 `next_target`（列表批量）；结果带来源；新错误文案（中英） | 后端（Codex） | `packages/work`、`packages/storage`、`apps/hub` |
+| E1-3 ✅ | CLI 与 skill：`project create/update --default-target`（`""` 清除）；`task show` / `task list` 显示下一次委派的目标与来源；`task dispatch` 不带 `--to` 时打印实际目标 | 后端（Codex） | `apps/cli`、`skills/lumio` |
+| E1-4 ✅ | Web：项目详情编辑默认执行者；任务详情显示下一次委派给谁；Today 待办「委托」按钮与换目标小箭头 | 前端（Claude） | `packages/api-client`、`apps/web` |
 
 E1-2、E1-3 依赖 E1-1；E1-4 依赖 E1-2。
 
