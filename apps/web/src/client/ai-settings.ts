@@ -3,20 +3,21 @@
  * 连接是「去哪里调用模型」（API 地址与密钥，或某台执行器上的官方 Codex 登录）；
  * Profile 是「用哪个模型、怎么思考」，助手和执行器共用。密钥只写不读。
  */
-import type { AIConfiguration, AIConnection, AIProfile, AIRuntime, NativeSession, NativeConnectionView, NativeConnectionAction } from "@lumio/schema";
+import type { AIConfiguration, AIConnection, AIProfile, AIQuotaView, AIRuntime, NativeSession, NativeConnectionView, NativeConnectionAction } from "@lumio/schema";
 import { TYPESAFE_JEV_BASE_URL } from "@lumio/schema";
 import { errorText, type Client } from "./api.ts";
 import { clear, failure, h, icon, openDialog, toast } from "./dom.ts";
 import { t } from "./i18n.ts";
 import { defaultAssistantProfile, saveDefaultAssistantProfile } from "./assistant-profile.ts";
 import { newRequestId } from "./commands.ts";
+import { usageDetails } from "./ai-usage.ts";
 
 type Group = (title: string, hint: string | undefined, body: HTMLElement, action?: HTMLElement) => HTMLElement;
 type Kind = AIConnection["kind"];
 
 export const CONNECTION_KINDS: ReadonlyArray<readonly [Kind, string]> = [
   ["codex-account", "Codex account"], ["deepseek", "DeepSeek API"], ["doubao", "Doubao API"], ["openai-compatible", "Compatible API"],
-  ["typesafe-jev", "TypeSafe Jev"],
+  ["typesafe-jev", "TypeSafe Jev"], ["claude-code-subscription", "Claude Code subscription"],
 ];
 const BASE_URL: Partial<Record<Kind, string>> = { deepseek: "https://api.deepseek.com/v1", doubao: "https://ark.cn-beijing.volces.com/api/v3" };
 const DEEPSEEK_EFFORTS = ["low", "high", "max"];
@@ -24,7 +25,7 @@ const DEEPSEEK_EFFORTS = ["low", "high", "max"];
 export const kindLabel = (kind: Kind) => t(CONNECTION_KINDS.find(([value]) => value === kind)?.[1] ?? kind);
 
 export function profileConnections(connections: readonly AIConnection[]): AIConnection[] {
-  return connections.filter(connection => connection.kind !== "typesafe-jev");
+  return connections.filter(connection => connection.kind !== "typesafe-jev" && connection.kind !== "claude-code-subscription");
 }
 
 /** Profile 一行的副标题：引擎 · 模型 · 思考强度。 */
@@ -37,6 +38,7 @@ const authLabel = (view: NativeConnectionView): string =>
 
 /** 连接一行的副标题：服务、位置与连接级授权或密钥状态。 */
 export function connectionSummary(connection: AIConnection, view?: NativeConnectionView, hasLegacyChat = false): string {
+  if (connection.kind === "claude-code-subscription") return [kindLabel(connection.kind), connection.host, t("Session sampling")].join(" · ");
   if (connection.kind === "codex-account") {
     const status = !view ? t("Official sign-in") : view.state === "signed_out" && hasLegacyChat
       ? t("Only existing chats are signed in") : authLabel(view);
@@ -56,6 +58,9 @@ export class AISettings {
   private auth = new Map<string, NativeConnectionView>();
   private profileRows = h("div", { class: "set-rows" });
   private connectionRows = h("div", { class: "set-rows" });
+  private usage = new Map<string, AIQuotaView>();
+  private usageVersion = 0;
+  private usageTimer?: ReturnType<typeof setInterval>;
   private newProfile = h("button", { type: "button", class: "btn btn-quiet btn-small", onclick: () => this.editProfile() }, icon("plus"), t("New profile"));
   private newConnection = h("button", { type: "button", class: "btn btn-quiet btn-small", onclick: () => this.editConnection() }, icon("plus"), t("Add connection"));
 
@@ -63,21 +68,46 @@ export class AISettings {
     this.element.append(
       group(t("Default assistant model"), t("New chats start with this profile. This preference is saved in this browser."), this.defaultRows),
       group(t("AI profiles"), t("Choose an API or an official Codex session. Profiles share model settings; each conversation keeps its own permissions and history."), this.profileRows, this.newProfile),
-      group(t("Connections"), t("Where models are called: an API address and key kept on the Hub, or an official Codex sign-in on a runtime."), this.connectionRows, this.newConnection));
+      group(t("Connections"), t("Manage API connections, runtime sign-ins, and usage monitoring."), this.connectionRows, this.newConnection));
     for (const rows of [this.defaultRows, this.connectionRows, this.profileRows]) {
       clear(rows, h("p", { class: "set-empty" }, t("Loading…")));
     }
     void this.load();
+    this.usageTimer = setInterval(() => void this.loadUsage(), 30_000);
   }
 
-  dispose(): void { this.active = false; }
+  dispose(): void { this.active = false; clearInterval(this.usageTimer); }
+
+  private async loadUsage(): Promise<void> {
+    const version = ++this.usageVersion;
+    try {
+      const data = await this.client.aiUsage();
+      if (!this.active || version !== this.usageVersion) return;
+      const next = new Map(data.map(value => [value.connection, value]));
+      if (JSON.stringify([...next]) === JSON.stringify([...this.usage])) return;
+      this.usage = next;
+      this.renderConnections();
+    } catch { /* A Hub without the usage route can still manage connections. */ }
+  }
+
+  private updateUsage = (usage: AIQuotaView) => {
+    if (!this.active) return;
+    this.usageVersion++;
+    this.usage.set(usage.connection, usage);
+    this.renderConnections();
+  };
 
   private async load(): Promise<void> {
     try {
       const [config, runtimes, sessions] = await Promise.all([this.client.aiConfiguration(), this.client.aiRuntimes(), this.client.nativeSessions()]);
       if (!this.active) return;
+      const prior = new Map(this.config.connections.map(connection => [connection.id, connection.revision]));
+      for (const connection of config.connections) {
+        if (connection.revision !== prior.get(connection.id)) this.usage.delete(connection.id);
+      }
       this.config = config; this.runtimes = runtimes; this.sessions = sessions;
       this.render();
+      void this.loadUsage();
       await Promise.all(config.connections.filter(c => c.kind === "codex-account").map(async c => {
         try { this.auth.set(c.id, await this.client.nativeConnection(c.id)); } catch { /* Older Hub. */ }
       }));
@@ -99,10 +129,21 @@ export class AISettings {
     clear(this.profileRows, ...(this.config.profiles.length ? this.config.profiles.map(profile => this.item(
       profile.engine === "codex" ? "terminal" : "assistant", profile.name, profileSummary(profile, byId.get(profile.connection)), () => this.editProfile(profile)))
       : [h("p", { class: "set-empty" }, hasChatConnection ? t("No profiles yet. Create one to choose a model for the assistant.") : t("Add a chat connection first, then create a profile."))]));
-    clear(this.connectionRows, ...(this.config.connections.length ? this.config.connections.map(connection =>
-      this.item(connection.kind === "codex-account" ? "device" : "globe", connection.name,
-        connectionSummary(connection, this.auth.get(connection.id), this.legacyChatUses(connection)),
-        () => this.editConnection(connection)))
+    this.renderConnections();
+  }
+
+  private renderConnections(): void {
+    const expanded = new Set([...this.connectionRows.querySelectorAll<HTMLDetailsElement>("details[open]")].map(node => node.dataset.connection));
+    const ordered = [...this.config.connections].sort((a, b) => Number(!!this.usage.get(b.id)?.attention) - Number(!!this.usage.get(a.id)?.attention));
+    clear(this.connectionRows, ...(ordered.length ? ordered.map(connection => {
+      const row = this.item(["codex-account", "claude-code-subscription"].includes(connection.kind) ? "device" : "globe", connection.name,
+        connectionSummary(connection, this.auth.get(connection.id), this.legacyChatUses(connection)), () => this.editConnection(connection));
+      const usage = this.usage.get(connection.id);
+      const details = usage && ["deepseek", "codex-account", "claude-code-subscription"].includes(connection.kind)
+        ? usageDetails(connection, usage, this.client, this.updateUsage) : undefined;
+      if (details && expanded.has(connection.id)) details.setAttribute("open", "");
+      return h("div", { class: "ai-connection-row" }, row, details);
+    })
       : [h("p", { class: "set-empty" }, t("No connections yet."))]));
   }
 
@@ -150,7 +191,7 @@ export class AISettings {
     const name = h("input", { required: true, maxLength: 100, value: old?.name ?? "", placeholder: t("Connection name"), autocomplete: "off" });
     const kind = h("select", { disabled: !!old }, ...CONNECTION_KINDS.map(([value, label]) => h("option", { value, selected: (old?.kind ?? "deepseek") === value }, t(label))));
     const host = h("select", { disabled: !!old },
-      old?.kind === "codex-account" && !this.runtimes.some(runtime => runtime.name === old.host)
+      old && old.host !== "hub" && !this.runtimes.some(runtime => runtime.name === old.host)
         ? h("option", { value: old.host }, `${old.host} · ${t("Offline")}`) : undefined,
       ...this.runtimes.map(runtime => h("option", { value: runtime.name, selected: old?.host === runtime.name },
       runtime.online ? runtime.name : `${runtime.name} · ${t("Offline")}`)));
@@ -159,14 +200,18 @@ export class AISettings {
     const jevHint = h("p", { class: "field-hint" }, t("TypeSafe Jev is for structured decisions and is unavailable in chat profiles."));
     const api = h("div", { class: "form-stack" }, this.field(t("API address"), base), this.field(t("API key"), key, t("Stored only on the Hub, never shown again, and never sent to agents.")), jevHint);
     const authSection = h("section", { class: "codex-auth", "aria-label": t("Codex sign-in") });
+    const samplingHint = h("p", { class: "field-hint" }, t("After saving, open Usage & balance to set up sampling."));
     const native = h("div", { class: "form-stack" },
-      (this.runtimes.length || old?.kind === "codex-account") ? this.field(t("Runtime"), host) : h("p", { class: "notice" }, t("No runtimes yet. Run lumio runtime add <name> to pair a machine.")),
-      authSection);
+      (this.runtimes.length || old && old.host !== "hub") ? this.field(t("Runtime"), host) : h("p", { class: "notice" }, t("No runtimes yet. Run lumio runtime add <name> to pair a machine.")),
+      authSection, samplingHint);
     let editableAddress = base.value;
     const sync = () => {
       const codex = kind.value === "codex-account";
+      const claude = kind.value === "claude-code-subscription";
       const jev = kind.value === "typesafe-jev";
-      api.hidden = codex; native.hidden = !codex;
+      api.hidden = codex || claude; native.hidden = !(codex || claude);
+      authSection.hidden = !codex;
+      samplingHint.hidden = !claude;
       jevHint.hidden = !jev;
       if (jev) {
         editableAddress = base.value;
@@ -177,7 +222,7 @@ export class AISettings {
       base.readOnly = jev;
       const preset = BASE_URL[kind.value as Kind];
       if (!old && preset && (!base.value || Object.values(BASE_URL).includes(base.value))) base.value = preset;
-      base.required = !codex;
+      base.required = !(codex || claude);
       key.required = jev && !old?.api_key_set;
       key.placeholder = old?.api_key_set ? t("Saved. Leave blank to keep it.")
         : jev ? t("Enter your TypeSafe API key") : t("Leave blank if the service needs no key");
@@ -195,9 +240,10 @@ export class AISettings {
     let busy = false;
 
     const isCodex = () => kind.value === "codex-account";
+    const isClaude = () => kind.value === "claude-code-subscription";
     const updateFooter = () => {
       save.textContent = t(isCodex() ? "Finish" : "Save");
-      save.disabled = busy || (isCodex() && !old && view?.state !== "ready");
+      save.disabled = busy || (isCodex() && !old && view?.state !== "ready") || (isClaude() && !host.value);
     };
     const button = (label: string, run: () => void, primary = false) =>
       h("button", { type: "button", class: `btn btn-small${primary ? " btn-primary" : ""}`, onclick: run }, t(label));
@@ -288,8 +334,9 @@ export class AISettings {
       try {
         const updatedName = name.value.trim();
         if (!isCodex() || (connection && connection.name !== updatedName)) {
-          connection = await this.client.saveAIConnection({ name: updatedName, kind: kind.value as Kind, host: isCodex() ? host.value : "hub",
-            ...(isCodex() ? {} : { base_url: base.value.trim(), ...(key.value ? { api_key: key.value } : {}) }) }, connection?.id);
+          const runtime = isCodex() || isClaude();
+          connection = await this.client.saveAIConnection({ name: updatedName, kind: kind.value as Kind, host: runtime ? host.value : "hub",
+            ...(runtime ? {} : { base_url: base.value.trim(), ...(key.value ? { api_key: key.value } : {}) }) }, connection?.id);
         }
         if (isCodex() && connection && view?.state === "ready") {
           const current = await this.client.aiConfiguration();

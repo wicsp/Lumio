@@ -19,6 +19,7 @@ async function until<T>(get: () => Promise<T> | T, predicate: (v: T) => boolean,
 async function fixture(options: {
     official?: boolean;
     connectionAuth?: boolean;
+    connectionUsage?: boolean;
 } = {}) {
     const root = await mkdtemp(join(await realpath(tmpdir()),"lumio-native-integration-"));
     const state = join(root, "hub"), local = join(root, "runtime");
@@ -70,6 +71,13 @@ async function fixture(options: {
                             await post({ type: "connection_auth", command: c.command, connection: c.connection, owner: c.owner, view: await accounts.request(c) });
                             continue;
                         }
+                        if (c.type === "connection_usage") {
+                            if (!accounts || !options.connectionUsage) throw new Error("Unexpected quota command");
+                            await post({ type: "connection_usage", command: c.command, connection: c.connection,
+                                result: await accounts.usage(c.connection, c.owner) });
+                            continue;
+                        }
+                        if (c.type === "claude_usage") throw new Error("Unexpected Claude quota command");
                         if (options.official && c.type === "open") {
                             const home = join(local, "native", c.session.id, "codex");
                             await mkdir(home, { recursive: true, mode: 0o700 });
@@ -89,7 +97,8 @@ async function fixture(options: {
             await reader.cancel().catch(() => { });
             reader.releaseLock();
         } })();
-        await post({ type: "hello", protocol: 1, instance: "synthetic-runtime-instance", version: "1", isolation: "macos-seatbelt", ...(accounts ? { connection_auth: true } : {}) });
+        await post({ type: "hello", protocol: 1, instance: "synthetic-runtime-instance", version: "1", isolation: "macos-seatbelt",
+            ...(accounts ? { connection_auth: true } : {}), ...(options.connectionUsage ? { connection_usage: true } : {}) });
         await until(() => client.aiRuntimes(), r => r.some(v => v.online));
     };
     await connect();
@@ -98,6 +107,26 @@ async function fixture(options: {
     const close = async () => { await manager.stop(); await accounts?.stop(); channel = undefined; abort?.abort(); await reading; await hub.stop(); store.close(); await rm(root, { recursive: true, force: true }); };
     return { root, local, hub, client, profile, connection, create, close, store, manager, accounts, url, owner, connect };
 }
+test("Codex quota is negotiated, read without a chat and cleared at logout", async () => {
+    const f = await fixture({ connectionAuth: true, connectionUsage: true });
+    try {
+        const id = f.connection.id;
+        expect((await f.client.refreshAIUsage(id)).status).toBe("credentials");
+        await f.client.nativeConnectionAction(id, { request_id: "fixture-usage-login", action: "login" });
+        await until(() => f.client.nativeConnection(id), view => view.state === "ready");
+        const view = await f.client.refreshAIUsage(id);
+        expect(view.status).toBe("ready");
+        expect(view.snapshot).toMatchObject({ source: "codex", windows: [
+            { id: "codex:primary", used_percent: 20, minutes: 300 },
+            { id: "codex:secondary", used_percent: 91, minutes: 10080 },
+            { id: "other:primary", label: "Synthetic model limit", used_percent: 35 },
+        ] });
+        expect(await f.client.nativeSessions()).toEqual([]);
+        await f.client.nativeConnectionAction(id, { request_id: "fixture-usage-logout", action: "logout" });
+        expect((await f.client.aiUsage())[0]).toMatchObject({ status: "credentials" });
+        expect((await f.client.aiUsage())[0]?.snapshot).toBeUndefined();
+    } finally { await f.close(); }
+}, 20_000);
 test("native conversation keeps one official thread, dynamic model settings, idempotency and owner boundary", async () => {
     const f = await fixture();
     try {

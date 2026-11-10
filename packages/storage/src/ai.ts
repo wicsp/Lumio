@@ -1,10 +1,31 @@
 import type { Database } from "bun:sqlite";
-import { AIConnection, AIProfile, NativeSession, NativeEventData } from "@lumio/schema";
+import { AIConnection, AIProfile, NativeSession, NativeEventData, AIQuotaSettings, AIQuotaSnapshot, AIQuotaStatus, type ClaudeQuotaIssue } from "@lumio/schema";
+
+export interface StoredAIQuota {
+  settings: AIQuotaSettings;
+  generation?: string;
+  binding?: string;
+  claudeAccount?: string;
+  claudeIssue?: ClaudeQuotaIssue;
+  snapshot?: AIQuotaSnapshot;
+  status?: AIQuotaStatus;
+  alerted?: Record<string, string>;
+  next?: number;
+  failures?: number;
+}
 /** Additive, private business tables. No credentials in public records or exports. */
 export class SqliteAIStore {
   constructor(readonly db: Database) {
     db.exec(`
  CREATE TABLE IF NOT EXISTS ai_connections(id TEXT PRIMARY KEY,owner TEXT NOT NULL,record TEXT NOT NULL CHECK(json_valid(record)),secret TEXT);
+ CREATE TABLE IF NOT EXISTS ai_quota(connection TEXT PRIMARY KEY REFERENCES ai_connections(id) ON DELETE CASCADE,record TEXT NOT NULL CHECK(json_valid(record)));
+ CREATE TRIGGER IF NOT EXISTS ai_quota_source_changed AFTER UPDATE ON ai_connections
+ WHEN OLD.secret IS NOT NEW.secret OR json_extract(OLD.record,'$.base_url') IS NOT json_extract(NEW.record,'$.base_url')
+   OR json_extract(OLD.record,'$.host') IS NOT json_extract(NEW.record,'$.host')
+   OR json_extract(OLD.record,'$.kind') IS NOT json_extract(NEW.record,'$.kind')
+ BEGIN
+   UPDATE ai_quota SET record=json_object('settings',json_extract(record,'$.settings')) WHERE connection=NEW.id;
+ END;
  CREATE TABLE IF NOT EXISTS ai_profiles(id TEXT PRIMARY KEY,owner TEXT NOT NULL,record TEXT NOT NULL CHECK(json_valid(record)));
  CREATE TABLE IF NOT EXISTS native_sessions(id TEXT PRIMARY KEY,owner TEXT NOT NULL,conversation TEXT NOT NULL UNIQUE,record TEXT NOT NULL CHECK(json_valid(record)),token_hash TEXT,agent TEXT);
  CREATE TABLE IF NOT EXISTS native_events(session TEXT NOT NULL,sequence INTEGER NOT NULL,turn TEXT,record TEXT NOT NULL CHECK(json_valid(record)),PRIMARY KEY(session,sequence));
@@ -50,6 +71,18 @@ export class SqliteAIStore {
       this.db.query<{ secret: string | null }, [string]>("SELECT secret FROM ai_connections WHERE id=?").get(id)
         ?.secret ?? undefined
     );
+  }
+  quota(id: string): StoredAIQuota {
+    const row = this.db.query<{ record: string }, [string]>("SELECT record FROM ai_quota WHERE connection=?").get(id);
+    return row ? JSON.parse(row.record) as StoredAIQuota : { settings: { monitor: false, thresholds: {} } };
+  }
+  putQuota(id: string, value: StoredAIQuota): void {
+    this.db.query("INSERT INTO ai_quota VALUES(?,?) ON CONFLICT(connection) DO UPDATE SET record=excluded.record")
+      .run(id, JSON.stringify(value));
+  }
+  quotaConnections(): AIConnection[] {
+    return this.db.query<{ record: string }, []>("SELECT ai_connections.record FROM ai_quota JOIN ai_connections ON ai_connections.id=ai_quota.connection")
+      .all().map(row => AIConnection.parse(JSON.parse(row.record)));
   }
   profiles(owner: string) {
     return this.db

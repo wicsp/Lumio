@@ -67,7 +67,7 @@ export class BusinessModules {
   private readonly timer: ReturnType<typeof setInterval>;
   readonly signal = this.stopped.signal;
   constructor(private readonly config: HubConfig, private readonly store: HubStore, options: {
-    authorize?: typeof authorize; now?: () => Date; assistantModel?: AssistantModel; assistantTools?: AssistantTool[]; pushFetch?: typeof fetch;
+    authorize?: typeof authorize; now?: () => Date; assistantModel?: AssistantModel; assistantTools?: AssistantTool[]; pushFetch?: typeof fetch; quotaFetch?: typeof fetch;
   } = {}) {
     const now = options.now ?? (() => new Date());
     if (config.vault) this.knowledge = new KnowledgeService(new FileKnowledgeRepository(config.vault, { stateDir: config.stateDir }));
@@ -130,13 +130,14 @@ export class BusinessModules {
     this.ai=new AIConfigurationService(new SqliteAIStore(store.db),config.assistantModel);
     this.ai.migrateLegacy(store.actors().filter(actor => actor.role === "human").map(actor => actor.id));
     this.ai.store.installConversationPurge();
-    this.native=new NativeAssistant(this.ai.store,this,store,config);
+    this.native=new NativeAssistant(this.ai.store,this,store,config,{ fetch: options.quotaFetch, now });
     this.assistant = new AssistantService(this.assistantStore, options.assistantModel ?? configuredModel(config.assistantModel),
       [...this.capabilities.tools(), ...(options.assistantTools ?? [])], { text: msg, now, id, toolActor: store.assistantActor(),resolveModel:(profile,owner)=>this.ai.model(owner,profile),native:{validate:(c,r)=>this.native.validate(c,r),run:this.native.run,cancel:c=>this.native.cancelConversation(c)} });
     this.assistant.recover();
     this.reconcile();
     this.timer = setInterval(() => {
       try { this.reconcile(); } catch { /* Persisted pending results remain for the next pass. */ }
+      try { this.native.usage.tick(); } catch { /* The next tick can retry quota collection. */ }
       void this.notifications.drain().catch(() => {});
     }, 1000);
   }

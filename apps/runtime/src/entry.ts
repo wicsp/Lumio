@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import {runNativeMCP} from "./native/mcp.ts";
 import { withLanguage, errorMessage, text as msg } from "./messages.ts";
 import { parseArgs } from "node:util";
@@ -16,9 +18,26 @@ import { runRuntime } from "./runtime.ts";
 import { runWorker } from "./worker.ts";
 import { prepareMigration } from "./prepare-migration.ts";
 import { StorageError } from "@lumio/storage";
+import { sampleClaudeFromStdin } from "./claude-usage.ts";
+import { setupClaudeQuota } from "./native/claude-quota.ts";
 
 export async function run(args: string[]): Promise<void> {
   if(args[0]==="native-mcp"){await runNativeMCP();return;}
+  if (args[0] === "claude-quota-login") {
+    try {
+      const { values, positionals } = parseArgs({ args: args.slice(1), allowPositionals: true,
+        options: { trust: { type: "boolean" }, "state-dir": { type: "string" } } });
+      if (positionals.length) throw new Error();
+      const state = resolve(values["state-dir"] ?? process.env.LUMIO_RUNTIME_STATE_DIR ?? join(homedir(), ".local/share/lumio-runtime"));
+      process.exitCode = await setupClaudeQuota(state, !!values.trust);
+    } catch { console.error(msg("entry.claude_quota_login_failed")); process.exitCode = 1; }
+    return;
+  }
+  if (args[0] === "claude-usage-sample") {
+    try { await sampleClaudeFromStdin(args.slice(1)); }
+    catch { console.error(msg("entry.claude_usage_sample_failed")); process.exitCode = 1; }
+    return;
+  }
 
   if (args.length === 1 && args[0] === "--version") {
     console.log(version);
