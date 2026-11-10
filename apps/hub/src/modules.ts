@@ -13,7 +13,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { CoreError, newId } from "@lumio/foundation";
 import { parseAssignee, type WorkCommandResult, type AgentRun, type WorkTask } from "@lumio/schema";
-import { PlanDispatchUnavailable, WorkService } from "@lumio/work";
+import { mergeStageGrant, PlanDispatchUnavailable, WorkService } from "@lumio/work";
 import { AssistantService, type AssistantModel, type AssistantTool } from "@lumio/assistant";
 import { FileKnowledgeRepository, SqliteWorkStore, SqliteAssistantStore, SqliteRoutineStore, SqliteArtifacts } from "@lumio/storage";
 import { ExecutionRoutines } from "@lumio/execution";
@@ -105,7 +105,7 @@ export class BusinessModules {
           from: change.from.stage, stage: change.to.stage, turn: change.to, checkpoint }), "allow", plan.approved.proposal, "applied");
       },
       validateTarget: (target, source) => { validateTarget(this.store, config.localRuntime, target, now(), source); },
-      dispatch: (task, input, round, to, previous) => this.dispatch(task, input, round, to, now(), previous),
+      dispatch: (task, input, round, to, previous, grant) => this.dispatch(task, input, round, to, now(), previous, grant),
       agentsForJobs: ids => {
         const jobs = store.executionStore.agentJobs(ids);
         if (!jobs.length) return new Map();
@@ -154,29 +154,40 @@ export class BusinessModules {
     this.assistantStore.putCall({ ...call, change: { ...change, undone: change.undone ?? { at: new Date().toISOString(), by: identity.actor.id } } });
     return outcome.result as WorkCommandResult;
   }
-  private dispatch(task: WorkTask, input: string, round: number, to: string | undefined, now: Date, previousJob?: string | null) {
+  private dispatch(task: WorkTask, input: string, round: number, to: string | undefined, now: Date, previousJob?: string | null, grant?: AgentRun["permissions"]) {
     const target = parseAssignee(to ?? "human");
     if (target === "human") throw new HubError("INVALID", { key: "modules.specify_an_agent_e_g_pi_server", args: [] });
     const stage = task.plan?.plan.stages.find(stage => stage.id === task.plan?.stage);
+    const agentStage = stage?.kind === "agent" ? stage : undefined;
+    const restrictedRound = Boolean(agentStage || grant || task.grants);
     const device = target.device ?? this.config.localRuntime;
     const runtime = this.store.runtimes(now).find(value => value.registration.name === device);
     if (!runtime) {
-      if (stage?.kind === "agent") throw new PlanDispatchUnavailable({ key: "target.stage_runtime_missing", args: [to] });
+      if (restrictedRound) throw new PlanDispatchUnavailable({ key: "target.stage_runtime_missing", args: [to] });
       throw new HubError("INVALID", { key: "modules.the_specified_runtime_is_not_registered_pair_it_first", args: [] });
     }
     const engine = runtime.registration.engines.find(value => value.name === target.agent);
     if (!engine) {
-      if (stage?.kind === "agent") throw new PlanDispatchUnavailable({ key: "target.stage_engine_missing", args: [target.agent, device] });
+      if (restrictedRound) throw new PlanDispatchUnavailable({ key: "target.stage_engine_missing", args: [target.agent, device] });
       throw new HubError("INVALID", { key: "modules.selected_agent_is_not_registered_on_runtime", args: [] });
     }
-    const options: Pick<AgentRun, "permissions" | "hooks"> = stage?.kind === "agent" ? stageDispatchOptions(stage, runtime, engine) : {};
-    const roundScope = roundPermissions(engine.sandbox, options.permissions, stage?.kind === "agent");
+    const base = agentStage ?? task.grants;
+    const permissions = grant ? mergeStageGrant(base, grant) : base;
+    const options: Pick<AgentRun, "permissions" | "hooks"> = permissions
+      ? stageDispatchOptions({ ...permissions, hooks: agentStage?.hooks }, runtime, engine) : {};
+    const roundScope = roundPermissions(engine.sandbox, options.permissions, restrictedRound);
+    const requestHint = msg(runtime.registration.features?.includes("permission_request") && runtime.registration.features.includes("stage_permissions")
+      ? "modules.round_permission_request" : "modules.round_permission_question");
     const workdir = task.workdir ?? (task.project ? this.work.project(task.project).workdir : undefined) ?? "~";
     if (this.config.vault && runtime.registration.name === this.config.localRuntime && workdirInVault(this.config.vault, workdir)) {
       throw new HubError("INVALID", { key: "modules.working_directory_must_be_outside_the_knowledge_directory", args: [] });
     }
     const jobs = new Jobs(this.store);
     const previous = previousJob === undefined ? jobs.list(undefined, task.id).at(-1) : previousJob ? jobs.get(previousJob) : undefined;
+    if (grant && (!previous || previous.spec.runtime !== runtime.actor || previous.spec.run.kind !== "agent"
+      || previous.spec.run.engine !== target.agent || previous.spec.workdir !== workdir)) {
+      throw new PlanDispatchUnavailable({ key: "work.permission_context_changed", args: [] });
+    }
     let session: AgentRun["session"];
     if (previous?.spec.run.kind === "agent" && previous.spec.run.engine === target.agent && previous.spec.runtime === runtime.actor && previous.result?.session_id) {
       session = { id: previous.result.session_id, resume: true };
@@ -185,7 +196,7 @@ export class BusinessModules {
     return jobs.create({ runtime: runtime.actor, workdir, timeout_seconds: (task.timeout_minutes ?? 120) * 60,
       ...(task.gpus ? { gpus: task.gpus } : {}), source: { task: task.id, round, ...(previous ? { previous: previous.spec.id } : {}) },
       run: { kind: "agent", engine: target.agent, ...(task.model ? { model: task.model } : {}), ...(session ? { session } : {}), ...options,
-        prompt: prefix + msg("modules.you_are_completing_round_of_a_user_task_work_only_in_the_working_dir", round, roundScope, input) },
+        prompt: prefix + msg("modules.you_are_completing_round_of_a_user_task_work_only_in_the_working_dir", round, roundScope, input, requestHint) },
     }, now);
   }
   reconcile(): void {

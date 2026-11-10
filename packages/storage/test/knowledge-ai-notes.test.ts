@@ -50,6 +50,15 @@ test("the human graph keeps incoming AI-note edges and excludes its outgoing lin
   expect(links.outgoing).toEqual([]);
   expect(links.incoming).toHaveLength(1);
   expect(links.incoming[0]?.note?.path).toBe(anchorPath);
+  expect(links.ai_incoming).toBeUndefined();
+  // ADR 0053：AI 笔记的出链单独列出，被链接的笔记能看到"AI 笔记提到"。
+  expect(links.ai_outgoing?.map(link => [link.target, link.dangling])).toEqual([
+    ["Alpha_2024_Paper", false], ["../../research/ideas/Anchor.md", false], ["Missing.md", true],
+  ]);
+  const anchor = await noteLinks(vault, anchorPath, options);
+  expect(anchor.incoming.some(link => link.note.path === digestPath)).toBe(false);
+  expect(anchor.ai_incoming?.map(link => link.note.path)).toEqual([digestPath]);
+  expect(anchor.ai_outgoing).toBeUndefined();
   const graph = KnowledgeGraph.parse(await knowledgeGraph(vault, options));
   expect(graph.nodes).toContainEqual(links.note);
   expect(graph.edges).toContainEqual({ from: anchorPath, to: digestPath, count: 1 });
@@ -72,6 +81,7 @@ test("both reference tables rebuild and track replacement/removal without leakin
   expect(await countKnowledgeReferences(vault, [message], options)).toBe(1);
   await rm(join(vault, digestPath));
   expect(await countKnowledgeReferences(vault, [message], options)).toBe(0);
+  expect((await noteLinks(vault, "Alpha_2024_Paper", options)).ai_incoming).toBeUndefined();
   expect(await countKnowledgeReferences(vault, [message], { ...options, includePrivate: true })).toBe(1);
 });
 
@@ -91,7 +101,7 @@ test("AI creation reuses its published receipt and returns the exact file revisi
   const result = KnowledgeAiNoteResult.parse(await create());
   expect(await create()).toEqual(result);
   expect(audits).toBe(1);
-  expect(result.note.path).toBe("ai/notes/" + ctx.newId("ain") + ".md");
+  expect(result.note.path).toBe("ai/notes/New synthetic note " + ctx.newId("ain") + ".md");
   const bytes = await readFile(join(vault, result.note.path));
   expect(result.revision).toBe(revision(bytes));
   const parsed = parseFrontmatter(bytes);

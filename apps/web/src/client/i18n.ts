@@ -7,6 +7,7 @@ export type Lang = "en" | "zh";
 const KEY = "lumio.web.lang";
 
 export const ZH: Record<string, string> = {
+  "Mentioned in AI notes": "AI 笔记提到",
   "This item is in Recently deleted.": "它在「最近删除」里。",
   "This item was deleted.": "它已被删除。",
   "This item isn't available to you.": "你无法查看它。",

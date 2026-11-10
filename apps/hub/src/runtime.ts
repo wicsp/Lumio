@@ -30,6 +30,11 @@ export async function handleRuntime(request: Request, operation: "runtime.regist
     if (operation === "runtime.results") {
       const result = JobResult.safeParse(body);
       if (!result.success) throw new HubError("INVALID", { key: "runtime.invalid_job_result", args: [] });
+      const requested = result.data.permission;
+      if (requested && (result.data.status !== "waiting_for_human" || requested.access === "read" || requested.git === false
+        || !(requested.git || requested.access || requested.secrets?.length))) {
+        throw new HubError("INVALID", { key: "runtime.invalid_job_result", args: [] });
+      }
       jobs.result(identity.actor.id, result.data);
       return Response.json(result.data);
     }

@@ -68,7 +68,7 @@ test("agents write versioned AI notes and can only use visible sources", async (
     const response = await f.note(create, args, f.agent.token, requestId);
     expect(response.status).toBe(201);
     const initial = KnowledgeAiNoteResult.parse(await response.json()), id = initial.note.id!;
-    expect(initial.note).toMatchObject({ type: "ai-note", path: `ai/notes/${id}.md` });
+    expect(initial.note).toMatchObject({ type: "ai-note", path: `ai/notes/Synthetic digest ${id}.md` });
     expect(await f.metadata(initial.note.path)).toMatchObject({ generated_by: f.agent.actor.id, derived_from: args.derived_from });
     expect(KnowledgeAiNoteResult.parse(await (await f.note(create, args, f.agent.token, requestId)).json())).toEqual(initial);
     expect((await f.note(create, { ...args, title: "Different request" }, f.agent.token, requestId)).status).toBe(409);

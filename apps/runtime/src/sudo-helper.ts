@@ -2,10 +2,11 @@ import { errorMessage, text as msg } from "./messages.ts";
 import { createPublicKey, verify } from "node:crypto";
 import { constants } from "node:fs";
 import { open, lstat, mkdir, rmdir } from "node:fs/promises";
-import { dirname, isAbsolute, parse, resolve } from "node:path";
+import { dirname, isAbsolute, join, parse, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { PrivilegedApproval, privilegedSigningPayload } from "@lumio/schema";
 import { RuntimeError } from "./config.ts";
+import { sudoPaths } from "./sudo-paths.ts";
 
 const ENV = { PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", LANG: "C.UTF-8" };
 /** 测试可注入路径、时钟与 uid；生产入口只使用写死的路径及真实 uid。 */
@@ -74,7 +75,8 @@ export async function executeApproval(raw: unknown, options: {
 export async function runSudoHelper() {
   try {
     const input = await new Response(Bun.stdin.stream()).text();
-    return await executeApproval(JSON.parse(input), { config: "/etc/lumio/sudo.json", used: "/var/lib/lumio-sudo/used" });
+    const paths = sudoPaths(process.platform);
+    return await executeApproval(JSON.parse(input), { config: paths.config, used: join(paths.state, "used") });
   } catch (cause) {
     console.error(cause instanceof RuntimeError ? errorMessage(cause) : msg("sudo-helper.helper_refused_execution"));
     return 126;

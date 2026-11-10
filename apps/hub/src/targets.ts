@@ -1,4 +1,4 @@
-import { ExecutionTarget, parseAssignee, DISPATCH_TARGET_SOURCES, type AgentRun, type PlanStage, type RuntimeInfo } from "@lumio/schema";
+import { ExecutionTarget, parseAssignee, DISPATCH_TARGET_SOURCES, type AgentRun, type RuntimeInfo, type StagePermissions } from "@lumio/schema";
 import type { HubStore } from "./store.ts";
 import { PlanDispatchUnavailable } from "@lumio/work";
 import { HubError } from "./errors.ts";
@@ -16,9 +16,7 @@ export function validateTarget(store: HubStore, localRuntime: string | undefined
   return found;
 }
 
-export type AgentStage = Extract<PlanStage, { kind: "agent" }>;
-
-export function stageDispatchOptions(stage: AgentStage, runtime: RuntimeInfo, engine: RuntimeInfo["registration"]["engines"][number]): Pick<AgentRun, "permissions" | "hooks"> {
+export function stageDispatchOptions(stage: StagePermissions & Pick<AgentRun, "hooks">, runtime: RuntimeInfo, engine: RuntimeInfo["registration"]["engines"][number]): Pick<AgentRun, "permissions" | "hooks"> {
   const { access = "write", git = false, secrets, hooks } = stage;
   const features = runtime.registration.features ?? [];
   const target = `${engine.name}@${runtime.registration.name}`;

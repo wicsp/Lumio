@@ -48,6 +48,9 @@ export const LinksResult = z.strictObject({
   note: NoteRef,
   outgoing: z.array(Link),
   incoming: z.array(Link.extend({ note: NoteRef }).describe("反向链接：哪些笔记链接到了这里")),
+  // ADR 0053：AI 笔记正文里的链接单独列出，不计入人的链接图、全库图谱与引用导出。缺失表示没有。
+  ai_outgoing: z.array(Link).min(1).optional().describe("这篇 AI 笔记正文里的链接（只有 AI 笔记有）"),
+  ai_incoming: z.array(Link.extend({ note: NoteRef })).min(1).optional().describe("哪些 AI 笔记提到了这里"),
 });
 
 /**

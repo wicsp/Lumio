@@ -8,6 +8,7 @@
   原始 stdout/stderr 的 JSONL output 负载用 base64 表达，避免二进制和 UTF-8 分块造成内容损坏。
 - 活跃日志末行不完整可报告；封存日志截断、行损坏、事件重复或缺失必须失败。恢复中断运行只封存完整前缀并记 recovery，Job 仍由数据库标为 unknown，不从日志重新执行。
 - 自有日志归档 MIME 为 `application/vnd.lumio.runlog+jsonl`，按完整运行流再次校验；原始输出以 text/plain 独立归档。
+- 按事件 ID 定位运行使用业务库中的派生索引：查询未命中时只补扫尚未建索引的已归档日志，每份归档扫描一次，可由归档重建（ADR 0053）。
 - Runtime 为文件保留独立交付记录；Hub 校验大小与 SHA-256，先发布字节再登记 ready。登记冲突保留文件待核查，重复交付不重复登记。
   Job 结果确认与文件确认互不替代，上传失败不阻塞结果交回；确认后原始文件仍留在 Runtime。
 - 文件接口在 `/v2/execution/` 下；runtime 只能上传自己已接手的 Job 的文件。读取只授予 human，私密产物需显式 include_private。
@@ -46,11 +47,12 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
   `context: previous` 时带上上一次的摘要。执行器离线错过的只补跑最近一次，其余在结果里注明跳过了几次。
   结果按时间追加在这篇笔记的 `run-<日期时间>` AI 区块里。`lumio routine list` 列出计划；
   `lumio routine followup <例行任务> <日期>`（操作 `routine.followup`）从某一次开出普通任务：执行配置照抄，`assignee: human`。
-- **高权限申请**（ADR 0020）：每轮单独的本地 socket 凭据经 `lumio runtime sudo -- <绝对路径程序>` 发起；人用 `lumio proposals` 查看并批准或拒绝。批准后 Hub 签发 10 分钟有效的一次性凭据，root 助手独立验证并在执行前记为已用；输出只返回调用者，执行状态离线时保留交回。安装见 `infra/sudo-helper.md`。
+- **高权限申请**（ADR 0020）：每轮单独的本地 socket 凭据经 `lumio runtime sudo -- <绝对路径程序>` 发起；人用 `lumio proposals` 查看并批准或拒绝。批准后 Hub 签发 10 分钟有效的一次性凭据，root 助手独立验证并在执行前记为已用；输出只返回调用者，执行状态离线时保留交回。Linux 与 macOS 安装见 `infra/sudo-helper.md`。
 - **适配器**：`codex exec`、`claude -p`、`pi -p` 的非交互模式；锁定验证过的版本；如实声明隔离级别（`os`/`none`）。
   不经过 shell；command 类型只执行登记过的程序；密钥在执行节点上才解析。
 - **阶段权限与钩子**（ADR 0049，H1-4）：Codex 默认使用工作区写入沙箱，可按阶段改为只读或显式全权限；Git 写入授权只覆盖已验证版本上当前 checkout 的元数据。无 OS 沙箱的引擎由执行器账号权限约束。
   在执行器环境中通过 `LUMIO_SECRET_<名称>` 配置阶段密钥（名称中的 `-` 写成大写 `H`，例如 `LUMIO_SECRET_githubHmerge`），同名变量只注入声明它的 agent 轮次，汇报和日志脱敏。前后钩子以执行器账号在工作目录按 argv 运行，输出进入轮次日志，失败或超时结束该轮。
+- **普通权限申请**（ADR 0049，H1-9）：执行器从 agent 汇报末尾的独立 `<lumio-permission>` 行提取权限，按等待人决定交回并保留理由。
 - **不做**：跨设备调用工具、上下文管理、模型路由；留给以后自研的 agent（作为执行器里的一种引擎接入）。
 
 ## 数据库 Routine 与设备（ADR 0025）

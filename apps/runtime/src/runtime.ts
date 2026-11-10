@@ -45,7 +45,7 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
   const events = new Wake(), deliveries = new Wake(), archiveWake = new Wake();
   const wait = options.sleep ?? ((milliseconds, signal) => events.wait(milliseconds, signal));
   await mkdir(config.stateDir, { recursive: true, mode: 0o700 });
-  const registration = RuntimeRegistration.parse({ ...config.registration, engines: await detectEngines(options.env), features: ["stage_permissions", "hooks"] });
+  const registration = RuntimeRegistration.parse({ ...config.registration, engines: await detectEngines(options.env), features: ["stage_permissions", "hooks", "permission_request"] });
   const queue = new Queue(config.stateDir);
   const plans = new RoutinePlans(queue);
   const archives = options.archive ?? new RuntimeArchives(config, queue, fetcher, log);

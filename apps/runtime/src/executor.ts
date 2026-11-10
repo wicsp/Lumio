@@ -1,3 +1,4 @@
+import { splitPermissionRequest } from "./permission-request.ts";
 import { gitWritePaths, stageSecrets } from "./stage.ts";
 import { CredentialRedactor } from "./redact.ts";
 import { installSkill, SKILL_TEXT } from "../../../skills/lumio/install.ts";
@@ -232,12 +233,15 @@ export class Executor {
       try { lastMessage = await readFile(agent.lastMessageFile, "utf8"); } catch { /* 只有 codex 写这个文件 */ }
       await rm(agent.lastMessageFile, { force: true });
       const parsed = agent.adapter.parse(stdoutAll, lastMessage === undefined ? undefined : redact(lastMessage), run as Extract<typeof run, { kind: "agent" }>);
-      const split = splitQuestion(parsed.report ?? report);
+      const finalReport = parsed.report ?? report;
+      const requested = ok && spec.source?.task ? splitPermissionRequest(finalReport) : { report: finalReport, permission: undefined };
+      const split = splitQuestion(requested.report);
       const after = gitState(workdir, this.env);
       await finish({ job: spec.id, lease: spec.lease, started, finished: new Date().toISOString(), ...result, log,
         report: split.report.slice(0, MAX_REPORT),
         ...(split.question && ok ? { question: split.question } : {}),
-        status: stopped ?? (ok ? (split.question ? "waiting_for_human" : "done") : "failed"),
+        ...(requested.permission ? { permission: requested.permission } : {}),
+        status: stopped ?? (ok ? (split.question || requested.permission ? "waiting_for_human" : "done") : "failed"),
         engine: { name: agent.adapter.engine, version: agent.version, sandbox: run.kind === "agent" && run.permissions?.access === "full" ? "none" : agent.adapter.sandbox },
         ...(parsed.sessionId ? { session_id: parsed.sessionId } : {}),
         ...(agent.before || after ? { git: { ...(agent.before ? { before: agent.before } : {}), ...(after ? { after } : {}) } } : {}),

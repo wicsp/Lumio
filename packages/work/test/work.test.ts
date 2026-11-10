@@ -1,12 +1,12 @@
 import { expect, test } from "bun:test";
 import { Job, WorkCommandResult, type TrashItem, type HandoffPlan, type PlanTemplate, type WorkProject, type WorkTask, type WorkComment, type TaskTurnChange, type WorkExecution } from "@lumio/schema";
-import { WorkService, type WorkCaller, type WorkStore } from "../src/index.ts";
+import { WorkService, type PendingStageGrant, type WorkCaller, type WorkStore } from "../src/index.ts";
 
 const owner = "act_00000000000000000000000001";
 const timestamp = "2026-10-31T00:00:00Z";
 class MemoryStore implements WorkStore {
-  data: { trash: TrashItem[]; templates: PlanTemplate[]; turns: TaskTurnChange[]; projects: WorkProject[]; tasks: WorkTask[]; comments: WorkComment[]; executions: WorkExecution[]; receipts: Record<string, { operation: string; result: WorkCommandResult }> } = {
-    trash: [], templates: [], turns: [], projects: [], tasks: [], comments: [], executions: [], receipts: {},
+  data: { grants: Record<string, PendingStageGrant>; trash: TrashItem[]; templates: PlanTemplate[]; turns: TaskTurnChange[]; projects: WorkProject[]; tasks: WorkTask[]; comments: WorkComment[]; executions: WorkExecution[]; receipts: Record<string, { operation: string; result: WorkCommandResult }> } = {
+    grants: {}, trash: [], templates: [], turns: [], projects: [], tasks: [], comments: [], executions: [], receipts: {},
   };
   project(id: string) { return structuredClone(this.data.projects.find((value) => value.id === id)); }
   projects() { return structuredClone(this.data.projects); }
@@ -14,6 +14,11 @@ class MemoryStore implements WorkStore {
   task(id: string) { return structuredClone(this.data.tasks.find((value) => value.id === id)); }
   tasks() { return structuredClone(this.data.tasks); }
   putTask(value: WorkTask) { this.data.tasks = [...this.data.tasks.filter((item) => item.id !== value.id), structuredClone(value)]; }
+  pendingGrant(id: string) { return structuredClone(this.data.grants[id]); }
+  putPendingGrant(id: string, grant?: PendingStageGrant) {
+    if (grant) this.data.grants[id] = structuredClone(grant);
+    else delete this.data.grants[id];
+  }
   comments(task: string) { return structuredClone(this.data.comments.filter((value) => value.task === task)); }
   putComment(value: WorkComment) { this.data.comments.push(structuredClone(value)); }
   executions(task?: string) { return structuredClone(this.data.executions.filter((value) => task === undefined || value.task === task)); }

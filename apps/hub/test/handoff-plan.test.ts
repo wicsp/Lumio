@@ -59,7 +59,7 @@ async function startRuntime() {
     LUMIO_RUNTIME_NAME: "mac", LUMIO_RUNTIME_STATE_DIR: join(temp, "runtime"), LUMIO_RUNTIME_POLL_SECONDS: "0.05",
     SYNTHETIC_AGENT_LOG: join(temp, "agent-log.jsonl"), SYNTHETIC_REVIEW_COUNT: join(temp, "review-count"),
   }, stdout: "pipe", stderr: "pipe" });
-  await eventually(async () => RuntimeInfo.array().parse(await (await request("/v1/runtimes")).json()).some(value => value.registration.name === "mac"));
+  await eventually(async () => RuntimeInfo.array().parse(await (await request("/v1/runtimes")).json()).some(value => value.registration.name === "mac" && value.registration.features?.includes("permission_request")));
 }
 async function cli(args: string[], language = "en", token = human) {
   const child = Bun.spawn([process.execPath, new URL("../../cli/src/main.ts", import.meta.url).pathname, ...args], {
@@ -115,7 +115,7 @@ test("fake agents run implementation → review (one send-back) → checkpoint c
     expect(prompt).toContain("Do only the work assigned for this round and its current stage");
     expect(prompt).toContain(engine === "codex" ? "Git metadata is protected" : "without an OS sandbox");
     expect(prompt).toContain("no stage-specific secrets");
-    expect(prompt).toContain("<lumio-question>What access is needed and why</lumio-question>");
+    expect(prompt).toContain("<lumio-permission>git</lumio-permission>");
     expect(prompt).toContain("For system commands that require root, use `lumio-runtime sudo --");
   }
   expect(invocations[2].prompt).toContain("Fix the synthetic edge case");

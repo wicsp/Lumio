@@ -22,7 +22,7 @@ function fixture() {
     },
     run: async (argv: string[]) => {
       commands.push(argv); const command = argv[0]!;
-      return { code: fail.has(command) ? 1 : 0, stderr: "", stdout: command === "loginctl" ? "Linger=yes\n" : command === "sudo" ? "(root) NOPASSWD: /helper\n" : versions[command.replace("/saved/bin/", "")] ?? "" };
+      return { code: fail.has(command) ? 1 : 0, stderr: "", stdout: command === "loginctl" ? "Linger=yes\n" : command === "sudo" ? `(root) NOPASSWD: /helper${files["/synthetic/.config/lumio-runtime/runtime.env"]?.includes("--sudo-helper") ? " --sudo-helper" : ""}\n` : versions[command.replace("/saved/bin/", "")] ?? "" };
     },
     fetch: (async () => { if (fail.has("fetch")) throw new Error("synthetic-secret"); return Response.json(signingKey); }) as unknown as typeof fetch,
     which: (command: string, path: string) => { expect(path).toBe("/saved/bin"); return fail.has("which") ? null : `/saved/bin/${command}`; },
@@ -35,7 +35,10 @@ test("runtime doctor checks saved PATH, read-only queue, service, linger, authen
   expect(checks.every((c) => c.ok)).toBe(true); expect(checks.find((c) => c.name === "结果队列")!.problem).toContain("3");
   expect(f.commands).toContainEqual(["sudo", "-n", "-l"]);
   expect(JSON.stringify(checks)).not.toContain("synthetic-secret");
-  f.options.platform = "darwin"; checks = await doctor(f.options);
+  f.options.platform = "darwin";
+  f.files["/synthetic/.config/lumio-runtime/runtime.env"] = f.files["/synthetic/.config/lumio-runtime/runtime.env"]!.replace('/helper"', '/helper --sudo-helper"');
+  checks = await doctor(f.options);
+  expect(checks.every(c => c.ok)).toBe(true);
   expect(checks.some((c) => c.name === "linger")).toBe(false); expect(f.commands).toContainEqual(["launchctl", "print", "gui/501/io.lumio.runtime"]);
   f.files["/synthetic/.config/lumio-runtime/runtime.env"] = f.files["/synthetic/.config/lumio-runtime/runtime.env"]!.replace(/\nLUMIO_RUNTIME_SUDO_COMMAND=.*/, "");
   checks = await doctor(f.options); expect(checks.some((c) => c.name.startsWith("提权"))).toBe(false);
