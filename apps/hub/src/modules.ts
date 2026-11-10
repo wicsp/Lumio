@@ -74,7 +74,7 @@ export class BusinessModules {
     }(store.db);
     store.proposalCreated = proposal => {
       const operation = proposal.operation;
-      const taskId = operation.op === "work.command" ? operation.args.operation.args.task : operation.op === "task.dispatch" ? operation.args.task : undefined;
+      const taskId = operation.op === "work.command" ? ("task" in operation.args.operation.args ? operation.args.operation.args.task : undefined) : operation.op === "task.dispatch" ? operation.args.task : undefined;
       notifications.proposal(proposal, taskId ? this.workStore.task(taskId)?.title : undefined);
     };
     this.work = new WorkService(this.workStore, { text: msg, now, id, localRuntime: config.localRuntime, systemActor: store.workActor().id, job: id => jobs.get(id),
