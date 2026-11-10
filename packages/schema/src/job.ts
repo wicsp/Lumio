@@ -2,6 +2,7 @@ import { z } from "zod";
 import { AGENTS, AgentTarget, Timestamp, RuntimeName, idOf } from "./common.ts";
 import { NoteRef } from "./query.ts";
 import { JobAccess } from "./access.ts";
+import { PlanHook, StagePermissions } from "./plan.ts";
 
 /**
  * Hub ↔ 执行器（Runtime）的协议（ADR 0005、ADR 0019）。
@@ -33,6 +34,9 @@ export const AgentRun = z.strictObject({
   session: z
     .strictObject({ id: SessionId, resume: z.boolean().describe("true：接着这个会话继续；false：用这个 ID 新建") })
     .optional(),
+  permissions: StagePermissions.optional().describe("这一轮的权限（ADR 0049 第 3 节）；缺失按缺省（write、不写 Git、无密钥）。只发给登记了 stage_permissions 的执行器"),
+  hooks: z.strictObject({ before: PlanHook.optional(), after: PlanHook.optional() }).optional()
+    .describe("这一轮前后的钩子（ADR 0049 第 4 节）。只发给登记了 hooks 的执行器"),
 });
 
 /** 执行一条登记过的程序（P2-2 用它测试可靠性；不经过 shell）。 */
@@ -92,6 +96,8 @@ export const JobResult = z.strictObject({
     .describe("实际使用的 agent、版本与隔离级别"),
   report: z.string().optional().describe("agent 最后的汇报原文"),
   question: z.string().optional().describe("status 为 waiting_for_human 时，agent 提的问题"),
+  permission: StagePermissions.optional()
+    .describe("status 为 waiting_for_human 时，agent 申请的权限（汇报里的 <lumio-permission>，ADR 0049 第 3 节）；理由在 report 中"),
   session_id: SessionId.optional().describe("下一轮接着这个会话继续"),
   git: z.strictObject({ before: GitState.optional(), after: GitState.optional() }).optional(),
   log: z.string().optional().describe("完整日志在执行器上的路径"),
@@ -109,6 +115,9 @@ export const Job = z.strictObject({
 
 // ───────────────────────── 执行器登记与同步 ─────────────────────────
 
+/** 执行器可选能力（ADR 0049）：按阶段权限启动 agent、运行钩子、提取权限申请。 */
+export const RUNTIME_FEATURES = ["stage_permissions", "hooks", "permission_request"] as const;
+
 /** 执行器启动时登记自己的能力。 */
 export const RuntimeRegistration = z.strictObject({
   protocol_version: z.literal(JOB_PROTOCOL_VERSION),
@@ -116,6 +125,8 @@ export const RuntimeRegistration = z.strictObject({
   engines: z.array(z.strictObject({ name: z.enum(AGENTS), version: z.string().min(1), sandbox: SandboxLevel })),
   tags: z.array(z.string().regex(/^[a-z0-9][a-z0-9:._-]{0,63}$/)).describe('人配置的标签，如 "gpu:4"'),
   max_concurrent: z.number().int().positive(),
+  features: z.array(z.enum(RUNTIME_FEATURES)).optional()
+    .describe("执行器支持的可选能力；Hub 只把对应字段发给声明了它的执行器（ADR 0049）。缺失表示都不支持"),
 });
 
 /** `lumio runtime list` / `GET /v1/runtimes` 的一项：Hub 记录的执行器。 */

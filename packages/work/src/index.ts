@@ -493,6 +493,9 @@ export class WorkService {
           const item = this.trashItem({ kind: "project", id: project.id, title: project.title, detached_tasks: detached.map(task => task.id) }, actor, time);
           result = { kind: "trashed", item }; break;
         }
+        case "work.task.grant":
+          // ADR 0049 第 3 节：契约已就位，执行由 H1-9 实现。
+          throw new WorkError("INVALID", { key: "index.invalid_work_command_parameters", args: [] }, "work.task.grant is not implemented yet (H1-9)");
         case "work.task.dispatch": {
           const task = this.visibleTask(operation.args.task);
           if (operation.args.expected_revision !== undefined && task.revision !== operation.args.expected_revision) throw new WorkError("CONFLICT", { key: "index.task_changed_reload_before_dispatching", args: [] });
