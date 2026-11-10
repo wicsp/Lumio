@@ -1,6 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { NativeRuntimeCommand, NativeRuntimeMessage, type ClaudeBackgroundResult } from "@lumio/schema";
+import { idOf, NativeRuntimeCommand, NativeRuntimeMessage, type ClaudeBackgroundResult } from "@lumio/schema";
 import type { RuntimeConfig } from "../config.ts";
 import { NativeLocalStore } from "./store.ts";
 import { NativeManager } from "./manager.ts";
@@ -14,6 +14,7 @@ export async function runNativeChannel(
 ) {
   await mkdir(config.stateDir, { recursive: true, mode: 0o700 });
   const store = new NativeLocalStore(config.stateDir);
+  const claudeQuotaConnection = idOf("aic").safeParse(env.LUMIO_CLAUDE_QUOTA_CONNECTION).data;
   let channel: string | undefined;
   let flushing = false,
     pendingFlush = false;
@@ -74,7 +75,8 @@ export async function runNativeChannel(
         if (!channel) throw new Error("Native handshake unavailable");
         const connectionAuth = response.headers.get("x-lumio-native-connection-auth") === "1";
         const connectionUsage = response.headers.get("x-lumio-native-connection-usage") === "1" && connectionAuth;
-        const claudeUsage = response.headers.get("x-lumio-native-claude-usage") === "1" && process.platform === "darwin";
+        const claudeUsage = response.headers.get("x-lumio-native-claude-usage") === "1" &&
+          process.platform === "darwin" && !!claudeQuotaConnection;
         await post(
           NativeRuntimeMessage.parse({
             type: "hello",
@@ -105,6 +107,11 @@ export async function runNativeChannel(
               const c = NativeRuntimeCommand.parse(JSON.parse(line));
               if (c.type === "claude_usage") {
                 if (!claudeUsage) throw new Error("Claude usage was not negotiated");
+                if (c.connection !== claudeQuotaConnection) {
+                  await post(NativeRuntimeMessage.parse({ type: "claude_usage", command: c.command,
+                    connection: c.connection, generation: c.generation, result: { status: "failed", issue: "account_unverified" } }));
+                  continue;
+                }
                 if (!claudeFlight) {
                   claudeFlight = { account: c.account,
                     result: queryClaudeQuota(config.stateDir, AbortSignal.any([signal, current.signal]), c.account)

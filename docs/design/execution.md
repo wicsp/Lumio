@@ -69,4 +69,4 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
 - Runtime 的原生 Assistant 通道与 Job2 并列，显式启用；Runtime 主动发起认证 HTTP 命令流并 POST 持久事件，按 Session 序号确认去重。断线只补事件，不重发 turn 或工具。
 - 每个 Session 独占进程和托管目录，按需恢复原线程；支持连接授权的 Runtime 复用连接登录。当前只允许已验证 macOS/Codex 0.166.0，隔离不满足拒绝运行。一次仅一轮，审批绑定进程实例，停止时监督整个已观察进程范围。
 - Job/Routine 后续沿用 Connection/Profile/用途绑定；本次不升级 Job 协议或把旧摘要执行改成交互会话。
-- **连接额度上报（ADR 0052、0054）**：Codex 复用连接级认证通道，在双方协商支持后按需查询账户额度。Claude Code 状态栏在本机仅保存规范化读数，Runtime 取得指定给自己的绑定后上报，不需要开启 Codex 原生会话。Claude Code 后台查询由具备能力的 macOS Runtime 在专用登录环境调用原版 CLI 的内置 `/usage`。短时伪终端禁用项目扩展，验证订阅身份并按连接和代次回传规范化读数。专用环境由用户用官方 CLI 登录。上报只包含规范化读数、绑定信息和失败类别。
+- **连接额度上报（ADR 0052、0054）**：Codex 复用连接级认证通道，在双方协商支持后按需查询账户额度。Claude Code 状态栏在本机仅保存规范化读数，Runtime 取得指定给自己的绑定后上报，不需要开启 Codex 原生会话。macOS Runtime 管理者将 `LUMIO_CLAUDE_QUOTA_CONNECTION` 设为允许查询的连接 ID 后，设备可为该连接在外层 Seatbelt 之外调用签名和版本已验证的原版 Claude Code。短时伪终端在专用登录环境用 Claude 的受限模式调用内置 `/usage`，禁用项目扩展，验证订阅身份并按连接和代次回传规范化读数。专用环境由用户用官方 CLI 登录。上报只包含规范化读数、绑定信息和失败类别。
