@@ -64,13 +64,15 @@ export async function doctor(options: DiagnosticOptions & {
   });
   if (config?.sudoCommand.length) {
     // sudo command includes launcher/options; validate the installed helper itself, not /usr/bin/sudo.
-    const helper = config.sudoCommand.at(-1)!;
+    const hasHelperFlag = config.sudoCommand.at(-1) === "--sudo-helper";
+    const helper = config.sudoCommand.at(hasHelperFlag ? -2 : -1)!;
+    const sudoRule = hasHelperFlag ? `${helper} --sudo-helper` : helper;
     await check(msg("doctor.privileged_helper_files"), msg("doctor.reinstall_with_sudo_lumio_runtime_install_sudo_helper"), async () => {
       const s = await io.stat(helper); if (!s.isFile() || s.uid !== 0 || (s.mode & 0o022)) throw new Error();
     });
     await check(msg("doctor.sudo_authorization"), msg("doctor.run_sudo_lumio_runtime_install_sudo_helper_to_repair_sudoers"), async () => {
       const r = await io.run(["sudo", "-n", "-l"]);
-      if (r.code || !r.stdout.split("\n").some((line) => line.includes("NOPASSWD:") && line.trim().endsWith(helper))) throw new Error();
+      if (r.code || !r.stdout.split("\n").some((line) => line.includes("NOPASSWD:") && line.trim().endsWith(sudoRule))) throw new Error();
     });
   }
   return checks;
