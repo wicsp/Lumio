@@ -2,7 +2,7 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ApiError, Job, WorkCommandRequest, WorkCommandResult, WorkProject, WorkTask, WorkTaskDetail } from "@lumio/schema";
+import { ApiError, HandoffPlan, Job, WorkCommandRequest, WorkCommandResult, WorkProject, WorkTask, WorkTaskDetail } from "@lumio/schema";
 import { runCli } from "../src/cli.ts";
 import { COMMANDS, commandUsage } from "../src/command-definitions.ts";
 import { printHelp } from "../src/help.ts";
@@ -114,4 +114,94 @@ test("default-target flags, next-target output and implicit dispatch work throug
     expect(requests.at(-1)).toEqual({ op: "work.task.dispatch", args: { task: task.id, expected_revision: 1 } });
     expect(Job.parse(JSON.parse(await run(["task", "continue", task.id, "--json"])))).toEqual(job);
   } finally { await server.stop(true); }
+});
+
+test("project update sets and clears the default plan using the observed revision", async () => {
+  const at = "2026-11-10T00:00:00Z", template = "wft_00000000000000000000000001";
+  const project = WorkProject.parse({ schema_version: 2, type: "project", id: "prj_00000000000000000000000001",
+    title: "Synthetic project", description: "", revision: 3, status: "active", tags: [], created: at, updated: at });
+  const requests: WorkCommandRequest[] = [];
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
+    if (request.method === "GET") return Response.json(project);
+    const body = WorkCommandRequest.parse(await request.json());
+    requests.push(body);
+    if (body.operation.op !== "work.project.update") return new Response(null, { status: 400 });
+    const updated = WorkProject.parse({ ...project, revision: 4, default_plan: body.operation.args.patch.default_plan ?? undefined });
+    return Response.json(WorkCommandResult.parse({ kind: "project", project: updated }));
+  } });
+  try {
+    const update = ["project", "update", project.id, "--json"];
+    const set = await cli([...update, "--default-plan", template], "en", server.url.origin);
+    expect(set.code, set.stdout + set.stderr).toBe(0);
+    expect(WorkCommandResult.parse(JSON.parse(set.stdout))).toMatchObject({ kind: "project", project: { default_plan: template } });
+    const clear = await cli([...update, "--default-plan", ""], "zh", server.url.origin);
+    expect(clear.code, clear.stdout + clear.stderr).toBe(0);
+    expect(WorkCommandResult.parse(JSON.parse(clear.stdout))).toMatchObject({ kind: "project", project: { revision: 4 } });
+    expect(requests.map(request => request.operation)).toEqual([
+      { op: "work.project.update", args: { project: project.id, expected_revision: 3, patch: { default_plan: template } } },
+      { op: "work.project.update", args: { project: project.id, expected_revision: 3, patch: { default_plan: null } } },
+    ]);
+    const invalid = await cli([...update, "--default-plan", "synthetic-title"], "en");
+    expect(invalid.code).toBe(1);
+    expect(ApiError.parse(JSON.parse(invalid.stdout)).error).toMatchObject({ code: "INVALID", message: expect.stringContaining("wft_ template ID") });
+    const conflict = await cli([...update, "--default-plan", template, "--patch", "{}"], "zh");
+    expect(conflict.code).toBe(1);
+    expect(ApiError.parse(JSON.parse(conflict.stdout)).error).toMatchObject({ code: "INVALID", message: expect.stringContaining("与 --patch 分开") });
+  } finally { await server.stop(true); }
+});
+
+test("graph plan files round-trip through task updates and template proposals with advisory warnings", async () => {
+  const at = "2026-11-10T00:00:00Z", path = new URL("./fixtures/h1-handoff-plan.json", import.meta.url).pathname;
+  const plan = HandoffPlan.parse(await Bun.file(path).json()), target = "claude-code@synthetic";
+  const task = WorkTask.parse({ schema_version: 3, type: "task", id: "task_00000000000000000000000001", title: "Synthetic task",
+    description: "", revision: 1, outcome: "open", turn: { holder: "human", reason: "todo", since: at }, tags: [],
+    dependencies: [], references: [], created: at, updated: at });
+  const detail = WorkTaskDetail.parse({ task, dependents: [], children: [], comments: [], executions: [], turns: [] });
+  const proposal = WorkCommandResult.parse({ kind: "proposal", proposal: "prop_00000000000000000000000001" });
+  const requests: WorkCommandRequest[] = [];
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
+    if (request.method === "GET") return Response.json(detail);
+    const body = WorkCommandRequest.parse(await request.json());
+    requests.push(body);
+    return Response.json(body.operation.op === "work.plan_template.save" ? proposal : WorkCommandResult.parse({ kind: "task", task }),
+      { headers: { "X-Lumio-Advisory-Targets": target }, status: body.operation.op === "work.plan_template.save" ? 202 : 200 });
+  } });
+  try {
+    const set = await cli(["task", "plan", "set", task.id, "--file", path, "--json"], "en", server.url.origin);
+    expect(set.code, set.stdout + set.stderr).toBe(0);
+    expect(WorkCommandResult.parse(JSON.parse(set.stdout))).toMatchObject({ kind: "task" });
+    expect(set.stderr).toContain("cannot enforce stage access or Git restrictions");
+    expect(set.stderr).toContain(target);
+    const save = ["plan-template", "save", "Synthetic template", "--file", path, "--request-id", "synthetic-h1-template"];
+    const proposed = await cli([...save, "--json"], "zh", server.url.origin);
+    expect(proposed.code, proposed.stdout + proposed.stderr).toBe(0);
+    expect(WorkCommandResult.parse(JSON.parse(proposed.stdout))).toEqual(proposal);
+    expect(proposed.stderr).toContain("无法强制执行阶段访问和 Git 限制");
+    expect(proposed.stderr).toContain(target);
+    const text = await cli(save, "en", server.url.origin);
+    expect(text.code, text.stdout + text.stderr).toBe(0);
+    expect(text.stdout).toContain("waiting for human approval");
+    expect(requests[0]!.operation).toEqual({ op: "work.task.plan.set", args: { task: task.id, expected_revision: 1, plan } });
+    expect(requests[1]).toEqual({ request_id: "synthetic-h1-template", operation: { op: "work.plan_template.save", args: { name: "Synthetic template", plan } } });
+    expect(requests[2]).toEqual(requests[1]!);
+  } finally { await server.stop(true); }
+});
+
+test("plan files reject invalid JSON, unknown fields and invalid graph settings locally", async () => {
+  const path = join(home, "invalid-h1-plan.json");
+  const task = "task_00000000000000000000000001";
+  const set = ["task", "plan", "set", task], save = ["plan-template", "save", "Synthetic template"];
+  const stage = { kind: "agent", id: "implement", agent: "codex@synthetic", instruction: "Implement the synthetic change" };
+  for (const [command, content, expected] of [
+    [set, "{", "must contain valid JSON"],
+    [save, JSON.stringify({ stages: [{ ...stage, accidental: true }] }), "stages.0"],
+    [set, JSON.stringify({ stages: [stage, { ...stage, id: "parallel", after: [] }] }), "stages.0.access"],
+    [save, JSON.stringify({ stages: [stage], finish: "auto" }), "finish"],
+    [save, "null", "does not match HandoffPlan"],
+  ] as const) {
+    await Bun.write(path, content);
+    const invalid = await cli([...command, "--file", path, "--json"], "en");
+    expect(invalid.code).toBe(1);
+    expect(ApiError.parse(JSON.parse(invalid.stdout)).error).toMatchObject({ code: "INVALID", message: expect.stringContaining(expected) });
+  }
 });
