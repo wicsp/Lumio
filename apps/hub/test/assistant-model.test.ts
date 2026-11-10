@@ -107,6 +107,101 @@ test("configured Hub uses a local compatible model service without injected mode
   } finally { await hub?.stop(); await provider.stop(true); await rm(temp, { recursive: true, force: true }); }
 });
 
+test("chat returns JSON and NDJSON after a model is silent past the server idle timeout", async () => {
+  const temp = await mkdtemp(join(tmpdir(), "lumio-chat-idle-"));
+  let hub: Awaited<ReturnType<typeof startHub>> | undefined;
+  try {
+    const store = await HubStore.open(temp);
+    store.createActor("idle-owner", "human");
+    const token = store.createToken("idle-owner", "idle-owner");
+    store.close();
+    hub = await startHub({ ...readConfig({ HOME: temp, LUMIO_STATE_DIR: temp }), port: 0 }, {
+      log() {},
+      assistantModel: {
+        async complete() {
+          await Bun.sleep(12_000);
+          return { content: "Synthetic reply after thinking", tool_calls: [] };
+        },
+      },
+    });
+    const url = `http://127.0.0.1:${hub.server.port}/v2/assistant/chat`;
+    const chat = (format: "application/json" | "application/x-ndjson") => fetch(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: format },
+      body: JSON.stringify({ request_id: `synthetic-idle-${format === "application/json" ? "json" : "ndjson"}`, message: "Synthetic slow query" }),
+    });
+    const [result, events] = await Promise.all([
+      chat("application/json").then(async response => AssistantChatResult.parse(await response.json())),
+      chat("application/x-ndjson").then(async response => (await response.text()).trim().split("\n")
+        .map(line => AssistantEvent.parse(JSON.parse(line)))),
+    ]);
+    expect(result.turn.status).toBe("done");
+    expect(result.messages.at(-1)?.content).toBe("Synthetic reply after thinking");
+    expect(events.at(-1)).toMatchObject({
+      type: "result", messages: expect.arrayContaining([expect.objectContaining({ content: "Synthetic reply after thinking" })]),
+    });
+  } finally { await hub?.stop(); await rm(temp, { recursive: true, force: true }); }
+}, 25_000);
+
+test("opted-in chat streams DeepSeek reasoning around tool calls and applies turn overrides", async () => {
+  const temp = await mkdtemp(join(tmpdir(), "lumio-chat-progress-"));
+  let hub: Awaited<ReturnType<typeof startHub>> | undefined;
+  const requests: Record<string, unknown>[] = [];
+  const model = new ChatCompletionsModel({ baseUrl: "https://api.deepseek.com", model: "synthetic-default", credential: () => undefined }, fake((_url, init) => {
+    const body = JSON.parse(String(init?.body));
+    requests.push(body);
+    const thinking = body.thinking.type === "enabled";
+    const tool = body.messages.at(-1)?.role === "tool";
+    const reasoning = thinking ? chunk({ reasoning_content: tool ? "Second step" : "First step", encrypted_content: "synthetic-opaque" }) : "";
+    const answer = thinking && !tool
+      ? chunk({ tool_calls: [{ index: 0, id: "fixture-call", type: "function",
+        function: { name: toolName("work.task.list"), arguments: "{}" } }] }, "tool_calls")
+      : chunk({ content: "Synthetic answer" }, "stop");
+    return streamed(reasoning + answer + "data: [DONE]\n\n");
+  }));
+  try {
+    const store = await HubStore.open(temp);
+    store.createActor("progress-owner", "human");
+    const token = store.createToken("progress-owner", "progress-owner");
+    store.close();
+    hub = await startHub({ ...readConfig({ HOME: temp, LUMIO_STATE_DIR: temp }), port: 0 }, { log() {}, assistantModel: model });
+    const base = `http://127.0.0.1:${hub.server.port}`;
+    const chat = (request_id: string, headers: Record<string, string>, overrides = {}) => fetch(`${base}/v2/assistant/chat`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", ...headers },
+      body: JSON.stringify({ request_id, message: "Synthetic task query", ...overrides }),
+    });
+    const events = async (response: Response) => (await response.text()).trim().split("\n")
+      .map(line => AssistantEvent.parse(JSON.parse(line)));
+    const stream = { Accept: "application/x-ndjson" };
+    const progress = { "X-Lumio-Assistant-Progress": "1" };
+    const overrides = { model: "synthetic-alternate", effort: "high" };
+    const optedIn = await events(await chat("synthetic-progress", { ...stream, ...progress }, overrides));
+    expect(optedIn.map(event => event.type)).toEqual([
+      "model_waiting", "reasoning", "tool", "tool", "model_waiting", "reasoning", "token", "result",
+    ]);
+    expect(optedIn.filter(event => event.type === "reasoning").map(event => event.delta)).toEqual(["First step", "Second step"]);
+    expect(JSON.stringify(optedIn)).not.toContain("synthetic-opaque");
+    expect(requests[0]).toMatchObject({ model: "synthetic-alternate", reasoning_effort: "high", thinking: { type: "enabled" } });
+    expect(requests[1]).toMatchObject({ model: "synthetic-alternate", reasoning_effort: "high" });
+    const result = optedIn.at(-1);
+    if (result?.type !== "result") throw new Error("missing terminal result");
+    const detail = AssistantConversationDetail.parse(await (await fetch(`${base}/v2/assistant/conversations/${result.messages[0]!.conversation}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })).json());
+    expect(JSON.stringify(detail)).not.toContain("First step");
+    expect(detail.messages.at(-1)?.content).toBe("Synthetic answer");
+
+    const legacy = await events(await chat("synthetic-legacy", stream, overrides));
+    expect(legacy.map(event => event.type)).toEqual(["tool", "tool", "token", "result"]);
+    const off = await events(await chat("synthetic-thinking-off", { ...stream, ...progress }));
+    expect(off.map(event => event.type)).toEqual(["model_waiting", "token", "result"]);
+    const json = AssistantChatResult.parse(await (await chat("synthetic-json-response", progress, overrides)).json());
+    expect(json.messages.at(-1)?.content).toBe("Synthetic answer");
+    expect(JSON.stringify(json)).not.toContain("First step");
+  } finally { await hub?.stop(); await rm(temp, { recursive: true, force: true }); }
+});
+
 test("DeepSeek non-thinking mode is scoped to its official host, including config verification", async () => {
   const home = await mkdtemp(join(tmpdir(), "lumio-deepseek-config-"));
   try {
