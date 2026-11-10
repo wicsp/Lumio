@@ -111,6 +111,13 @@ test("fake agents run implementation → review (one send-back) → checkpoint c
   expect(detail.executions.map(value => value.round)).toEqual([1, 2, 3, 4, 5]);
   const invocations = (await readFile(join(temp, "agent-log.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
   expect(invocations.map(value => [value.engine, value.stage])).toEqual([["codex", "implement"], ["claude", "review"], ["codex", "implement"], ["claude", "review"], ["claude", "merge"]]);
+  for (const { engine, prompt } of invocations) {
+    expect(prompt).toContain("Do only the work assigned for this round and its current stage");
+    expect(prompt).toContain(engine === "codex" ? "Git metadata is protected" : "without an OS sandbox");
+    expect(prompt).toContain("no stage-specific secrets");
+    expect(prompt).toContain("<lumio-question>What access is needed and why</lumio-question>");
+    expect(prompt).toContain("For system commands that require root, use `lumio-runtime sudo --");
+  }
   expect(invocations[2].prompt).toContain("Fix the synthetic edge case");
   const system = hub.store.workActor();
   const autoTurns = detail.turns.filter(turn => turn.by === system.id);

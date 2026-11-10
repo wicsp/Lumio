@@ -64,7 +64,7 @@ export class SudoGate {
     let value: { token?: string; argv?: unknown }; try { value = JSON.parse(input); } catch { write(socket, { message: msg("sudo.invalid_request"), code: 2 }); return; }
     const entry = typeof value.token === "string" ? this.jobs.get(value.token) : undefined;
     if (!entry || entry.controller.signal.aborted) { write(socket, { message: msg("sudo.only_available_within_a_round_dispatched_by_the_runtime"), code: 2 }); return; }
-    if (!this.config.sudoCommand.length) { write(socket, { message: msg("sudo.this_runtime_does_not_support_privileged_commands"), code: 2 }); return; }
+    if (!this.config.sudoCommand.length) { write(socket, { message: msg("sudo.privileged_helper_not_configured"), code: 2 }); return; }
     const actor = this.actor() ?? entry.spec.runtime;
     const parsed = OperationRequest.safeParse({ operation: { op: "exec.privileged", args: { runtime: actor, job: entry.spec.id, argv: value.argv } }, reason: msg("sudo.agent_request_for_round", entry.spec.source?.round ?? 1) });
     if (!parsed.success || parsed.data.operation.op !== "exec.privileged" || !isAbsolute(parsed.data.operation.args.argv[0]!) || parsed.data.operation.args.argv.some((a) => a.includes("\0"))) {

@@ -53,6 +53,24 @@ test("directory precedence, repo snapshots, changed project directory, clear, an
   await applied("work.project.update", { project: p.id, expected_revision: p.revision + 1, patch: { workdir: null } });
   expect((await client().workProject(p.id)).workdir).toBeUndefined();
 });
+test("Chinese dispatch explains the round's scope and available permissions", async () => {
+  const t = await task({ description: "合成任务描述" });
+  const response = await fetch(new URL("/v2/work/commands", base()), {
+    method: "POST",
+    headers: { Authorization: `Bearer ${human}`, "Content-Type": "application/json", "Accept-Language": "zh-CN" },
+    body: JSON.stringify({ request_id: "synthetic-zh-round-permissions", operation: { op: "work.task.dispatch", args: { task: t.id, to: "codex@mac" } } }),
+  });
+  expect(response.status).toBe(200);
+  const result = WorkCommandResult.parse(await response.json());
+  if (result.kind !== "job" || result.job.spec.run.kind !== "agent") throw Error("agent job expected");
+  const { prompt } = result.job.spec.run;
+  expect(prompt).toContain("只做本轮交代的工作，有阶段时只做当前阶段");
+  expect(prompt).toContain("Git 元数据受保护");
+  expect(prompt).toContain("没有注入阶段专用密钥");
+  expect(prompt).toContain("<lumio-question>所需权限和理由</lumio-question>");
+  expect(prompt).toContain("确实需要 root 的系统命令使用 `lumio-runtime sudo --");
+  expect(prompt).toContain("合成任务描述");
+});
 test("target discovery, validation before proposals, offline acceptance, and runtime denial", async () => {
   const list = ExecutionTarget.array().parse(await client().targets()); expect(list).toMatchObject([{ target: "codex@mac", online: false }]);
   expect(await client().targets({ online: true })).toEqual([]);

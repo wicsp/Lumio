@@ -133,7 +133,8 @@ export class BusinessModules {
     if (target === "human") throw new HubError("INVALID", { key: "modules.specify_an_agent_e_g_pi_server", args: [] });
     const runtime = this.store.runtimes(now).find((value) => value.registration.name === (target.device ?? this.config.localRuntime));
     if (!runtime) throw new HubError("INVALID", { key: "modules.the_specified_runtime_is_not_registered_pair_it_first", args: [] });
-    if (!runtime.registration.engines.some((value) => value.name === target.agent)) throw new HubError("INVALID", { key: "modules.selected_agent_is_not_registered_on_runtime", args: [] });
+    const engine = runtime.registration.engines.find((value) => value.name === target.agent);
+    if (!engine) throw new HubError("INVALID", { key: "modules.selected_agent_is_not_registered_on_runtime", args: [] });
     const workdir = task.workdir ?? (task.project ? this.work.project(task.project).workdir : undefined) ?? "~";
     if (this.config.vault && runtime.registration.name === this.config.localRuntime && workdirInVault(this.config.vault, workdir)) {
       throw new HubError("INVALID", { key: "modules.working_directory_must_be_outside_the_knowledge_directory", args: [] });
@@ -144,10 +145,11 @@ export class BusinessModules {
     if (previous?.spec.run.kind === "agent" && previous.spec.run.engine === target.agent && previous.spec.runtime === runtime.actor && previous.result?.session_id) {
       session = { id: previous.result.session_id, resume: true };
     } else if (target.agent === "pi" || target.agent === "claude-code") session = { id: randomUUID(), resume: false };
+    const permissions = msg(engine.sandbox === "os" ? "modules.round_workspace_write" : "modules.round_no_sandbox");
     return jobs.create({ runtime: runtime.actor, workdir, timeout_seconds: (task.timeout_minutes ?? 120) * 60,
       ...(task.gpus ? { gpus: task.gpus } : {}), source: { task: task.id, round, ...(previous ? { previous: previous.spec.id } : {}) },
       run: { kind: "agent", engine: target.agent, ...(task.model ? { model: task.model } : {}), ...(session ? { session } : {}),
-        prompt: msg("modules.you_are_completing_round_of_a_user_task_work_only_in_the_working_dir", round, input) },
+        prompt: msg("modules.you_are_completing_round_of_a_user_task_work_only_in_the_working_dir", round, permissions, input) },
     }, now);
   }
   reconcile(): void {
