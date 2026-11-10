@@ -168,13 +168,13 @@ export function statusIcon(status: string): SVGSVGElement {
 // ───────────── 对话框 ─────────────
 
 /** 原生对话框；内容草稿按账户与用途恢复，关闭不触发提交。 */
-export function openDialog(title: string, body: Node, actions: Node[], options: { wide?: boolean; draftKey?: string } = {}): HTMLDialogElement {
-  const dialog = h("dialog", { class: `dialog${options.wide ? " dialog-wide" : ""}`, "aria-label": title },
+export function openDialog(title: string, body: Node, actions: Node[], options: { wide?: boolean; narrow?: boolean; draftKey?: string; cancelLabel?: string } = {}): HTMLDialogElement {
+  const dialog = h("dialog", { class: `dialog${options.wide ? " dialog-wide" : ""}${options.narrow ? " dialog-narrow" : ""}`, "aria-label": title },
     h("header", { class: "dialog-head" }, h("h2", {}, title),
       h("button", { type: "button", class: "icon-btn", "aria-label": t("Close"), onclick: () => { dialog.close(); } }, icon("close"))),
     h("div", { class: "dialog-body" }, body),
     h("footer", { class: "dialog-foot" },
-      h("button", { type: "button", class: "btn btn-quiet", onclick: () => { dialog.close(); } }, t("Close")), ...actions));
+      h("button", { type: "button", class: "btn btn-quiet", onclick: () => { dialog.close(); } }, options.cancelLabel ?? t("Close")), ...actions));
   dialog.addEventListener("input", () => { dialog.dataset.dirty = "true"; });
   dialog.addEventListener("click", event => { if (event.target === dialog) dialog.close(); });
   const store = drafts(), key = options.draftKey ? `form:${options.draftKey}` : undefined;
@@ -210,6 +210,71 @@ export function openDialog(title: string, body: Node, actions: Node[], options: 
   document.body.append(dialog);
   dialog.showModal();
   return dialog;
+}
+
+// ───────────── 确认与输入 ─────────────
+// 代替浏览器自带的 confirm()/prompt()：样式与应用一致，出现在页面中间，Esc、点遮罩或「取消」都算取消。
+
+export interface ConfirmOptions {
+  title: string;
+  /** Longer explanation under the title. */
+  message?: string;
+  /** Label of the confirming button (default "Confirm"). */
+  confirm?: string;
+  /** Red button for destructive actions. */
+  danger?: boolean;
+}
+
+export function confirmDialog(options: ConfirmOptions): Promise<boolean> {
+  return new Promise(resolve => {
+    let ok = false;
+    const button = h("button", { type: "button", class: `btn ${options.danger ? "btn-danger" : "btn-primary"}`, onclick: () => { ok = true; dialog.close(); } },
+      options.confirm ?? t("Confirm"));
+    const dialog = openDialog(options.title, h("div", { class: "confirm-body" }, options.message ? h("p", {}, options.message) : null), [button],
+      { narrow: true, cancelLabel: t("Cancel") });
+    dialog.classList.add("dialog-confirm");
+    dialog.addEventListener("close", () => resolve(ok));
+    button.focus();
+  });
+}
+
+export interface PromptOptions {
+  title: string;
+  message?: string;
+  label?: string;
+  placeholder?: string;
+  value?: string;
+  confirm?: string;
+  multiline?: boolean;
+}
+
+/** Resolves to the trimmed text, or undefined when cancelled or left empty. */
+export function promptDialog(options: PromptOptions): Promise<string | undefined> {
+  return new Promise(resolve => {
+    let result: string | undefined;
+    const input = options.multiline
+      ? h("textarea", { rows: 3, placeholder: options.placeholder, "aria-label": options.label ?? options.title })
+      : h("input", { type: "text", autocomplete: "off", placeholder: options.placeholder, "aria-label": options.label ?? options.title });
+    input.value = options.value ?? "";
+    const id = `prompt-${Math.random().toString(36).slice(2)}`;
+    const button = h("button", { type: "submit", form: id, class: "btn btn-primary", disabled: !input.value.trim() }, options.confirm ?? t("Confirm"));
+    input.addEventListener("input", () => { button.disabled = !input.value.trim(); });
+    if (input instanceof HTMLTextAreaElement)
+      input.addEventListener("keydown", event => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); form.requestSubmit(); } });
+    const form = h("form", { id, class: "form-stack confirm-body" },
+      options.message ? h("p", {}, options.message) : null,
+      options.label ? field(options.label, input) : input);
+    form.addEventListener("submit", event => {
+      event.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+      result = text; dialog.dataset.dirty = "false"; dialog.close();
+    });
+    const dialog = openDialog(options.title, form, [button], { narrow: true, cancelLabel: t("Cancel") });
+    dialog.addEventListener("close", () => resolve(result));
+    input.focus();
+    if (input instanceof HTMLInputElement) input.select();
+  });
 }
 
 // ───────────── 表单 ─────────────

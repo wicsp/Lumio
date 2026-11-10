@@ -7,7 +7,7 @@ import type { WorkProject, WorkTask, WorkTaskDetail } from "@lumio/schema";
 import { PROJECT_STATUSES } from "@lumio/schema";
 import { errorText, isConflict, type Client, type HubExtras } from "../api.ts";
 import { newRequestId, projectCreateCommand, taskCreateCommand } from "../commands.ts";
-import { autosize, clear, debounce, empty, failure, field, h, icon, loading, openDialog, openMenu, placeholder, select, statusIcon, toast } from "../dom.ts";
+import { autosize, clear, confirmDialog, debounce, empty, failure, field, h, icon, loading, openDialog, openMenu, placeholder, promptDialog, select, statusIcon, toast } from "../dom.ts";
 import { drafts } from "../drafts.ts";
 import { confirmDelete, deletableRow } from "../trash-actions.ts";
 import { dueLabel } from "../format.ts";
@@ -274,8 +274,8 @@ export class WorkPane {
     openMenu(anchor, turnActions(task).map(action => ({ value: action, label: TURN_ACTION_LABELS[action], icon: icon(TURN_ACTION_ICONS[action]) })), async value => {
       const action = value as TurnAction;
       let note: string | undefined;
-      if (action === "external") { note = prompt(t("What are you waiting for?"))?.trim(); if (!note) return; }
-      if (task.turn.reason === "working" && action !== "external" && !confirm(t("An agent is still working on this task. Stop its round and continue?"))) return;
+      if (action === "external") { note = await promptDialog({ title: t("What are you waiting for?"), placeholder: t("e.g. a reply from someone, a delivery…"), confirm: t("Continue") }); if (!note) return; }
+      if (task.turn.reason === "working" && action !== "external" && !(await confirmDialog({ title: t("Stop the running round?"), message: t("An agent is still working on this task. Stop its round and continue?"), confirm: t("Continue"), danger: true }))) return;
       try {
         await this.client.workCommand(turnActionCommand(task, action, note));
         toast(TURN_ACTION_DONE[action]);

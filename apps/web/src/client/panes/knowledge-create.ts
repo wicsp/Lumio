@@ -1,6 +1,6 @@
 import type { KnowledgeCreateResult, KnowledgeNoteKind, KnowledgeContext } from "@lumio/schema";
 import { errorText, type Client } from "../api.ts";
-import { clear, failure, field, h, icon, loading, select, toast } from "../dom.ts";
+import { clear, confirmDialog, failure, field, h, icon, loading, select, toast } from "../dom.ts";
 import { newRequestId } from "../commands.ts";
 import { lang, t } from "../i18n.ts";
 import { drafts } from "../drafts.ts";
@@ -88,6 +88,6 @@ export class KnowledgeCreate {
   let request;try{request=this.state.begin(this.kind,this.capture(),newRequestId("note"));}catch{clear(this.error,failure(t("Check the title, authors, year and links before saving.")));return;}
   const generation=this.generation;this.persist();this.controls(true);clear(this.error);
   try{const result=await this.client.createNote(request);if(!this.opened||generation!==this.generation)return;this.state.saving=false;this.state.pending=undefined;this.state.changed=false;this.store.remove("knowledge:new");this.dispose();toast(t("Note created"));this.onSaved(result);}
-  catch(cause){if(!this.opened||generation!==this.generation)return;this.state.failed(cause);this.persist();this.controls(!!this.state.pending);clear(this.error,failure(errorText(cause)),this.state.pending?h("div",{},h("p",{class:"muted"},t("Your draft is kept. Retry the same save to check whether it succeeded; this will not create a second note.")),h("button",{type:"button",class:"btn",onclick:()=>{if(!confirm(t("Check whether the earlier note exists first. Start a separate save with this draft?")))return;this.state.pending=undefined;this.controls(false);clear(this.error);}},t("Continue as a new save"))):null);}
+  catch(cause){if(!this.opened||generation!==this.generation)return;this.state.failed(cause);this.persist();this.controls(!!this.state.pending);clear(this.error,failure(errorText(cause)),this.state.pending?h("div",{},h("p",{class:"muted"},t("Your draft is kept. Retry the same save to check whether it succeeded; this will not create a second note.")),h("button",{type:"button",class:"btn",onclick:async()=>{if(!(await confirmDialog({title:t("Continue as a new save"),message:t("Check whether the earlier note exists first. Start a separate save with this draft?"),confirm:t("Continue")})))return;this.state.pending=undefined;this.controls(false);clear(this.error);}},t("Continue as a new save"))):null);}
  }
 }

@@ -11,7 +11,7 @@ import {
 } from "@lumio/schema";
 import { errorText, isConflict, type Client } from "./api.ts";
 import { engineTargets, newRequestId } from "./commands.ts";
-import { autosize, clear, failure, field, h, icon, openDialog, select, toast } from "./dom.ts";
+import { autosize, clear, confirmDialog, failure, field, h, icon, openDialog, promptDialog, select, toast } from "./dom.ts";
 import { drafts } from "./drafts.ts";
 import { t } from "./i18n.ts";
 
@@ -402,9 +402,9 @@ export async function openPlanEditor(client: Client, task: WorkTask, saved: () =
   const renderTemplates = (items: PlanTemplate[]) => {
     if (!items.length) { clear(templateTools); return; }
     const pick = select("plan-template", [["", t("Start from a template…")], ...items.map(item => [item.id, item.name] as [string, string])]);
-    pick.addEventListener("change", () => {
+    pick.addEventListener("change", async () => {
       const chosen = items.find(item => item.id === pick.value);
-      if (!chosen || (dirty && !confirm(t("Replace the current steps with “{0}”?", chosen.name)))) { pick.value = ""; return; }
+      if (!chosen || (dirty && !(await confirmDialog({ title: t("Replace the current steps with “{0}”?", chosen.name), confirm: t("Replace") })))) { pick.value = ""; return; }
       rows = load(chosen.plan); maxRounds.value = String(chosen.plan.max_rounds ?? DEFAULT_PLAN_MAX_ROUNDS); finish.value = chosen.plan.finish ?? "review";
       changed(); render(); pick.value = "";
     });
@@ -414,11 +414,11 @@ export async function openPlanEditor(client: Client, task: WorkTask, saved: () =
 
   const saveTemplate = h("button", { type: "button", class: "text-btn", onclick: async () => {
     const value = plan(); if (!value) return;
-    const name = prompt(t("Template name"))?.trim();
+    const name = await promptDialog({ title: t("Save as template"), label: t("Template name"), confirm: t("Save") });
     if (!name) return;
     try {
       const existing = templates.find(item => item.name === name);
-      if (existing && !confirm(t("Replace the template “{0}”?", name))) return;
+      if (existing && !(await confirmDialog({ title: t("Replace the template “{0}”?", name), confirm: t("Replace") }))) return;
       const result = await client.workCommand(templateSaveCommand(name.slice(0, 80), value, existing?.id));
       if (result.kind === "template") { const i = templates.findIndex(item => item.id === result.template.id); if (i >= 0) templates[i] = result.template; else templates.push(result.template); renderTemplates(templates); }
       toast(t("Template saved"));
@@ -447,7 +447,7 @@ export async function openPlanEditor(client: Client, task: WorkTask, saved: () =
   let pending = false, requestId = newRequestId(), previous = "";
   const commit = async (value: HandoffPlan | null) => {
     if (pending) return;
-    if (value === null && !confirm(t("Remove the plan from this task? Running rounds are not affected."))) return;
+    if (value === null && !(await confirmDialog({ title: t("Remove plan"), message: t("Remove the plan from this task? Running rounds are not affected."), confirm: t("Remove"), danger: true }))) return;
     const key = JSON.stringify([value, from.value]);
     if (previous && previous !== key) requestId = newRequestId();
     previous = key; pending = true; submit.disabled = true;

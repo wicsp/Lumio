@@ -6,7 +6,7 @@ import type { AgentInfo } from "@lumio/schema";
 import { ApiClientError } from "@lumio/api-client";
 import { errorText, type Client } from "./api.ts";
 import { formatTime } from "./commands.ts";
-import { clear, failure, h, icon, toast } from "./dom.ts";
+import { clear, confirmDialog, failure, h, icon, toast } from "./dom.ts";
 import { ago } from "./format.ts";
 import { t } from "./i18n.ts";
 
@@ -69,7 +69,7 @@ export class AgentsSettings {
     const last = agent.last_activity ?? used;
     const revoke = manual.length ? h("button", { type: "button", class: "btn btn-quiet btn-small set-danger" }, t("Revoke")) : null;
     revoke?.addEventListener("click", async () => {
-      if (!confirm(t("Revoke access for {0}? It stops working immediately; reconnect with lumio skill install.", agent.actor.name))) return;
+      if (!(await confirmDialog({ title: t("Revoke access"), message: t("Revoke access for {0}? It stops working immediately; reconnect with lumio skill install.", agent.actor.name), confirm: t("Revoke"), danger: true }))) return;
       revoke.disabled = true;
       try {
         await this.client.revokeAgent({ name: agent.actor.name });

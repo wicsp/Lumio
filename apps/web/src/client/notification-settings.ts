@@ -7,7 +7,7 @@ import { NOTIFICATION_KINDS, type NotificationKind, type PushDevice } from "@lum
 import { ApiClientError } from "@lumio/api-client";
 import { errorText, type Client } from "./api.ts";
 import { formatTime } from "./commands.ts";
-import { clear, failure, h, icon, toast } from "./dom.ts";
+import { clear, confirmDialog, failure, h, icon, toast } from "./dom.ts";
 import { ago } from "./format.ts";
 import { t, translated } from "./i18n.ts";
 
@@ -114,7 +114,7 @@ export class NotificationSettings {
     for (const device of devices.filter(device => device.id !== mine?.id)) {
       const remove = h("button", { type: "button", class: "btn btn-small btn-quiet" }, t("Remove"));
       remove.addEventListener("click", () => void this.guard(error, async () => {
-        if (!confirm(t("Stop sending notifications to {0}?", device.label))) return;
+        if (!(await confirmDialog({ title: t("Stop sending notifications to {0}?", device.label), confirm: t("Remove"), danger: true }))) return;
         await this.client.removePushDevice(device.id);
         void this.load();
       }));
