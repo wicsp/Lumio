@@ -108,7 +108,9 @@ export class Executor {
     const finish = async (fields: Parameters<Queue["finish"]>[0]) => {
       try { if (trace) { await trace.append("status", { status: fields.status }); await trace.close(); } }
       catch { fields = { ...fields, status: fields.status === "cancelled" || fields.status === "unknown" ? fields.status : "failed", error: msg("executor.could_not_seal_run_log") }; }
-      this.queue.finish({ ...fields, ...(fields.report === undefined ? {} : { report: redact(fields.report) }),
+      const unavailable = this.sudo?.unavailableFor(spec.id);
+      this.queue.finish({ ...fields, ...(unavailable ? { privileged_unavailable: { program: redact(unavailable) } } : {}),
+        ...(fields.report === undefined ? {} : { report: redact(fields.report) }),
         ...(fields.question === undefined ? {} : { question: redact(fields.question) }),
         ...(fields.error === undefined ? {} : { error: redact(fields.error) }) });
     };

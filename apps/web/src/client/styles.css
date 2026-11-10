@@ -1466,3 +1466,11 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 .attn-grant .attn-composer-foot .btn { margin-left: 0; }
 .attn-grant-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .attn-grant .check-field { min-height: 24px; }
+
+/* 管理员权限助手提示（ADR 0020） */
+.helper-command { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.helper-command code { font-family: var(--mono); font-size: var(--fs-sm); background: var(--sunken); padding: 4px 8px; border-radius: var(--r-sm, 6px); user-select: all; }
+.helper-notice { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: var(--r-md); background: var(--surface); }
+.helper-notice-title { display: flex; gap: 6px; align-items: flex-start; font-size: var(--fs-sm); font-weight: 600; }
+.helper-notice-title .icon { width: 14px; height: 14px; flex: none; margin-top: 2px; color: var(--ochre); }
+.set-row.helper-row { flex-direction: column; align-items: flex-start; gap: 6px; }

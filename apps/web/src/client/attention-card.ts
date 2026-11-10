@@ -9,6 +9,7 @@ import type { WorkAttention } from "@lumio/schema";
 import { errorText, isConflict, type Client, type HubExtras } from "./api.ts";
 import { answerCommand, engineTargets, formatTime, grantCommand, itemsPermission, newRequestId, permissionItemLabel, permissionItems, type PermissionItem } from "./commands.ts";
 import type { StagePermissions } from "@lumio/schema";
+import { helperMissingNotice } from "./privileged-helper.ts";
 import { agentStages, checkpointCommand, type CheckpointAction } from "./plan.ts";
 import { finishCommand, handCommand } from "./turn.ts";
 import { autosize, clear, failure, h, icon, openMenu, select, toast } from "./dom.ts";
@@ -146,14 +147,6 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
   if (item.kind === "question") {
     const answer = composer(t("Answer and continue"), true, t("Your answer…"));
     body = h("div", { class: "attn-body" }, question(item.question ?? t("The agent is waiting for your input.")), answer.form);
-    // 读这一轮的结果；带权限申请时换成批准表单（读取失败时保留回答框）。
-    void ctx.client.job(item.job).then(job => {
-      const requested = job.status === "waiting_for_human" ? job.result?.permission : undefined;
-      if (!requested || !body || !card.contains(body)) return;
-      const next = permissionRequest(requested, job.result?.report);
-      body.replaceWith(next); body = next;
-      label.textContent = t("Asking for permission");
-    }, () => undefined);
   } else {
     if (item.prompt) body = question(item.prompt);
     else if (item.summary) body = h("p", { class: "attn-summary" }, item.summary);
@@ -213,6 +206,21 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
     });
     return h("div", { class: "attn-body" }, reason ? question(reason) : null, form);
   }
+
+  // 读这一轮的结果：带权限申请时换成批准表单；机器没装管理员助手时附上安装提示（读取失败时保持原样）。
+  void ctx.client.job(item.job).then(job => {
+    const missing = job.result?.privileged_unavailable;
+    if (missing) {
+      const notice = helperMissingNotice(item.agent, missing.program);
+      if (body && card.contains(body)) body.after(notice);
+      else if (card.contains(actions)) actions.before(notice);
+    }
+    const requested = item.kind === "question" && job.status === "waiting_for_human" ? job.result?.permission : undefined;
+    if (!requested || !body || !card.contains(body)) return;
+    const next = permissionRequest(requested, job.result?.report);
+    body.replaceWith(next); body = next;
+    label.textContent = t("Asking for permission");
+  }, () => undefined);
 
   const meta = [t("Round {0}", item.round), item.agent, ago(item.since)].filter(Boolean).join(t(" · "));
   const label = h("p", { class: "attn-kind" }, item.kind === "review" && item.prompt ? t("Checkpoint") : item.kind === "review" && item.stage === "end" ? t("Plan finished · ready for your review") : t(kind.label));
