@@ -1,9 +1,10 @@
 import { z } from "zod";
-import { Id, Timestamp, idOf } from "./common.ts";
+import { DerivedFrom, Id, Timestamp, idOf } from "./common.ts";
 import { ExecutionRoutineInfo } from "./execution.ts";
 import { ExecutionTarget, ExecutionTargetListArgs, Job, JobStatus } from "./job.ts";
 import { Proposal } from "./proposal.ts";
-import { LinksResult, NOTE_TYPES, NoteDetail, SearchResult } from "./query.ts";
+import { KnowledgeRevision } from "./knowledge-editing.ts";
+import { LinksResult, NOTE_TYPES, NoteDetail, NoteRef, SearchResult } from "./query.ts";
 import {
   ProjectStatus, TaskStatus, WorkCommandResult, WorkProject, WorkProjectCreate, WorkProjectUpdate,
   WorkAttention, WorkTask, WorkTaskComment, WorkTaskCreate, WorkTaskDetail, WorkTaskHand, WorkTaskUpdate,
@@ -43,6 +44,44 @@ export const KnowledgeSearchArgs = z.strictObject({
 });
 export const KnowledgeShowArgs = z.strictObject({ ref: NoteReference });
 export const KnowledgeLinksArgs = z.strictObject({ ref: NoteReference });
+
+/**
+ * AI 笔记（ADR 0051 第 4、6 节）：agent 只能新建和带版本更新 AI 笔记。
+ * Hub 填写 id、时间、generated_by，并把调用方所在的对话消息或 Job 加进 derived_from；
+ * derived_from 中有调用方不可见的资源时拒绝。
+ *
+ * K4-1 只定义参数与结果；K4-3 实现 Hub 与 CLI 时再登记进 CAPABILITIES（名称与说明见下方 AI_NOTE_CAPABILITIES）。
+ */
+const AiNoteTitle = z.string().trim().min(1).max(500);
+const AiNoteBody = z.string().max(500000).describe("Markdown body. Link other notes with [[name]]; link conversations, tasks or runs with [text](lumio:<id>)");
+const AiNoteTags = z.array(z.string().trim().min(1).max(100)).max(100);
+const AiNoteSources = z.array(DerivedFrom).max(100).describe("Where this came from: Lumio IDs (message, run, note…) or URLs. Your current message or run is added automatically");
+export const KnowledgeAiNoteCreateArgs = z.strictObject({
+  title: AiNoteTitle,
+  body: AiNoteBody,
+  tags: AiNoteTags.optional(),
+  derived_from: AiNoteSources.optional(),
+  model: z.string().trim().min(1).max(200).optional().describe("Model that wrote it, if known"),
+});
+export const KnowledgeAiNoteUpdateArgs = z
+  .strictObject({
+    note: idOf("ain"),
+    expected_revision: KnowledgeRevision.describe("revision from your last read or write; a newer human edit returns CONFLICT"),
+    title: AiNoteTitle.optional(),
+    body: AiNoteBody.optional(),
+    tags: AiNoteTags.optional().describe("Replaces all tags"),
+    derived_from: AiNoteSources.optional().describe("Replaces all sources"),
+  })
+  .refine((args) => args.title !== undefined || args.body !== undefined || args.tags !== undefined || args.derived_from !== undefined, "Nothing to update");
+export const AI_NOTE_CAPABILITY_NAMES = ["knowledge.ainote.create", "knowledge.ainote.update"] as const;
+export const AI_NOTE_SUMMARIES = {
+  "knowledge.ainote.create": { en: "Write knowledge as an AI note (one note per topic) when the user asks to record something or a task requires it. You cannot write other note types.", zh: "把知识写成一份 AI 笔记（一件事一份），用于用户要求记下来或任务要求写入时。不能写其他类型的笔记。" },
+  "knowledge.ainote.update": { en: "Update an AI note, e.g. regenerate a summary. Requires the revision you last saw; returns CONFLICT if the user edited it since.", zh: "更新一份 AI 笔记（例如重新生成摘要）。需要带上次看到的版本；用户之后改过则返回冲突。" },
+} as const satisfies Record<(typeof AI_NOTE_CAPABILITY_NAMES)[number], { en: string; zh: string }>;
+export const KnowledgeAiNoteResult = z.strictObject({
+  note: NoteRef,
+  revision: KnowledgeRevision.describe("SHA-256 of the file after writing; pass as expected_revision next time"),
+});
 
 export const WorkTaskListArgs = z.strictObject({
   readiness: z.enum(["ready", "blocked"]).optional(),
@@ -160,3 +199,6 @@ export type CapabilityChange = z.infer<typeof CapabilityChange>;
 export type KnowledgeSearchArgs = z.infer<typeof KnowledgeSearchArgs>;
 export type WorkTaskListArgs = z.infer<typeof WorkTaskListArgs>;
 export type ExecutionJobListArgs = z.infer<typeof ExecutionJobListArgs>;
+export type KnowledgeAiNoteCreateArgs = z.infer<typeof KnowledgeAiNoteCreateArgs>;
+export type KnowledgeAiNoteUpdateArgs = z.infer<typeof KnowledgeAiNoteUpdateArgs>;
+export type KnowledgeAiNoteResult = z.infer<typeof KnowledgeAiNoteResult>;

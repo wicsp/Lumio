@@ -48,7 +48,7 @@ import {
   ResourceRef, TaskTurnChange, Turn, WorkAttention, WorkComment, WorkCommandRequest, WorkCommandResult, WorkExecution, WorkProject, WorkTask, WorkTaskDetail,
 } from "./work.ts";
 import { ApiError, OperationRequest, OperationResult } from "./api.ts";
-import { Asset, Experiment, Idea, Paper, Post, Project, Routine, Source, Task } from "./entities.ts";
+import { AiNote, Asset, Experiment, Idea, Paper, Post, Project, Routine, Source, Task } from "./entities.ts";
 import { ExecutionTarget, Job, JobResult, JobSpec, RoutineInfo, RuntimeAck, RuntimeHeartbeat, RuntimeInfo, RuntimeRegistration, RuntimeSync } from "./job.ts";
 import { Operation } from "./operation.ts";
 import { PrivilegedApproval, PrivilegedReport, PrivilegedStatus } from "./privileged.ts";
@@ -92,6 +92,7 @@ export const CONTRACTS = {
   source: Source,
   post: Post,
   asset: Asset,
+  "ai-note": AiNote,
   job: Job,
   "job-spec": JobSpec,
   "job-result": JobResult,
