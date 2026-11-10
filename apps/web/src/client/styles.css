@@ -123,29 +123,51 @@ code, pre, kbd { font-family: var(--mono); font-size: 0.92em; }
 }
 .brand { display: flex; align-items: center; gap: 9px; padding: 6px 8px 14px; font-weight: 650; font-size: 16px; letter-spacing: -0.02em; }
 .brand-mark { width: 20px; height: 20px; background: url("/assets/icon.svg") center / contain no-repeat; flex: none; }
+.brand-logo { display: grid; place-items: center; flex: none; padding: 0; border: 0; background: none; }
 .brand-sub { margin-left: auto; color: var(--ink-4); font-weight: 400; font-size: var(--fs-xs); }
 .sidebar-toggle { margin-left: auto; }
 .sidebar-toggle .icon { rotate: 180deg; }
 
+/*
+ * 桌面侧栏：展开和收起共用同一套几何，收起只是把栏宽缩到 --rail-w、把文字隐藏，
+ * 图标的大小和位置都不变。每一行的图标中心都落在 x = --rail-w / 2：
+ * 侧栏左右内边距 10px，行左内边距 11px，图标 18px → 10 + 11 + 9 = 30 = 60 / 2。
+ */
 @media (min-width: 861px) {
-  .shell.sidebar-collapsed { grid-template-columns: 64px minmax(0, 1fr); }
-  .sidebar-collapsed .sidebar { padding-inline: 8px; gap: 4px; }
-  .sidebar-collapsed .brand { justify-content: center; padding-inline: 0; }
-  .sidebar-collapsed .sidebar-toggle { margin-left: 0; }
-  .sidebar-collapsed .sidebar-toggle .icon { rotate: none; }
-  .sidebar-collapsed .sidebar :is(.brand-mark, .brand-name, .quick-find span, .quick-find kbd, .nav-group-label, .nav-label, .account-text, .account > .icon) { display: none; }
-  .sidebar-collapsed :is(.quick-find, .nav-item, .account) { position: relative; justify-content: center; padding-inline: 0; }
-  .sidebar-collapsed .nav-count { display: none; }
-  .sidebar-collapsed .nav-count.attention { display: block; position: absolute; top: 3px; right: 3px; font-size: 9px; }
-  /* Icon-only rail: bigger targets and glyphs so it doesn't look cramped. */
-  .sidebar-collapsed :is(.quick-find, .nav-item) { height: 44px; border-radius: var(--r-md); }
-  .sidebar-collapsed .quick-find { margin-bottom: 8px; border-color: transparent; background: none; }
-  .sidebar-collapsed .quick-find:hover { background: var(--hover); }
-  .sidebar-collapsed :is(.quick-find, .nav-item) .icon { width: 21px; height: 21px; stroke-width: 1.6; }
-  .sidebar-collapsed .sidebar-toggle { width: 40px; height: 40px; }
-  .sidebar-collapsed .sidebar-toggle .icon { width: 18px; height: 18px; }
-  .sidebar-collapsed .account { justify-content: center; padding: 6px 0; }
-  .sidebar-collapsed .who-avatar { width: 32px; height: 32px; }
+  :root { --rail-w: 60px; --rail-icon: 18px; --rail-row: 36px; }
+  .shell { transition: grid-template-columns .2s var(--ease); }
+  .shell.sidebar-collapsed { grid-template-columns: var(--rail-w) minmax(0, 1fr); }
+  .sidebar { gap: 2px; padding: 8px 10px 10px; overflow-x: hidden; }
+  .sidebar :is(.brand, .quick-find, .nav-item, .nav-group-label, .account) { overflow: hidden; white-space: nowrap; }
+  .sidebar .icon { width: var(--rail-icon); height: var(--rail-icon); stroke-width: 1.6; }
+
+  /* 顶部：Lumio 图标 40×36，中心与下面各行的图标对齐；行高与右侧标题栏居中对齐。 */
+  .sidebar .brand { height: var(--rail-row); margin-bottom: 8px; padding: 0; gap: 6px; flex: none; }
+  .sidebar .brand-logo { width: 40px; height: var(--rail-row); border-radius: var(--r-md); pointer-events: none; }
+  .sidebar .brand-mark { width: 24px; height: 24px; }
+  .sidebar .brand-name { font-size: 16px; }
+  .sidebar .sidebar-toggle { width: 32px; height: 32px; margin-left: auto; }
+  .sidebar .sidebar-toggle .icon { width: 16px; height: 16px; }
+
+  .sidebar .quick-find { height: var(--rail-row); flex: none; gap: 10px; margin-bottom: 10px; padding: 0 9px 0 10px; font-size: var(--fs-md); }
+  .sidebar .nav-item { height: var(--rail-row); flex: none; gap: 10px; padding: 0 10px 0 11px; border-radius: var(--r-md); font-size: var(--fs-md); }
+  .sidebar .nav-group-label { position: relative; height: 26px; flex: none; margin: 10px 0 2px; padding: 8px 0 0 11px; line-height: 18px; }
+  .sidebar .account { height: 44px; padding: 0 8px 0 6px; gap: 10px; }
+  .sidebar .account .who-avatar { width: 28px; height: 28px; flex: none; }
+  .sidebar :is(.nav-label, .brand-name, .quick-find > span, .quick-find kbd, .account-text, .account > .icon, .nav-count, .sidebar-toggle) { transition: opacity .15s; }
+
+  /* 收起：文字和次要控件淡出，但仍占原位，所以图标不会移动。 */
+  .sidebar-collapsed .sidebar :is(.nav-label, .brand-name, .quick-find > span, .quick-find kbd, .account-text, .account > .icon, .sidebar-toggle) { opacity: 0; visibility: hidden; }
+  .sidebar-collapsed .sidebar .brand-logo { pointer-events: auto; cursor: pointer; }
+  .sidebar-collapsed .sidebar .brand-logo:hover { background: var(--hover); }
+  .sidebar-collapsed .sidebar .quick-find { border-color: transparent; background: none; }
+  .sidebar-collapsed .sidebar .quick-find:hover { background: var(--hover); color: var(--ink); }
+  .sidebar-collapsed .sidebar .nav-group-label { color: transparent; }
+  .sidebar-collapsed .sidebar .nav-group-label::after { content: ""; position: absolute; left: 10px; right: 10px; top: 16px; border-top: 1px solid var(--line); }
+  .sidebar-collapsed .sidebar .nav-count:not(.attention) { opacity: 0; }
+  /* 需要处理的数量在收起时变成图标右上角的小角标。 */
+  .sidebar-collapsed .sidebar .nav-count.attention { position: absolute; top: 3px; left: 22px; min-width: 15px; height: 15px; padding: 0 4px; border: 2px solid var(--paper); border-radius: 8px; font-size: 9px; line-height: 11px; box-sizing: content-box; }
+  .sidebar-collapsed .sidebar .nav-item { position: relative; overflow: visible; }
 }
 
 .quick-find {
@@ -343,6 +365,23 @@ select { appearance: none; padding-right: 28px; background-image: linear-gradien
 .row.is-selected { background: var(--lumen-wash); }
 .row.is-selected::before { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; border-radius: 0 2px 2px 0; background: var(--lumen); }
 .row.is-cursor:not(.is-selected) { background: var(--hover); }
+.row-delete { opacity: 0; pointer-events: none; transition: opacity .12s; }
+:is(.delete-row, .convo-row, .memory-item, .trash-row):is(:hover, :focus-within) .row-delete {
+  opacity: 1; pointer-events: auto;
+}
+.icon-btn.row-delete:hover:not(:disabled) { color: var(--red); background: var(--red-wash); }
+.delete-row { position: relative; --delete-bg: var(--hover); }
+.delete-row:has(> .is-selected) { --delete-bg: var(--lumen-wash); }
+.delete-row:is(:hover, :focus-within) > .row { background: var(--delete-bg); }
+.delete-row > .row-delete {
+  position: absolute; inset-inline-end: 6px; top: 50%; translate: 0 -50%;
+  background: var(--delete-bg); box-shadow: -8px 0 6px 2px var(--delete-bg);
+}
+@media (hover: none) {
+  .row-delete { opacity: 1; pointer-events: auto; }
+  .delete-row > .row { padding-inline-end: 42px; }
+  .delete-row:not(:hover, :focus-within) > .row-delete { background: none; box-shadow: none; }
+}
 .row-main { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
 .row-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .row.done .row-title, .row.cancelled .row-title { color: var(--ink-3); }
@@ -364,7 +403,6 @@ select { appearance: none; padding-right: 28px; background-image: linear-gradien
 /* 详情 */
 .detail { max-width: 860px; margin: 0 auto; padding: 22px 32px 64px; }
 .detail-crumbs { display: flex; align-items: center; gap: 6px; min-height: 22px; color: var(--ink-3); font-size: var(--fs-sm); }
-.detail-crumbs .detail-more { margin-left: auto; }
 .detail-crumbs .icon { width: 13px; height: 13px; }
 .detail-crumbs > button:not(.icon-btn) { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 0; color: inherit; }
 .detail-crumbs > button:not(.icon-btn):hover { color: var(--ink); text-decoration: underline; }
@@ -497,7 +535,7 @@ div.note-rich-preview { padding:4px 0; }
 
 /* 知识阅读：衬线正文，像在读论文 */
 .reader { max-width: 760px; margin: 0 auto; padding: 36px 40px 80px; }
-.reader-title { font-family: var(--serif); font-size: 30px; line-height: 1.25; font-weight: 600; letter-spacing: -0.01em; }
+.reader-title { font-family: var(--serif); font-size: 30px; line-height: 1.25; font-weight: 600; letter-spacing: -0.01em; overflow-wrap: anywhere; }
 .reader-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0 28px; color: var(--ink-3); font-size: var(--fs-sm); }
 .reader .markdown { font-family: var(--serif); font-size: 16.5px; line-height: 1.8; max-width: 68ch; }
 .reader .markdown h1, .reader .markdown h2, .reader .markdown h3 { font-family: var(--sans); }
@@ -875,9 +913,7 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 .convo-row { position: relative; }
 .convo-row.is-selected .convo { background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
 .convo-row .convo { padding-right: 34px; }
-.convo-delete { position: absolute; top: 50%; right: 4px; translate: 0 -50%; width: 28px; height: 28px; opacity: 0; transition: opacity .12s; }
-.convo-row:is(:hover, :focus-within) .convo-delete { opacity: 1; }
-@media (hover: none) { .convo-delete { opacity: .6; } }
+.convo-row > .row-delete { position: absolute; inset-inline-end: 4px; top: 50%; translate: 0 -50%; }
 .convo strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; font-size: var(--fs-sm); }
 .convo span { color: var(--ink-4); font-size: var(--fs-xs); }
 .chat-main { display: flex; flex-direction: column; min-height: 0; }
@@ -914,6 +950,7 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 .memory-page > p { margin: 6px 0 18px; color: var(--ink-3); }
 .memory-list { display: flex; flex-direction: column; margin-top: 22px; border-top: 1px solid var(--line); }
 .memory-item { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.memory-item:hover, .trash-row:hover { background: var(--hover); }
 .memory-item p { flex: 1; }
 .memory-item span { color: var(--ink-4); font-size: var(--fs-xs); white-space: nowrap; margin-top: 2px; }
 
@@ -1088,6 +1125,7 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 /* Continuous knowledge authoring: one Markdown document, with rendered decorations. */
 .note-author { max-width: 900px; }
 .note-title { display:block; width:100%; border:0; background:transparent; padding:0; border-radius:0; font:inherit; font-size:1.8rem; font-weight:650; color:inherit; }
+.note-title { resize: none; overflow: hidden; line-height: 1.25; overflow-wrap: anywhere; }
 .note-title:focus { outline: none; box-shadow:0 1px 0 var(--blue); }
 .note-save-status { font-size:.76rem; opacity:.7; min-height:1.6rem; margin:.75rem 0; }
 .note-save-error:empty { display:none; }

@@ -68,7 +68,7 @@ export class TrashPane {
       if (ok) { this.changed(); void this.load(true); this.offerOpen(item); }
       else restore.disabled = purge.disabled = false;
     } }, icon("restore"), t("Restore"));
-    const purge = h("button", { type: "button", class: "icon-btn", title: t("Delete permanently"), "aria-label": t("Delete {0} permanently", item.title || KIND_LABEL[item.kind]),
+    const purge = h("button", { type: "button", class: "icon-btn row-delete", title: t("Delete permanently"), "aria-label": t("Delete {0} permanently", item.title || KIND_LABEL[item.kind]),
       onclick: () => this.confirmPurge(item) }, icon("trash"));
     return h("article", { class: "trash-row" },
       h("span", { class: "trash-kind", title: KIND_LABEL[item.kind] }, icon(KIND_ICON[item.kind])),

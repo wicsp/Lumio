@@ -102,7 +102,6 @@ const ICONS: Record<string, string> = {
   device: "M4 5h16v11H4zM9 20h6M12 16v4",
   repeat: "M17 3l3 3-3 3M4 11V9a3 3 0 0 1 3-3h13M7 21l-3-3 3-3M20 13v2a3 3 0 0 1-3 3H4",
   edit: "M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4",
-  more: "M6 12h0M12 12h0M18 12h0",
   trash: "M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3",
   restore: "M4 12a8 8 0 1 0 2.3-5.6M4 4v4h4",
   memory: "M12 3a6 6 0 0 0-3.5 10.9V17h7v-3.1A6 6 0 0 0 12 3zM9.5 21h5",

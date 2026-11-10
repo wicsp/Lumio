@@ -65,3 +65,24 @@ test("related task refresh follows deleted, restored and cancelled prerequisites
   visible = []; await editor.refreshRelatedTasks(() => false); expect(editor.byId.has(seed.id)).toBe(true);
   editor.active = false; await editor.refreshRelatedTasks(); expect(editor.byId.has(seed.id)).toBe(true);
 });
+
+test("deleting the selected work item uses the revision after pending edits save", async () => {
+  const writer = { base: seed };
+  const editor = Object.assign(Object.create(WorkEditor.prototype), {
+    active: true, busy: false, writer,
+    flush: async () => {
+      writer.base = { ...seed, revision: seed.revision + 1 };
+      return true;
+    },
+  }) as WorkEditor;
+
+  expect((await editor.prepareDelete())?.revision).toBe(seed.revision + 1);
+});
+
+test("deleting the selected work item stops if its edits could not be saved", async () => {
+  const editor = Object.assign(Object.create(WorkEditor.prototype), {
+    active: true, busy: false, writer: { base: seed }, flush: async () => false,
+  }) as WorkEditor;
+
+  expect(await editor.prepareDelete()).toBeUndefined();
+});

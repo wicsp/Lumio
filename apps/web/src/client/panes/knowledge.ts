@@ -1,7 +1,7 @@
 import { KnowledgeGraphView } from "../graph/knowledge.ts";
 import { NoteEditor } from "../note-editor.ts";
 import { drafts } from "../drafts.ts";
-import { confirmDelete } from "../trash-actions.ts";
+import { confirmDelete, deletableRow } from "../trash-actions.ts";
 import { NoteSave } from "../note-save.ts";
 import { writingContext } from "../note-text.ts";
 import { matchTerms } from "../note-matches.ts";
@@ -25,6 +25,11 @@ import { SideRail, type RailEntry } from "../side-rail.ts";
 
 const TYPE_LABEL: Record<string, string> = translated({ paper: "Paper", idea: "Idea", experiment: "Experiment", source: "Source", post: "Post", asset: "Asset", project: "Old project", task: "Old task", routine: "Old routine" });
 const LEGACY = new Set(["project", "task", "routine"]);
+const EDITABLE = new Set(["paper", "source", "idea", "experiment", "post"]);
+
+function editableId(note: NoteDetail["note"]): string | undefined {
+  return EDITABLE.has(note.type) && !note.path.startsWith("life/") ? note.id : undefined;
+}
 
 export class KnowledgePane {
   private graphMode = false;
@@ -51,6 +56,7 @@ export class KnowledgePane {
   private selected?: string;
   private creator?: KnowledgeCreate;
   private editor?: NoteEditor;
+  private titleResize?: ResizeObserver;
   private saver?: NoteSave;
   private store = drafts();
   private recoveries = new WeakMap<NoteSave, ReturnType<ReturnType<typeof drafts>["claim"]>>();
@@ -111,7 +117,7 @@ export class KnowledgePane {
     this.creator=new KnowledgeCreate(this.client,result=>{this.creator=undefined;this.query.value="";this.type="";this.renderFilters();void this.search();void this.read(result.id);},this.detail,context=>this.recommend(context),ref=>void this.open(ref),()=>{this.clearWriter();this.showPlaceholder();},()=>{this.split.classList.toggle("show-related");this.renderRelated();});
     this.creator.open();
   }
-  private clearWriter():void{this.persist();this.outlineEntries=()=>[];this.outline.refresh();clearTimeout(this.saveTimer);clearTimeout(this.relatedTimer);this.relatedGeneration++;this.contextKey="";this.relatedTerms=[];this.linksRevision="";this.split.classList.remove("show-related");this.relatedHits=[];this.related.hidden=true;clear(this.related);this.editor?.destroy();this.editor=undefined;this.saver=undefined;this.creator?.dispose();this.creator=undefined;}
+  private clearWriter():void{this.persist();this.titleResize?.disconnect();this.titleResize=undefined;this.outlineEntries=()=>[];this.outline.refresh();clearTimeout(this.saveTimer);clearTimeout(this.relatedTimer);this.relatedGeneration++;this.contextKey="";this.relatedTerms=[];this.linksRevision="";this.split.classList.remove("show-related");this.relatedHits=[];this.related.hidden=true;clear(this.related);this.editor?.destroy();this.editor=undefined;this.saver=undefined;this.creator?.dispose();this.creator=undefined;}
   dispose():void{this.graphView?.dispose();this.clearWriter();this.outline.dispose();this.active=false;this.generation++;this.searchGeneration++;this.unbindKeys();}
   async open(reference: string, reload = false): Promise<void> {
     if (!reload && reference === this.selected && this.detail.querySelector(".reader")) return;
@@ -186,10 +192,12 @@ export class KnowledgePane {
 
   private row(hit: SearchResult["hits"][number], terms: string[]): HTMLElement {
     const id = hit.note.id ?? hit.note.path;
-    return h("div", { class: "row", "data-id": id, role: "button", tabindex: "0", onclick: () => void this.open(id),
+    const row = h("div", { class: "row", "data-id": id, role: "button", tabindex: "0", onclick: () => void this.open(id),
       onkeydown: (event: Event) => { if ((event as KeyboardEvent).key === "Enter") void this.open(id); } },
       h("span", { class: "type-tag" }, TYPE_LABEL[hit.note.type] ?? hit.note.type),
       h("span", { class: "row-main" }, h("span", { class: "row-title" }, highlightedText(hit.note.title, terms)), hit.snippet && h("span", { class: "row-sub" }, highlightedText(hit.snippet, terms))));
+    const deletable = editableId(hit.note);
+    return deletable ? deletableRow(row, hit.note.title, () => void this.deleteNote(deletable)) : row;
   }
 
   private async read(reference: string): Promise<void> {
@@ -233,7 +241,7 @@ export class KnowledgePane {
       links && h("footer", { class: "backlinks" }, list(t("Links to"), links.outgoing), list(t("Linked from"), links.incoming))));
     this.detail.scrollTop = 0;
     this.outlineEntries = () => renderedOutline(this.detail, body); this.outline.refresh();
-    if(note.note.id && ["paper","source","idea","experiment","post"].includes(note.note.type) && !note.note.path.startsWith("life/"))void this.enableEditing(note);
+    if(editableId(note.note))void this.enableEditing(note);
     else this.detail.querySelector("article")?.append(h("p",{class:"field-hint"},t("This note is read-only here. Check its metadata or edit it in your external editor.")));
   }
   /**
@@ -275,7 +283,20 @@ export class KnowledgePane {
     try{
       const doc=await this.client.knowledgeDocument(note.note.id!);if(!this.active||generation!==this.generation)return;
       const article=this.detail.querySelector("article")!;const oldBody=article.querySelector(".markdown")!;const oldTitle=article.querySelector("h1")!;
-      const title=h("input",{class:"reader-title note-title",value:doc.document.note.title,maxlength:500,"aria-label":t("Title")});oldTitle.replaceWith(title);
+      const title = h("textarea", { class: "reader-title note-title", rows: 1, maxlength: 500, "aria-label": t("Title") });
+      title.value = doc.document.note.title;
+      oldTitle.replaceWith(title);
+      const fitTitle = () => {
+        title.style.height = "auto";
+        title.style.height = `${title.scrollHeight}px`;
+      };
+      let width = title.clientWidth;
+      this.titleResize = new ResizeObserver(() => {
+        if (title.clientWidth === width) return;
+        width = title.clientWidth;
+        fitTitle();
+      });
+      this.titleResize.observe(title);
       this.conflict=h("section",{class:"note-conflict",hidden:true});this.saveError=h("div",{class:"note-save-error"});this.saveStatus=h("div",{class:"note-save-status",role:"status"});
       const saver=new NoteSave(doc,this.client,()=>{this.persist(saver);if(this.active&&generation===this.generation&&this.saver===saver)this.renderSave();});this.saver=saver;
       const recovery=this.store.claim(`note:${note.note.id}`);this.recoveries.set(saver,recovery);
@@ -287,44 +308,72 @@ export class KnowledgePane {
       const context=()=>writingContext(title.value,this.editor?.value??doc.document.body,this.editor?.position??0);
       this.editor=new NoteEditor({value:saver.body,change:(text,position,composing)=>{this.saver!.change(title.value,text);clearTimeout(this.saveTimer);if(!composing&&!this.saver!.error)this.saveTimer=setTimeout(()=>void this.saver?.save(),800);this.recommend(writingContext(title.value,text,position));},context:()=>this.recommend(context()),
         referenceContext:position=>writingContext(title.value,this.editor!.value,position),references:(query,position)=>this.client.noteReferences({source_id:note.note.id!,query,context:writingContext(title.value,this.editor!.value,position)}),open:ref=>void this.open(this.resolveReference(ref)),save:()=>{clearTimeout(this.saveTimer);if(!this.saver?.error)void this.saver?.save();},outlineChanged:()=>this.outline.refresh()});
-      const titleChanged=(composing:boolean)=>{this.saver!.change(title.value,this.editor!.value);clearTimeout(this.saveTimer);if(!composing&&!this.saver!.error)this.saveTimer=setTimeout(()=>void this.saver?.save(),800);this.recommend(context());};
+      const titleChanged = (composing: boolean) => {
+        if (!composing && /[\r\n]/.test(title.value)) title.value = title.value.replace(/[\r\n]+/g, " ");
+        fitTitle();
+        this.saver!.change(title.value, this.editor!.value);
+        clearTimeout(this.saveTimer);
+        if (!composing && !this.saver!.error) this.saveTimer = setTimeout(() => void this.saver?.save(), 800);
+        this.recommend(context());
+      };
       title.addEventListener("compositionstart",()=>clearTimeout(this.saveTimer));
       title.addEventListener("input",event=>titleChanged((event as InputEvent).isComposing));
       title.addEventListener("compositionend",()=>titleChanged(false));
-      title.addEventListener("keydown",event=>{if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="s"){event.preventDefault();if(!event.isComposing&&!this.saver?.error)void this.saver?.save();}});
+      title.addEventListener("keydown", event => {
+        if (event.isComposing) return;
+        if (event.key === "Enter") event.preventDefault();
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+          event.preventDefault();
+          if (!this.saver?.error) void this.saver?.save();
+        }
+      });
+      fitTitle();
       oldBody.replaceWith(this.editor.root);const editor=this.editor;this.outlineEntries=()=>editor.outlineEntries();this.outline.refresh();article.insertBefore(this.saveStatus,this.editor.root);article.insertBefore(this.saveError,this.editor.root);article.insertBefore(this.conflict,this.editor.root);
       this.saveStatus.before(h("button",{type:"button",class:"btn btn-small mobile-only",onclick:()=>{this.split.classList.toggle("show-related");this.renderRelated();}},t("Related notes")));
-      article.querySelector(".detail-crumbs")?.append(this.moreButton(note.note.id!,()=>title.value.trim()||note.note.title));
       this.renderSave();this.recommend(context());if(saver.dirty)void saver.save();
     }catch{if(this.active&&generation===this.generation)this.detail.querySelector("article")?.append(h("p",{class:"field-hint"},t("This note is read-only here. Check its metadata or edit it in your external editor.")));}
   }
-  // ───────────── 删除（ADR 0038） ─────────────
-  private moreButton(id: string, title: () => string): HTMLButtonElement {
-    const button: HTMLButtonElement = h("button", { type: "button", class: "icon-btn detail-more", title: t("More"), "aria-label": t("More"), "aria-haspopup": "menu",
-      onclick: () => openMenu(button, [{ value: "delete", label: t("Delete"), icon: icon("trash") }], value => { if (value === "delete") void this.confirmDelete(id, title()); }) },
-    icon("more"));
-    return button;
-  }
-  private async confirmDelete(id: string, title: string): Promise<void> {
-    const saver = this.saver;
-    if (!saver) return;
-    clearTimeout(this.saveTimer);
-    if (saver.dirty && (saver.error || !(await saver.save()))) { toast(t("Save or resolve your changes before deleting this note."), "error"); return; }
-    if (this.saver !== saver || !this.active) return;
-    const links = (await this.client.links(id).catch(() => undefined))?.incoming.length ?? 0;
-    if (this.saver !== saver || !this.active) return;
-    confirmDelete(this.client, {
-      title: t("Delete this note?"), name: title,
-      consequences: [t("The file moves to the vault's .trash folder."), ...(links ? [t("{0} notes link to it; those links will show as missing until it is restored.", links)] : [])],
-      run: async requestId => (await this.client.deleteNote(id, { request_id: requestId, expected_revision: saver.base.revision })).item,
-      deleted: () => {
-        this.recoveries.get(saver)?.remove();
-        this.clearWriter(); this.selected = undefined; markSelected(this.results, undefined); this.showPlaceholder();
-        history.replaceState(null, "", "#knowledge");
-        void this.search(true);
-      },
-      restored: item => { void this.search(true); void this.open(item.id, true); },
-    });
+  private async deleteNote(id: string): Promise<void> {
+    const generation = this.generation;
+    const saver = this.saver?.base.document.note.id === id ? this.saver : undefined;
+    if (saver) {
+      clearTimeout(this.saveTimer);
+      if (saver.dirty && (saver.error || !(await saver.save()))) {
+        toast(t("Save or resolve your changes before deleting this note."), "error");
+        return;
+      }
+    }
+    const visible = () => this.active && generation === this.generation && this.split.isConnected && !this.split.closest("[hidden]");
+    try {
+      const [doc, links] = await Promise.all([
+        saver?.base ?? this.client.knowledgeDocument(id),
+        this.client.links(id, { includePrivate: this.includePrivate }).catch(() => undefined),
+      ]);
+      if (!visible() || document.querySelector("dialog[open]")) return;
+      if (saver?.dirty || saver !== (this.saver?.base.document.note.id === id ? this.saver : undefined)) return;
+      const incoming = links?.incoming.length ?? 0;
+      confirmDelete(this.client, {
+        title: t("Delete this note?"), name: doc.document.note.title,
+        consequences: [t("The file moves to the vault's .trash folder."), ...(incoming ? [t("{0} notes link to it; those links will show as missing until it is restored.", incoming)] : [])],
+        run: async requestId => (await this.client.deleteNote(id, { request_id: requestId, expected_revision: doc.revision })).item,
+        deleted: () => {
+          if (this.active && (this.selected === id || this.selected === doc.document.note.path)) {
+            this.generation++;
+            this.clearWriter(); this.selected = undefined; markSelected(this.results, undefined); this.showPlaceholder();
+            if (!this.split.closest("[hidden]")) history.replaceState(null, "", "#knowledge");
+          }
+          this.store.remove(`note:${id}`);
+          if (this.active) void this.search(true);
+        },
+        restored: item => {
+          if (!this.active) return;
+          void this.search(true);
+          if (saver && !this.selected && !this.creator && !this.split.closest("[hidden]")) void this.open(item.id, true);
+        },
+      });
+    } catch (cause) {
+      if (visible()) toast(errorText(cause), "error");
+    }
   }
   private renderSave():void{
     const saver=this.saver;if(!saver)return;

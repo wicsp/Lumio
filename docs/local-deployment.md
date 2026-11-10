@@ -6,4 +6,4 @@
 
 从指定提交的独立源码目录用仓库固定的 Bun 构建。安装新程序后重启 Hub。仅 Web 更新可保留 Runtime 进程；Runtime 有改动时，等在途工作结束后再重启。核对 `/health` 的版本、页面资源和 Runtime 在线状态。
 
-对外发布时，从 `main` 上已验收的提交推送正式 `v*` 标签。Release workflow 校验提交属于主线，重跑全量检查并创建 GitHub Release。
+对外发布时，从 `main` 上已验收的提交推送正式 `v*` 标签。Release workflow 校验提交属于主线，重跑全量检查并创建 GitHub Release。带预发布后缀的版本标为预发布，不成为 Latest。

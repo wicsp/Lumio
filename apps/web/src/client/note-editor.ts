@@ -12,6 +12,7 @@ import { renderMarkdown, renderInline, renderMath, renderRichBlock } from "./uti
 import { richBlocks, inlineMath, escapedAt } from "./utils/markdown-extra.ts";
 import { footnotes, referenceTrigger, insertReference, protectedText } from "./note-text.ts";
 import { chineseQuoteInput, chineseQuoteChange } from "./note-input.ts";
+import { activatePreview } from "./note-preview.ts";
 import { OUTLINE_DEPTH, markdownHeadings, mayHaveHeadings } from "./article-outline.ts";
 import type { RailEntry } from "./side-rail.ts";
 type Hit = KnowledgeReferencesResult["hits"][number];
@@ -30,7 +31,7 @@ interface Options {
 class InlineWidget extends WidgetType {
     constructor(private html: string, private activate: (view: EditorView, event: MouseEvent) => void, private className = "", private preview?: (anchor: HTMLElement) => void) { super(); }
     override eq(other: InlineWidget): boolean { return this.html === other.html && this.className === other.className && this.activate === other.activate; }
-    toDOM(view: EditorView): HTMLElement { const el = h("span", { class: this.className }); el.innerHTML = this.html; el.addEventListener("click", event => { event.preventDefault(); event.stopPropagation(); this.activate(view, event); }); if (this.preview) {
+    toDOM(view: EditorView): HTMLElement { const el = h("span", { class: this.className }); el.innerHTML = this.html; el.addEventListener("click", event => activatePreview(event, () => this.activate(view, event))); if (this.preview) {
         el.addEventListener("mouseenter", () => this.preview!(el));
         el.addEventListener("focusin", () => this.preview!(el));
     } return el; }
@@ -45,8 +46,8 @@ class RichPreview extends WidgetType {
     toDOM(): HTMLElement {
         const element: HTMLElement = h(this.block ? "div" : "span", { class: "note-rich-preview markdown", tabindex: "0", "aria-label": this.label });
         element.innerHTML = this.html;
-        element.addEventListener("click", event => { event.preventDefault(); event.stopPropagation(); this.edit(event); });
-        element.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); event.stopPropagation(); this.edit(event); } });
+        element.addEventListener("click", event => activatePreview(event, () => this.edit(event)));
+        element.addEventListener("keydown", event => { if (event.key === "Enter") activatePreview(event, () => this.edit(event)); });
         element.addEventListener("mouseover", event => { const link = (event.target as Element).closest<HTMLElement>("[data-note]"); if (link) this.preview?.(link); });
         element.addEventListener("focusin", event => { const link = (event.target as Element).closest<HTMLElement>("[data-note]"); if (link) this.preview?.(link); });
         return element;
