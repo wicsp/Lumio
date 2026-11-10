@@ -10,6 +10,7 @@ import { PROJECT_STATUSES, type WorkProject, type WorkTask, type WorkTaskDetail,
 import { errorText, isConflict, type Client, type HubExtras } from "../api.ts";
 import { attentionCard, attentionFor } from "../attention-card.ts";
 import { answerCommand, commentCommand, dispatchCommand, engineTargets, formatTime, newRequestId, workPatchCommand } from "../commands.ts";
+import { nextTargetText } from "../delegate.ts";
 import { autosize, clear, failure, field, h, icon, openDialog, openMenu, select, statusIcon, toast, type MenuItem } from "../dom.ts";
 import { ago, dateInputValue, dueLabel, isoFromDateInput } from "../format.ts";
 import { PROJECT_LABELS } from "../labels.ts";
@@ -216,6 +217,9 @@ export class WorkEditor {
         [{ value: "", label: t("No project"), selected: !r.project }, ...this.projects.map(p => ({ value: p.id, label: p.title, icon: icon("folder"), selected: p.id === r.project }))],
         value => void this.patch({ project: value || null }, projectBtn, t("Project updated")), { filter: this.projects.length > 6, placeholder: t("Find a project") }));
       row(t("Project"), "folder", projectBtn);
+      // 下一次委派给谁：Hub 推导（ADR 0044）；换人在委派时选，之后一直沿用。
+      if (r.outcome === "open") row(t("Next delegation"), "bot", h("span", { class: `prop-text${r.next_target ? "" : " placeholder-value"}`, title: t("Delegating without choosing goes to the plan step, then whoever did the last round, then the project's default agent.") },
+        r.next_target ? nextTargetText(r.next_target) : t("Choose when delegating")));
       row(t("Due"), "calendar", this.dateInput("due", r.due));
 
       if (this.showAdvanced) {
@@ -229,6 +233,7 @@ export class WorkEditor {
       row(t("Goal"), "check", this.textInput("goal", r.goal, t("What should this phase achieve?")));
       row(t("Due"), "calendar", this.dateInput("deadline", r.deadline));
       row(t("Working directory"), "terminal", this.textInput("workdir", r.workdir, t("~ (runtime's home directory)")));
+      row(t("Default agent"), "bot", this.defaultTargetControl(r));
       row(t("Repository"), "link", this.textInput("repo", r.repo, t("URL or path, for reference")));
     }
     if (r.type === "task") {
@@ -238,6 +243,26 @@ export class WorkEditor {
     row(t("Tags"), "flag", this.tagControl(r));
     clear(this.props, ...rows);
     this.updateDelegate();
+  }
+
+  /** 项目默认执行者（ADR 0044）：只用于还没派过的任务；选项来自已登记的执行器与引擎。 */
+  private defaultTargetControl(project: WorkProject): HTMLElement {
+    const current = project.default_target;
+    const button = h("button", { type: "button", class: `prop-btn${current ? "" : " placeholder-value"}`, title: t("New tasks in this project are delegated here until someone picks another agent.") },
+      icon("bot"), h("span", {}, current ?? t("None")));
+    button.addEventListener("click", async () => {
+      try {
+        const targets = engineTargets(await this.client.runtimes());
+        const items = [{ value: "", label: t("No default agent"), selected: !current },
+          ...(current && !targets.some(x => x.target === current) ? [{ value: current, label: t("{0} (not registered)", current), selected: true, icon: icon("alert") }] : []),
+          ...targets.map(x => ({ value: x.target, label: x.label, selected: x.target === current, icon: icon("bot") }))];
+        openMenu(button, items, value => {
+          if ((value || undefined) === current) return;
+          void this.patch({ default_target: value || null }, button, value ? t("Default agent set to {0}", value) : t("Default agent cleared"));
+        });
+      } catch (cause) { this.showFailure(cause); }
+    });
+    return button;
   }
 
   // ───────────── 结构：父任务、前置、标签（ADR 0039） ─────────────
@@ -634,7 +659,8 @@ export class WorkEditor {
       if (!this.active || this.root.closest("[hidden]")) return;
       const fixed = stage?.kind === "agent" ? stage.agent : undefined;
       const options = fixed ? [[fixed, targets.find(x => x.target === fixed)?.label ?? fixed] as [string, string]] : targets.map(x => [x.target, x.label] as [string, string]);
-      const preferred = fixed ?? targets.find(x => x.online)?.target ?? "";
+      const suggested = task.next_target?.target;
+      const preferred = fixed ?? (suggested && targets.some(x => x.target === suggested) ? suggested : targets.find(x => x.online)?.target) ?? "";
       const target = select("dispatch-target", fixed ? options : [["", t("Choose a runtime and engine")], ...options], preferred);
       target.required = true; target.disabled = !!fixed;
       const formId = `dispatch-${newRequestId()}`, error = h("div", { role: "alert" });
