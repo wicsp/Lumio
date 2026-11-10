@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Id } from "./common.ts";
+import { Id, Sha256, Timestamp } from "./common.ts";
 import { Citekey } from "./entities.ts";
 
 /**
@@ -70,6 +70,7 @@ export const NoteDetail = z.strictObject({
   note: NoteRef,
   frontmatter: z.record(z.string(), z.unknown()),
   body: z.string(),
+  revision: Sha256.optional().describe("File revision for versioned AI note updates"),
 });
 
 export type NoteRef = z.infer<typeof NoteRef>;
@@ -79,3 +80,16 @@ export type Link = z.infer<typeof Link>;
 export type LinksResult = z.infer<typeof LinksResult>;
 export type NoteDetail = z.infer<typeof NoteDetail>;
 export type CheckResult = z.infer<typeof CheckResult>;
+
+/** A resource anchor exposes only the metadata the caller can see. */
+export const KnowledgeReferenceCount = z.number().int().nonnegative();
+export const ResourceSummary = z.discriminatedUnion("status", [
+  z.strictObject({
+    id: Id, status: z.literal("visible"), title: z.string(),
+    parent: Id.optional().describe("Conversation, task or job containing the anchor"),
+    timestamp: Timestamp.optional(),
+    knowledge_references: KnowledgeReferenceCount.optional(),
+  }),
+  z.strictObject({ id: Id, status: z.enum(["trashed", "deleted", "unavailable"]) }),
+]);
+export type ResourceSummary = z.infer<typeof ResourceSummary>;

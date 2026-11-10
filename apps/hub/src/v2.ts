@@ -1,5 +1,5 @@
 import { text as msg } from "./messages.ts";
-import { KnowledgeGraph, KnowledgeGraphArgs, AgentInfo, AgentTokenRequest, AgentRevokeRequest, AssistantChatRequest, WorkCommandRequest, ExecutionRoutineCommandRequest, RequestId, AssistantToolCall, capability, ExecutionRoutine, PlanTemplate, WorkCommandResult, type AssistantEvent, KnowledgeDeleteRequest, AssistantConversationDeleteRequest, TrashListArgs, TrashPurgeRequest, TrashRestoreRequest } from "@lumio/schema";
+import { Id, KnowledgeAiNoteCommand, KnowledgeAiNoteResult, ResourceSummary, KnowledgeGraph, KnowledgeGraphArgs, AgentInfo, AgentTokenRequest, AgentRevokeRequest, AssistantChatRequest, WorkCommandRequest, ExecutionRoutineCommandRequest, RequestId, AssistantToolCall, capability, ExecutionRoutine, PlanTemplate, WorkCommandResult, type AssistantEvent, KnowledgeDeleteRequest, AssistantConversationDeleteRequest, TrashListArgs, TrashPurgeRequest, TrashRestoreRequest } from "@lumio/schema";
 import { AssistantError } from "@lumio/assistant";
 import { WorkError } from "@lumio/work";
 import type { BusinessModules } from "./modules.ts";
@@ -9,6 +9,8 @@ import type { authorize } from "./authorize.ts";
 import { handleArtifacts } from "./artifacts.ts";
 
 export const V2_ROUTES = [
+  { operation: "resource.read", method: "GET", pattern: /^\/v2\/resources\/([^/]+)$/, path: "/v2/resources/<id>" },
+  { operation: "knowledge.ai-note", method: "POST", pattern: /^\/v2\/knowledge\/ai-note-commands$/, path: "/v2/knowledge/ai-note-commands" },
   { operation: "knowledge.graph", method: "GET", pattern: /^\/v2\/knowledge\/graph$/, path: "/v2/knowledge/graph" },
   { operation: "knowledge.delete", method: "DELETE", pattern: /^\/v2\/knowledge\/notes\/([a-z]+_[0-9A-HJKMNP-TV-Z]{26})$/, path: "/v2/knowledge/notes/<id>" },
   { operation: "assistant.delete", method: "DELETE", pattern: /^\/v2\/assistant\/conversations\/(conv_[0-9A-HJKMNP-TV-Z]{26})$/, path: "/v2/assistant/conversations/<id>" },
@@ -65,12 +67,30 @@ export function moduleError(cause: unknown): HubError | undefined {
 export async function handleV2(request: Request, server: Bun.Server<undefined>, route: V2Route, identity: Identity, store: HubStore,
   modules: BusinessModules, decide: typeof authorize, now = new Date()): Promise<Response> {
   let decision = decide(identity.actor, { operation: route.operation,
-    includePrivate: ["execution.read", "knowledge.graph"].includes(route.operation) && new URL(request.url).searchParams.get("include_private") === "true" });
+    includePrivate: ["resource.read", "execution.read", "knowledge.graph"].includes(route.operation) && new URL(request.url).searchParams.get("include_private") === "true" });
   let execution = "applied";
   let audited = false;
   try {
     if (decision.result !== "allow") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: decision.result === "deny" ? decision.reason : msg("v2.approval_required") });
     const url = new URL(request.url), id = route.pattern.exec(url.pathname)?.[1];
+    if (route.operation === "resource.read") {
+      const resource = Id.safeParse(id);
+      const privateValue = url.searchParams.get("include_private"), includePrivate = privateValue === "true";
+      if (!resource.success || (privateValue !== null && !["true", "false"].includes(privateValue)))
+        throw new HubError("INVALID", { key: "capability.invalid", args: [] });
+      const summary = await modules.resources.resolve(resource.data, identity, { includePrivate });
+      const result = summary.status === "visible" && identity.actor.role === "human" && /^(conv|task)_/.test(summary.id)
+        ? { ...summary, knowledge_references: await modules.resources.count(summary.id, identity, includePrivate) }
+        : summary;
+      return Response.json(ResourceSummary.parse(result), { headers: { "Cache-Control": "no-store" } });
+    }
+    if (route.operation === "knowledge.ai-note") {
+      const parsed = KnowledgeAiNoteCommand.safeParse(await json(request));
+      if (!parsed.success) throw new HubError("INVALID", { key: "capability.invalid", args: [] });
+      audited = true;
+      const result = await modules.capabilities.execute(parsed.data.operation.op, parsed.data.operation.args, identity, parsed.data.request_id);
+      return Response.json(KnowledgeAiNoteResult.parse(result.result), { status: parsed.data.operation.op.endsWith(".create") ? 201 : 200 });
+    }
     if (route.operation === "knowledge.graph") {
       if (identity.actor.role !== "human") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] });
       const raw = Object.fromEntries([...url.searchParams].map(([key, value]) => [key, value === "true" ? true : value === "false" ? false : value]));
@@ -99,7 +119,8 @@ export async function handleV2(request: Request, server: Bun.Server<undefined>, 
       if (route.operation === "assistant.delete") {
         const input = AssistantConversationDeleteRequest.safeParse(body);
         if (!input.success) throw invalid();
-        const result = trash.deleteConversation(id!, input.data.request_id, identity);
+        const count = await modules.resources.count(id!, identity);
+        const result = trash.deleteConversation(id!, input.data.request_id, identity, count);
         audited = true;
         return Response.json(result);
       }
@@ -176,11 +197,22 @@ export async function handleV2(request: Request, server: Bun.Server<undefined>, 
       }
       if (commandDecision.result !== "allow") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: commandDecision.result === "deny" ? commandDecision.reason : msg("v2.approval_required") });
       if (capability(operation.op)) return respond((await modules.capabilities.execute(operation.op, operation.args, identity, request_id)).result);
+      const receipt = operation.op === "work.task.delete" && identity.actor.role === "human"
+        ? modules.workStore.receipt(identity.actor.id, request_id)?.result : undefined;
+      const referenceCount = operation.op === "work.task.delete" && identity.actor.role === "human"
+        && !(receipt?.kind === "trashed" && receipt.knowledge_references !== undefined)
+        ? await modules.resources.count(operation.args.task, identity) : undefined;
       const result = store.db.transaction(() => {
         const value = route.operation === "work.command" ? modules.workCommands.execute(WorkCommandRequest.parse(body), identity) : modules.routines.command(body, identity.actor.id);
-        store.audit(identity, route.operation, decision.result, undefined, "applied"); return value;
+        store.audit(identity, route.operation, decision.result, undefined, "applied");
+        if (referenceCount !== undefined && "kind" in value && value.kind === "trashed" && value.knowledge_references === undefined) {
+          modules.workStore.saveTrashReferenceCount(identity.actor.id, request_id, referenceCount);
+          return { ...value, knowledge_references: referenceCount };
+        }
+        return value;
       })();
-      audited = true; return respond(result);
+      audited = true;
+      return respond(result);
     }
     const read = async (name: string, args: Record<string, unknown>) => Response.json((await modules.capabilities.execute(name, args, identity)).result);
     if (route.operation === "execution.read" && url.pathname.startsWith("/v2/execution/jobs")) {

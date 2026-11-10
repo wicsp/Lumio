@@ -76,6 +76,7 @@ export const en = {
   "Next validation": "Next validation",
 
   "knowledge.no_vault": "Configure a knowledge directory on this Hub before creating notes.",
+  "knowledge.ai_note_source_unavailable": "One or more AI note sources are unavailable to the caller.",
   "knowledge.invalid": "Check the title, required paper fields, URL and BibTeX. No note was created by this attempt.",
   "knowledge.sensitive": "Remove sensitive information (keys or card numbers) before saving.",
   "knowledge.paper_input": "Enter an arXiv ID, DOI, or an arxiv.org / doi.org link.",
@@ -959,6 +960,7 @@ export const zh: typeof en = {
   "Next validation": "下一步验证",
 
   "knowledge.no_vault": "请先为 Hub 配置知识目录，再创建笔记。",
+  "knowledge.ai_note_source_unavailable": "调用者无法查看 AI 笔记的一项或多项来源。",
   "knowledge.invalid": "请检查标题、论文必填字段、链接和 BibTeX。本次尝试未创建笔记。",
   "knowledge.sensitive": "请先移除密钥或疑似卡号等敏感信息，再保存。",
   "knowledge.paper_input": "请输入 arXiv 编号、DOI，或 arxiv.org / doi.org 链接。",

@@ -1,3 +1,4 @@
+import { KnowledgeReferenceCount } from "./query.ts";
 /**
  * 删除与回收站（ADR 0038）。删除即移入回收站，30 天后由 Hub 永久删除；只有人可以删除、恢复、彻底删除。
  *
@@ -43,7 +44,7 @@ export const KnowledgeDeleteRequest = z.strictObject({ request_id: RequestId, ex
 export const AssistantConversationDeleteRequest = z.strictObject({ request_id: RequestId });
 
 /** 删除笔记或对话的结果。 */
-export const TrashResult = z.strictObject({ request_id: RequestId, item: TrashItem });
+export const TrashResult = z.strictObject({ request_id: RequestId, item: TrashItem, knowledge_references: KnowledgeReferenceCount.optional() });
 
 /** `POST /v2/trash/<id>/restore`：对象回到删除前的状态。 */
 export const TrashRestoreRequest = z.strictObject({ request_id: RequestId });

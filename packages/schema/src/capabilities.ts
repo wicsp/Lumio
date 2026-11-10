@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { DerivedFrom, Id, Timestamp, idOf } from "./common.ts";
+import { DerivedFrom, Id, RequestId, Timestamp, idOf } from "./common.ts";
 import { ExecutionRoutineInfo } from "./execution.ts";
 import { ExecutionTarget, ExecutionTargetListArgs, Job, JobStatus } from "./job.ts";
 import { Proposal } from "./proposal.ts";
@@ -50,7 +50,6 @@ export const KnowledgeLinksArgs = z.strictObject({ ref: NoteReference });
  * Hub 填写 id、时间、generated_by，并把调用方所在的对话消息或 Job 加进 derived_from；
  * derived_from 中有调用方不可见的资源时拒绝。
  *
- * K4-1 只定义参数与结果；K4-3 实现 Hub 与 CLI 时再登记进 CAPABILITIES（名称与说明见下方 AI_NOTE_CAPABILITIES）。
  */
 const AiNoteTitle = z.string().trim().min(1).max(500);
 const AiNoteBody = z.string().max(500000).describe("Markdown body. Link other notes with [[name]]; link conversations, tasks or runs with [text](lumio:<id>)");
@@ -82,6 +81,15 @@ export const KnowledgeAiNoteResult = z.strictObject({
   note: NoteRef,
   revision: KnowledgeRevision.describe("SHA-256 of the file after writing; pass as expected_revision next time"),
 });
+
+export const KnowledgeAiNoteCommand = z.strictObject({
+  request_id: RequestId,
+  operation: z.discriminatedUnion("op", [
+    z.strictObject({ op: z.literal(AI_NOTE_CAPABILITY_NAMES[0]), args: KnowledgeAiNoteCreateArgs }),
+    z.strictObject({ op: z.literal(AI_NOTE_CAPABILITY_NAMES[1]), args: KnowledgeAiNoteUpdateArgs }),
+  ]),
+});
+export type KnowledgeAiNoteCommand = z.infer<typeof KnowledgeAiNoteCommand>;
 
 export const WorkTaskListArgs = z.strictObject({
   readiness: z.enum(["ready", "blocked"]).optional(),
@@ -117,7 +125,7 @@ interface CapabilityDef<A extends z.ZodType, R extends z.ZodType> {
 }
 const define = <A extends z.ZodType, R extends z.ZodType>(def: CapabilityDef<A, R>) => def;
 
-/** 写入类能力的参数直接复用 Work 命令的 args，结果是 WorkCommandResult。 */
+/** Work 写入能力直接复用 Work 命令的参数和结果。 */
 export const CAPABILITIES = [
   define({ name: "knowledge.note.search", kind: "read", args: KnowledgeSearchArgs, result: SearchResult,
     summary: { en: "Search the user's notes (papers, ideas, sources). Snippets are short; read a hit with knowledge.note.show.", zh: "搜索用户的笔记（论文、想法、资料）。片段很短，需要时用 knowledge.note.show 读全文。" } }),
@@ -125,6 +133,10 @@ export const CAPABILITIES = [
     summary: { en: "Read one note in full.", zh: "读取一篇笔记的全文。" } }),
   define({ name: "knowledge.note.links", kind: "read", args: KnowledgeLinksArgs, result: LinksResult,
     summary: { en: "List a note's outgoing and incoming links.", zh: "列出一篇笔记的出链与反链。" } }),
+  define({ name: AI_NOTE_CAPABILITY_NAMES[0], kind: "write", args: KnowledgeAiNoteCreateArgs, result: KnowledgeAiNoteResult,
+    summary: AI_NOTE_SUMMARIES[AI_NOTE_CAPABILITY_NAMES[0]] }),
+  define({ name: AI_NOTE_CAPABILITY_NAMES[1], kind: "write", args: KnowledgeAiNoteUpdateArgs, result: KnowledgeAiNoteResult,
+    summary: AI_NOTE_SUMMARIES[AI_NOTE_CAPABILITY_NAMES[1]] }),
   define({ name: "work.task.list", kind: "read", args: WorkTaskListArgs, result: z.array(WorkTask),
     summary: { en: "List tasks with derived blocked_by and next_target; filter by readiness (ready or blocked), tag, parent, project, status or text.", zh: "列出任务与推导的 blocked_by、next_target（下一次委派给谁），可按可开工/被阻塞、标签、父任务、项目、状态或文字筛选。" } }),
   define({ name: "work.task.show", kind: "read", args: WorkTaskShowArgs, result: WorkTaskDetail,

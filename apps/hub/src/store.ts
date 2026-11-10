@@ -74,6 +74,11 @@ export class HubStore {
 
   actors(): Actor[] { return this.db.query("SELECT * FROM actors ORDER BY created, id").all().map((row) => Actor.parse(row)); }
 
+  recoveryIdentity(id: string): Identity {
+    const actor = Actor.parse(this.db.query("SELECT * FROM actors WHERE id=?").get(id));
+    return { actor, label: "knowledge-recovery" };
+  }
+
   createToken(label: string, actorName: string): string {
     if (!label) throw new HubError("INVALID", { key: "store.token_label_must_not_be_empty", args: [] });
     const row = this.db.query("SELECT * FROM actors WHERE name=?").get(actorName);

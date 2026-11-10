@@ -43,16 +43,19 @@ export class KnowledgeEditing {
                 return this.edits.update(identity.actor.id, id, input, {
                     now, validate: bytes => { if (containsSecret(bytes.toString("utf8")))
                         throw new HubError("INVALID", { key: "knowledge.sensitive", args: [] }, { reason: "sensitive-content" }); },
-                    finalize: async (note, bytes) => { await updateIndex(this.config.vault, options); const git = await openVaultGit(this.config.vault); if (git)
+                    finalize: async (note, bytes, writer) => { await updateIndex(this.config.vault, options); const git = await openVaultGit(this.config.vault); if (git)
                         try {
                             await git.add(note.note.path, bytes);
-                            await git.commit([note.note.path], "lumio: edit knowledge note", { "Lumio-Actor": identity.actor.id });
+                            await git.commit([note.note.path], "lumio: edit knowledge note", { "Lumio-Actor": writer });
                         }
                         catch (cause) {
                             this.issue(note.note.path, msg("knowledge.commit_failed"));
                             throw cause;
                         } },
-                    audit: (note, actor) => this.store.audit(identity, operation, "allow", undefined, actor === identity.actor.id ? `updated:${note.note.id}` : `recovered:${note.note.id}:${actor}`)
+                    audit: (note, writer) => {
+                        const original = writer === identity.actor.id ? identity : this.store.recoveryIdentity(writer);
+                        this.store.audit(original, operation, "allow", undefined, `${writer === identity.actor.id ? "updated" : "recovered"}:${note.note.id}`);
+                    }
                 });
             });
             return Response.json(result);

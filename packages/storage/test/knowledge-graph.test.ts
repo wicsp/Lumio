@@ -59,7 +59,7 @@ test("graph reads only the existing snapshot and preserves its generation time e
   expect(next.nodes.some(n => n.title === "Updated synthetic island")).toBe(true);
   expect(Date.parse(next.generated_at)).toBeGreaterThanOrEqual(Date.parse(first.generated_at));
 });
-test("existing version 3 indexes gain timestamp metadata without rebuilding unchanged notes", async () => {
+test("existing indexes gain timestamp metadata without rebuilding unchanged notes", async () => {
   const db = new Database(join(stateDir, "index.sqlite"));
   db.exec("ALTER TABLE metadata DROP COLUMN updated_at"); db.close();
   await updateIndex(vault, { stateDir, parse: () => { throw Error("unchanged note should not be reparsed"); } });

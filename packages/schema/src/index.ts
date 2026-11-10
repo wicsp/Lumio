@@ -39,7 +39,7 @@ import {
   AssistantConfigUpdate, AssistantConfigView,
 } from "./assistant.ts";
 import { AgentInfo, AgentRevokeRequest, AgentTokenIssued, AgentTokenRequest, JobAccess } from "./access.ts";
-import { CapabilityChange } from "./capabilities.ts";
+import { CapabilityChange, KnowledgeAiNoteCommand } from "./capabilities.ts";
 import { HandoffPlan, PlanRun, PlanTemplate } from "./plan.ts";
 import { NotificationEvent, PushDevice, PushDeviceUpdate, PushPublicKey, PushSubscriptionInput, PushTestResult } from "./notifications.ts";
 import { ExecutionRoutine, ExecutionRoutineCommandRequest, ExecutionRoutineInfo } from "./execution.ts";
@@ -54,7 +54,7 @@ import { Operation } from "./operation.ts";
 import { PrivilegedApproval, PrivilegedReport, PrivilegedStatus } from "./privileged.ts";
 import { CliConfig, ClientInvite, ClientInviteRequest, ClientJoin, ClientJoinRequest, HubSigningKey, RuntimeInvite, RuntimeInviteRequest, RuntimeJoin, RuntimeJoinRequest } from "./setup.ts";
 import { Proposal } from "./proposal.ts";
-import { CheckResult, LinksResult, NoteDetail, SearchResult } from "./query.ts";
+import { CheckResult, LinksResult, NoteDetail, ResourceSummary, SearchResult } from "./query.ts";
 
 /** 需要导出为 JSON Schema 的全部契约，键名即输出文件名。 */
 import { KnowledgeTemplateRequest, KnowledgeTemplateResult, PaperResolveRequest, PaperResolveResult, KnowledgeCreateRequest, KnowledgeCreateResult } from "./knowledge-authoring.ts";
@@ -93,6 +93,8 @@ export const CONTRACTS = {
   post: Post,
   asset: Asset,
   "ai-note": AiNote,
+  "ai-note-command": KnowledgeAiNoteCommand,
+  "resource-summary": ResourceSummary,
   job: Job,
   "job-spec": JobSpec,
   "job-result": JobResult,

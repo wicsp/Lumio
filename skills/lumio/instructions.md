@@ -17,6 +17,8 @@ For a personal installation, run commands with `LUMIO_CONFIG_FILE` pointing to `
 
 Always add `--json`. Each successful command returns one JSON value matching its capability's result contract. Work writes return a WorkCommandResult, including the updated task or project and revision. Use stable IDs from list/create results. Use `--request-id <unique-id>` on writes when retrying an uncertain request; reuse it for that request only. Fetch the current revision before updating; a conflict requires rereading and reconsidering the change.
 
+For AI notes, pass Markdown with `--file` and JSON arrays with `--tags` or `--sources`. Before updating, read the note with `lumio show <id> --json` and pass its `revision` using `--revision`. The Hub adds the current conversation message or job when available.
+
 <!-- commands -->
 
 Additional Work commands (generated from the same CLI definitions):
