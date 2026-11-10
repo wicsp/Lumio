@@ -1,5 +1,5 @@
 import { homedir,tmpdir } from "node:os";
-import { test, expect } from "bun:test";
+import { test, expect, spyOn } from "bun:test";
 import { mkdtemp, rm, mkdir, readFile, copyFile, chmod, stat,realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { startHub } from "../apps/hub/src/server.ts";
@@ -7,6 +7,7 @@ import { readConfig } from "../apps/hub/src/config.ts";
 import { createClient } from "../packages/api-client/src/index.ts";
 import { NativeRuntimeCommand, NativeSession, WorkCommandResult, type NativeRuntimeMessage } from "../packages/schema/src/index.ts";
 import { NativeManager } from "../apps/runtime/src/native/manager.ts";
+import { NativeRpc } from "../apps/runtime/src/native/rpc.ts";
 import { NativeLocalStore } from "../apps/runtime/src/native/store.ts";
 import { ConnectionAuth } from "../apps/runtime/src/native/connection-auth.ts";
 async function until<T>(get: () => Promise<T> | T, predicate: (v: T) => boolean, timeout = 10000) { const end = Date.now() + timeout; let last: T; while (Date.now() < end) {
@@ -324,3 +325,57 @@ test("connection sign-in authorizes two isolated chats, survives rename, and res
         expect((await f.client.nativeSession(a.id)).quarantined).toBe(true);
     } finally { await f.close(); }
 }, 25000);
+
+test("a turn arriving during idle eviction resumes the same native thread", async () => {
+    const f = await fixture({ connectionAuth: true });
+    const release = Promise.withResolvers<void>();
+    const stopping = Promise.withResolvers<void>();
+    const setTimer = globalThis.setTimeout;
+    let expireIdle: (() => void) | undefined;
+    const timers = spyOn(globalThis, "setTimeout").mockImplementation(new Proxy(setTimer, {
+        apply(target, receiver, args) {
+            const [callback, delay, ...callbackArgs] = args;
+            if (delay === 5 * 60_000) expireIdle = () => callback(...callbackArgs);
+            return Reflect.apply(target, receiver, args);
+        },
+    }));
+    const stopRpc = NativeRpc.prototype.stop;
+    const stop = spyOn(NativeRpc.prototype, "stop").mockImplementationOnce(async function (this: NativeRpc) {
+        stopping.resolve();
+        await release.promise;
+        return stopRpc.call(this);
+    });
+    const receive = spyOn(f.manager, "receive");
+    let pending: ReturnType<typeof f.client.assistantChat> | undefined;
+    try {
+        await f.client.nativeConnectionAction(f.connection.id, { action: "login", request_id: crypto.randomUUID() });
+        await until(() => f.client.nativeConnection(f.connection.id), v => v.state === "ready");
+        const session = await f.create();
+        expect(expireIdle).toBeDefined();
+        timers.mockRestore();
+        expireIdle!();
+        await stopping.promise;
+        pending = f.client.assistantChat({
+            request_id: crypto.randomUUID(),
+            conversation: session.conversation,
+            message: "RECALL",
+        });
+        await until(() => receive.mock.calls.some(([command]) => command.type === "turn"), Boolean);
+        expect(f.store.get(session.id)?.view.state).toBe("ready");
+        release.resolve();
+        expect((await pending).turn.status).toBe("done");
+        const resumed = await f.client.nativeSession(session.id);
+        expect(resumed.view.state).toBe("ready");
+        expect(resumed.view.thread).toBe(session.view.thread);
+        expect(resumed.view.instance).not.toBe(session.view.instance);
+        const saved = JSON.parse(await readFile(join(f.local, "native", session.id, "codex/fixture-state.json"), "utf8"));
+        expect(saved.calls).toBe(1);
+    } finally {
+        release.resolve();
+        await pending?.catch(() => {});
+        timers.mockRestore();
+        stop.mockRestore();
+        receive.mockRestore();
+        await f.close();
+    }
+}, 20_000);

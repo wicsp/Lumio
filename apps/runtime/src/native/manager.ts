@@ -51,6 +51,8 @@ const CONTROL =
 export class NativeManager {
   private clients = new Map<string, Client>();
   private chains = new Map<string, Promise<unknown>>();
+  // Retain timer evictions so a turn sent against the last ready view can resume.
+  private idleEvictions = new Map<string, Promise<void>>();
   private stopped = false;
   constructor(
     readonly store: NativeLocalStore,
@@ -95,11 +97,12 @@ export class NativeManager {
     }
     // Control requests serialize per session, while an in-flight turn completes through events.
     const id = c.type === "open" ? c.session.id : c.session;
-    const prior = this.chains.get(id) ?? Promise.resolve();
+    const prior = this.chains.get(id) ?? this.idleEvictions.get(id) ?? Promise.resolve();
     const next = prior
       .catch(() => {})
       .then(async () => {
         if (this.stopped) return;
+        if (c.type !== "turn") this.idleEvictions.delete(id);
         if (c.type === "open") await this.open(c);
         else if (c.type === "turn") await this.turn(c);
         else await this.action(id, c.input, c.command);
@@ -364,8 +367,15 @@ export class NativeManager {
     clearTimeout(c.idle);
     if (!this.record(id).session.connection_auth) return;
     c.idle = setTimeout(() => {
-      if (this.clients.get(id) !== c || c.turn || this.chains.has(id) || this.record(id).view.state !== "ready") return;
-      void this.closeProcess(id).then(() => this.state(id, { state: "offline", stopped: true }));
+      if (
+        this.stopped || this.clients.get(id) !== c || c.closing || c.turn ||
+        this.chains.has(id) || this.record(id).view.state !== "ready"
+      ) return;
+      const eviction = this.closeProcess(id).then(stopped => {
+        if (stopped) this.state(id, { state: "offline", stopped: true });
+        else this.state(id, { state: "unknown", stopped: false, error: "native.unknown" });
+      });
+      this.idleEvictions.set(id, eviction);
     }, 5 * 60000);
   }
   private verifyPolicy(v: Wire, id: string) {
@@ -392,10 +402,22 @@ export class NativeManager {
     if (JSON.stringify(tools) !== JSON.stringify(expected)) throw new NativeError("native.tools_mismatch");
   }
   private async turn(v: Turn) {
-    const r = this.record(v.session),
-      c = this.clients.get(v.session);
-    if (!c || r.view.state !== "ready" || r.turn) throw new NativeError("native.not_ready");
+    let r = this.record(v.session);
+    const evicted = this.idleEvictions.has(v.session);
+    if (evicted && r.view.state === "unknown") {
+      this.emit(v.session, { type: "complete", status: "unknown", text: "", error: "native.unknown" }, v.turn);
+      return;
+    }
+    const resume = evicted && r.view.state === "offline";
+    if (r.turn || (!resume && r.view.state !== "ready")) throw new NativeError("native.not_ready");
     if (r.contextRevision && r.contextRevision !== v.context_revision) throw new NativeError("native.context_expired");
+    if (resume) {
+      this.idleEvictions.delete(v.session);
+      await this.launch(v.session);
+      r = this.record(v.session);
+    }
+    const c = this.clients.get(v.session);
+    if (!c || r.view.state !== "ready") throw new NativeError("native.not_ready");
     const model = r.view.models.find((m) => m.id === v.model);
     if (!model || (v.effort && !model.efforts.includes(v.effort))) throw new NativeError("native.unsupported_model");
     if (!(await this.account(v.session, c))) throw new NativeError("native.login_required");
@@ -647,8 +669,9 @@ export class NativeManager {
     clearTimeout(c.stopping);
     clearTimeout(c.idle);
     if (c.pending) clearTimeout(c.pending.timer);
-    await c.rpc.stop();
+    const stopped = await c.rpc.stop();
     this.clients.delete(id);
+    return stopped;
   }
   private async action(id: string, a: NativeAction, command: string) {
     if (!this.store.command(command, id, a.action)) return;
@@ -725,8 +748,12 @@ export class NativeManager {
     }
   }
   async disconnect() {
+    const evictions = new Map(this.idleEvictions);
+    this.idleEvictions.clear();
     await Promise.all(
       [...this.clients].map(async ([id, c]) => {
+        const eviction = evictions.get(id);
+        if (eviction) return eviction;
         if (c.turn) await this.unknown(id, c);
         else {
           await this.closeProcess(id);
