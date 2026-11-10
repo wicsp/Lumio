@@ -255,7 +255,9 @@ export class KnowledgePane {
     const ai = note.note.type === "ai-note";
     const model = ai && typeof fm.model === "string" ? fm.model : "";
     clear(this.detail, h("article", { class: "reader" },
-      h("div", { class: "detail-crumbs" }, h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": t("Back to list"), onclick: async () => { if (!(await this.beforeLeave())) return; this.clearWriter(); this.selected = undefined; markSelected(this.results, undefined); this.showPlaceholder(); } }, icon("back"))),
+      h("div", { class: "detail-crumbs" }, h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": t("Back to list"), onclick: async () => { if (!(await this.beforeLeave())) return; this.clearWriter(); this.selected = undefined; markSelected(this.results, undefined); this.showPlaceholder(); } }, icon("back")),
+        note.note.id && h("div", { class: "detail-actions" },
+          h("button", { type: "button", class: "icon-btn", title: t("Copy ID"), "aria-label": t("Copy ID"), onclick: () => void this.copyId(note.note.id!) }, icon("link")))),
       h("h1", { class: "reader-title" }, note.note.title),
       h("div", { class: "reader-meta" }, h("span", { class: "pill" }, kindLabel), attribution && h("span", {}, attribution), sourceUrl && h("a", { href: sourceUrl, target: "_blank", rel: "noopener noreferrer nofollow", class: "btn btn-small" }, icon("external"), t("Open source")), note.note.citekey && h("span", { class: "pill" }, note.note.citekey),
         h("button", { type: "button", class: "btn btn-small", title: t("Show how this note links to others"), onclick: () => this.openGraph(note.note.id ?? note.note.path, note.note.title) }, icon("graph"), t("Graph"))),
@@ -267,6 +269,18 @@ export class KnowledgePane {
     this.outlineEntries = () => renderedOutline(this.detail, body); this.outline.refresh();
     if(editableId(note.note))void this.enableEditing(note);
     else this.detail.querySelector("article")?.append(h("p",{class:"field-hint"},t("This note is read-only here. Check its metadata or edit it in your external editor.")));
+  }
+  private async copyId(id: string): Promise<void> {
+    try {
+      if (!navigator.clipboard?.writeText) {
+        toast(t("Couldn't copy ID. Check clipboard permissions and try again."), "error");
+        return;
+      }
+      await navigator.clipboard.writeText(id);
+      toast(t("ID copied"));
+    } catch {
+      toast(t("Couldn't copy ID. Check clipboard permissions and try again."), "error");
+    }
   }
   /** 来源（derived_from，ADR 0051）：ID 经 Hub 查可见标题，URL 直接打开。 */
   private sources(value: unknown): HTMLElement | undefined {

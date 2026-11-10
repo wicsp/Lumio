@@ -664,6 +664,7 @@ export const ZH: Record<string, string> = {
   "Help me prioritize what to work on today": "帮我把今天要推进的任务排个优先级",
   "How should I organize this week's experiment results?": "这周的实验结果应该怎么整理？",
   "ID copied": "已复制编号",
+  "Couldn't copy ID. Check clipboard permissions and try again.": "无法复制编号。请检查剪贴板权限后重试。",
   "Idea": "想法",
   "Image: {0}": "图片：{0}",
   "In progress": "进行中",
