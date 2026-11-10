@@ -1,5 +1,10 @@
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
+import { ApiError } from "@lumio/schema";
+
+class KnownToolError extends Error {
+  constructor(readonly api: ApiError["error"]) { super(api.code); }
+}
 /** A credential-scoped thin adapter, never a human/runtime bearer. */
 export async function runNativeMCP(env: NodeJS.ProcessEnv = process.env) {
   const token = env.LUMIO_NATIVE_MCP_TOKEN,
@@ -7,8 +12,11 @@ export async function runNativeMCP(env: NodeJS.ProcessEnv = process.env) {
   if (!token || !url) throw new Error("Native MCP connection unavailable");
   const instance = randomUUID();
   const replies = new Map<string, string>();
-  const send = (id: unknown, result: unknown) =>
-    process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\n");
+  const send = (id: unknown, result: unknown, cache = false) => {
+    const reply = JSON.stringify({ jsonrpc: "2.0", id, result }) + "\n";
+    if (cache) replies.set(JSON.stringify(id), reply);
+    process.stdout.write(reply);
+  };
   const post = async (path: string, body?: unknown) => {
     const r = await fetch(url + path, {
       method: body ? "POST" : "GET",
@@ -17,7 +25,16 @@ export async function runNativeMCP(env: NodeJS.ProcessEnv = process.env) {
       redirect: "error",
       signal: AbortSignal.timeout(60000),
     });
-    if (!r.ok) throw new Error("Not authorized or outcome unavailable");
+    if (!r.ok) {
+      const parsed = ApiError.safeParse(await r.json().catch(() => undefined));
+      if (parsed.success) {
+        const error = parsed.data.error;
+        if ((error.code === "CONFLICT" && ["revision_conflict", "request_conflict", "note_recovery_conflict", "file_exists"].includes(error.reason ?? ""))
+          || (error.code === "FORBIDDEN" && error.reason === "source-unavailable"))
+          throw new KnownToolError(error);
+      }
+      throw new Error("Not authorized or outcome unavailable");
+    }
     return (await r.json()) as Record<string, unknown>;
   };
   createInterface({ input: process.stdin }).on("line", (line) => {
@@ -52,11 +69,12 @@ export async function runNativeMCP(env: NodeJS.ProcessEnv = process.env) {
           tool: m.params?.name,
           args: m.params?.arguments ?? {},
         });
-        const result = { content: [{ type: "text", text: JSON.stringify(body.result ?? null) }], isError: false };
-        const reply = JSON.stringify({ jsonrpc: "2.0", id: m.id, result }) + "\n";
-        replies.set(key, reply);
-        process.stdout.write(reply);
-      } catch {
+        send(m.id, { content: [{ type: "text", text: JSON.stringify(body.result ?? null) }], isError: false }, true);
+      } catch (cause) {
+        if (cause instanceof KnownToolError) {
+          send(m.id, { content: [{ type: "text", text: JSON.stringify(cause.api) }], isError: true }, true);
+          return;
+        }
         send(m.id, {
           content: [{ type: "text", text: "Tool unavailable or outcome unknown. Inspect Lumio; do not retry writes." }],
           isError: true,

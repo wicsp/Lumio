@@ -100,13 +100,13 @@ export class Trash {
     this.store.audit(identity, operation, "allow", undefined, "applied");
   }
 
-  deleteConversation(id: string, request: string, identity: Identity): TrashResult {
+  deleteConversation(id: string, request: string, identity: Identity, knowledgeReferences?: number): TrashResult {
     const actor = identity.actor.id, fingerprint = JSON.stringify(["delete-conversation", id]);
     const { result, applied } = this.store.db.transaction(() => {
       const previous = this.replay(actor, request, fingerprint);
       if (previous) return { result: TrashResult.parse(previous), applied: false };
       this.checkPendingRequest(actor, request);
-      const result = TrashResult.parse({ request_id: request, item: this.modules.assistant.trash(id, actor) });
+      const result = TrashResult.parse({ request_id: request, item: this.modules.assistant.trash(id, actor), knowledge_references: knowledgeReferences });
       this.receipt(actor, request, fingerprint, result, identity, "delete-conversation");
       return { result, applied: true };
     })();

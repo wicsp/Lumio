@@ -1,3 +1,4 @@
+import { AiNotes } from "./ai-notes.ts";
 import { KNOWLEDGE_ROUTES, KnowledgeAuthoring, type PaperFetch } from "./knowledge-authoring.ts";
 import { migrateTaskModel } from "@lumio/storage";
 import { withLanguage, errorMessage, text as msg } from "./messages.ts";
@@ -119,6 +120,8 @@ async function startHubInstance(config: HubConfig, options: {
         status: async () => ({ watching: false, last_full_sync: null, pending_files: 0, issues: [] }), stop: () => writes.drain(),
       };
     const watch = vaultWatch;
+    if (config.vault) modules.aiNotes = new AiNotes(config, store, modules.resources,
+      action => watch.exclusive(action), (path, message) => watch.issue(path, message), options.now ?? (() => new Date()));
     modules.trash = new Trash(config, store, modules, action => watch.exclusive(action), options.now ?? (() => new Date()), (path, message) => watch.issue(path, message));
     await modules.trash.sweep();
     modules.trash.start();

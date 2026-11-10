@@ -81,6 +81,9 @@ export class SqliteWorkStore implements WorkStore {
     return WorkTask.parse({ ...fields, schema_version: 3, type: "task", turn: JSON.parse(String(turn)), plan: plan ? JSON.parse(String(plan)) : undefined, tags: JSON.parse(String(row.tags)), references: JSON.parse(String(refs)),
       gpus: row.gpus === null ? undefined : JSON.parse(String(row.gpus)), dependencies });
   }
+  purgedTask(id: string): boolean {
+    return !!this.db.query("SELECT 1 FROM work_purged_tasks WHERE id=?").get(id);
+  }
   task(id: string): WorkTask | undefined { return this.readTask(this.db.query<Record<string, unknown>, [string]>("SELECT * FROM work_tasks WHERE id=? AND id NOT IN (SELECT id FROM work_purged_tasks)").get(id)); }
   tasks(): WorkTask[] {
     const dependencies = new Map<string, string[]>();
@@ -105,6 +108,10 @@ export class SqliteWorkStore implements WorkStore {
       const insert = this.db.query("INSERT INTO work_dependencies(task,dependency) VALUES (?,?)");
       for (const dependency of value.dependencies) insert.run(value.id, dependency);
     });
+  }
+  comment(id: string): WorkComment | undefined {
+    const row = this.db.query("SELECT * FROM work_comments WHERE id=?").get(id);
+    return row ? WorkComment.parse(row) : undefined;
   }
   comments(task: string): WorkComment[] {
     return WorkComment.array().parse(this.db.query("SELECT * FROM work_comments WHERE task=? ORDER BY rowid").all(task));
@@ -178,6 +185,10 @@ export class SqliteWorkStore implements WorkStore {
   receipt(actor: string, request: string): { operation: string; result: WorkCommandResult } | undefined {
     const row = this.db.query<{ operation: string; result: string }, [string, string]>("SELECT operation,result FROM work_requests WHERE actor=? AND request=?").get(actor, request);
     return row ? { operation: row.operation, result: WorkCommandResult.parse(JSON.parse(row.result)) } : undefined;
+  }
+  saveTrashReferenceCount(actor: string, request: string, count: number): void {
+    this.db.query(`UPDATE work_requests SET result=json_set(result,'$.knowledge_references',?)
+      WHERE actor=? AND request=? AND json_extract(result,'$.kind')='trashed'`).run(count, actor, request);
   }
   putReceipt(actor: string, request: string, operation: string, result: WorkCommandResult): void {
     const parsed = WorkCommandResult.parse(result);

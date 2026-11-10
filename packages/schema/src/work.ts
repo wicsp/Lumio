@@ -1,3 +1,4 @@
+import { KnowledgeReferenceCount } from "./query.ts";
 import { z } from "zod";
 import { AgentTarget, ID_PREFIXES, Id, RequestId, Revision, Timestamp, idOf } from "./common.ts";
 import { TASK_STATUSES } from "./entities.ts";
@@ -454,7 +455,7 @@ export const WorkCommandResult = z.discriminatedUnion("kind", [
   }),
   z.strictObject({ kind: z.literal("template"), template: PlanTemplate }),
   z.strictObject({ kind: z.literal("removed"), id: idOf("wft") }),
-  z.strictObject({ kind: z.literal("trashed"), item: TrashItem }),
+  z.strictObject({ kind: z.literal("trashed"), item: TrashItem, knowledge_references: KnowledgeReferenceCount.optional() }),
   // agent 的委派或流程需要人批准（ADR 0031 第 2 节）：没有执行，生成了这条提议（只给 ID，避免与提议契约互相引用）
   z.strictObject({ kind: z.literal("proposal"), proposal: idOf("prop") }),
 ]);

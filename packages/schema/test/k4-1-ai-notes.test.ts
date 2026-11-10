@@ -69,9 +69,9 @@ test("AI note capability arguments and results", () => {
   expect(KnowledgeAiNoteResult.parse({ note: { id: ain, type: "ai-note", title: "S", path: "ai/notes/S.md" }, revision }).revision).toBe(revision);
 });
 
-test("AI note capabilities have valid names and are not yet in the catalog (registered with K4-3)", () => {
+test("AI note capabilities have valid names and are registered in the catalog", () => {
   for (const name of AI_NOTE_CAPABILITY_NAMES) {
     expect(CapabilityName.safeParse(name).success).toBe(true);
-    expect((CAPABILITY_NAMES as readonly string[]).includes(name)).toBe(false);
+    expect((CAPABILITY_NAMES as readonly string[]).includes(name)).toBe(true);
   }
 });
