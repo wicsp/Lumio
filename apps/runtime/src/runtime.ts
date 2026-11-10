@@ -1,4 +1,5 @@
 import {runNativeChannel} from "./native/channel.ts";
+import { publishClaudeUsage } from "./claude-usage.ts";
 import { withLanguage, text as msg } from "./messages.ts";
 import { SudoGate } from "./sudo.ts";
 import { privateFile } from "./service.ts";
@@ -95,6 +96,9 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
   let archiving: Promise<void> | undefined;
   let deliveryFailure: unknown;
   let native:Promise<void>|undefined;
+  let claudeUsage: Promise<void> | undefined;
+  let nextClaudeUsage = 0;
+  const claudeSentAt = new Map<string, string>();
   try {
     await sudo.start();
     await executor.recover();
@@ -133,6 +137,10 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
           if (actor) plans.replace(sync.routines, actor, now());
         }
         backoff = Math.min(config.pollSeconds, 60);
+        if (!claudeUsage && Date.now() >= nextClaudeUsage) {
+          nextClaudeUsage = Date.now() + 15_000;
+          claudeUsage = publishClaudeUsage(config, fetcher, signal, claudeSentAt).catch(() => {}).finally(() => { claudeUsage = undefined; });
+        }
       } catch {
         if (signal.aborted) break;
         if (!disconnected) log(msg("runtime.hub_disconnected_retrying"));
@@ -151,6 +159,7 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
     await delivering;
     await archiving;
     await native;
+    await claudeUsage;
     queue.close();
   }
   if (deliveryFailure) throw deliveryFailure;

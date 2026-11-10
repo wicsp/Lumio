@@ -81,6 +81,7 @@ async function startHubInstance(config: HubConfig, options: {
   assistantFetch?: typeof fetch;
   paperFetch?: PaperFetch;
   pushFetch?: typeof fetch;
+  quotaFetch?: typeof fetch;
   assistantModel?: AssistantModel;
   assistantTools?: AssistantTool[];
 } = {}) {
@@ -164,6 +165,11 @@ async function startHubInstance(config: HubConfig, options: {
             if (!identity) throw new HubError("UNAUTHENTICATED", { key: "server.a_valid_bearer_token_is_required", args: [] });
           }
           if(url.pathname.startsWith("/v2/runtime/native")){const response=await modules!.native.channel(request,identity!);status=response.status;return response;}
+          if(url.pathname==="/v2/runtime/claude-usage"){const response=await modules!.native.usage.claude(request,identity!);status=response.status;return response;}
+          if(url.pathname==="/v2/ai/usage"||/^\/v2\/ai\/connections\/[^/]+\/usage\//.test(url.pathname)){
+            const response=await modules!.native.usage.human(request,identity!);
+            store.audit(identity!,"assistant.config","allow",undefined,"applied");status=response.status;return response;
+          }
           if(url.pathname.startsWith("/v2/ai/")||url.pathname.startsWith("/v2/assistant/native-sessions")){const response=await modules!.native.handle(request,identity!);store.audit(identity!,"assistant.config","allow",undefined,"applied");status=response.status;return response;}
           if (!route) throw new HubError("NOT_FOUND", { key: "server.endpoint_not_found", args: [] });
           const knowledgeRoute = KNOWLEDGE_ROUTES.find(item => item.operation === route.operation);

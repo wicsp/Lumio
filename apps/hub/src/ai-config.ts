@@ -118,6 +118,7 @@ export class AIConfigurationService {
     if (id && old?.owner !== owner) throw failure("profile_missing", "NOT_FOUND");
     if (!connection || connection.owner !== owner) throw failure("connection_missing", "NOT_FOUND");
     if (connection.kind === "typesafe-jev") throw failure("jev_chat_unsupported");
+    if (connection.kind === "claude-code-subscription") throw failure("engine_mismatch");
     if ((input.engine === "codex") !== (connection.kind === "codex-account")) throw failure("engine_mismatch");
     if (connection.kind === "codex-account" && input.thinking !== "default") throw failure("thinking_unsupported");
     if (input.effort && !/^[a-z]+$/.test(input.effort)) throw failure("effort_unsupported");

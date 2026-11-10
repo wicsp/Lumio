@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { NotificationEvent, PushDevice, PushPublicKey, PushTestResult, WorkCommandResult, WorkAttention, ApiError } from "@lumio/schema";
+import { NOTIFICATION_KINDS, NotificationEvent, PushDevice, PushPublicKey, PushTestResult, WorkCommandResult, WorkAttention, ApiError } from "@lumio/schema";
 import { startHub } from "../src/server.ts";
 import { HubStore } from "../src/store.ts";
 import { readConfig } from "../src/config.ts";
@@ -63,7 +63,7 @@ test("human-only device API isolates owners, validates keys and keeps all respon
   const key = await request("/v2/notifications/push/key"); expect(key.headers.get("cache-control")).toBe("no-store");
   expect(PushPublicKey.parse(await key.json()).public_key.length).toBe(87);
   const device = await subscribe(); noSecrets(device);
-  expect(device.owner).toBe(owner); expect(device.events).toHaveLength(4); expect(device.label).toBe("Browser");
+  expect(device.owner).toBe(owner); expect(device.events).toEqual([...NOTIFICATION_KINDS]); expect(device.label).toBe("Browser");
   expect((await subscribe()).id).toBe(device.id);
   const path = `/v2/notifications/push/devices/${device.id}`;
   expect(await (await request("/v2/notifications/push/devices", "GET", undefined, other)).json()).toEqual([]);
@@ -103,6 +103,15 @@ test("synthetic service decrypts exact minimal payload, verifies VAPID; id dedup
   hub.modules.notifications.notify(event()); await hub.modules.notifications.drain(); expect(received).toHaveLength(2);
   expect(hub.modules.notifications.push.key().public_key).toBe(firstKey);
   expect(hub.modules.notifications.push.devices(owner)[0]!.id).toBe(device.id);
+});
+
+test("AI quota push carries only the connection title, event type, and settings link", async () => {
+  await subscribe();
+  const notice = { ...event("synthetic-quota-alert", "ai.quota_low"), title: "Synthetic connection", path: "#settings/ai" };
+  hub.modules.notifications.notify(notice);
+  hub.modules.notifications.notify(notice);
+  await hub.modules.notifications.drain();
+  expect(received.map(value => value.payload)).toEqual([{ kind: notice.kind, title: notice.title, path: notice.path }]);
 });
 
 test("preferences filter events; test notification targets only the calling human and bypasses event filters", async () => {

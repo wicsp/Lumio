@@ -2,9 +2,10 @@ import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { chmod, mkdir, open, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { NativeConnectionView, type NativeAccountBinding, type NativeRuntimeCommand } from "@lumio/schema";
+import { NativeConnectionView, type CodexQuotaResult, type NativeAccountBinding, type NativeRuntimeCommand } from "@lumio/schema";
 import { codexExecutable, isolatedEnvironment, NativeError, sandboxCommand } from "./isolation.ts";
 import { NativeRpc } from "./rpc.ts";
+import { codexWindows } from "./quota.ts";
 
 type Command = Extract<NativeRuntimeCommand, { type: "connection_auth" }>;
 type Metadata = { owner: string; generation: number; account?: string };
@@ -158,6 +159,24 @@ export class ConnectionAuth {
       if (verified.binding.account !== binding.account || verified.binding.generation < binding.generation)
         throw new NativeError("native.account_changed");
       return { accessToken: verified.material.accessToken, chatgptAccountId: verified.material.chatgptAccountId, chatgptPlanType: null };
+    });
+  }
+  async usage(connection: string, owner: string): Promise<CodexQuotaResult> {
+    return this.serialize(connection, async account => {
+      let binding: NativeAccountBinding | undefined;
+      try {
+        if (account.pending) return { status: "credentials" };
+        const verified = await this.verify(connection, owner, account);
+        if (!verified) return { status: "credentials" };
+        binding = verified.binding;
+        const windows = codexWindows(await verified.rpc.request("account/rateLimits/read", {}, 8000));
+        if (!windows.length) return { status: "unsupported", binding };
+        return { status: "ready", binding, snapshot: { source: "codex", sampled_at: new Date().toISOString(), windows } };
+      } catch (cause) {
+        if (cause instanceof NativeError && ["native.login_required", "native.account_unverified"].includes(cause.reason))
+          return { status: "credentials" };
+        return { status: cause instanceof NativeError && cause.reason === "native.version_unsupported" ? "unsupported" : "error", binding };
+      }
     });
   }
   async stop() {

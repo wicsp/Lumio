@@ -1,0 +1,9 @@
+{
+  "cwd": "/synthetic/project",
+  "session_id": "synthetic-session",
+  "transcript_path": "/synthetic/private-session.jsonl",
+  "rate_limits": {
+    "five_hour": { "used_percentage": 93.5, "resets_at": 1794326400 },
+    "seven_day": { "used_percentage": 29, "resets_at": 1794758400 }
+  }
+}

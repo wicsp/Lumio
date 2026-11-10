@@ -62,6 +62,15 @@ createInterface({ input: process.stdin }).on("line", line => {
                 if (broker && p.refreshToken) await saveSyntheticAuth();
                 reply({ account: { type: "chatgpt", accountId: "synthetic-account" }, requiresOpenaiAuth: true });
                 break;
+            case "account/rateLimits/read": {
+                const resetsAt = Math.floor(Date.now() / 1000) + 3600;
+                reply({ rateLimitsByLimitId: {
+                    codex: { primary: { usedPercent: 20, windowDurationMins: 300, resetsAt },
+                        secondary: { usedPercent: 91, windowDurationMins: 10080, resetsAt: resetsAt + 86400 } },
+                    other: { limitName: "Synthetic model limit", primary: { usedPercent: 35, windowDurationMins: 30 } },
+                } });
+                break;
+            }
             case "account/login/start":
                 if (p.type === "chatgptAuthTokens") {
                     authorized = typeof p.accessToken === "string" && p.chatgptAccountId === "synthetic-account";

@@ -16,9 +16,15 @@ import { runRuntime } from "./runtime.ts";
 import { runWorker } from "./worker.ts";
 import { prepareMigration } from "./prepare-migration.ts";
 import { StorageError } from "@lumio/storage";
+import { sampleClaudeFromStdin } from "./claude-usage.ts";
 
 export async function run(args: string[]): Promise<void> {
   if(args[0]==="native-mcp"){await runNativeMCP();return;}
+  if (args[0] === "claude-usage-sample") {
+    try { await sampleClaudeFromStdin(args.slice(1)); }
+    catch { console.error(msg("entry.claude_usage_sample_failed")); process.exitCode = 1; }
+    return;
+  }
 
   if (args.length === 1 && args[0] === "--version") {
     console.log(version);

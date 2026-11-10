@@ -71,6 +71,7 @@ export async function runNativeChannel(
         channel = response.headers.get("x-lumio-native-channel") ?? undefined;
         if (!channel) throw new Error("Native handshake unavailable");
         const connectionAuth = response.headers.get("x-lumio-native-connection-auth") === "1";
+        const connectionUsage = response.headers.get("x-lumio-native-connection-usage") === "1" && connectionAuth;
         await post(
           NativeRuntimeMessage.parse({
             type: "hello",
@@ -79,6 +80,7 @@ export async function runNativeChannel(
             version: "1",
             isolation: process.platform === "darwin" ? "macos-seatbelt" : "unsupported",
             ...(connectionAuth ? { connection_auth: true } : {}),
+            ...(connectionUsage ? { connection_usage: true } : {}),
           }),
         );
         flush();
@@ -97,6 +99,14 @@ export async function runNativeChannel(
               buffer = buffer.slice(end + 1);
               if (!line.trim()) continue;
               const c = NativeRuntimeCommand.parse(JSON.parse(line));
+              if (c.type === "connection_usage") {
+                if (!connectionUsage) throw new Error("Connection usage was not negotiated");
+                void accounts.usage(c.connection, c.owner).then(result => {
+                  if (current.signal.aborted || signal.aborted || controller !== current) return;
+                  return post(NativeRuntimeMessage.parse({ type: "connection_usage", command: c.command, connection: c.connection, result }));
+                }).catch(() => current.abort());
+                continue;
+              }
               if (c.type === "connection_auth") {
                 if (!connectionAuth) throw new Error("Connection auth was not negotiated");
                 void accounts.request(c).then(view => {

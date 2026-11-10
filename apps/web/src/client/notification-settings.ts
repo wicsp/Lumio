@@ -17,6 +17,7 @@ const KIND_LABELS: Record<NotificationKind, string> = translated({
   "turn.review": "Work is ready for your review or a checkpoint",
   "turn.failed": "A round fails",
   "proposal.pending": "An agent asks for your approval",
+  "ai.quota_low": "An AI connection reaches its usage threshold",
 });
 
 /** 不能开启的原因；能开启时返回 undefined。 */

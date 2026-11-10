@@ -1,4 +1,5 @@
 import {AIConnection,AIConnectionInput,AIProfile,AIProfileInput,AIConfiguration,AIRuntime,NativeConnectionAction,NativeConnectionView,NativeSession,NativeCreate,NativeAction,NativeEventRecord} from "@lumio/schema";
+import { AIQuotaSettings, AIQuotaView, AIQuotaViews } from "@lumio/schema";
 import { KnowledgeGraph, KnowledgeGraphArgs, Id, KnowledgeDocument, KnowledgeUpdateRequest, KnowledgeUpdateResult, KnowledgeRelatedRequest, KnowledgeRelatedResult, KnowledgeReferencesRequest, KnowledgeReferencesResult } from "@lumio/schema";
 import { KnowledgeTemplateRequest, KnowledgeTemplateResult, PaperResolveRequest, PaperResolveResult, KnowledgeCreateRequest, KnowledgeCreateResult } from "@lumio/schema";
 import { ExecutionTarget, ExecutionTargetListArgs } from "@lumio/schema";
@@ -74,6 +75,16 @@ export function createClient(options: { url: string; token?: string; language?: 
   const queryParams = (options: QueryOptions): Record<string, string> => options.includePrivate === undefined ? {} : { include_private: String(options.includePrivate) };
   return {
     aiConfiguration(){return request("/v2/ai/config",{},AIConfiguration);},
+    aiUsage() { return request("/v2/ai/usage", {}, AIQuotaViews); },
+    refreshAIUsage(id: string) {
+      return request(`/v2/ai/connections/${validate(idOf("aic"), id)}/usage/refresh`, {}, AIQuotaView, undefined, "POST");
+    },
+    saveAIUsageSettings(id: string, settings: AIQuotaSettings) {
+      return request(`/v2/ai/connections/${validate(idOf("aic"), id)}/usage/settings`, {}, AIQuotaView, validate(AIQuotaSettings, settings), "PUT");
+    },
+    bindClaudeUsage(id: string) {
+      return request(`/v2/ai/connections/${validate(idOf("aic"), id)}/usage/bind`, {}, AIQuotaView, undefined, "POST");
+    },
     aiRuntimes(){return request("/v2/ai/runtimes",{},AIRuntime.array());},
     saveAIConnection(input:AIConnectionInput,id?:string){return request(`/v2/ai/connections${id?`/${validate(idOf("aic"),id)}`:""}`,{},AIConnection,validate(AIConnectionInput,input),id?"PUT":"POST");},
     saveAIProfile(input:AIProfileInput,id?:string){return request(`/v2/ai/profiles${id?`/${validate(idOf("aip"),id)}`:""}`,{},AIProfile,validate(AIProfileInput,input),id?"PUT":"POST");},

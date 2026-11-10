@@ -6,12 +6,13 @@ import { Timestamp, idOf } from "./common.ts";
  * 正文只含标题与事件类型，不含汇报、问题原文或私密内容；点击打开 path 指向的页面。
  */
 
-/** 轮到你且需要回应（ADR 0032 第 2 节；todo 不推送），以及待批准的提议。 */
+/** 工作交回、待批准提议与 AI 连接用量提醒。 */
 export const NOTIFICATION_KINDS = [
   "turn.answer", // agent 在等你回答
   "turn.review", // 一轮交付或交接计划的检查点，等你看
   "turn.failed", // 一轮失败或结果不明
   "proposal.pending", // 待批准的提议（含 agent 的委派与交接计划）
+  "ai.quota_low", // 连接余额或订阅额度低于设定阈值
 ] as const;
 export const NotificationKind = z.enum(NOTIFICATION_KINDS);
 

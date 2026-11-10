@@ -798,6 +798,14 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 .set-row-badge .icon { width: 16px; height: 16px; }
 .set-row-icon { color: var(--ink-3); }
 .set-row-chevron { width: 14px; height: 14px; color: var(--ink-4); flex: none; }
+.ai-connection-row + .ai-connection-row { border-top: 1px solid var(--line); }
+.ai-quota-details { padding: 0 14px 12px; margin-left: 40px; min-width: 0; }
+.ai-quota-details > summary { padding: 4px 0; color: var(--ink-2); font-size: var(--fs-sm); cursor: pointer; }
+.ai-quota-details > summary .set-sub { display: inline; margin-left: 8px; }
+.ai-quota-details > .button-row { margin-top: 8px; }
+.ai-quota-window { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-top: 8px; font-size: var(--fs-sm); }
+.ai-quota-window meter { width: 66px; margin-right: 6px; }
+.ai-quota-command { overflow: auto; padding: 8px; background: var(--sunken); border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .set-about { display: flex; align-items: center; gap: 14px; padding: 18px; border: 1px solid var(--line); border-radius: var(--r-lg); background: linear-gradient(135deg, var(--lumen-wash), var(--surface) 60%); }
 .set-about-mark { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; background: #1c2220; color: var(--lumen); font: 700 22px/1 var(--serif); box-shadow: 0 0 0 1px var(--line); flex: none; }
 

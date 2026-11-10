@@ -1,14 +1,15 @@
 import { z } from "zod";
+import { AIQuotaSnapshot } from "./ai-usage.ts";
 import { idOf, Timestamp, Revision, RequestId, RuntimeName } from "./common.ts";
 /** ADR 0041/0042: shared model configuration; credentials never appear in a view. */
 export const TYPESAFE_JEV_BASE_URL = "https://api.typesafe.ai/v1";
-export const AIConnectionKind = z.enum(["codex-account", "openai-compatible", "deepseek", "doubao", "typesafe-jev"]);
+export const AIConnectionKind = z.enum(["codex-account", "openai-compatible", "deepseek", "doubao", "typesafe-jev", "claude-code-subscription"]);
 export const AIConnection = z.strictObject({ id: idOf("aic"), owner: idOf("act"), name: z.string().trim().min(1).max(100), kind: AIConnectionKind,
     host: z.union([z.literal("hub"), RuntimeName]), base_url: z.string().url().optional(), api_key_set: z.boolean(), revision: Revision, created: Timestamp, updated: Timestamp });
 export const AIConnectionInput = z.strictObject({ name: z.string().trim().min(1).max(100), kind: AIConnectionKind, host: z.union([z.literal("hub"), RuntimeName]), base_url: z.string().url().optional(), api_key: z.string().min(1).max(8192).optional(), clear_api_key: z.boolean().optional() })
     .refine(v => !(v.api_key && v.clear_api_key), "Conflicting credential changes")
     .refine(v => v.kind !== "typesafe-jev" || v.base_url === TYPESAFE_JEV_BASE_URL, { path: ["base_url"], message: "Use the official TypeSafe API address" })
-    .refine(v => v.kind === "codex-account" ? v.host !== "hub" && !v.api_key && !v.base_url : !!v.base_url && v.host === "hub", "Unsupported connection location")
+    .refine(v => (v.kind === "codex-account" || v.kind === "claude-code-subscription") ? v.host !== "hub" && !v.api_key && !v.base_url && (v.kind !== "claude-code-subscription" || !v.clear_api_key) : !!v.base_url && v.host === "hub", "Unsupported connection location")
     .refine(v => !v.base_url || (() => { const u = new URL(v.base_url); return ["http:", "https:"].includes(u.protocol) && !u.username && !u.password && !u.search && !u.hash; })(), "Invalid API address");
 export const AIProfile = z.strictObject({ id: idOf("aip"), owner: idOf("act"), name: z.string().trim().min(1).max(100), connection: idOf("aic"), engine: z.enum(["lumio", "codex"]), model: z.string().trim().min(1).max(200), thinking: z.enum(["default", "off", "on"]).default("default"), effort: z.string().min(1).max(32).optional(), revision: Revision, created: Timestamp, updated: Timestamp });
 export const AIProfileInput = AIProfile.omit({ id: true, owner: true, revision: true, created: true, updated: true });
@@ -43,7 +44,14 @@ export const NativeEventData = z.discriminatedUnion("type", [
     z.strictObject({ type: z.literal("tool"), id: z.string(), name: z.string(), status: z.enum(["running", "completed", "failed", "unknown"]), description: z.string().max(32000) }),
     z.strictObject({ type: z.literal("complete"), status: z.enum(["done", "failed", "unknown", "cancelled"]), text: z.string().max(2000000), error: z.string().max(1000).optional() })
 ]);
+export const CodexQuotaResult = z.union([
+    z.strictObject({ status: z.literal("ready"), binding: NativeAccountBinding, snapshot: AIQuotaSnapshot.refine(value => value.source === "codex") }),
+    z.strictObject({ status: z.literal("credentials") }),
+    z.strictObject({ status: z.enum(["error", "unsupported"]), binding: NativeAccountBinding.optional() }),
+]);
+export type CodexQuotaResult = z.infer<typeof CodexQuotaResult>;
 export const NativeRuntimeCommand = z.discriminatedUnion("type", [
+    z.strictObject({ type: z.literal("connection_usage"), command: z.string().uuid(), connection: idOf("aic"), owner: idOf("act") }),
     z.strictObject({ type: z.literal("connection_auth"), command: z.string().uuid(), connection: idOf("aic"), owner: idOf("act"), action: z.enum(["status", "login", "cancel", "logout"]) }),
     z.strictObject({ type: z.literal("open"), command: z.string(), session: NativeSession, hub_url: z.string().url(), mcp_token: z.string().min(16) }),
     z.strictObject({ type: z.literal("action"), command: z.string(), session: idOf("ais"), input: NativeAction }),
@@ -51,7 +59,8 @@ export const NativeRuntimeCommand = z.discriminatedUnion("type", [
     z.strictObject({ type: z.literal("ack"), session: idOf("ais"), sequence: z.number().int().nonnegative() })
 ]);
 export const NativeRuntimeMessage = z.discriminatedUnion("type", [
-    z.strictObject({ type: z.literal("hello"), protocol: z.literal(1), instance: z.string(), version: z.string(), isolation: z.enum(["macos-seatbelt", "unsupported"]), connection_auth: z.literal(true).optional() }),
+    z.strictObject({ type: z.literal("hello"), protocol: z.literal(1), instance: z.string(), version: z.string(), isolation: z.enum(["macos-seatbelt", "unsupported"]), connection_auth: z.literal(true).optional(), connection_usage: z.literal(true).optional() }),
+    z.strictObject({ type: z.literal("connection_usage"), command: z.string().uuid(), connection: idOf("aic"), result: CodexQuotaResult }),
     z.strictObject({ type: z.literal("connection_auth"), command: z.string().uuid(), connection: idOf("aic"), owner: idOf("act"), view: NativeConnectionView }),
     z.strictObject({ type: z.literal("event"), session: idOf("ais"), sequence: z.number().int().positive(), turn: idOf("turn").optional(), event: NativeEventData }),
     z.strictObject({ type: z.literal("pong") })

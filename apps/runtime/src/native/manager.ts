@@ -88,7 +88,7 @@ export class NativeManager {
   private fail(id: string, reason: string) {
     this.state(id, { state: "failed", error: reason });
   }
-  async receive(c: Exclude<NativeRuntimeCommand, { type: "connection_auth" }>) {
+  async receive(c: Exclude<NativeRuntimeCommand, { type: "connection_auth" | "connection_usage" }>) {
     if (c.type === "ack") {
       this.store.ack(c.session, c.sequence);
       return;
