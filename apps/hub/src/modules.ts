@@ -78,13 +78,13 @@ export class BusinessModules {
       notifications.proposal(proposal, taskId ? this.workStore.task(taskId)?.title : undefined);
     };
     this.work = new WorkService(this.workStore, { text: msg, now, id, localRuntime: config.localRuntime, systemActor: store.workActor().id, job: id => jobs.get(id),
-      auditPlan: (change, plan) => {
+      auditPlan: (change, plan, checkpoint) => {
         const actor = store.actors().find(actor => actor.id === change.by)!;
         store.audit({ actor, label: actor.name }, JSON.stringify({ op: "work.task.plan.advance", task: change.task, plan,
-          from: change.from.stage, stage: change.to.stage, turn: change.to }), "allow", plan.approved.proposal, "applied");
+          from: change.from.stage, stage: change.to.stage, turn: change.to, checkpoint }), "allow", plan.approved.proposal, "applied");
       },
       validateTarget: (target, source) => { validateTarget(this.store, config.localRuntime, target, now(), source); },
-      dispatch: (task, input, round, to) => this.dispatch(task, input, round, to, now()),
+      dispatch: (task, input, round, to, previous) => this.dispatch(task, input, round, to, now(), previous),
       agentsForJobs: ids => {
         const jobs = store.executionStore.agentJobs(ids);
         if (!jobs.length) return new Map();
@@ -96,7 +96,11 @@ export class BusinessModules {
         }
         return targets;
       },
-      cancel: (task) => { const job = jobs.activeForTask(task); if (job) { jobs.cancel(job.spec.id); return job.spec.id; } },
+      cancel: (task) => {
+        const active = jobs.list(undefined, task).filter(job => !job.result && ["queued", "assigned", "running"].includes(job.status));
+        for (const job of active) jobs.cancel(job.spec.id);
+        return active[0]?.spec.id;
+      },
     });
     this.workCommands = new WorkCommands(store, this.work, options.authorize ?? authorize, config.localRuntime, now);
     this.capabilities = new Capabilities(this, store, config, options.authorize);
@@ -128,7 +132,7 @@ export class BusinessModules {
     this.assistantStore.putCall({ ...call, change: { ...change, undone: change.undone ?? { at: new Date().toISOString(), by: identity.actor.id } } });
     return outcome.result as WorkCommandResult;
   }
-  private dispatch(task: WorkTask, input: string, round: number, to: string | undefined, now: Date) {
+  private dispatch(task: WorkTask, input: string, round: number, to: string | undefined, now: Date, previousJob?: string | null) {
     const target = parseAssignee(to ?? "human");
     if (target === "human") throw new HubError("INVALID", { key: "modules.specify_an_agent_e_g_pi_server", args: [] });
     const runtime = this.store.runtimes(now).find((value) => value.registration.name === (target.device ?? this.config.localRuntime));
@@ -139,7 +143,7 @@ export class BusinessModules {
       throw new HubError("INVALID", { key: "modules.working_directory_must_be_outside_the_knowledge_directory", args: [] });
     }
     const jobs = new Jobs(this.store);
-    const previous = jobs.list(undefined, task.id).at(-1);
+    const previous = previousJob === undefined ? jobs.list(undefined, task.id).at(-1) : previousJob ? jobs.get(previousJob) : undefined;
     let session: AgentRun["session"];
     if (previous?.spec.run.kind === "agent" && previous.spec.run.engine === target.agent && previous.spec.runtime === runtime.actor && previous.result?.session_id) {
       session = { id: previous.result.session_id, resume: true };
