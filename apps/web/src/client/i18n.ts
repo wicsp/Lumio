@@ -583,7 +583,7 @@ export const ZH: Record<string, string> = {
   "Its {0} tasks will be kept and moved to No project. Restoring the project puts them back.": "其中 {0} 个任务会保留并变成无项目；恢复项目时会挂回。",
   "Kept for 30 days": "保留 30 天",
   "Memories saved from it are kept.": "从中保存的记忆不受影响。",
-  "More": "更多",
+  "Delete {0}": "删除 {0}",
   "Moved to Recently deleted": "已移到最近删除",
   "Note": "笔记",
   "Notes": "笔记",

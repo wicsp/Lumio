@@ -24,7 +24,6 @@ import { WorkSave, type WorkDraft } from "../work-save.ts";
 import { MAX_TASK_NODES, taskGraph } from "../graph/data.ts";
 import { dependencyGraph } from "../graph/view.ts";
 import { drafts, textDraft } from "../drafts.ts";
-import { confirmDelete } from "../trash-actions.ts";
 import type { Navigate } from "../navigation.ts";
 import { t, tParts } from "../i18n.ts";
 
@@ -40,8 +39,6 @@ export interface EditorHooks {
   newTask?(project: string): void;
   /** 新建子任务：预填父任务与项目（ADR 0039）。 */
   newSubtask?(parent: string, project?: string): void;
-  /** 对象已移入回收站：关闭详情并刷新列表（ADR 0038）。 */
-  removed?(): void;
 }
 
 export class WorkEditor {
@@ -109,8 +106,7 @@ export class WorkEditor {
       h("div", { class: "detail-actions" },
         h("button", { type: "button", class: "icon-btn", title: t("Copy ID"), "aria-label": t("Copy ID"), onclick: () => void navigator.clipboard?.writeText(this.record.id).then(() => toast(t("ID copied"))) }, icon("link")),
         rec.type === "task" && !rec.plan && this.planButton(rec),
-        isTask && (this.delegateButton = h("button", { type: "button", class: "btn btn-primary btn-small", onclick: () => void this.dispatch() }, icon("play"), t("Delegate"))),
-        this.moreButton()));
+        isTask && (this.delegateButton = h("button", { type: "button", class: "btn btn-primary btn-small", onclick: () => void this.dispatch() }, icon("play"), t("Delegate")))));
 
     const attention = h("div", { class: "attn-slot" });
     const detail = h("div", { class: "detail" }, crumbs, h("div", { class: "detail-head" }, this.title, this.updated), attention, this.note, this.props,
@@ -601,43 +597,8 @@ export class WorkEditor {
       planProgress(task));
   }
 
-  // ───────────── 更多：删除（ADR 0038） ─────────────
-
-  private moreButton(): HTMLButtonElement {
-    const button: HTMLButtonElement = h("button", { type: "button", class: "icon-btn", title: t("More"), "aria-label": t("More"), "aria-haspopup": "menu",
-      onclick: () => openMenu(button, [{ value: "delete", label: t("Delete"), icon: icon("trash") }], value => { if (value === "delete") void this.confirmDelete(); }) },
-    icon("more"));
-    return button;
-  }
-
-  private async confirmDelete(): Promise<void> {
-    if (this.busy || !(await this.flush()) || !this.active) return;
-    const record = this.record;
-    const consequences: string[] = [];
-    if (record.type === "task" && record.turn.reason === "working")
-      consequences.push(t("{0} is working on this task. That round will be stopped first; its run record is kept.", record.turn.holder));
-    if (record.type === "project") {
-      const tasks = await this.client.workTasks({ project: record.id }).catch(() => undefined);
-      if (!this.active) return;
-      consequences.push(tasks === undefined ? t("Tasks in this project will be kept and moved to No project.")
-        : tasks.length ? t("Its {0} tasks will be kept and moved to No project. Restoring the project puts them back.", tasks.length) : t("This project has no tasks."));
-    }
-    confirmDelete(this.client, {
-      title: record.type === "task" ? t("Delete this task?") : t("Delete this project?"),
-      name: this.title.value.trim() || record.title,
-      consequences,
-      run: async requestId => {
-        // Always delete the version currently on screen; a newer edit elsewhere returns CONFLICT instead.
-        const current = this.writer.base;
-        const result = await this.client.workCommand(current.type === "task"
-          ? { request_id: requestId, operation: { op: "work.task.delete", args: { task: current.id, expected_revision: current.revision } } }
-          : { request_id: requestId, operation: { op: "work.project.delete", args: { project: current.id, expected_revision: current.revision } } });
-        if (result.kind !== "trashed") throw new Error("unexpected result");
-        return result.item;
-      },
-      deleted: () => { this.recovery.remove(); this.store.remove(`comment:${record.id}`); this.hooks.removed?.(); },
-      restored: item => { this.hooks.changed(); this.hooks.navigate("work", item.id); },
-    });
+  async prepareDelete(): Promise<EditableWork | undefined> {
+    if (!this.busy && await this.flush() && this.active) return this.writer.base;
   }
 
   // ───────────── 委派 ─────────────

@@ -7,6 +7,8 @@ import { PROJECT_STATUSES } from "@lumio/schema";
 import { errorText, isConflict, type Client, type HubExtras } from "../api.ts";
 import { newRequestId, projectCreateCommand, taskCreateCommand } from "../commands.ts";
 import { autosize, clear, debounce, empty, failure, field, h, icon, loading, openDialog, openMenu, placeholder, select, statusIcon, toast } from "../dom.ts";
+import { drafts } from "../drafts.ts";
+import { confirmDelete, deletableRow } from "../trash-actions.ts";
 import { dueLabel } from "../format.ts";
 import { PROJECT_LABELS } from "../labels.ts";
 import { TURN_ACTION_DONE, TURN_ACTION_ICONS, TURN_ACTION_LABELS, TURN_GROUPS, TURN_GROUP_LABELS, isBlocked, turnActionCommand, turnActions, turnGroup, turnIcon, turnText, type TurnAction, type TurnGroup } from "../turn.ts";
@@ -198,12 +200,13 @@ export class WorkPane {
       // 被阻塞（ADR 0039）：叠加在轮到谁之上；悬停列出还没完成的前置。
       isBlocked(task) && h("span", { class: "who-chip is-blocked", title: t("Waiting on: {0}", blockingTitles(task, new Map(this.tasks.map(item => [item.id, item]))).join(t(", "))) },
         icon("link"), t("Waiting on {0}", task.blocked_by!.length))].filter(Boolean) as HTMLElement[];
-    return h("div", { class: `row t-${group}`, "data-id": task.id, role: "button", tabindex: "0",
+    const row = h("div", { class: `row t-${group}`, "data-id": task.id, role: "button", tabindex: "0",
       onclick: () => void this.open(task.id), onkeydown: (event: Event) => { if ((event as KeyboardEvent).key === "Enter" && event.target === event.currentTarget) void this.open(task.id); } },
       statusBtn,
       h("span", { class: "row-main" }, h("span", { class: "row-title" }, task.title), sub.length ? h("span", { class: "row-sub" }, ...sub) : null),
       h("span", { class: "row-meta" },
         due && task.outcome === "open" && h("span", { class: `due${due.overdue ? " overdue" : due.soon ? " soon" : ""}`, title: t("Due") }, due.text)));
+    return deletableRow(row, task.title, () => void this.deleteWork(task));
   }
 
   private projectRow(project: WorkProject): HTMLElement {
@@ -211,11 +214,58 @@ export class WorkPane {
     const done = related.filter(t => t.outcome === "done").length;
     const fill = h("span", { class: "progress-fill" });
     fill.style.width = `${related.length ? Math.round((done / related.length) * 100) : 0}%`;
-    return h("div", { class: `row ${project.status}`, "data-id": project.id, role: "button", tabindex: "0", onclick: () => void this.open(project.id),
+    const row = h("div", { class: `row ${project.status}`, "data-id": project.id, role: "button", tabindex: "0", onclick: () => void this.open(project.id),
       onkeydown: (event: Event) => { if ((event as KeyboardEvent).key === "Enter") void this.open(project.id); } },
       statusIcon(project.status),
       h("span", { class: "row-main" }, h("span", { class: "row-title" }, project.title), project.goal && h("span", { class: "row-sub" }, project.goal)),
       h("span", { class: "row-meta" }, related.length ? h("span", { class: "progress", title: t("{0} of {1} done", done, related.length) }, fill) : null, related.length ? `${done}/${related.length}` : t("No tasks")));
+    return deletableRow(row, project.title, () => void this.deleteWork(project));
+  }
+
+  private async deleteWork(item: WorkTask | WorkProject): Promise<void> {
+    const editor = this.selected === item.id ? this.editor : undefined;
+    // If this record is open, save pending edits and use the saved revision.
+    const record = editor ? await editor.prepareDelete() : item;
+    if (!record) return;
+
+    const consequences: string[] = [];
+    if (record.type === "task" && record.turn.reason === "working") {
+      consequences.push(t("{0} is working on this task. That round will be stopped first; its run record is kept.", record.turn.holder));
+    }
+    if (record.type === "project") {
+      const tasks = await this.client.workTasks({ project: record.id }).catch(() => undefined);
+      consequences.push(tasks === undefined ? t("Tasks in this project will be kept and moved to No project.")
+        : tasks.length ? t("Its {0} tasks will be kept and moved to No project. Restoring the project puts them back.", tasks.length) : t("This project has no tasks."));
+    }
+    if (!this.active || this.root.hidden || document.querySelector("dialog[open]")) return;
+    if (editor?.dirty || editor?.isBusy || editor !== (this.selected === record.id ? this.editor : undefined)) return;
+    const store = drafts();
+    confirmDelete(this.client, {
+      title: record.type === "task" ? t("Delete this task?") : t("Delete this project?"),
+      name: record.title,
+      consequences,
+      run: async requestId => {
+        const result = await this.client.workCommand(record.type === "task"
+          ? { request_id: requestId, operation: { op: "work.task.delete", args: { task: record.id, expected_revision: record.revision } } }
+          : { request_id: requestId, operation: { op: "work.project.delete", args: { project: record.id, expected_revision: record.revision } } });
+        if (result.kind !== "trashed") throw new Error("unexpected result");
+        return result.item;
+      },
+      deleted: () => {
+        if (this.active && this.selected === record.id) {
+          this.closeDetail();
+          if (!this.root.hidden) history.replaceState(null, "", `#work/${this.mode}`);
+        }
+        store.remove(`work:${record.id}`);
+        store.remove(`comment:${record.id}`);
+        if (this.active) { this.changed(); void this.load(); }
+      },
+      restored: restored => {
+        if (!this.active) return;
+        this.changed(); void this.load();
+        if (editor && !this.root.hidden && !this.selected) this.navigate("work", restored.id);
+      },
+    });
   }
 
   private quickTurn(task: WorkTask, anchor: HTMLElement): void {
@@ -275,12 +325,6 @@ export class WorkPane {
         changed: () => { this.changed(); void this.load(); },
         reload: () => void this.open(id, true),
         back: () => { if (this.canLeave()) this.closeDetail(); },
-        removed: () => {
-          this.closeDetail();
-          // Leave the deleted object's URL so a reload doesn't try to open it.
-          history.replaceState(null, "", `#work/${id.startsWith("prj_") ? "projects" : "tasks"}`);
-          this.changed(); void this.load();
-        },
         navigate: this.navigate,
         openProject: projectId => this.navigate("work", projectId),
         newTask: projectId => this.create("tasks", projectId),

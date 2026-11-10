@@ -16,6 +16,9 @@ import { t } from "../i18n.ts";
 import { SettingsPane } from "../panes/settings-page.ts";
 import { TrashPane } from "../panes/trash.ts";
 
+/** 记住侧栏是否收起（只影响本设备）。 */
+const SIDEBAR_KEY = "lumio.web.sidebar-collapsed";
+
 /** short：窄屏底栏的短名；没有 short 的模块不进底栏，从今日页和提醒进入（ADR 0028）。 */
 export const SECTIONS: Array<{ key: Exclude<Section, "settings" | "trash">; label: string; short?: string; icon: string; key2: string }> = [
   { key: "overview", label: "Today", short: "Today", icon: "home", key2: "1" },
@@ -97,21 +100,32 @@ export class WorkbenchView {
       h("span", { class: "account-text" }, h("span", { class: "who-name" }, this.name),
         h("span", { class: "account-sub" }, h("span", { class: "connection-dot" }), t("Connected to Hub"))),
       icon("settings"));
-    const toggle = h("button", { type: "button", class: "icon-btn sidebar-toggle", "aria-controls": "main-sidebar", "aria-expanded": "true" }, icon("chevron"));
+    // 收起侧栏后，左上角只剩 Lumio 图标，点它展开；展开时图标只是标志，收起按钮在右侧。
+    const toggle = h("button", { type: "button", class: "icon-btn sidebar-toggle", "aria-controls": "main-sidebar", "aria-expanded": "true", title: t("Collapse sidebar"), "aria-label": t("Collapse sidebar") }, icon("chevron"));
+    const logo = h("button", { type: "button", class: "brand-logo", "aria-controls": "main-sidebar", title: t("Expand sidebar"), "aria-label": t("Expand sidebar") }, h("span", { class: "brand-mark", "aria-hidden": "true" }));
     const sidebar = h("aside", { class: "sidebar", id: "main-sidebar" },
-      h("div", { class: "brand" }, h("span", { class: "brand-mark", "aria-hidden": "true" }), h("span", { class: "brand-name" }, "Lumio"), toggle),
+      h("div", { class: "brand" }, logo, h("span", { class: "brand-name" }, "Lumio"), toggle),
       h("button", { type: "button", class: "quick-find", title: t("Search or jump to"), "aria-label": t("Search or jump to"), onclick: () => this.palette.open() }, icon("search"), h("span", {}, t("Search or jump to")), h("kbd", {}, "⌘K")),
       nav,
       h("div", { class: "sidebar-foot" }, this.account));
     const shell = h("div", { class: "shell" }, sidebar, this.main);
-    const labelToggle = (collapsed: boolean) => {
-      const label = collapsed ? t("Expand sidebar") : t("Collapse sidebar");
-      toggle.title = label;
-      toggle.setAttribute("aria-label", label);
+    const collapse = (collapsed: boolean, focus = false) => {
+      shell.classList.toggle("sidebar-collapsed", collapsed);
       toggle.setAttribute("aria-expanded", String(!collapsed));
+      logo.setAttribute("aria-expanded", String(!collapsed));
+      // 展开时 Lumio 图标不可点，也不进入 Tab 顺序。
+      logo.tabIndex = collapsed ? 0 : -1;
+      logo.setAttribute("aria-hidden", String(!collapsed));
+      if (focus) {
+        try { localStorage.setItem(SIDEBAR_KEY, collapsed ? "1" : "0"); } catch { /* 存储不可用时只是不记住 */ }
+        (collapsed ? logo : toggle).focus();
+      }
     };
-    labelToggle(false);
-    toggle.addEventListener("click", () => labelToggle(shell.classList.toggle("sidebar-collapsed")));
+    let remembered = false;
+    try { remembered = localStorage.getItem(SIDEBAR_KEY) === "1"; } catch { remembered = false; }
+    collapse(remembered);
+    toggle.addEventListener("click", () => collapse(true, true));
+    logo.addEventListener("click", () => { if (shell.classList.contains("sidebar-collapsed")) collapse(false, true); });
     root.append(
       h("a", { class: "skip-link", href: "#content", onclick: (event: Event) => { event.preventDefault(); this.main.focus(); } }, t("Skip to content")),
       shell);

@@ -8,6 +8,12 @@ import { newRequestId } from "./commands.ts";
 import { clear, failure, h, icon, openDialog, toast } from "./dom.ts";
 import { t } from "./i18n.ts";
 
+/** Keep the delete button outside the row's open control, including for keyboard activation. */
+export function deletableRow(row: HTMLElement, name: string, run: () => void): HTMLElement {
+  return h("div", { class: "delete-row" }, row,
+    h("button", { type: "button", class: "icon-btn row-delete", title: t("Delete"), "aria-label": t("Delete {0}", name), onclick: run }, icon("trash")));
+}
+
 export interface DeleteOptions {
   /** Dialog title, e.g. "Delete this task?" */
   title: string;

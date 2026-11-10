@@ -229,7 +229,7 @@ export class AssistantPane {
       clear(this.conversations, ...conversations.map(c => h("div", { class: "convo-row", "data-id": c.id },
         h("button", { type: "button", class: "convo", disabled: this.sending, onclick: () => void this.openConversation(c.id) },
           h("strong", {}, c.title), h("span", { title: formatTime(c.updated) }, ago(c.updated))),
-        h("button", { type: "button", class: "icon-btn convo-delete", title: t("Delete conversation"), "aria-label": t("Delete conversation {0}", c.title),
+        h("button", { type: "button", class: "icon-btn row-delete", title: t("Delete conversation"), "aria-label": t("Delete conversation {0}", c.title),
           disabled: this.sending, onclick: () => this.confirmDelete(c) }, icon("trash")))),
         !conversations.length && h("p", { class: "state" }, t("No conversations yet")));
       this.markCurrent();
@@ -499,7 +499,7 @@ export class AssistantPane {
         memories.length
           ? h("div", { class: "memory-list" }, ...memories.map(memory => h("article", { class: "memory-item" }, icon("memory"), h("p", {}, memory.content),
               h("span", { title: formatTime(memory.created) }, ago(memory.created)),
-              h("button", { type: "button", class: "btn btn-quiet btn-small", onclick: () => this.forget(memory) }, t("Forget")))))
+              h("button", { type: "button", class: "icon-btn row-delete", title: t("Forget"), "aria-label": t("Forget"), onclick: () => this.forget(memory) }, icon("trash")))))
           : empty(t("No memories yet. Write down preferences or facts you want the assistant to keep in mind."))));
     } catch (cause) {
       if (this.active && generation === this.generation) clear(this.messages, failure(errorText(cause), () => this.loadMemories()));
