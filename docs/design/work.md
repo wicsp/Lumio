@@ -7,6 +7,8 @@
 - `/v2/work/commands` 使用 `WorkCommandRequest` 与 `WorkCommandResult`；Task/Project 查询返回严格业务对象，不含路径。
 - **任务模型**（ADR 0032，R4-2）：任务只回答三个问题——结局（open / done / cancelled，只有人能改）、轮到谁（你 / 某个 agent / 外部 / 无人，附原因：todo、answer、review、failed、working、waiting、on_hold）、发生过什么（讨论、轮次、交接记录，只追加）。没有状态与负责人字段。「需要你处理」= 轮到你且原因是 answer、review 或 failed。一轮结束：提问 → answer，失败 → failed，取消 → todo，交付 → 没有交接计划时 review，有计划时进入下一步。每一轮的输入只放摘要与 ID，agent 用 skill 沿 ID 取回更多（Inline & Spill）。
 - **交接计划**（ADR 0032 第 5 节，R4-3）：agent 步骤（可声明 `back_to`，汇报里单独一行 `<lumio-outcome>changes</lumio-outcome>` 时打回）与检查点；一轮交付后由 Hub 系统身份自动委派下一步，或在检查点 / 计划结束时轮到人（review）。只委派给计划写明的 agent；计划内轮数达到上限（缺省 8）时轮到人。检查点的继续 / 打回 / 完成 / 搁置只有人能做，对过时的步骤操作被拒绝。计划模板只有人能管理。agent 设置计划与委派都只能提议，人批准后以提议作者身份、按提议时的版本执行。
+  **扩展中（ADR 0049，H1，未实现）**：计划扩展为有向无环的交接图（`after` 汇合，第一版只允许只读阶段并行）；agent 阶段可声明权限（`access` read / write / full、`git`、`secrets`）与可选的 `before` / `after` 钩子；
+  含检查点的计划可设 `finish: auto`，走完自动完成；项目可设默认计划；agent 可提议保存计划模板；派出前检查执行者与权限；agent 可用 `<lumio-permission>` 按需申请阶段权限，人批准后续接会话。
 - **通知**（ADR 0031 第 4 节，R4-4）：Hub 内统一 `notify()`，在业务事务里写入待发事件并按事件 ID 去重；只在新出现「轮到人且原因为 answer / review / failed」与新的待批准提议时通知，每个事件最多发一次。先实现 Web Push：VAPID 私钥私密保存，JWT 一定带 https 的 `sub`（`LUMIO_PUBLIC_URL`，否则订阅页面的 Origin），TTL 24 小时；推送服务返回 404/410 时移除设备；推送地址与密钥不出现在响应、日志与审计中。
 - **工作目录与目标**（ADR 0033，R4-8）：一轮的工作目录在委派时按「任务 → 项目 → `~`」确定，项目的 `repo` 只供参考并写进每轮输入；
   委派目标与计划里的 agent 在提交时校验，`execution.target.list` 列出可委派的目标。
