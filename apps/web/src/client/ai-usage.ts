@@ -20,7 +20,7 @@ const STATUS = translated({
   error: "Usage refresh failed", stale: "Previous reading",
 });
 
-function amount(currency: string, value: string): string {
+export function amount(currency: string, value: string): string {
   return currency === "CNY" ? `¥${value}` : `$${value}`;
 }
 
@@ -36,7 +36,7 @@ function percentage(used: number): number {
   return Math.round((100 - used) * 100) / 100;
 }
 
-function windowRow(window: AIQuotaWindow): HTMLElement {
+export function windowRow(window: AIQuotaWindow): HTMLElement {
   const label = windowLabel(window);
   const remaining = window.used_percent === undefined ? undefined : percentage(window.used_percent);
   const expired = window.resets_at && Date.parse(window.resets_at) <= Date.now();

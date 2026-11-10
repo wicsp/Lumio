@@ -16,6 +16,7 @@ import type { Navigate, Pane, Section } from "../navigation.ts";
 import { t } from "../i18n.ts";
 import { SettingsPane } from "../panes/settings-page.ts";
 import { TrashPane } from "../panes/trash.ts";
+import { UsageIndicator } from "../usage-indicator.ts";
 
 /** 记住侧栏是否收起（只影响本设备）。 */
 const SIDEBAR_KEY = "lumio.web.sidebar-collapsed";
@@ -75,12 +76,15 @@ export class WorkbenchView {
     this.lastRefresh = Date.now();
     this.current?.pane.liveRefresh?.();
     void this.refreshCounts();
+    void this.usage.refresh();
   };
   private readonly onVisible = () => { if (document.visibilityState === "visible") this.refreshNow(); else void this.current?.pane.beforeLeave?.(); };
   private liveTimer: ReturnType<typeof setInterval> = setInterval(() => this.refreshNow(), 15_000);
   private readonly onUnload = () => { this.current?.pane.canLeave?.(); };
 
   private name: string;
+  /** 侧栏底部的 AI 用量指示器。 */
+  private usage: UsageIndicator;
   private account: HTMLButtonElement;
   /** 进入设置页之前所在的位置，设置页的返回键回到这里。 */
   private beforeSettings = "#overview";
@@ -98,6 +102,7 @@ export class WorkbenchView {
       this.nav.set(s.key, button); this.counts.set(s.key, count); nav.append(button);
     }
     this.name = humans[0] ?? t("Me");
+    this.usage = new UsageIndicator(session.client, () => void this.go("settings", "ai"));
     this.account = h("button", { type: "button", class: "account", title: t("Settings"), "aria-label": t("Settings"), onclick: () => this.go("settings") },
       h("span", { class: "who-avatar", "aria-hidden": "true" }, this.name.slice(0, 1).toUpperCase()),
       h("span", { class: "account-text" }, h("span", { class: "who-name" }, this.name),
@@ -110,7 +115,7 @@ export class WorkbenchView {
       h("div", { class: "brand" }, logo, h("span", { class: "brand-name" }, "Lumio"), toggle),
       h("button", { type: "button", class: "quick-find", title: t("Search or jump to"), "aria-label": t("Search or jump to"), onclick: () => this.palette.open() }, icon("search"), h("span", {}, t("Search or jump to")), h("kbd", {}, "⌘K")),
       nav,
-      h("div", { class: "sidebar-foot" }, this.account));
+      h("div", { class: "sidebar-foot" }, this.usage.element, this.account));
     const shell = h("div", { class: "shell" }, sidebar, this.main);
     const collapse = (collapsed: boolean, focus = false) => {
       shell.classList.toggle("sidebar-collapsed", collapsed);
@@ -275,6 +280,7 @@ export class WorkbenchView {
     this.panes.clear();
     this.current = undefined;
     this.palette.dispose();
+    this.usage.dispose();
     clearInterval(this.countTimer); clearInterval(this.liveTimer);
     window.removeEventListener("focus", this.refreshNow);
     window.removeEventListener("lumio-refresh", this.refreshNow);
