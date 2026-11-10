@@ -2,6 +2,7 @@
  * 项目与任务（ADR 0026、0032）：任务按「轮到谁」分组，项目按状态分组；右侧详情。
  * 列表上可直接交回、完成、取消（带 revision）；新建在对话框里完成，新建不会委派。
  */
+import { knowledgeReferences, referenceConsequence } from "../resources.ts";
 import type { WorkProject, WorkTask, WorkTaskDetail } from "@lumio/schema";
 import { PROJECT_STATUSES } from "@lumio/schema";
 import { errorText, isConflict, type Client, type HubExtras } from "../api.ts";
@@ -232,6 +233,7 @@ export class WorkPane {
     if (record.type === "task" && record.turn.reason === "working") {
       consequences.push(t("{0} is working on this task. That round will be stopped first; its run record is kept.", record.turn.holder));
     }
+    if (record.type === "task") consequences.push(...referenceConsequence(await knowledgeReferences(this.client, record.id)));
     if (record.type === "project") {
       const tasks = await this.client.workTasks({ project: record.id }).catch(() => undefined);
       consequences.push(tasks === undefined ? t("Tasks in this project will be kept and moved to No project.")

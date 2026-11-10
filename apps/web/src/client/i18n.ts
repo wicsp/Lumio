@@ -7,6 +7,23 @@ export type Lang = "en" | "zh";
 const KEY = "lumio.web.lang";
 
 export const ZH: Record<string, string> = {
+  "This item is in Recently deleted.": "它在「最近删除」里。",
+  "This item was deleted.": "它已被删除。",
+  "This item isn't available to you.": "你无法查看它。",
+  "Couldn't open {0}: {1}": "无法打开 {0}：{1}",
+  "{0} has no page to open.": "「{0}」没有可打开的页面。",
+  "{0} knowledge notes cite it as a source. They keep the reference and will show it as deleted until you restore it.": "有 {0} 条知识把它作为来源。引用会保留，恢复之前显示为已删除。",
+  "AI note": "AI 笔记",
+  "Show": "展开",
+  "Hide": "收起",
+  "Written by AI": "AI 写的",
+  "AI": "AI",
+  "Edit link": "编辑链接",
+  "This AI note isn't available.": "无法读取这份 AI 笔记。",
+  "Written by AI ({0}). Your own notes embed it with a link on its own line.": "由 AI 写成（{0}）。在你的笔记里单独一行写一个指向它的链接，就能嵌入。",
+  "Written by AI. Your own notes embed it with a link on its own line.": "由 AI 写成。在你的笔记里单独一行写一个指向它的链接，就能嵌入。",
+  "Sources": "来源",
+  "That message isn't shown in this conversation.": "这段对话里没有显示那条消息。",
   "Codex sign-in": "Codex 登录",
   "Only existing chats are signed in": "仅旧对话已登录",
   "Older chats can still use their own sign-in. Sign in here once to use this connection in new chats.": "旧对话可能仍在使用自己的登录。请在这里授权一次，之后新对话都可以使用这个连接。",

@@ -25,7 +25,9 @@ AI 写的知识与人写的笔记在文件层面分开；任何知识都能记�
 
 K4-2、K4-3 依赖 K4-1；K4-4 依赖 K4-3 的接口。
 
-实施状态：K4-1 契约见 PR（`packages/schema`：`AiNote`、`ID_PREFIXES["ai-note"]`、`DerivedFrom`、`LumioLink`、`KnowledgeAiNote*`）。`VAULT_LAYOUT` 的 `ai/notes/` 在 K4-2 加入；在此之前 `entityDirectory("ai-note")` 会报未知目录。
+实施状态（2026-11-10）：K4-1 至 K4-4 全部完成（#141 契约，#145 索引与 Hub，K4-4 Web）。Web 中 `lumio:` 链接与来源在捕获阶段统一经 `/v2/resources/<id>` 打开，`lumio:amsg_…` 打开对话并定位到消息；AI 笔记在阅读视图和编辑器里都渲染为卡片（按文件名 `ain_<ULID>` 识别，不需查询）；删除对话与任务前显示引用数。
+
+K4-1 契约（`packages/schema`：`AiNote`、`ID_PREFIXES["ai-note"]`、`DerivedFrom`、`LumioLink`、`KnowledgeAiNote*`）。`VAULT_LAYOUT` 的 `ai/notes/` 在 K4-2 加入；在此之前 `entityDirectory("ai-note")` 会报未知目录。
 
 ## K4-4 接口交接
 
