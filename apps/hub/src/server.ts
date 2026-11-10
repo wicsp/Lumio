@@ -172,7 +172,7 @@ async function startHubInstance(config: HubConfig, options: {
             status = response.status; return response;
           }
           if (v2) {
-            const response = await handleV2(request, v2, identity!, store, modules!, decide, (options.now ?? (() => new Date()))());
+            const response = await handleV2(request, server, v2, identity!, store, modules!, decide, (options.now ?? (() => new Date()))());
             status = response.status; return response;
           }
           if ((PAIRING_OPERATIONS as readonly string[]).includes(route.operation)) {

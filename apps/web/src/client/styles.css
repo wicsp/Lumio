@@ -937,7 +937,11 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 .chat-dock .composer textarea { min-height: 52px; padding-top: 12px; font-size: var(--fs-lg); }
 .chat-dock .composer-foot .btn { margin-left: 0; }
 .chat-dock .composer-foot { justify-content: flex-end; }
-.chat-dock .composer-foot select { margin-right: auto; }
+.chat-turn-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.chat-dock .composer-foot > .chat-turn-controls { margin-right: auto; }
+.chat-progress { margin-left: 36px; color: var(--ink-3); font-size: var(--fs-sm); }
+.chat-progress summary { padding: 4px 0; cursor: pointer; }
+.chat-progress pre { margin: 0; padding: 8px 10px; max-height: 40vh; overflow: auto; border-radius: var(--r-md); background: var(--sunken); white-space: pre-wrap; overflow-wrap: anywhere; }
 .welcome { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 12vh 0 0; }
 .welcome h2 { font-size: var(--fs-2xl); font-weight: 650; letter-spacing: -0.02em; }
 .welcome p { color: var(--ink-3); max-width: 34em; }
@@ -1356,7 +1360,6 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 /* Codex 状态留在输入框边上，详细活动在对话内按需展开。 */
 .native-panel { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; font-size: var(--fs-sm); }
 .native-panel > :empty { display: none; }
-.native-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-height: 28px; padding: 0 4px; }
 .native-status { display: flex; align-items: center; gap: 6px; color: var(--ink-3); font-size: var(--fs-xs); }
 .native-status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .native-advanced { position: relative; margin-left: auto; font-size: var(--fs-xs); }

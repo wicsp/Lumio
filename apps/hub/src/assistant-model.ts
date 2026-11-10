@@ -50,9 +50,11 @@ function rejected(status: number): AssistantError {
 /** HTTP stays in the Hub adapter. No provider, model, tool or retries are enabled implicitly. */
 export class ChatCompletionsModel implements AssistantModel {
   constructor(private readonly config: ModelConfiguration, private readonly fetcher: typeof fetch = fetch) {}
-  async complete(raw: AssistantModelRequest, options: { signal?: AbortSignal; token(text: string): void }): Promise<AssistantModelResponse> {
+  async complete(raw: AssistantModelRequest, options: Parameters<AssistantModel["complete"]>[1]): Promise<AssistantModelResponse> {
     const input = AssistantModelRequest.parse(raw);
     const signal = AbortSignal.any([...(options.signal ? [options.signal] : []), AbortSignal.timeout(120_000)]);
+    const url = new URL(this.config.baseUrl);
+    const showReasoning = url.origin === "https://api.deepseek.com" && input.thinking === "on";
     let response: Response | undefined;
     try {
       const key = this.config.credential();
@@ -98,7 +100,13 @@ export class ChatCompletionsModel implements AssistantModel {
           if (choice.index !== 0 || finish) throw invalid();
           const delta = object(choice.delta);
           if (delta.refusal) throw invalid();
-          for(const key of ["reasoning_content","encrypted_content"] as const){if(delta[key]!==undefined&&delta[key]!==null){if(typeof delta[key]!=="string")throw invalid();continuation[key]=(continuation[key]??"")+delta[key];}}
+          for (const key of ["reasoning_content", "encrypted_content"] as const) {
+            const fragment = delta[key];
+            if (fragment === undefined || fragment === null) continue;
+            if (typeof fragment !== "string") throw invalid();
+            continuation[key] = (continuation[key] ?? "") + fragment;
+            if (key === "reasoning_content" && fragment && showReasoning) options.reasoning?.(fragment);
+          }
           if (delta.content !== undefined && delta.content !== null) {
             if (typeof delta.content !== "string") throw invalid();
             content += delta.content; options.token(delta.content);

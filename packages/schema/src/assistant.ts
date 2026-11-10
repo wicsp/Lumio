@@ -239,12 +239,13 @@ export const AssistantModelResponse = z.strictObject({
 
 // ───────────────────────── 事件（用于以后的流式响应） ─────────────────────────
 
-/**
- * Assistant 事件（R0-1）：用于以后 Hub 流式响应（如每行一个事件），目前只定义格式。
- * token：流式文本片段；tool：工具调用开始/结束；result：轮次完成；error：失败。
- */
+export const ASSISTANT_REASONING_DELTA_LIMIT = 65_536;
+
+/** Assistant NDJSON 事件。进度事件需要客户端显式订阅（ADR 0049）。 */
 export const AssistantEvent = z.discriminatedUnion("type", [
   z.strictObject({type:z.literal("native"),turn:idOf("turn"),event:NativeEventData}),
+  z.strictObject({ type: z.literal("model_waiting"), turn: idOf("turn") }),
+  z.strictObject({ type: z.literal("reasoning"), turn: idOf("turn"), delta: z.string().min(1).max(ASSISTANT_REASONING_DELTA_LIMIT) }),
   z.strictObject({ type: z.literal("token"), turn: idOf("turn"), delta: z.string() }),
   z.strictObject({ type: z.literal("tool"), turn: idOf("turn"), tool: AssistantToolCall }),
   z.strictObject({ type: z.literal("result"), turn: idOf("turn"), messages: z.array(AssistantMessage) }),
