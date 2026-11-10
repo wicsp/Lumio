@@ -135,8 +135,11 @@ finish: auto
 
 - 好处：谁来审核、要不要审核、用哪台机器的哪个 agent 都在 Lumio 里可见、可改、可校验；仓库规则在 Lumio 内外都适用。
   「验收前不合并」由凭据隔离保证，不靠 agent 自觉。交接图仍只有两种节点，不写 `after` 时与现在完全一样。
-- 代价：并行带来汇合、打回与提问的组合规则；`PlanRun`、`Turn` 的形状变化要迁移旧数据（把 `stage` 映射为 `active` / `done`）。
+- 代价：并行带来汇合、打回与提问的组合规则。`PlanRun` 保留 `stage`，只新增可选的 `active` / `done`，旧数据不迁移（见修订记录）。
   `sandbox: none` 的引擎无法强制权限，只能如实提示。
 - 风险：钩子是任意命令，含钩子的计划必须经人批准并完整展示；长时间等待的钩子占用执行器并发名额。
 
 ## 修订记录
+- 2026-11-10（H1-2 契约起草，随 PR 待人类批准）：契约落地方式细化——`PlanRun` 保留 `stage`（并行时为第一个执行中的阶段），新增可选 `active`（≥2）与 `done`，缺失按线性前缀理解，不迁移旧数据；
+  权限批准为新命令 `work.task.grant`（范围 `next_round` / `task`，缺省批准后续接）；`AgentRun` 增加 `permissions` / `hooks`，`JobResult` 增加 `permission`；
+  `RuntimeRegistration` 增加可选 `features`（`stage_permissions`、`hooks`、`permission_request`），Hub 只把新字段发给声明了对应能力的执行器，旧执行器不受影响。

@@ -114,7 +114,7 @@ export class Capabilities {
         case "approval.proposal.list": {
           const activeTasks = new Set(work.tasks().map(task => task.id));
           result = this.store.proposals("pending", identity.actor.role === "agent" ? identity.actor.id : undefined)
-            .filter(proposal => proposal.operation.op !== "work.command" || activeTasks.has(proposal.operation.args.operation.args.task));
+            .filter(proposal => proposal.operation.op !== "work.command" || !("task" in proposal.operation.args.operation.args) || activeTasks.has(proposal.operation.args.operation.args.task));
           break;
         }
       }

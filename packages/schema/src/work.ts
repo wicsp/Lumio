@@ -2,7 +2,7 @@ import { z } from "zod";
 import { AgentTarget, ID_PREFIXES, Id, RequestId, Revision, Timestamp, idOf } from "./common.ts";
 import { TASK_STATUSES } from "./entities.ts";
 import { Job } from "./job.ts";
-import { HandoffPlan, PlanRun, PlanStageId, PlanTemplate } from "./plan.ts";
+import { HandoffPlan, PlanRun, PlanStageId, PlanTemplate, StagePermissions } from "./plan.ts";
 import { TrashItem } from "./trash.ts";
 
 /**
@@ -71,6 +71,7 @@ export const WorkProject = z.strictObject({
   repo: z.string().min(1).optional().describe("关联代码仓库的 URL 或路径，只供参考；写进每一轮的输入（ADR 0033）"),
   workdir: z.string().min(1).optional().describe("项目的工作目录：任务没有自己的 workdir 时，委派那一刻用它（ADR 0033）；规则同任务 workdir"),
   default_target: AgentTarget.optional().describe("默认执行者：项目下还没派过的任务不带 to 委派时用它（ADR 0044）"),
+  default_plan: idOf("wft").optional().describe("默认计划模板：人点「委托」且任务还没有计划时套用（ADR 0049 第 6 节）"),
   deadline: Timestamp.optional(),
 });
 
@@ -102,7 +103,8 @@ export const TASK_OUTCOMES = ["open", "done", "cancelled"] as const;
 export const TaskOutcome = z.enum(TASK_OUTCOMES);
 
 /** 持有者：人、某个 agent（engine@device）、外部、无人。 */
-export const TurnHolder = z.union([z.literal("human"), z.literal("external"), z.literal("nobody"), AgentTarget]);
+/** agents：交接图中多个 agent 阶段同时执行（ADR 0049 第 2 节），各分支见 Turn.parallel。 */
+export const TurnHolder = z.union([z.literal("human"), z.literal("external"), z.literal("nobody"), z.literal("agents"), AgentTarget]);
 export const TURN_REASONS = ["todo", "answer", "review", "failed", "working", "waiting", "on_hold"] as const;
 export const TurnReason = z.enum(TURN_REASONS);
 /** 需要人回应的原因：出现在「需要你处理」并触发推送。 */
@@ -125,6 +127,14 @@ export const NextTarget = z.strictObject({
 });
 
 /** 现在轮到谁（ADR 0032 第 2 节）。持有者与原因必须匹配。 */
+/** 并行执行中的一个分支。 */
+export const TurnBranch = z.strictObject({
+  stage: PlanStageId,
+  agent: AgentTarget,
+  job: idOf("job"),
+  round: z.number().int().positive(),
+});
+
 export const Turn = z
   .strictObject({
     holder: TurnHolder,
@@ -134,8 +144,10 @@ export const Turn = z
     job: idOf("job").optional(),
     stage: PlanStageId.optional().describe("有交接计划时所在的阶段"),
     note: z.string().min(1).max(200).optional().describe("外部等待的说明（如「等导师回复」），或停下的原因（如「达到 8 轮上限」）"),
+    parallel: z.array(TurnBranch).min(2).optional().describe("holder 为 agents 时同时执行的各分支（ADR 0049 第 2 节）"),
   })
-  .refine((turn) => reasonFits(turn.holder, turn.reason), { message: "持有者与原因不匹配", path: ["reason"] });
+  .refine((turn) => reasonFits(turn.holder, turn.reason), { message: "持有者与原因不匹配", path: ["reason"] })
+  .refine((turn) => (turn.holder === "agents") === (turn.parallel !== undefined), { message: "只有 holder 为 agents 时才有 parallel，且必须有", path: ["parallel"] });
 
 /** 任务 v3。没有 status 与 assignee；结局只有人能改，轮到谁按 ADR 0032 第 3、4 节变化。 */
 export const WorkTask = z
@@ -149,6 +161,7 @@ export const WorkTask = z
     outcome: TaskOutcome,
     turn: Turn,
     plan: PlanRun.optional().describe("交接计划与进度（ADR 0032 第 5 节）；缺失表示一轮交付后交回给人"),
+    grants: StagePermissions.optional().describe("没有计划的任务上人已批准的权限（ADR 0049 第 3 节）；有计划时权限记在阶段上"),
     created: Timestamp,
     updated: Timestamp,
     created_by: idOf("act").optional(),
@@ -210,6 +223,7 @@ export const WorkProjectPatch = z
     repo: z.string().min(1).nullable().optional().describe("null：清空"),
     workdir: z.string().min(1).nullable().optional().describe("null：清空（ADR 0033）"),
     default_target: AgentTarget.nullable().optional().describe("null：清空（ADR 0044）"),
+    default_plan: idOf("wft").nullable().optional().describe("null：清空（ADR 0049）"),
     deadline: Timestamp.nullable().optional().describe("null：清空"),
   })
   .refine(nonEmpty, PATCH_EMPTY)
@@ -243,6 +257,7 @@ export const WorkProjectCreate = z.strictObject({
     repo: z.string().min(1).optional(),
     workdir: z.string().min(1).optional(),
     default_target: AgentTarget.optional().describe("默认执行者（ADR 0044）"),
+    default_plan: idOf("wft").optional().describe("默认计划模板（ADR 0049）"),
     deadline: Timestamp.optional(),
   }),
 });
@@ -345,7 +360,23 @@ export const WorkTaskCheckpoint = z.strictObject({
     .refine((args) => args.action !== "send_back" || args.comment !== undefined, "打回时要写明要改什么"),
 });
 
-/** 保存计划模板（新建或按 template 覆盖）；删除模板。只有人。 */
+/**
+ * 批准 agent 的权限申请（只有人，ADR 0049 第 3 节）。scope：next_round 只给接下来这一轮；task 记到任务上
+ * （有计划时记在当前阶段，没有计划时记在 task.grants）。continue 为 true 时同一事务里以新权限续接会话委派下一轮。
+ * 拒绝不需要单独的命令：带说明「回答并继续」即可。
+ */
+export const WorkTaskGrant = z.strictObject({
+  op: z.literal("work.task.grant"),
+  args: z.strictObject({
+    task: idOf("task"),
+    expected_revision: Revision,
+    permissions: StagePermissions.refine((p) => p.access !== undefined || p.git !== undefined || (p.secrets?.length ?? 0) > 0, "至少批准一项权限"),
+    scope: z.enum(["next_round", "task"]),
+    continue: z.boolean().optional().describe("缺省 true"),
+  }),
+});
+
+/** 保存计划模板（新建或按 template 覆盖）；删除模板。只有人；agent 只能通过提议（ADR 0049 第 6 节）。 */
 export const PlanTemplateSave = z.strictObject({
   op: z.literal("work.plan_template.save"),
   args: z.strictObject({ template: idOf("wft").optional(), name: z.string().min(1).max(80), plan: HandoffPlan }),
@@ -372,7 +403,7 @@ export const WorkProjectDelete = z.strictObject({
 
 export const WorkCommand = z.discriminatedUnion("op", [
   WorkProjectCreate, WorkProjectUpdate, WorkTaskCreate, WorkTaskUpdate, WorkTaskComment, WorkTaskDispatch,
-  WorkTaskHand, WorkTaskFinish, WorkTaskReopen, WorkTaskPlanSet, WorkTaskCheckpoint, PlanTemplateSave, PlanTemplateDelete,
+  WorkTaskHand, WorkTaskFinish, WorkTaskReopen, WorkTaskPlanSet, WorkTaskCheckpoint, WorkTaskGrant, PlanTemplateSave, PlanTemplateDelete,
   WorkTaskDelete, WorkProjectDelete,
 ]);
 
