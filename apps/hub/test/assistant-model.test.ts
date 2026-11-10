@@ -107,6 +107,42 @@ test("configured Hub uses a local compatible model service without injected mode
   } finally { await hub?.stop(); await provider.stop(true); await rm(temp, { recursive: true, force: true }); }
 });
 
+test("chat returns JSON and NDJSON after a model is silent past the server idle timeout", async () => {
+  const temp = await mkdtemp(join(tmpdir(), "lumio-chat-idle-"));
+  let hub: Awaited<ReturnType<typeof startHub>> | undefined;
+  try {
+    const store = await HubStore.open(temp);
+    store.createActor("idle-owner", "human");
+    const token = store.createToken("idle-owner", "idle-owner");
+    store.close();
+    hub = await startHub({ ...readConfig({ HOME: temp, LUMIO_STATE_DIR: temp }), port: 0 }, {
+      log() {},
+      assistantModel: {
+        async complete() {
+          await Bun.sleep(12_000);
+          return { content: "Synthetic reply after thinking", tool_calls: [] };
+        },
+      },
+    });
+    const url = `http://127.0.0.1:${hub.server.port}/v2/assistant/chat`;
+    const chat = (format: "application/json" | "application/x-ndjson") => fetch(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: format },
+      body: JSON.stringify({ request_id: `synthetic-idle-${format === "application/json" ? "json" : "ndjson"}`, message: "Synthetic slow query" }),
+    });
+    const [result, events] = await Promise.all([
+      chat("application/json").then(async response => AssistantChatResult.parse(await response.json())),
+      chat("application/x-ndjson").then(async response => (await response.text()).trim().split("\n")
+        .map(line => AssistantEvent.parse(JSON.parse(line)))),
+    ]);
+    expect(result.turn.status).toBe("done");
+    expect(result.messages.at(-1)?.content).toBe("Synthetic reply after thinking");
+    expect(events.at(-1)).toMatchObject({
+      type: "result", messages: expect.arrayContaining([expect.objectContaining({ content: "Synthetic reply after thinking" })]),
+    });
+  } finally { await hub?.stop(); await rm(temp, { recursive: true, force: true }); }
+}, 25_000);
+
 test("DeepSeek non-thinking mode is scoped to its official host, including config verification", async () => {
   const home = await mkdtemp(join(tmpdir(), "lumio-deepseek-config-"));
   try {

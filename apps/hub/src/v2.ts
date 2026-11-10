@@ -62,7 +62,7 @@ async function json(request: Request): Promise<unknown> {
 export function moduleError(cause: unknown): HubError | undefined {
   if (cause instanceof WorkError || cause instanceof AssistantError) return new HubError(cause.code, cause.params, { reason: cause.reason });
 }
-export async function handleV2(request: Request, route: V2Route, identity: Identity, store: HubStore,
+export async function handleV2(request: Request, server: Bun.Server<undefined>, route: V2Route, identity: Identity, store: HubStore,
   modules: BusinessModules, decide: typeof authorize, now = new Date()): Promise<Response> {
   let decision = decide(identity.actor, { operation: route.operation,
     includePrivate: ["execution.read", "knowledge.graph"].includes(route.operation) && new URL(request.url).searchParams.get("include_private") === "true" });
@@ -204,6 +204,8 @@ export async function handleV2(request: Request, route: V2Route, identity: Ident
     if (route.operation === "assistant.read") return Response.json(id ? modules.assistant.detail(id, identity.actor.id) : modules.assistant.conversations(identity.actor.id));
     const parsed = AssistantChatRequest.safeParse(await json(request));
     if (!parsed.success) throw new HubError("INVALID", { key: "v2.invalid_assistant_request_parameters", args: [] });
+    // A model can be silent while thinking. The chat deadline below bounds the turn.
+    server.timeout(request, 0);
     await modules.assistantConfig.refresh();
     const native=parsed.data.conversation?modules.assistant.detail(parsed.data.conversation,identity.actor.id).conversation.native_session:undefined;
     const signal = AbortSignal.any([...(native?[]:[request.signal]), modules.signal, AbortSignal.timeout(native?1800000:120000)]);
