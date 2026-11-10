@@ -13,6 +13,13 @@ export class SqliteExecutionStore implements ExecutionStore {
     const row = this.db.query<{ record: string }, [string]>("SELECT record FROM jobs WHERE id=?").get(id);
     return row ? Job.parse(JSON.parse(row.record)) : undefined;
   }
+  agentJobs(ids: string[]): { id: string; runtime: string; engine: string }[] {
+    if (!ids.length) return [];
+    return this.db.query<{ id: string; runtime: string; engine: string }, [string]>(`
+      SELECT id, json_extract(record,'$.spec.runtime') AS runtime, json_extract(record,'$.spec.run.engine') AS engine
+      FROM jobs WHERE id IN (SELECT value FROM json_each(?)) AND json_extract(record,'$.spec.run.kind')='agent'`
+    ).all(JSON.stringify(ids));
+  }
   list(filter: { task?: string; routine?: string; status?: string; runtime?: string; open?: boolean } = {}): Job[] {
     const where: string[] = [], parameters: SQLQueryBindings[] = [];
     for (const [field, value] of [["spec.source.task", filter.task], ["spec.source.routine", filter.routine], ["status", filter.status], ["spec.runtime", filter.runtime]] as const) {

@@ -77,22 +77,28 @@ export class BusinessModules {
       const taskId = operation.op === "work.command" ? operation.args.operation.args.task : operation.op === "task.dispatch" ? operation.args.task : undefined;
       notifications.proposal(proposal, taskId ? this.workStore.task(taskId)?.title : undefined);
     };
-    this.work = new WorkService(this.workStore, { text: msg, now, id, systemActor: store.workActor().id, job: id => jobs.get(id),
+    this.work = new WorkService(this.workStore, { text: msg, now, id, localRuntime: config.localRuntime, systemActor: store.workActor().id, job: id => jobs.get(id),
       auditPlan: (change, plan) => {
         const actor = store.actors().find(actor => actor.id === change.by)!;
         store.audit({ actor, label: actor.name }, JSON.stringify({ op: "work.task.plan.advance", task: change.task, plan,
           from: change.from.stage, stage: change.to.stage, turn: change.to }), "allow", plan.approved.proposal, "applied");
       },
-      validateTarget: target => { validateTarget(this.store, config.localRuntime, target, now()); },
+      validateTarget: (target, source) => { validateTarget(this.store, config.localRuntime, target, now(), source); },
       dispatch: (task, input, round, to) => this.dispatch(task, input, round, to, now()),
-      agentForJob: jobId => {
-        const job = jobs.get(jobId);
-        const runtime = store.runtimes(now()).find(value => value.actor === job.spec.runtime);
-        return job.spec.run.kind === "agent" && runtime ? `${job.spec.run.engine}@${runtime.registration.name}` : undefined;
+      agentsForJobs: ids => {
+        const jobs = store.executionStore.agentJobs(ids);
+        if (!jobs.length) return new Map();
+        const runtimes = new Map(store.runtimes(now()).map(runtime => [runtime.actor, runtime.registration.name]));
+        const targets = new Map<string, string>();
+        for (const job of jobs) {
+          const name = runtimes.get(job.runtime);
+          if (name) targets.set(job.id, `${job.engine}@${name}`);
+        }
+        return targets;
       },
       cancel: (task) => { const job = jobs.activeForTask(task); if (job) { jobs.cancel(job.spec.id); return job.spec.id; } },
     });
-    this.workCommands = new WorkCommands(store, this.work, options.authorize ?? authorize, config.localRuntime);
+    this.workCommands = new WorkCommands(store, this.work, options.authorize ?? authorize, config.localRuntime, now);
     this.capabilities = new Capabilities(this, store, config, options.authorize);
     this.assistantStore = new SqliteAssistantStore(store.db);
     this.ai=new AIConfigurationService(new SqliteAIStore(store.db),config.assistantModel);
@@ -123,7 +129,6 @@ export class BusinessModules {
     return outcome.result as WorkCommandResult;
   }
   private dispatch(task: WorkTask, input: string, round: number, to: string | undefined, now: Date) {
-    validateTarget(this.store, this.config.localRuntime, to ?? "human", now);
     const target = parseAssignee(to ?? "human");
     if (target === "human") throw new HubError("INVALID", { key: "modules.specify_an_agent_e_g_pi_server", args: [] });
     const runtime = this.store.runtimes(now).find((value) => value.registration.name === (target.device ?? this.config.localRuntime));

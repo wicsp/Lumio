@@ -104,3 +104,24 @@ test("derived readiness is never persisted; SQLite purge preserves dangling depe
     expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
   } finally { db.close(); }
 });
+
+test("existing projects gain a nullable default and derived targets stay out of tasks and receipts", () => {
+  const db = new Database(":memory:");
+  try {
+    const f = fixture(db);
+    const project = f.command("work.project.create", { title: "Synthetic existing project" });
+    if (project.kind !== "project") throw Error("Expected a project");
+    db.exec("ALTER TABLE work_projects DROP COLUMN default_target");
+    const store = new SqliteWorkStore(db);
+    expect(store.project(project.project.id)).toEqual(project.project);
+    store.putProject({ ...project.project, default_target: "codex@mac" });
+    expect(new SqliteWorkStore(db).project(project.project.id)?.default_target).toBe("codex@mac");
+    const created = f.command("work.task.create", { title: "Synthetic inheriting task", project: project.project.id });
+    if (created.kind !== "task") throw Error("Expected a task");
+    expect(created.task.next_target).toEqual({ target: "codex@mac", source: "project" });
+    store.putTask(created.task);
+    store.putReceipt(actor, "synthetic-target-receipt", "{}", created);
+    expect(store.task(created.task.id)?.next_target).toBeUndefined();
+    expect(store.receipt(actor, "synthetic-target-receipt")?.result).not.toHaveProperty("task.next_target");
+  } finally { db.close(); }
+});

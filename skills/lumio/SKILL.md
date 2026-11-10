@@ -38,8 +38,8 @@ Always add `--json`. Each successful command returns one JSON value matching its
 | work.task.update | `lumio task update <id> [--patch <patch>] [--revision <revision>] [--description <description>] [--file <file>] [--project <project>] [--parent <parent>] [--depends <depends>] [--due <due>] [--workdir <workdir>] [--model <model>] [--gpus <gpus>] [--timeout <timeout>] [--request-id <request-id>] --json` | Change task fields. Tasks have outcome and turn, with no status or assignee; only the user decides completion. |
 | work.task.comment | `lumio task comment <id> [<text>] [--file <file>] [--request-id <request-id>] --json` | Add a comment to a task's discussion. |
 | work.task.hand | `lumio task hand <id> --to <to> [--note <note>] [--revision <revision>] [--request-id <request-id>] --json` | Hand a task back to the human or to external waiting (with a note). Agents cannot hand to nobody. |
-| work.project.create | `lumio project new <title> [--description <description>] [--file <file>] [--goal <goal>] [--repo <repo>] [--deadline <deadline>] [--workdir <workdir>] [--request-id <request-id>] --json` | Create a project, optionally with a default_target used for tasks never dispatched before. |
-| work.project.update | `lumio project update <id> [--patch <patch>] [--revision <revision>] [--description <description>] [--file <file>] [--goal <goal>] [--repo <repo>] [--deadline <deadline>] [--workdir <workdir>] [--request-id <request-id>] --json` | Change project fields, including default_target (null clears it). |
+| work.project.create | `lumio project new <title> [--description <description>] [--file <file>] [--goal <goal>] [--repo <repo>] [--deadline <deadline>] [--workdir <workdir>] [--default-target <default-target>] [--request-id <request-id>] --json` | Create a project, optionally with a default_target used for tasks never dispatched before. |
+| work.project.update | `lumio project update <id> [--patch <patch>] [--revision <revision>] [--description <description>] [--file <file>] [--goal <goal>] [--repo <repo>] [--deadline <deadline>] [--workdir <workdir>] [--default-target <default-target>] [--request-id <request-id>] --json` | Change project fields, including default_target (null clears it). |
 
 Additional Work commands (generated from the same CLI definitions):
 
@@ -61,7 +61,11 @@ Additional Work commands (generated from the same CLI definitions):
 
 Use `lumio <command> --help --json` for structured usage without connecting to the Hub. Task/project update accepts either `--patch <json>` or the listed field flags; null in a patch clears an optional field. `--timeout` is in minutes, `--gpus` and `--depends` are comma-separated lists. `--revision` selects the observed revision (otherwise the CLI fetches it first); `edit --file` requires an explicit revision. Plan files contain HandoffPlan JSON, or null to clear a task plan.
 
-Before delegation or setting a plan, run `lumio targets --json` and use a returned target (offline targets are allowed and wait for reconnection). If a proposal is wrong, submit a corrected proposal directly: it automatically supersedes your pending proposal of the same kind for that task. Alternatively use `lumio proposals withdraw <id> --json` to withdraw your own pending proposal.
+Before choosing a delegation target, setting a plan, or setting a project default, run `lumio targets --json` and use a returned target. Offline targets wait for reconnection. Use `project create --default-target <target>` or `project update --default-target <target>` with the required title or ID. Use `project update <id> --default-target ""` to clear the default.
+
+Read `next_target` in `task show --json` or `task list --json` before using `task continue <id>` (also `task dispatch <id>`) without `--to`. The Hub chooses the current agent step of a handoff plan, the agent from the last round, or the project default for a task with no rounds. The source is `plan`, `last_round`, or `project`. With no available default or history, choose a target explicitly. Agents still submit a proposal for approval.
+
+If a proposal is wrong, submit a corrected proposal directly: it automatically supersedes your pending proposal of the same kind for that task. Alternatively use `lumio proposals withdraw <id> --json` to withdraw your own pending proposal.
 
 ## Boundaries
 

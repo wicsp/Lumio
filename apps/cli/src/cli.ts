@@ -69,7 +69,11 @@ async function executeCli(args: string[], options: CliOptions): Promise<number> 
   if (args[0] === "job") return runJobs(args.slice(1), log);
   if (args[0] === "attention") return runAttention(args.slice(1), log);
   if (args[0] === "plan-template") return runPlanTemplates(args.slice(1), log);
-  if (args[0] === "task") return (await runWork("task", args.slice(1), log)) ?? runTasks(args.slice(1).filter((arg) => arg !== "--legacy"), log);
+  if (args[0] === "task") {
+    const taskArgs = args.slice(1);
+    if (taskArgs[0] === "dispatch") taskArgs[0] = "continue";
+    return (await runWork("task", taskArgs, log)) ?? runTasks(taskArgs.filter((arg) => arg !== "--legacy"), log);
+  }
   if (args[0] === "project") return (await runWork("project", args.slice(1), log))!;
   if (args[0] === "chat") return runAssistant(args.slice(1), log);
   if (args[0] === "routine") return (await runExecutionRoutines(args.slice(1), log)) ?? runRoutines(args.slice(1).filter((arg) => arg !== "--legacy"), log);
