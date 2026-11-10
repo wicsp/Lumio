@@ -74,9 +74,10 @@ export function answerCommand(task: Pick<WorkTask, "id" | "revision">, target: s
 }
 
 /** 执行器登记的引擎 → 可选目标 engine@device。 */
-export function engineTargets(runtimes: Array<{ online: boolean; registration: { name: string; engines: Array<{ name: string; version: string }> } }>) {
+export function engineTargets(runtimes: Array<{ online: boolean; registration: { name: string; engines: Array<{ name: string; version: string; sandbox?: string }> } }>): Array<{ target: string; label: string; online: boolean; sandbox?: string }> {
   return runtimes.flatMap((runtime) => runtime.registration.engines.map((engine) => ({
     target: `${engine.name}@${runtime.registration.name}`, label: t("{0} @ {1} ({2}{3})", engine.name, runtime.registration.name, engine.version, runtime.online ? "" : t(", offline")), online: runtime.online,
+    sandbox: engine.sandbox,
   })));
 }
 
