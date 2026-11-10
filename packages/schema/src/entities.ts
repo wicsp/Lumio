@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AgentAssignee, Assignee, Base, Id, Timestamp, idOf, optional, withDefault } from "./common.ts";
+import { AgentAssignee, Assignee, Base, DerivedFrom, Timestamp, idOf, optional, withDefault } from "./common.ts";
 import { containsCardNumber } from "./secrets.ts";
 
 /**
@@ -154,7 +154,7 @@ export const Post = Base.extend({
   id: idOf("post"),
   format: z.enum(POST_FORMATS).describe("默认形态，target 可以覆盖"),
   status: withDefault(z.enum(["idea", "drafting", "ready", "done"]), "idea"),
-  derived_from: withDefault(z.array(Id), []).describe("来源的 source / idea / paper"),
+  derived_from: withDefault(z.array(DerivedFrom), []).describe("来源的 source / idea / paper，也可以是任何 Lumio ID 或 URL（ADR 0051 放宽）"),
   media: withDefault(
     z.record(
       z.string().regex(/^[a-z][a-z0-9_-]*$/, "媒体角色名只能用小写字母、数字、- 和 _，例如 main、cover"),
@@ -221,9 +221,22 @@ export const Asset = Base.extend({
   }
 });
 
+// ───────────────────────── ADR 0051：AI 笔记 ─────────────────────────
+
+/**
+ * AI 写的知识，位于 `ai/notes/`（ADR 0051 第 4 节）。一份一件事；重新生成即更新同一份，ID 不变。
+ * 人的笔记用单独成段的普通链接嵌入它；它正文里的链接不计入人的链接图。
+ */
+export const AiNote = Base.extend({
+  type: z.literal("ai-note"),
+  id: idOf("ain"),
+  generated_by: optional(idOf("act")).describe("写入者身份，由 Hub 填写；手放进目录的文件可以缺失"),
+  model: optional(z.string().min(1)).describe("生成所用模型，可选"),
+});
+
 /** 任意 vault 实体，按 `type` 字段区分。 */
 export const Entity = z.discriminatedUnion("type", [
-  Paper, Idea, Project, Task, Routine, Experiment, Source, Post, Asset,
+  Paper, Idea, Project, Task, Routine, Experiment, Source, Post, Asset, AiNote,
 ]);
 
 export type Paper = z.infer<typeof Paper>;
@@ -237,4 +250,5 @@ export type MediaRef = z.infer<typeof MediaRef>;
 export type PostTarget = z.infer<typeof PostTarget>;
 export type Post = z.infer<typeof Post>;
 export type Asset = z.infer<typeof Asset>;
+export type AiNote = z.infer<typeof AiNote>;
 export type Entity = z.infer<typeof Entity>;

@@ -19,7 +19,7 @@ export const Module = z.enum(MODULES);
 
 /** 每个模块的 ResourceRef 可以指向哪些前缀的对象。 */
 export const MODULE_ID_PREFIXES = {
-  knowledge: [ID_PREFIXES.paper, ID_PREFIXES.idea, ID_PREFIXES.source, ID_PREFIXES.experiment, ID_PREFIXES.post, ID_PREFIXES.asset, ID_PREFIXES.report],
+  knowledge: [ID_PREFIXES.paper, ID_PREFIXES.idea, ID_PREFIXES.source, ID_PREFIXES.experiment, ID_PREFIXES.post, ID_PREFIXES.asset, ID_PREFIXES.report, ID_PREFIXES["ai-note"]],
   work: [ID_PREFIXES.project, ID_PREFIXES.task, ID_PREFIXES.work_comment],
   execution: [ID_PREFIXES.job, ID_PREFIXES.routine, ID_PREFIXES.log_event, ID_PREFIXES.artifact],
   assistant: [ID_PREFIXES.conversation, ID_PREFIXES.assistant_message, ID_PREFIXES.assistant_turn, ID_PREFIXES.tool_call, ID_PREFIXES.memory],
