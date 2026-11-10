@@ -9,7 +9,7 @@ export const WORK_OPTIONS = {
   timeout: { type: "string" }, patch: { type: "string" }, revision: { type: "string" }, "request-id": { type: "string" },
   comment: { type: "string" }, turn: { type: "string" }, note: { type: "string" },
   from: { type: "string" }, stage: { type: "string" }, action: { type: "string" }, "back-to": { type: "string" },
-  goal: { type: "string" }, repo: { type: "string" }, deadline: { type: "string" }, "default-target": { type: "string" },
+  goal: { type: "string" }, repo: { type: "string" }, deadline: { type: "string" }, "default-target": { type: "string" }, "default-plan": { type: "string" },
 } as const;
 export interface CommandDefinition { path: string; positional?: string; options?: string[]; required?: string[]; capability?: string; aliases?: string[]; tail?: string }
 const write = ["request-id"], body = ["description", "file"], taskFields = ["project", "parent", "depends", "due", "workdir", "model", "gpus", "timeout"], projectFields = ["goal", "repo", "deadline", "workdir", "default-target"];
@@ -32,7 +32,7 @@ export const COMMANDS: CommandDefinition[] = [
   def("task checkpoint", "<id>", ["stage", "action", "back-to", "comment", ...write], undefined, { required: ["stage", "action"] }),
   def("project new", "<title>", [...body, ...projectFields, ...write], "work.project.create", { aliases: ["project create"] }),
   def("project list", "", ["status"], "work.project.list"), def("project show", "<id>", [], "work.project.show"),
-  def("project update", "<id>", ["patch", "revision", ...body, ...projectFields, ...write], "work.project.update"),
+  def("project update", "<id>", ["patch", "revision", ...body, ...projectFields, "default-plan", ...write], "work.project.update"),
   def("project edit", "<id>", ["file", "revision", ...write]), def("project status", "<id> [<status>]", ["status", "revision", ...write]),
   def("plan-template list"), def("plan-template save", "<name>", ["file", "template", ...write], undefined, { required: ["file"] }), def("plan-template delete", "<id>", write),
   def("job list", "", ["status", "task", "routine", "limit"], "execution.job.list"), def("job show", "<id>", [], "execution.job.show"),
