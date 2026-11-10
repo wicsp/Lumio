@@ -37,6 +37,14 @@ export async function searchNotes(root: string, query: string, options: SearchOp
   });
 }
 
+export async function noteById(root: string, id: string, options: QueryOptions = {}): Promise<NoteRef | undefined> {
+  return withIndex(root, options, db => {
+    const rows = db.query<NoteRow, [string, number]>("SELECT * FROM notes WHERE id=? AND (private=0 OR ?=1) LIMIT 2")
+      .all(id, Number(options.includePrivate ?? false));
+    return rows.length === 1 ? noteRef(rows[0]!) : undefined;
+  });
+}
+
 export async function showNote(root: string, reference: string, options: QueryOptions = {}): Promise<NoteDetail> {
   return withIndex(root, options, (db) => {
     const row = resolveReference(db, reference, options.includePrivate);
@@ -66,6 +74,7 @@ export async function collectCitations(root: string, reference: string, options:
   const msg = options.text ?? ((key: string, ...args: unknown[]) => key.replace(/\$\{(\d+)\}/g, (_, index: string) => String(args[Number(index)])));
   return withIndex(root, options, (db) => {
     const row = resolveReference(db, reference);
+    if (row.type === "ai-note") return { papers: [], warnings: [] };
     const { citations, ignored } = extractCitations(row.body, row.path);
     const papers = new Map<string, NoteRef>();
     const warnings: string[] = ignored ? [msg("${0} citations inside AI blocks were excluded", ignored)] : [];
@@ -99,6 +108,20 @@ export async function checkLinks(root: string, options: QueryOptions = {}): Prom
     }));
     return CheckResult.parse({ dangling, total: dangling.length });
   });
+}
+
+/** Count visible notes referencing any of the supplied resources, once per note. */
+export async function countKnowledgeReferences(root: string, targets: readonly string[], options: QueryOptions = {}): Promise<number> {
+  if (!targets.length) return 0;
+  return withIndex(root, options, db => db.query<{ count: number }, { targets: string; includePrivate: number }>(`
+    WITH targets AS (SELECT value FROM json_each($targets)), refs AS (
+      SELECT from_path FROM derived_from WHERE target IN (SELECT value FROM targets)
+      UNION
+      SELECT from_path FROM resource_links WHERE target IN (SELECT value FROM targets)
+    )
+    SELECT count(*) AS count FROM refs JOIN notes n ON n.path=refs.from_path
+    WHERE n.private=0 OR $includePrivate=1
+  `).get({ targets: JSON.stringify(targets), includePrivate: Number(options.includePrivate ?? false) })!.count);
 }
 
 /** Paths only: raw sensitive text is never stored or returned. */

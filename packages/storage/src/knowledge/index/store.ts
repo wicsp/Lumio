@@ -3,13 +3,13 @@ import { Database } from "bun:sqlite";
 import { mkdir, readFile, stat, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import { Citekey, Id, textContainsCardNumber, type NoteRef } from "@lumio/schema";
+import { Citekey, DerivedFrom, Id, textContainsCardNumber, type NoteRef } from "@lumio/schema";
 import { CoreError } from "@lumio/foundation";
 import { parseFrontmatter } from "@lumio/knowledge";
 import { scanVault } from "../vault.ts";
-import { extractLinks, plainText, resolveMarkdownPath } from "@lumio/knowledge";
+import { extractKnowledgeLinks, plainText, resolveMarkdownPath } from "@lumio/knowledge";
 
-const VERSION = 3; // 3：同时索引按路径解析的 Markdown 链接（P2-10），旧索引自动重建
+const VERSION = 4; // K4-2：增加来源及跨模块引用表，旧索引自动重建
 export interface IndexOptions {
   text?: (key: string, ...args: unknown[]) => string;
   stateDir?: string;
@@ -54,6 +54,10 @@ function initialize(db: Database, root: string): void {
     CREATE TABLE links (from_path TEXT NOT NULL, source TEXT NOT NULL, target TEXT NOT NULL, resolved_path TEXT);
     CREATE INDEX links_from ON links(from_path);
     CREATE INDEX links_to ON links(resolved_path);
+    CREATE TABLE derived_from (target TEXT NOT NULL, from_path TEXT NOT NULL, PRIMARY KEY(target, from_path));
+    CREATE INDEX derived_from_path ON derived_from(from_path);
+    CREATE TABLE resource_links (target TEXT NOT NULL, from_path TEXT NOT NULL, PRIMARY KEY(target, from_path));
+    CREATE INDEX resource_links_path ON resource_links(from_path);
   `);
   db.query("INSERT INTO metadata VALUES (?, ?, ?)").run(VERSION, root, new Date().toISOString());
 }
@@ -93,7 +97,7 @@ async function openStore(path: string, root: string): Promise<Database> {
       ? db.query<{ version: number; vault: string }, []>("SELECT * FROM metadata").get() : null;
     const healthy = Object.values(db.query("PRAGMA quick_check").get() ?? {})[0] === "ok";
     if (healthy && metadata?.version === VERSION && metadata.vault === root
-      && ["files", "notes", "fulltext", "links"].every((name) => tables.some((t) => t.name === name))) {
+      && ["files", "notes", "fulltext", "links", "derived_from", "resource_links"].every((name) => tables.some((t) => t.name === name))) {
       db.exec("INSERT INTO fulltext(fulltext) VALUES ('integrity-check')");
       // Additive derived metadata remains readable by older clients; no business migration.
       if (!db.query<{ name: string }, []>("PRAGMA table_info(metadata)").all().some(column => column.name === "updated_at")) {
@@ -171,6 +175,8 @@ export async function withIndex<T>(root: string, options: IndexOptions, query: (
         database.query("DELETE FROM fulltext WHERE rowid IN (SELECT rowid FROM notes WHERE path=?)").run(path);
         database.query("DELETE FROM notes WHERE path=?").run(path);
         database.query("DELETE FROM links WHERE from_path=?").run(path);
+        database.query("DELETE FROM derived_from WHERE from_path=?").run(path);
+        database.query("DELETE FROM resource_links WHERE from_path=?").run(path);
         database.query("DELETE FROM files WHERE path=?").run(path);
       };
       for (const path of removed) remove(path);
@@ -183,8 +189,17 @@ export async function withIndex<T>(root: string, options: IndexOptions, query: (
           .run(n.path, n.id, n.type, n.title, n.citekey, n.filename, n.private, change.mtime, change.size, n.frontmatter, n.body, n.search_text);
         database.query("INSERT INTO fulltext(rowid, title, body, authors, citekey, tags) VALUES (?, ?, ?, ?, ?, ?)")
           .run(result.lastInsertRowid, n.title, n.body, change.authors!, n.citekey ?? "", change.tags!);
-        for (const link of extractLinks(JSON.parse(n.frontmatter), n.body, n.path)) {
-          database.query("INSERT INTO links VALUES (?, ?, ?, NULL)").run(n.path, link.source, link.target);
+        const { derived_from: sources } = JSON.parse(n.frontmatter);
+        if (Array.isArray(sources)) {
+          for (const source of sources) {
+            const parsed = DerivedFrom.safeParse(source);
+            if (parsed.success) database.query("INSERT OR IGNORE INTO derived_from VALUES (?, ?)").run(parsed.data, n.path);
+          }
+        }
+        const { links, resourceIds } = extractKnowledgeLinks(n.body, n.path);
+        for (const id of new Set(resourceIds)) database.query("INSERT INTO resource_links VALUES (?, ?)").run(id, n.path);
+        if (n.type !== "ai-note") {
+          for (const link of links) database.query("INSERT INTO links VALUES (?, ?, ?, NULL)").run(n.path, link.source, link.target);
         }
       }
       {
