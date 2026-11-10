@@ -1,6 +1,7 @@
 import { NativeSessionPanel } from "../native-session.ts";
 import { assistantProfiles, defaultAssistantProfile } from "../assistant-profile.ts";
 import { ChatProgress } from "../chat-progress.ts";
+import { effortLabel } from "../labels.ts";
 /**
  * 助手：对话历史、流式回复、停止接收与中断后核查；显式记忆。
  * 中断或结果不明时只核对已保存记录，不自动重发；同样的草稿重发时复用 request_id。
@@ -158,7 +159,9 @@ export class AssistantPane {
 
   private renderProfiles(): void {
     const options = assistantProfiles(this.profiles, !!this.current, this.boundProfile);
-    clear(this.profile, ...options.map(profile => h("option", { value: profile.id }, profile.name)));
+    // Without a saved default nothing is preselected; say so instead of showing an empty pill.
+    clear(this.profile, h("option", { value: "", disabled: true, hidden: true }, t("Choose a profile")),
+      ...options.map(profile => h("option", { value: profile.id }, profile.name)));
     this.profile.value = this.selectedProfile ?? (this.current ? "" : defaultAssistantProfile(options));
     this.profile.hidden = !options.length;
     this.renderApiControls();
@@ -183,8 +186,8 @@ export class AssistantPane {
     this.apiControlsProfile = profile.id;
     clear(this.apiModel, ...models.map(value => h("option", { value, selected: value === model }, value)));
     clear(this.apiEffort, h("option", { value: "" }, profile.effort
-      ? t("Profile effort ({0})", profile.effort) : t("Default effort")),
-      ...(deepseek ? DEEPSEEK_EFFORTS.map(value => h("option", { value, selected: value === effort }, value)) : []));
+      ? t("Default effort ({0})", effortLabel(profile.effort)) : t("Default effort")),
+      ...(deepseek ? DEEPSEEK_EFFORTS.map(value => h("option", { value, selected: value === effort }, effortLabel(value))) : []));
     this.apiModel.disabled = models.length < 2;
     this.apiEffort.disabled = !deepseek;
   }
@@ -460,7 +463,8 @@ export class AssistantPane {
     let progress = new ChatProgress(native ? "Thinking summary" : "Thinking process");
     let streamTurn: string | undefined;
     progress.waiting();
-    this.messages.append(this.userBubble(request.message), progress.element, this.assistantBlock(h("div", {}, content, tools)));
+    // Progress sits in the reply's own row, so waiting and thinking line up with the answer that follows.
+    this.messages.append(this.userBubble(request.message), this.assistantBlock(h("div", {}, progress.element, content, tools)));
     this.scroller.scrollTop = this.scroller.scrollHeight;
     let complete = false, streamedText = "";
     let renderTimer: ReturnType<typeof setTimeout> | undefined;

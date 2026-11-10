@@ -937,11 +937,35 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 .chat-dock .composer textarea { min-height: 52px; padding-top: 12px; font-size: var(--fs-lg); }
 .chat-dock .composer-foot .btn { margin-left: 0; }
 .chat-dock .composer-foot { justify-content: flex-end; }
-.chat-turn-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
-.chat-dock .composer-foot > .chat-turn-controls { margin-right: auto; }
-.chat-progress { margin-left: 36px; color: var(--ink-3); font-size: var(--fs-sm); }
-.chat-progress summary { padding: 4px 0; cursor: pointer; }
-.chat-progress pre { margin: 0; padding: 8px 10px; max-height: 40vh; overflow: auto; border-radius: var(--r-md); background: var(--sunken); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Profile、模型与思考强度：一行紧凑胶囊，宽度随内容，放不下再换行（ADR 0050）。 */
+.chat-turn-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; }
+.chat-turn-controls[hidden] { display: none; }
+.chat-dock .composer-foot { align-items: flex-end; }
+.chat-dock .composer-foot > .chat-turn-controls { flex: 1; margin-right: 8px; }
+.chat-turn-controls select { width: auto; min-height: 0; }
+.chat-turn-controls .native-advanced { margin-left: 4px; }
+
+/* 思考状态与思考内容：灰色小字，放在回复所在的那一行里。 */
+.chat-progress { display: flex; flex-direction: column; gap: 2px; color: var(--ink-3); font-size: var(--fs-sm); }
+.chat-progress[hidden] { display: none; }
+.messages > .chat-progress { margin: 0 0 -14px 36px; }
+.msg-assistant .chat-progress:not([hidden]) { margin-bottom: 6px; }
+.chat-progress-status { display: flex; align-items: center; min-height: 26px; }
+.chat-progress-status[hidden] { display: none; }
+.chat-thought > summary { display: inline-flex; align-items: center; gap: 4px; min-height: 26px; cursor: pointer; list-style: none; border-radius: var(--r-sm); }
+.chat-thought > summary::-webkit-details-marker { display: none; }
+.chat-thought > summary:hover { color: var(--ink); }
+.chat-thought > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.chat-thought > summary .icon { width: 14px; height: 14px; transition: transform .15s; }
+.chat-thought[open] > summary .icon { transform: rotate(90deg); }
+.chat-thought > pre { margin: 4px 0 8px 6px; padding: 2px 0 2px 14px; max-height: 40vh; overflow: auto; border-left: 2px solid var(--line-strong); font: inherit; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* 进行中的状态文字带一道扫过的高光；减少动态效果时只保留文字。 */
+.chat-progress .active { background: linear-gradient(90deg, var(--ink-3) 0%, var(--ink-3) 40%, var(--ink) 50%, var(--ink-3) 60%, var(--ink-3) 100%) 0 0 / 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: thinking-sweep 1.8s linear infinite; }
+.chat-progress-status.active::after, .chat-progress-label.active::after { content: "…"; }
+@keyframes thinking-sweep { from { background-position: 100% 0; } to { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) { .chat-progress .active { animation: none; background: none; color: inherit; } }
+/* 还没有正文时不显示闪烁光标，等待状态已经说明了进度。 */
+.stream-text.streaming:empty::after { display: none; }
 .welcome { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 12vh 0 0; }
 .welcome h2 { font-size: var(--fs-2xl); font-weight: 650; letter-spacing: -0.02em; }
 .welcome p { color: var(--ink-3); max-width: 34em; }

@@ -3,6 +3,7 @@ import type { Client } from "./api.ts";
 import { errorText } from "./api.ts";
 import { h, clear, failure, toast } from "./dom.ts";
 import { t } from "./i18n.ts";
+import { effortLabel } from "./labels.ts";
 const LABEL: Record<string, string> = { starting: "Starting Codex", login_required: "Sign in to Codex", ready: "Ready", running: "Working", awaiting_approval: "Waiting for your approval", recovering: "Restoring session", unknown: "Execution outcome needs review", failed: "Session unavailable", closed: "Session closed", offline: "Runtime disconnected" };
 export class NativeSessionPanel {
     readonly element = h("div", { class: "native-panel", hidden: true });
@@ -88,7 +89,7 @@ export class NativeSessionPanel {
             this.effortKey = key;
             clear(this.effort, h("option", { value: "" }, t("Default effort")),
                 ...(!valid ? [h("option", { value: this.desiredEffort, selected: true, disabled: true }, t("Choose a supported effort"))] : []),
-                ...choices.map(value => h("option", { value, selected: value === this.desiredEffort }, value)));
+                ...choices.map(value => h("option", { value, selected: value === this.desiredEffort }, effortLabel(value))));
         }
         this.ready(valid && this.session?.view.state === "ready" && !this.session.quarantined);
     }

@@ -1,6 +1,6 @@
-# 0049 Assistant 的思考状态与流式展示
+# 0050 Assistant 的思考状态与流式展示
 
-- 状态：Accepted（2026-11-10 用户批准）
+- 状态：Implemented
 - 日期：2026-11-10
 - 接续：ADR 0041 的模型与思考配置、ADR 0042 的原生会话
 
@@ -39,3 +39,7 @@ DeepSeek 开启思考模式后，Chat Completions 流可先返回 `delta.reasoni
 - 实现前批准本 ADR。批准后的实现 PR 同步更新 Assistant 和 Web 设计分册，并用 `@lumio/schema` 验证事件契约。测试使用合成数据，运行 `bun run check`。
 
 参考：[DeepSeek 思考模式与流式字段](https://api-docs.deepseek.com/guides/thinking_mode/)。
+
+## 修订记录
+
+- 2026-11-10：用户批准原提案。合入主线时，交接图 ADR 已占用 0049，本文顺延至 0050，原批准范围不变。

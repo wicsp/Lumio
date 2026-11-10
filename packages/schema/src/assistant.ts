@@ -241,7 +241,7 @@ export const AssistantModelResponse = z.strictObject({
 
 export const ASSISTANT_REASONING_DELTA_LIMIT = 65_536;
 
-/** Assistant NDJSON 事件。进度事件需要客户端显式订阅（ADR 0049）。 */
+/** Assistant NDJSON 事件。进度事件需要客户端显式订阅（ADR 0050）。 */
 export const AssistantEvent = z.discriminatedUnion("type", [
   z.strictObject({type:z.literal("native"),turn:idOf("turn"),event:NativeEventData}),
   z.strictObject({ type: z.literal("model_waiting"), turn: idOf("turn") }),
