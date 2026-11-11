@@ -186,7 +186,8 @@ export class Notices {
       case "exploration": {
         const target = await this.modules.resources.resolve(source.target, identity);
         if (target.status !== "visible") return;
-        return { title: msg("notices.exploration") + " · " + (excerpt(target.title, 100) ?? source.target), status: source.status, required: false,
+        // 标题只放对象标题；「探索结果」等来源说明由客户端按界面语言加上。
+        return { title: excerpt(target.title, 120) ?? msg("notices.exploration"), status: source.status, required: false,
           summary: excerpt(source.summary, 600), ai_note: source.note,
           subject: source.note ? ref("knowledge", source.note) : ref(target.id.startsWith("idea_") ? "knowledge" : "work", target.id),
           path: source.note ? "#knowledge/" + source.note : "#overview" };

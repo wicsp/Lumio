@@ -24,7 +24,9 @@ import { SpeechService, setSpeechService } from "../speech-input.ts";
 import { UsageIndicator } from "../usage-indicator.ts";
 import { MainDock } from "../main-dock.ts";
 import { canNavigateNow, navigateRoute, type FocusInput } from "../workbench-assist.ts";
-import type { WorkbenchAction } from "@lumio/schema";
+import type { Notice, WorkbenchAction } from "@lumio/schema";
+import { pendingNotices } from "../panes/overview.ts";
+import { newRequestId } from "../commands.ts";
 
 /** 记住侧栏是否收起（只影响本设备）。 */
 const SIDEBAR_KEY = "lumio.web.sidebar-collapsed";
@@ -69,6 +71,18 @@ export class WorkbenchView {
   /** 人最近一次在页面上输入、滚动、点击或按键的时间；助手替人跳转前要先空闲一会儿。 */
   private lastActivity = 0;
   private readonly onActivity = () => { this.lastActivity = Date.now(); };
+  /** 未读提醒按对象分组（A1-5）：行上标小圆点，打开对象时标为已读。 */
+  private unread = new Map<string, string[]>();
+  private marking = false;
+  private readonly decorate = () => {
+    if (this.marking) return;
+    this.marking = true;
+    requestAnimationFrame(() => {
+      this.marking = false;
+      for (const row of this.main.querySelectorAll<HTMLElement>("[data-id]")) row.classList.toggle("has-unread", this.unread.has(row.dataset.id!));
+    });
+  };
+  private observer = new MutationObserver(this.decorate);
 
   private routeGeneration = 0;
   private readonly onRoute = async () => {
@@ -191,6 +205,7 @@ export class WorkbenchView {
     shell.append(this.dock.element);
     for (const type of ["input", "keydown", "pointerdown", "wheel"]) this.main.addEventListener(type, this.onActivity, { passive: true });
     this.main.addEventListener("scroll", this.onActivity, { capture: true, passive: true });
+    this.observer.observe(this.main, { childList: true, subtree: true });
     const collapse = (collapsed: boolean, focus = false) => {
       shell.classList.toggle("sidebar-collapsed", collapsed);
       toggle.setAttribute("aria-expanded", String(!collapsed));
@@ -288,6 +303,7 @@ export class WorkbenchView {
     this.current = mounted;
     this.clearHighlights();
     this.dock?.pageChanged();
+    if (id) this.readSubject(id);
     this.padNavigation.routeChanged(!!id && section !== "settings");
     if (intent) mounted.pane.intent?.(intent);
   }
@@ -353,9 +369,30 @@ export class WorkbenchView {
     }
   }
 
+  /** 打开了提醒指向的对象：这些提醒算看过了。 */
+  private readSubject(id: string): void {
+    const ids = this.unread.get(id);
+    if (!ids?.length) return;
+    this.unread.delete(id); this.decorate();
+    void this.session.client.readNotices(newRequestId("notice"), ids).then(() => void this.refreshCounts(), () => {});
+  }
+
+  private applyNotices(notices: Notice[]): void {
+    this.unread = new Map();
+    for (const notice of notices) {
+      if (notice.read || notice.level === "silent" || !notice.subject) continue;
+      this.unread.set(notice.subject.id, [...this.unread.get(notice.subject.id) ?? [], notice.id]);
+    }
+    this.decorate();
+    this.dock.notices(notices);
+    void this.dock.refreshExplorations();
+  }
+
   private async refreshCounts(): Promise<void> {
     const client = this.session.client;
-    const [tasks, proposals, jobs, attention, inbox] = await Promise.allSettled([client.workTasks(), client.proposals("pending"), client.jobs(), this.session.hub.attention(), client.captures({ untriaged: true, limit: 1 })]);
+    const [tasks, proposals, jobs, attention, inbox, notices] = await Promise.allSettled([client.workTasks(), client.proposals("pending"), client.jobs(), this.session.hub.attention(), client.captures({ untriaged: true, limit: 1 }),
+      client.notices({ unread: true, limit: 100 })]);
+    if (notices.status === "fulfilled") this.applyNotices(notices.value.notices);
     const set = (section: Section, value: number | undefined, attention = false) => {
       const el = this.counts.get(section)!;
       el.textContent = value ? String(value) : "";
@@ -370,7 +407,8 @@ export class WorkbenchView {
     set("execution", groups ? groups.live.length + groups.needs.length : undefined);
     // 今日的提醒数 = 需要你处理的轮次 + 待批准（ADR 0030）；窄屏底栏只看得到这一个数。
     const needs = attention.status === "fulfilled" && attention.value ? attention.value.length : 0;
-    set("overview", needs + (proposals.status === "fulfilled" ? proposals.value.length : 0), true);
+    const pending = notices.status === "fulfilled" ? pendingNotices(notices.value.notices).length : 0;
+    set("overview", needs + (proposals.status === "fulfilled" ? proposals.value.length : 0) + pending, true);
   }
 
   private leaveSettings(): void {
@@ -427,6 +465,7 @@ export class WorkbenchView {
 
   dispose(): void {
     this.dock.dispose();
+    this.observer.disconnect();
     this.dock.launcher.remove();
     setSpeechService(undefined);
     this.unsubscribePadStatus();

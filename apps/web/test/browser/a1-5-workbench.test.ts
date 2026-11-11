@@ -75,3 +75,30 @@ describe("main conversation profile (A1-3)", () => {
     expect(mainProfile({ connections: [], profiles: [] }, memory())).toBeUndefined();
   });
 });
+
+describe("pending notices on Today (A1-5)", () => {
+  test("rule-important notices stay in Needs you; silent and read ones are hidden", async () => {
+    const { pendingNotices } = await import("../../src/client/panes/overview.ts");
+    const base = { owner: `act_${ULID}`, event: "turn:job_x", title: "T", created: at } as const;
+    const notices = [
+      { ...base, id: `ntc_${ULID}`, source: "turn", level: "important", graded: { by: "rule" } },
+      { ...base, id: "ntc_01JABCDEFGHJKMNPQRSTVWXYZ1", source: "exploration", level: "digest", graded: { by: "fallback", reason: "unconfigured" } },
+      { ...base, id: "ntc_01JABCDEFGHJKMNPQRSTVWXYZ2", source: "capture", level: "important", graded: { by: "gate", model: "jev-1.14.0", confidence: 0.9 } },
+      { ...base, id: "ntc_01JABCDEFGHJKMNPQRSTVWXYZ3", source: "exploration", level: "silent", graded: { by: "rule" } },
+      { ...base, id: "ntc_01JABCDEFGHJKMNPQRSTVWXYZ4", source: "capture", level: "digest", graded: { by: "rule" }, read: at },
+    ] as never[];
+    expect(pendingNotices(notices).map((notice: { id: string }) => notice.id.slice(-1))).toEqual(["1", "2"]);
+  });
+});
+
+describe("notice text (A1-5)", () => {
+  test("source label comes from the client language; previews drop markdown", async () => {
+    const { noticePreview, noticeTitle } = await import("../../src/client/workbench-assist.ts");
+    const { setLang } = await import("../../src/client/i18n.ts");
+    setLang("zh", false);
+    expect(noticeTitle({ source: "exploration", title: "试试预热" })).toBe("探索结果 · 试试预热");
+    expect(noticeTitle({ source: "watchdog", title: "Watchdog report" })).toBe("巡检报告");
+    setLang("en", false);
+    expect(noticePreview("**可行。** 见 [表 2](lumio:idea_x)\n\n下一步")).toBe("可行。 见 表 2 下一步");
+  });
+});

@@ -7,7 +7,7 @@ import { WORKBENCH_TOOLS, toolName } from "@lumio/schema";
 import type { AssistantChatRequest, AssistantMessage, Notice, ResourceRef, WorkbenchAction, WorkbenchPanel, WorkTask } from "@lumio/schema";
 import { errorText, type Client } from "./api.ts";
 import { newRequestId } from "./commands.ts";
-import { autosize, clear, failure, h, icon } from "./dom.ts";
+import { autosize, clear, failure, h, icon, toast } from "./dom.ts";
 import { t } from "./i18n.ts";
 import type { Navigate, Section } from "./navigation.ts";
 import { openResource } from "./resources.ts";
@@ -16,9 +16,12 @@ import { toolCallView } from "./tool-call-view.ts";
 import { MAX_TASK_NODES, taskGraph } from "./graph/data.ts";
 import { dependencyGraph } from "./graph/view.ts";
 import { turnGroup, turnText } from "./turn.ts";
-import { anchorLabels, buildFocus, mainProfile, navigateRoute, type FocusInput } from "./workbench-assist.ts";
+import { anchorLabels, buildFocus, mainProfile, navigateRoute, noticePreview, noticeTitle, refOf, type FocusInput } from "./workbench-assist.ts";
 
 const OPEN_KEY = "lumio.web.dock-open";
+/** 已在面板里出现过的提醒（本标签页内），避免刷新时重复插入。 */
+const SHOWN_KEY = "lumio.web.dock-notices";
+const EXPLORABLE = /^(idea|task|prj)_/;
 const HISTORY = 40;
 const WORKBENCH_TOOL_NAMES = new Set<string>(WORKBENCH_TOOLS.map(name => toolName(name)));
 
@@ -54,6 +57,9 @@ export class MainDock {
   private mode: FocusMode = "auto";
   private pinned?: FocusInput;
   private disposed = false;
+  private shown = new Set<string>();
+  /** 正在探索的对象 ID（来自 Hub，定时刷新）。 */
+  private exploring = new Set<string>();
 
   constructor(private client: Client, private host: DockHost) {
     const collapse = h("button", { type: "button", class: "icon-btn", title: t("Hide the assistant"), "aria-label": t("Hide the assistant"), onclick: () => this.setOpen(false) }, icon("close"));
@@ -70,7 +76,24 @@ export class MainDock {
     // 没记住过时：桌面默认展开，窄屏默认收起（抽屉会挡住内容）。
     let open = globalThis.matchMedia?.("(min-width: 861px)").matches ?? true;
     try { const saved = localStorage.getItem(OPEN_KEY); if (saved !== null) open = saved === "1"; } catch { /* 用默认值 */ }
+    try { this.shown = new Set(JSON.parse(sessionStorage.getItem(SHOWN_KEY) ?? "[]") as string[]); } catch { this.shown = new Set(); }
     this.setOpen(open, false);
+  }
+
+  private remember(id: string): void {
+    this.shown.add(id);
+    try { sessionStorage.setItem(SHOWN_KEY, JSON.stringify([...this.shown].slice(-200))); } catch { /* 只影响本次 */ }
+  }
+
+  /** 工作台刷新时交来未读提醒：重要的、还没在面板出现过的插进对话（ADR 0059 第 4 节）。 */
+  notices(notices: readonly Notice[]): void {
+    if (this.disposed || this.controller || !this.conversation) return;
+    const fresh = notices.filter(notice => notice.level === "important" && !notice.read && !this.shown.has(notice.id))
+      .sort((a, b) => a.created.localeCompare(b.created));
+    if (!fresh.length) return;
+    this.messages.querySelector(".dock-empty")?.remove();
+    for (const notice of fresh) { this.remember(notice.id); this.messages.append(this.noticeCard(notice)); }
+    this.scroller.scrollTop = this.scroller.scrollHeight;
   }
 
   get busy(): boolean { return !!this.controller; }
@@ -151,13 +174,42 @@ export class MainDock {
     const label = input.id ? await this.title(input.id) ?? input.id : t("Selected text");
     if (this.disposed) return;
     const pinned = this.mode === "pinned";
+    const target = input.id && EXPLORABLE.test(input.id) ? input.id : undefined;
+    const explore = target && (this.exploring.has(target)
+      ? h("span", { class: "chip-state" }, icon("clock"), t("Exploring…"))
+      : h("button", { type: "button", class: "chip-btn", title: t("Have the assistant look into this in the background and report back"),
+        onclick: () => void this.explore(target) }, t("Explore for me")));
     clear(this.chip,
       h("span", { class: "focus-label", title: t("The assistant sees this page with your next message") }, icon(pinned ? "lock" : "file"), label),
       h("button", { type: "button", class: "chip-btn", "aria-pressed": String(pinned), title: pinned ? t("Unpin") : t("Keep this as context while you move around"),
         onclick: () => { if (pinned) { this.mode = "auto"; this.pinned = undefined; } else { this.mode = "pinned"; this.pinned = this.host.focus(); } void this.renderChip(); } },
         pinned ? t("Unpin") : t("Pin")),
       h("button", { type: "button", class: "chip-btn", "aria-label": t("Don't share this page"), title: t("Don't share this page"),
-        onclick: () => { this.mode = "off"; this.pinned = undefined; void this.renderChip(); } }, icon("close")));
+        onclick: () => { this.mode = "off"; this.pinned = undefined; void this.renderChip(); } }, icon("close")),
+      explore);
+  }
+
+  /** 提前探索（ADR 0059 第 5 节，A1-9）：只读、有预算，结果写成 AI 笔记，完成后在待处理里提醒。 */
+  private async explore(target: string): Promise<void> {
+    const ref = refOf(target);
+    if (!ref) return;
+    try {
+      await this.client.explorationCommand({ op: "start", request_id: newRequestId("explore"), target: ref });
+      this.exploring.add(target);
+      toast(t("Exploring in the background. You'll find the result under To look at on Today."));
+    } catch (cause) { toast(errorText(cause), "error"); }
+    void this.renderChip();
+  }
+
+  /** 刷新正在探索的对象（工作台定时调用）。 */
+  async refreshExplorations(): Promise<void> {
+    try {
+      const list = await this.client.explorations({ active: true, limit: 50 });
+      const next = new Set(list.explorations.map(value => value.target.id));
+      const changed = next.size !== this.exploring.size || [...next].some(id => !this.exploring.has(id));
+      this.exploring = next;
+      if (changed) void this.renderChip();
+    } catch { /* 下次再试 */ }
   }
 
   private async submit(): Promise<void> {
@@ -201,7 +253,7 @@ export class MainDock {
           tools.set(event.tool.id, view);
         }
         else if (event.type === "topic") void this.topic(event.anchors, block);
-        else if (event.type === "notice") this.messages.append(this.noticeCard(event.notice));
+        else if (event.type === "notice") { this.remember(event.notice.id); this.messages.append(this.noticeCard(event.notice)); }
         else if (event.type === "ui") this.act(event.action, extras);
         else if (event.type === "result") {
           // 以保存的最终回复为准：模型没有逐字输出（或只在工具调用后才回复）时也能显示出来。
@@ -239,9 +291,9 @@ export class MainDock {
   private noticeCard(notice: Notice): HTMLElement {
     const open = notice.subject && h("button", { type: "button", class: "btn btn-quiet btn-small",
       onclick: () => void openResource(this.client, this.host.navigate, notice.subject!.id) }, t("Open"));
-    const summary = notice.summary && h("p", { class: "muted" }, notice.summary);
+    const summary = notice.summary && h("p", { class: "muted" }, noticePreview(notice.summary, 300));
     return h("article", { class: `dock-notice level-${notice.level}` }, icon("bell"),
-      h("div", {}, h("strong", {}, notice.title), summary), open);
+      h("div", {}, h("strong", {}, noticeTitle(notice)), summary), open);
   }
 
   /** 执行一个展示动作。面板在这里画；跳转与高亮交给工作台。 */
