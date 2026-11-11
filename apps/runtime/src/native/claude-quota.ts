@@ -34,7 +34,7 @@ function resetTime(value: string | undefined, now: Date): string | undefined {
   if (!value) return;
   const iso = /\b(\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d)?(?:Z|[+-]\d\d:\d\d))\b/.exec(value)?.[1];
   if (iso && Date.parse(iso) > now.getTime()) return new Date(iso).toISOString();
-  const m = /(?:\b([A-Za-z]{3})\s+(\d{1,2}),?\s+)?\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*\((?:UTC|Etc\/UTC)\)\s*$/i.exec(value);
+  const m = /^(?:([A-Za-z]{3})\s+(\d{1,2}),?\s+(?:at\s+)?)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*\((?:UTC|Etc\/UTC)\)$/i.exec(value);
   if (!m) return;
   const months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
   const month = m[1] ? months.indexOf(m[1].toLowerCase()) : now.getUTCMonth();
