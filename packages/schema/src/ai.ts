@@ -21,6 +21,9 @@ export const AIProfileInput = AIProfile.omit({ id: true, owner: true, revision: 
 export const AIUsageBinding = z.strictObject({ profile: idOf("aip"), purpose: z.enum(["assistant", "job", "routine"]), revision: Revision, workdir: z.literal("managed-session"),
     approval_policy: z.literal("on-request"), reviewer: z.literal("user"), sandbox: z.literal("workspace-write"), command_network: z.literal(false), tools: z.array(z.string().min(1)).max(128), timeout_seconds: z.number().int().min(30).max(7200) });
 export const AIConfiguration = z.strictObject({ connections: z.array(AIConnection), profiles: z.array(AIProfile) });
+/** ADR 0043: versioned, idempotent removal of an owned AI configuration. */
+export const AIConfigurationDelete = z.strictObject({ request_id: RequestId, expected_revision: Revision });
+export const AIConfigurationDeleted = z.strictObject({ id: z.union([idOf("aic"), idOf("aip")]), deleted: z.literal(true) });
 export const AIModel = z.strictObject({ id: z.string().min(1), default_effort: z.string().optional(), efforts: z.array(z.string()) });
 export const NativeAccountBinding = z.strictObject({ account: z.string().regex(/^[a-f0-9]{64}$/), generation: Revision });
 export const NativeConnectionAction = z.strictObject({ request_id: RequestId, action: z.enum(["login", "cancel", "logout"]) });
@@ -81,6 +84,8 @@ export type AIConnectionInput = z.infer<typeof AIConnectionInput>;
 export type AIProfile = z.infer<typeof AIProfile>;
 export type AIProfileInput = z.infer<typeof AIProfileInput>;
 export type AIConfiguration = z.infer<typeof AIConfiguration>;
+export type AIConfigurationDelete = z.infer<typeof AIConfigurationDelete>;
+export type AIConfigurationDeleted = z.infer<typeof AIConfigurationDeleted>;
 export type AIUsageBinding = z.infer<typeof AIUsageBinding>;
 export type AIModel = z.infer<typeof AIModel>;
 export type NativeAccountBinding = z.infer<typeof NativeAccountBinding>;
