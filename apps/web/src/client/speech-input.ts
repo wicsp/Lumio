@@ -83,6 +83,10 @@ export function setSpeechService(next: SpeechService | undefined): void {
 }
 export function speechService(): SpeechService | undefined { return service; }
 
+interface Dictation { start(): void; finish(cancel: boolean): void; readonly recording: boolean }
+/** 输入框 → 它的麦克风控制；手柄 RT 直接调用，不模拟指针事件（G1-6）。 */
+const dictations = new WeakMap<Field, Dictation>();
+
 const clock = (ms: number) => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
 
 /**
@@ -190,6 +194,8 @@ export function speechButton(field: Field): HTMLElement {
     if (current) finish(false); else start();
   });
 
+  dictations.set(field, { start, finish, get recording() { return !!current; } });
+
   function dispose() {
     finish(true);
     unsubscribe?.(); unsubscribe = undefined;
@@ -199,10 +205,20 @@ export function speechButton(field: Field): HTMLElement {
   return wrap;
 }
 
-/** 手柄 RT（G1-4）：对当前焦点所在输入框旁的麦克风按下 / 松开。 */
-export function speechKey(phase: "press" | "release", field: Element | null): boolean {
-  const button = field?.closest("form, .composer, .attn-composer, .form-stack")?.querySelector<HTMLButtonElement>(".speech-input:not([hidden]) .speech-btn");
-  if (!button) return false;
-  button.dispatchEvent(new PointerEvent(phase === "press" ? "pointerdown" : "pointerup", { button: 0, bubbles: true }));
+/** 这个输入框旁是否有可用的麦克风。 */
+export function canDictate(field: Element | null | undefined): field is Field {
+  if (typeof HTMLTextAreaElement === "undefined" || !(field instanceof HTMLTextAreaElement || field instanceof HTMLInputElement) || !dictations.has(field) || field.disabled) return false;
+  return !!service?.ready && !!field.closest("form, .composer, .attn-composer, .form-stack, dialog")?.querySelector(".speech-input:not([hidden])");
+}
+
+/** 手柄 RT（G1-6）：按下开始、松开结束；cancel 为 true 时放弃这一句。 */
+export function dictate(field: Field, phase: "start" | "stop" | "cancel"): boolean {
+  const control = dictations.get(field);
+  if (!control) return false;
+  if (phase === "start") { if (!control.recording) control.start(); }
+  else control.finish(phase === "cancel");
   return true;
 }
+
+/** 正在录音的输入框（同一时间最多一个）。 */
+export function recordingField(): Field | undefined { return service?.active?.owner; }

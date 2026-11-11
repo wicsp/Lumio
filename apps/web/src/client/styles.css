@@ -1553,8 +1553,11 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 .dialog > .pad-hints { position: static; translate: none; width: auto; margin: 4px 12px 12px; box-shadow: none; }
 [data-gamepad-mode]:has(.pad-hints) .toasts { bottom: calc(var(--pad-hints-bottom, 12px) + 60px); }
 @media (max-width: 720px) { [data-gamepad-mode] { --pad-hints-bottom: calc(62px + env(safe-area-inset-bottom)); } }
-.pad-hold { display: inline-flex; flex-direction: column; gap: 4px; margin: 8px; color: var(--ink-2); font-size: var(--fs-sm); }
-.pad-hold progress { width: 160px; height: 10px; accent-color: var(--focus); }
+/* G1-6：提示条左侧的层级标签；长按进度显示在对应的键旁，不往页面插元素。 */
+.pad-hints .pad-layer { padding: 1px 8px; border-radius: 999px; background: var(--hover); color: var(--ink-2); font-size: var(--fs-xs); }
+.pad-hints[data-layer="input"] .pad-layer { background: color-mix(in srgb, var(--focus) 15%, transparent); color: var(--focus); }
+.pad-hints[data-layer="recording"] .pad-layer { background: var(--red-wash); color: var(--red); }
+.pad-hints progress.pad-hold { width: 56px; height: 6px; accent-color: var(--focus); }
 .pad-mappings { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px 20px; }
 .gamepad-settings { padding: 16px; display: flex; flex-direction: column; gap: 16px; }
 .pad-readout { white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -1574,3 +1577,5 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 .attn-composer-foot .speech-input + .btn { margin-left: 0; }
 .speech-settings > .set-form-wrap:first-child { border-top: 0; }
 .speech-actions { display: flex; align-items: center; gap: 10px; }
+/* 手柄提示条固定在底部，给底部输入框让出位置（G1-6）。 */
+[data-gamepad-mode] :is(.thread-dock, .chat-dock) { padding-bottom: 60px; }

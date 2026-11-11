@@ -19,8 +19,7 @@ import { TrashPane } from "../panes/trash.ts";
 import { DEFAULT_BINDINGS, GamepadInput } from "../gamepad-input.ts";
 import { padButtonLabel } from "../gamepad-settings.ts";
 import { GamepadNavigation } from "../gamepad-navigation.ts";
-import { SpeechService, setSpeechService, speechKey } from "../speech-input.ts";
-import type { PadInput } from "../gamepad-input.ts";
+import { SpeechService, setSpeechService } from "../speech-input.ts";
 import { UsageIndicator } from "../usage-indicator.ts";
 
 /** 记住侧栏是否收起（只影响本设备）。 */
@@ -42,11 +41,11 @@ type MountedPane = { target: HTMLElement; pane: Pane };
 export class WorkbenchView {
   private gamepad: GamepadInput;
   private speech: SpeechService;
-  /** RT 按住说话（G1-4）时正在录音的输入框。 */
-  private talking?: Element;
+  /** 手柄 B 在页面层返回的位置（G1-6）：最近访问的页面，最多 30 个。 */
+  private visited: string[] = [];
+  private returning = false;
   private padNavigation: GamepadNavigation;
   private unsubscribePadStatus: () => void;
-  private toastReturn?: { section: Section; id?: string };
   private main = h("main", { class: "main", id: "content", tabindex: "-1" });
   private nav = new Map<Section, HTMLButtonElement>();
   private counts = new Map<Section, HTMLElement>();
@@ -66,7 +65,6 @@ export class WorkbenchView {
     const generation=++this.routeGeneration, route=this.readRoute();
     if (!(await this.beforeLeave())) { if(generation===this.routeGeneration) history.pushState(null, "", this.currentHash || "#overview"); return; }
     if(generation!==this.routeGeneration)return;
-    this.toastReturn = undefined;
     this.show(route.section, route.id);
   };
   private readonly onKey = (event: KeyboardEvent) => {
@@ -114,13 +112,12 @@ export class WorkbenchView {
     this.palette = new CommandPalette(session.client, (section, id, intent) => this.go(section, id, intent));
     this.padNavigation = new GamepadNavigation({
       pane: () => this.current?.target,
-      back: () => { if (this.section === "settings") this.leaveSettings(); else void this.go("overview"); },
-      backLabel: () => this.section === "overview" ? undefined : t("Back"),
-      returnFromToast: () => {
-        if (!this.toastReturn) return false;
-        const route = this.toastReturn;
-        void this.go(route.section, route.id);
-        return true;
+      back: () => this.goBack(),
+      backLabel: () => { const target = this.backTarget(); return target ? t("Back to {0}", this.sectionLabel(target.section)) : undefined; },
+      openAssistant: async () => {
+        if (this.section !== "assistant") await this.go("assistant");
+        if (this.section !== "assistant") return undefined;
+        return this.current?.target.querySelector<HTMLTextAreaElement>("textarea[name=chat-message]") ?? undefined;
       },
       section: step => {
         const next = this.adjacentSection(step);
@@ -142,7 +139,7 @@ export class WorkbenchView {
     this.padNavigation.mount();
     this.speech = new SpeechService(session);
     setSpeechService(this.speech);
-    this.gamepad = new GamepadInput(input => { if (!this.talk(input)) this.padNavigation.handle(input); });
+    this.gamepad = new GamepadInput(input => this.padNavigation.handle(input));
     const warned = new Set<string>();
     this.unsubscribePadStatus = this.gamepad.subscribe(({ pad }) => {
       if (pad && pad.mapping !== "standard" && !warned.has(pad.id)) {
@@ -224,7 +221,6 @@ export class WorkbenchView {
     if (section === this.section && section !== "settings" && !intent && (!id || (section === "work" && id === this.workMode))) return;
     if (!(await this.beforeLeave()) || generation !== this.routeGeneration) return;
     const hash = `#${section}${id ? `/${encodeURIComponent(id)}` : ""}`;
-    this.toastReturn = intent === "from-dispatch-toast" ? this.readRoute() : undefined;
     if (location.hash !== hash) history.pushState(null, "", hash);
     this.show(section, id, intent);
   }
@@ -234,6 +230,8 @@ export class WorkbenchView {
     if (section === "settings" && this.section !== "settings" && this.section !== "trash") this.beforeSettings = this.currentHash || "#overview";
     const previous = this.current;
     const previousSection = this.section;
+    if (this.currentHash && !this.returning) this.visited = [...this.visited.filter(hash => hash !== this.currentHash), this.currentHash].slice(-30);
+    this.returning = false;
     this.section = section;
     this.currentHash = `#${section}${id ? `/${encodeURIComponent(id)}` : ""}`;
     let key: PaneKey = section;
@@ -336,25 +334,29 @@ export class WorkbenchView {
     return this.current?.pane.canLeave?.() ?? true;
   }
 
-  /** 手柄 RT（G1-4）：按下时对当前输入框录音；焦点不在可录音的输入框时先打开助手输入框。返回 true 表示已处理。 */
-  private talk(input: PadInput): boolean {
-    if (!("command" in input) || input.command !== "talk") return false;
-    if (input.phase === "release") {
-      if (this.talking) speechKey("release", this.talking);
-      this.talking = undefined;
-      return true;
-    }
-    if (input.phase !== "press" || !this.speech.ready) return true;
-    const focused = document.activeElement;
-    if (focused && speechKey("press", focused)) { this.talking = focused; return true; }
-    void (async () => {
-      if (this.section !== "assistant") await this.go("assistant");
-      const field = this.current?.target.querySelector<HTMLTextAreaElement>("textarea[name=chat-message]");
-      if (!field || field.disabled) return;
-      field.focus();
-      if (speechKey("press", field)) this.talking = field;
-    })();
-    return true;
+  private sectionLabel(section: Section): string {
+    return section === "settings" ? t("Settings") : section === "trash" ? t("Recently deleted") : t(SECTIONS.find(s => s.key === section)?.label ?? "Today");
+  }
+
+  private parseHash(hash: string): { section: Section; id?: string } {
+    const [section, raw] = hash.slice(1).split(/\/(.*)/s);
+    const known: Section = section === "settings" || section === "trash" ? section : SECTIONS.find(s => s.key === section)?.key ?? "overview";
+    try { return { section: known, ...(raw ? { id: decodeURIComponent(raw) } : {}) }; } catch { return { section: known }; }
+  }
+
+  /** 页面层的 B 回到最近访问的另一个模块；没有记录时回到 Today，在 Today 时不动（G1-6）。 */
+  private backTarget(): { section: Section; id?: string; hash?: string } | undefined {
+    const hash = [...this.visited].reverse().find(value => this.parseHash(value).section !== this.section);
+    if (hash) return { ...this.parseHash(hash), hash };
+    return this.section === "overview" ? undefined : { section: "overview" };
+  }
+
+  private goBack(): void {
+    const target = this.backTarget();
+    if (!target) return;
+    if (target.hash) this.visited = this.visited.slice(0, this.visited.lastIndexOf(target.hash));
+    this.returning = true;
+    void this.go(target.section, target.id).finally(() => { this.returning = false; });
   }
 
   dispose(): void {

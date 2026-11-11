@@ -92,7 +92,7 @@ export class AssistantPane {
       this.renderApiControls();
       this.updateComposer();
     });
-    this.composer = h("form", { class: "composer" }, this.text,
+    this.composer = h("form", { class: "composer", "data-pad-input": "assistant" }, this.text,
       h("div", { class: "composer-foot" },
         h("div", { class: "chat-turn-controls" }, this.profile, this.apiControls, this.native.controls, this.native.advanced),
         speechButton(this.text), this.stop, this.send));
