@@ -1,4 +1,4 @@
-# ADR 0056：AI Connection 查询阿里云账户余额
+# ADR 0058：AI Connection 查询阿里云账户余额
 
 - 状态：Implemented
 - 日期：2026-11-11

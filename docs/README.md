@@ -93,8 +93,8 @@ ADR 0025 的四模块重构已合入：业务库、显式委派、Routine、助�
 | [0029](adr/0029-capabilities-and-agent-access.md) | 能力目录与 agent 访问：Lumio 记录与决策，agent 是可替换的手 | Accepted |
 | [0031](adr/0031-workflows-delegation-push.md) | 交接计划与 agent 接力、委派需要批准、统一推送（先做 PWA） | Accepted |
 | [0055](adr/0055-speech-input-and-output.md) | 语音：浏览器采集、Hub 中转、语音服务并入 AI 配置底座；串联式语音合成 | Accepted |
-| [0056](adr/0056-aliyun-ai-connection-balance.md) | AI Connection 查询阿里云账户余额 | Implemented |
 | [0057](adr/0057-inbox-and-captured-sources.md) | 入库时 AI 只写卡片，深读按需；AI 算出的关联实时显示、不持久化、不写进笔记 | Accepted |
+| [0058](adr/0058-aliyun-ai-connection-balance.md) | AI Connection 查询阿里云账户余额 | Implemented |
 
 **安全**
 | 编号 | 一句话 | 状态 |
