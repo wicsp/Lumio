@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { AIConnection, AIProfile, NativeConnectionView, TYPESAFE_JEV_BASE_URL } from "@lumio/schema";
+import { AIConnection, AIProfile, AIQuotaView, NativeConnectionView, TYPESAFE_JEV_BASE_URL } from "@lumio/schema";
 import { DEFAULT_SETTINGS_SECTION, SETTINGS_SECTIONS, settingsSection } from "../../src/client/settings-sections.ts";
 import { CONNECTION_KINDS, connectionSummary, profileConnections, profileSummary } from "../../src/client/ai-settings.ts";
 import { ZH } from "../../src/client/i18n.ts";
@@ -40,6 +40,15 @@ describe("AI settings summaries", () => {
     expect(connectionSummary(codex, signedOut)).toBe("Codex account · laptop · Signed out");
     expect(connectionSummary(codex, signedOut, true)).toBe("Codex account · laptop · Only existing chats are signed in");
     expect(connectionSummary(codex, { state: "ready", models: [] }, true)).toBe("Codex account · laptop · Signed in");
+  });
+  test("Claude connection rows show the configured quota source", () => {
+    const claude = AIConnection.parse({ ...codex, kind: "claude-code-subscription", name: "Laptop Claude" });
+    const background = AIQuotaView.parse({ connection: claude.id, status: "credentials", claude_issue: "login_required",
+      settings: { monitor: true, claude_mode: "background", thresholds: {} }, attention: false });
+    expect(connectionSummary(claude)).toBe("Claude Code subscription · laptop");
+    expect(connectionSummary(claude, undefined, false, background)).toBe("Claude Code subscription · laptop · Background refresh");
+    const sample = { ...background, settings: { monitor: true, thresholds: {} } };
+    expect(connectionSummary(claude, undefined, false, sample)).toBe("Claude Code subscription · laptop · Session sampling");
   });
   test("profile rows show connection, model and effort", () => {
     const profile = AIProfile.parse({ id: "aip_01J00000000000000000000000", owner: api.owner, name: "Daily", connection: api.id, engine: "lumio", model: "synthetic-chat", thinking: "default", effort: "high", revision: 1, created: stamp, updated: stamp });
