@@ -5,7 +5,7 @@ import { confirmDelete, deletableRow } from "../trash-actions.ts";
 import { NoteSave } from "../note-save.ts";
 import { writingContext } from "../note-text.ts";
 import { matchTerms } from "../note-matches.ts";
-import type { KnowledgeContext, KnowledgeDocument, KnowledgeRelatedResult } from "@lumio/schema";
+import type { KnowledgeContext, KnowledgeDocument, KnowledgeRelatedResult, ResourceRef } from "@lumio/schema";
 import { KnowledgeCreate } from "./knowledge-create.ts";
 import { aiNoteCard, hydrateAiEmbeds } from "../ai-note-embed.ts";
 import { resourceStatusText } from "../resources.ts";
@@ -24,6 +24,7 @@ import { renderMarkdown, safeExternalUrl } from "../utils/markdown.ts";
 import { t, translated } from "../i18n.ts";
 import { renderedOutline } from "../article-outline.ts";
 import { SideRail, type RailEntry } from "../side-rail.ts";
+import { refOf } from "../workbench-assist.ts";
 
 const TYPE_LABEL: Record<string, string> = translated({ paper: "Paper", idea: "Idea", experiment: "Experiment", source: "Source", post: "Post", asset: "Asset", "ai-note": "AI", project: "Old project", task: "Old task", routine: "Old routine" });
 const LEGACY = new Set(["project", "task", "routine"]);
@@ -76,6 +77,7 @@ export class KnowledgePane {
   private active = true;
   private currentPath = "";
   private selected?: string;
+  private displayed?: NoteDetail;
   private creator?: KnowledgeCreate;
   private editor?: NoteEditor;
   private titleResize?: ResizeObserver;
@@ -96,7 +98,7 @@ export class KnowledgePane {
   private conflict=h("section",{class:"note-conflict",hidden:true});
   private unbindKeys: () => void;
 
-  constructor(root: HTMLElement, private client: Client, initialReference?: string) {
+  constructor(root: HTMLElement, private client: Client, initialReference?: string, private focusChanged?: () => void) {
     this.listButton.addEventListener("click", () => this.setGraphMode(false));
     this.graphButton.addEventListener("click", () => this.setGraphMode(true));
     this.filterHost.append(h("label", { class: "search-box" }, icon("search"), this.query), this.typeButton, this.privateButton);
@@ -125,6 +127,14 @@ export class KnowledgePane {
   }
 
   get dirty():boolean{return !!this.creator?.dirty||!!this.saver?.dirty;}
+  /** 使用解析后的稳定 ID：路径/citekey 打开、阅读态与编辑态共用这一来源。 */
+  get focus(): ResourceRef | undefined {
+    if (!this.displayed) return undefined;
+    const note = this.saver?.base.document.note ?? this.displayed.note;
+    const ref = refOf(note.id, note.title);
+    if (ref?.module !== "knowledge") return undefined;
+    return { ...ref, ...(this.saver ? { revision: this.saver.base.revision } : {}) };
+  }
   canLeave():boolean{this.persist();if(!this.saver?.error)void this.saver?.save();return this.creator?.canLeave()??true;}
   async beforeLeave():Promise<boolean>{this.persist();if(this.saver?.dirty&&!this.saver.error)await this.saver.save();return this.creator?.canLeave()??true;}
   private persist(saver=this.saver):void{
@@ -139,7 +149,12 @@ export class KnowledgePane {
     this.creator=new KnowledgeCreate(this.client,result=>{this.creator=undefined;this.query.value="";this.type="";this.renderFilters();void this.search();void this.read(result.id);},this.detail,context=>this.recommend(context),ref=>void this.open(ref),()=>{this.clearWriter();this.showPlaceholder();},()=>{this.split.classList.toggle("show-related");this.renderRelated();});
     this.creator.open();
   }
-  private clearWriter():void{this.persist();this.titleResize?.disconnect();this.titleResize=undefined;this.outlineEntries=()=>[];this.outline.refresh();clearTimeout(this.saveTimer);clearTimeout(this.relatedTimer);this.relatedGeneration++;this.contextKey="";this.relatedTerms=[];this.linksRevision="";this.split.classList.remove("show-related");this.relatedHits=[];this.related.hidden=true;clear(this.related);this.editor?.destroy();this.editor=undefined;this.saver=undefined;this.creator?.dispose();this.creator=undefined;}
+  private clearFocus(): void {
+    const hadFocus = !!this.displayed;
+    this.displayed = undefined;
+    if (hadFocus) this.focusChanged?.();
+  }
+  private clearWriter():void{this.clearFocus();this.persist();this.titleResize?.disconnect();this.titleResize=undefined;this.outlineEntries=()=>[];this.outline.refresh();clearTimeout(this.saveTimer);clearTimeout(this.relatedTimer);this.relatedGeneration++;this.contextKey="";this.relatedTerms=[];this.linksRevision="";this.split.classList.remove("show-related");this.relatedHits=[];this.related.hidden=true;clear(this.related);this.editor?.destroy();this.editor=undefined;this.saver=undefined;this.creator?.dispose();this.creator=undefined;}
   dispose():void{this.graphView?.dispose();this.clearWriter();this.outline.dispose();this.active=false;this.generation++;this.searchGeneration++;this.unbindKeys();}
   async open(reference: string, reload = false): Promise<void> {
     if (!reload && reference === this.selected && this.detail.querySelector(".reader")) return;
@@ -244,6 +259,8 @@ export class KnowledgePane {
   }
 
   private render(note: NoteDetail, links: LinksResult | undefined): void {
+    this.displayed = note;
+    this.focusChanged?.();
     this.currentPath = note.note.path;
     const fm = note.frontmatter;
     const sourceUrl = typeof fm.url === "string" ? safeExternalUrl(fm.url) : undefined;

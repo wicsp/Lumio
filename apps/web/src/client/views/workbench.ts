@@ -317,7 +317,7 @@ export class WorkbenchView {
     let pane: Pane;
     if (section === "overview") pane = new OverviewPane(target, client, this.session.hub, navigate, this.name, changed);
     else if (section === "settings") pane = new SettingsPane(target, this.session, this.name, () => void this.signOut(), () => this.leaveSettings(), sub => void this.go("settings", sub), id, this.gamepad);
-    else if (section === "knowledge") pane = new KnowledgePane(target, client, id);
+    else if (section === "knowledge") pane = new KnowledgePane(target, client, id, () => this.dock?.pageChanged());
     else if (section === "work") pane = new WorkPane(target, client, this.session.hub, this.workMode, id, navigate, changed);
     else if (section === "execution") pane = new ExecutionPane(target, client, this.session.hub, id, navigate, changed);
     else if (section === "assistant") pane = new AssistantPane(target, client, this.session.hub, navigate, id);
@@ -327,13 +327,15 @@ export class WorkbenchView {
     return { target, pane };
   }
 
-  /** 焦点快照的来源：当前分区、路由里的对象 ID、主区域里选中的文字。 */
+  /** 知识页以内部分区实际加载的 Note 为准，其余分区沿用路由。 */
   private focusInput(): FocusInput {
     const { section, id } = this.parseHash(this.currentHash || "#overview");
     const selection = window.getSelection();
     const anchor = selection?.anchorNode;
     const selected = selection && !selection.isCollapsed && anchor && this.main.contains(anchor) ? selection.toString() : undefined;
-    return { section, ...(id ? { id } : {}), ...(selected ? { selection: selected } : {}) };
+    const ref = section === "knowledge" ? this.current?.pane.focus : undefined;
+    const object = section === "knowledge" ? ref && { id: ref.id, label: ref.label, revision: ref.revision } : id ? { id } : undefined;
+    return { section, ...object, ...(selected ? { selection: selected } : {}) };
   }
 
   /** 助手的跳转与高亮（ADR 0060 第 2、3 节）。人正在操作页面时不跳转，交给面板显示「带我过去」。 */

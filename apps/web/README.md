@@ -117,4 +117,14 @@ bun run check
 
 测试覆盖静态资源与 PWA 文件、契约命令、Markdown 安全、文件校验和会话清理。浏览器验收用临时合成 Hub、知识库、模型和执行器，不读取真实 vault 或调用真实 AI。完整证据见 [P4-1](../../docs/tasks/P4-1-web-workbench.md)。
 
+### Note 焦点自测（task_01M75F3QJZHJZ9NETKZ2Q245RA）
+
+1. 在知识页列表打开一篇有稳定 ID 的非私密 Note，确认右侧常驻主助手输入框上方显示该 Note 标题；不要固定焦点或关闭页面共享。
+2. 打开浏览器开发者工具的 Network，发送「概括当前这篇笔记」。找到 `POST /v2/assistant/chat`，检查 Request Payload：`focus.section` 为 `knowledge`，`focus.primary.id` 和 `focus.selected[0].id` 都是当前 Note 的 ID，引用的 `module` 为 `knowledge`。编辑器已加载时还应带保存版本的 `revision`。
+3. 通过 Note 内部链接、关系图或列表切到另一篇再发送，确认这两个 ID 都换成新 Note。即使 URL 还留着旧 ID，也应以当前显示的 Note 为准。
+4. 用 `#knowledge/<Note ID>` 直接进入并刷新，等待详情加载后重复检查。分别试 paper、idea、ai-note；阅读态与编辑态应一致。
+5. 返回列表空白详情、打开不存在的 Note 或进入尚未保存的新建页，确认不再发送上一篇的引用。没有稳定 ID 的旧笔记不会伪造引用；关闭共享时不发送 `focus`。固定焦点后切换 Note，仍发送被固定的 Note，解除固定后跟随当前详情。
+
+焦点在 Web 收集；Hub 再按助手可见性过滤，并结合消息与历史决定 `anchors`。首次围绕当前可见 Note 提问时，响应流的 `topic` 事件应包含该 ID；不是每轮都会重发话题事件。私密或不可见对象仍可能被 Hub 过滤。
+
 设计依据：[ADR 0026](../../docs/adr/0026-web-workbench.md)、[现行设计](../../docs/DESIGN.md)。

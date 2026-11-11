@@ -37,9 +37,10 @@ export function truncateGraphemes(text: string, max: number): string {
 
 export interface FocusInput {
   section: Section;
-  /** 路由里的对象 ID（如 `#work/task_…`）。 */
+  /** 当前已加载的对象 ID，或路由里的对象 ID（如 `#work/task_…`）。 */
   id?: string;
   label?: string;
+  revision?: string;
   /** 页面里选中的文字。 */
   selection?: string;
 }
@@ -52,10 +53,12 @@ const isWorkbenchSection = (section: Section): section is WorkbenchSection =>
  * 什么都没有时返回 undefined（不发 focus）。设置、回收站不在分区里，只发选中的文字。
  */
 export function buildFocus(input: FocusInput): FocusSnapshot | undefined {
-  const primary = refOf(input.id, input.label);
+  const ref = refOf(input.id, input.label);
+  const primary = ref && { ...ref, ...(input.revision ? { revision: input.revision } : {}) };
   const section = isWorkbenchSection(input.section) ? input.section : undefined;
   let selection = input.selection?.trim() ? truncateGraphemes(input.selection.trim(), FOCUS_LIMITS.max_selection_graphemes) : undefined;
-  const snapshot = () => ({ ...(section ? { section } : {}), ...(primary ? { primary } : {}), selected: [], ...(selection ? { selection_text: selection } : {}) });
+  const selected = section === "knowledge" && primary?.module === "knowledge" ? [primary] : [];
+  const snapshot = () => ({ ...(section ? { section } : {}), ...(primary ? { primary } : {}), selected, ...(selection ? { selection_text: selection } : {}) });
   while (selection && bytes(snapshot()) > FOCUS_LIMITS.max_bytes) {
     const parts = graphemes(selection);
     selection = parts.length > 1 ? parts.slice(0, Math.floor(parts.length * 0.8)).join("") : undefined;
