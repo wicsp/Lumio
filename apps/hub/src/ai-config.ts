@@ -13,6 +13,7 @@ import { newId } from "@lumio/foundation";
 import { SqliteAIStore } from "@lumio/storage";
 import { ChatCompletionsModel, type ModelConfiguration } from "./assistant-model.ts";
 import { HubError } from "./errors.ts";
+import { DecisionGateConfiguration } from "./decision-gate-config.ts";
 
 const failure = (problem: string, code: "INVALID" | "NOT_FOUND" = "INVALID") =>
   new HubError(code, { key: `ai.${problem}`, args: [] }, { reason: `ai-${problem.replaceAll("_", "-")}` });
@@ -20,10 +21,14 @@ const MIGRATION = "ai.legacy-migration";
 
 export class AIConfigurationService {
   knowledgeProfileInUse?: (profile: string, nextEngine?: AIProfile["engine"]) => boolean;
+  readonly decisionGate: DecisionGateConfiguration;
+
   constructor(
     readonly store: SqliteAIStore,
     private readonly legacy?: ModelConfiguration,
-  ) {}
+  ) {
+    this.decisionGate = new DecisionGateConfiguration(store);
+  }
 
   /** Called before serving requests. Each owner's pair and receipt commit together. */
   migrateLegacy(owners: string[]): void {
@@ -164,6 +169,9 @@ export class AIConfigurationService {
       const value = kind === "connection" ? this.store.connection(id) : this.store.profile(id);
       if (!value || value.owner !== owner) throw failure(kind + "_missing", "NOT_FOUND");
       if (value.revision !== input.expected_revision) throw new HubError("CONFLICT", { key: "ai.conflict", args: [] });
+      if (kind === "connection" && this.decisionGate.binding(owner)?.connection === id) {
+        throw new HubError("CONFLICT", { key: "ai.decision_gate_connection_in_use", args: [] });
+      }
       const inUse = kind === "connection"
         ? this.store.profiles(owner).some(profile => profile.connection === id)
         : this.knowledgeProfileInUse?.(id) || this.store.sessions(owner).some(session => session.profile.id === id && session.view.state !== "closed");
