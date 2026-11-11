@@ -95,9 +95,9 @@ ADR 0025 的四模块重构已合入：业务库、显式委派、Routine、助�
 | [0055](adr/0055-speech-input-and-output.md) | 语音：浏览器采集、Hub 中转、语音服务并入 AI 配置底座；串联式语音合成 | Accepted |
 | [0057](adr/0057-inbox-and-captured-sources.md) | 入库时 AI 只写卡片，深读按需；AI 算出的关联实时显示、不持久化、不写进笔记 | Accepted |
 | [0058](adr/0058-aliyun-ai-connection-balance.md) | AI Connection 查询阿里云账户余额 | Implemented |
-| [0059](adr/0059-single-assistant-anchored-context.md) | 单入口助手：一个主对话，按话题锚点组装上下文；后台预读与分级提醒；Watchdog 与提前探索 | Proposed |
-| [0060](adr/0060-shared-workbench-protocol.md) | 共用工作台：焦点快照与助手的展示动作（跳转、高亮、面板） | Proposed |
-| [0061](adr/0061-jev-decision-gate.md) | 判断闸门：用 Jev 做对话授权、提醒分级与进展判断 | Proposed |
+| [0059](adr/0059-single-assistant-anchored-context.md) | 单入口助手：一个主对话，按话题锚点组装上下文；后台预读与分级提醒；Watchdog 与提前探索 | Accepted |
+| [0060](adr/0060-shared-workbench-protocol.md) | 共用工作台：焦点快照与助手的展示动作（跳转、高亮、面板）；Hub 校验助手可见性 | Accepted |
+| [0061](adr/0061-jev-decision-gate.md) | 判断闸门：用 Jev 做提醒分级与进展判断；对话授权待定 | 部分 Accepted（对话授权 Proposed） |
 
 **安全**
 | 编号 | 一句话 | 状态 |
