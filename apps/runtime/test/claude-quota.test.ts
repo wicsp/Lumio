@@ -38,6 +38,21 @@ test("does not infer missing quota or ambiguous reset times from model-specific 
     .toEqual([{ id: "five_hour", minutes: 300, used_percent: 3, resets_at: "2026-11-10T05:30:00.000Z" }]);
   expect(parseClaudeUsage("Current week (all models)\n24% used\nResets 3pm (PST)", now))
     .toEqual([{ id: "seven_day", minutes: 10080, used_percent: 24 }]);
+  expect(parseClaudeUsage("Current week (all models)\n24% used\nResets an unknown day at 3pm (UTC)", now))
+    .toEqual([{ id: "seven_day", minutes: 10080, used_percent: 24 }]);
+});
+
+test("keeps the date on a Claude weekly reset rendered with at", () => {
+  const now = new Date("2026-11-11T16:04:00Z");
+  const screen = [
+    "Current session", "12% used", "Resets 5pm (UTC)",
+    "Current week (all models)", "28% used", "Resets Nov 15 at 12pm (UTC)",
+    "Current week (Fable)", "4% used", "Resets Nov 15 at 11:59am (UTC)",
+  ].join("\n");
+  expect(parseClaudeUsage(screen, now)).toEqual([
+    { id: "five_hour", minutes: 300, used_percent: 12, resets_at: "2026-11-11T17:00:00.000Z" },
+    { id: "seven_day", minutes: 10080, used_percent: 28, resets_at: "2026-11-15T12:00:00.000Z" },
+  ]);
 });
 
 test("Claude quota capability requires the local Runtime operator to opt in", async () => {
