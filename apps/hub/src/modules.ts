@@ -1,4 +1,5 @@
 import { Resources } from "./resources.ts";
+import { AssistantWorkbenchAnchors } from "./assistant-workbench-anchors.ts";
 import type { AiNotes } from "./ai-notes.ts";
 import {AIConfigurationService} from "./ai-config.ts";
 import {NativeAssistant} from "./native-assistant.ts";
@@ -147,6 +148,7 @@ export class BusinessModules {
     const assistantContext: AssistantContext = {
       text: msg, now, id, toolActor: store.assistantActor(),
       resolveModel: (profile, owner) => this.ai.model(owner, profile),
+      workbench: new AssistantWorkbenchAnchors(this, store, this.assistantMain),
       native: {
         validate: (conversation, request) => this.native.validate(conversation, request),
         run: this.native.run,
@@ -161,6 +163,7 @@ export class BusinessModules {
       try { this.reconcile(); } catch { /* Persisted pending results remain for the next pass. */ }
       try { this.native.usage.tick(); } catch { /* The next tick can retry quota collection. */ }
       void this.notifications.drain().catch(() => {});
+      void this.assistant.drainWorkbenchSummaries(this.signal).catch(() => { /* The durable queue retains the source range. */ });
     }, 1000);
   }
   async undo(callId: string, identity: Identity, requestId: string): Promise<WorkCommandResult> {
