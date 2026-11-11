@@ -7,6 +7,27 @@ export type Lang = "en" | "zh";
 const KEY = "lumio.web.lang";
 
 export const ZH: Record<string, string> = {
+  // 主对话面板（A1-5）
+  "Main conversation": "主对话",
+  "Shown by the assistant": "助手展示的内容",
+  "Ask about what you're looking at…": "问问你正在看的东西…",
+  "Hide the assistant": "收起助手",
+  "Couldn't open the main conversation: {0}": "无法打开主对话：{0}",
+  "Ask about the page you're on, or anything else. The conversation keeps going as you move between pages.": "可以问当前页面上的东西，也可以问别的。在页面之间切换时，对话会一直接着。",
+  "Not sharing this page": "不带上当前页面",
+  "Share again": "重新带上",
+  "Selected text": "选中的文字",
+  "The assistant sees this page with your next message": "下一条消息会把这个页面一起交给助手",
+  "Unpin": "取消固定",
+  "Keep this as context while you move around": "切换页面时也一直带上它",
+  "Pin": "固定",
+  "Don't share this page": "不带上这个页面",
+  "Stopped receiving. What was already done is saved in the conversation.": "已停止接收。已经完成的部分保存在对话里。",
+  "Topic: {0}": "话题：{0}",
+  "Take me there": "带我过去",
+  "Search results": "搜索结果",
+  "Related": "相关内容",
+  "Couldn't show that on the page.": "没能在页面上展示。",
   // Inbox（I1-5）
   "To sort": "待分拣",
   "Archive": "存档",

@@ -1622,3 +1622,50 @@ button.inbox-title:hover { text-decoration: underline; }
   .inbox-page { padding: 12px 12px 64px; }
   .inbox-capture { flex-direction: column; align-items: stretch; }
 }
+
+/* ───────────── 主对话面板（ADR 0060，A1-5） ───────────── */
+:root { --dock-w: 380px; }
+.dock { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 1px solid var(--line); background: var(--paper); }
+.dock[hidden] { display: none; }
+.dock-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); font-weight: 600; }
+.dock-head .icon-btn { margin-left: auto; }
+.dock-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 14px; }
+.dock-messages { display: flex; flex-direction: column; gap: 10px; }
+.dock-reply { display: flex; flex-direction: column; gap: 6px; }
+.dock-empty { font-size: var(--fs-sm); }
+.dock-composer { display: flex; flex-direction: column; gap: 6px; padding: 8px 12px 12px; border-top: 1px solid var(--line); }
+.dock-input { display: flex; align-items: flex-end; gap: 6px; }
+.dock-input textarea { flex: 1; min-height: 36px; max-height: 180px; resize: none; }
+.dock-focus { display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--ink-3); min-width: 0; }
+.dock-focus:empty { display: none; }
+.focus-label { display: inline-flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.focus-label .icon { width: 13px; height: 13px; flex: none; }
+.chip-btn { padding: 1px 6px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); color: inherit; font-size: inherit; }
+.chip-btn .icon { width: 11px; height: 11px; }
+.chip-btn[aria-pressed="true"] { border-color: var(--blue); color: var(--blue); }
+.topic-divider { display: flex; align-items: center; gap: 8px; color: var(--ink-3); font-size: var(--fs-xs); }
+.topic-divider::before, .topic-divider::after { content: ""; flex: 1; border-top: 1px dashed var(--line-strong); }
+.dock-notice { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 8px; align-items: start; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); font-size: var(--fs-sm); }
+.dock-notice .icon { width: 16px; height: 16px; margin-top: 2px; }
+.dock-notice.level-important { border-color: var(--blue); }
+.dock-notice p { margin: 2px 0 0; }
+.take-me { align-self: flex-start; }
+.dock-panel { display: flex; flex-direction: column; max-height: 45%; border-bottom: 1px solid var(--line); background: var(--surface); }
+.dock-panel[hidden] { display: none; }
+.dock-panel-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; font-size: var(--fs-sm); }
+.dock-panel-body { overflow: auto; padding: 0 12px 10px; display: flex; flex-direction: column; gap: 6px; }
+.dock-panel-body svg { max-width: 100%; height: auto; }
+.panel-card { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--paper); color: inherit; text-align: left; text-decoration: none; font-size: var(--fs-sm); }
+.panel-card:hover { background: var(--hover); }
+.dock-launcher { position: fixed; right: 18px; bottom: 18px; z-index: 30; display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid var(--line); border-radius: 50%; background: var(--surface); box-shadow: var(--shadow-pop); color: var(--ink); }
+.dock-launcher[hidden] { display: none; }
+.assist-highlight { outline: 2px solid var(--blue); outline-offset: -2px; background: var(--blue-wash) !important; }
+@media (prefers-reduced-motion: no-preference) { .assist-highlight { transition: background .3s var(--ease); } }
+@media (min-width: 861px) {
+  .shell.dock-open { grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--dock-w); }
+  .shell.dock-open.sidebar-collapsed { grid-template-columns: var(--rail-w) minmax(0, 1fr) var(--dock-w); }
+}
+@media (max-width: 860px) {
+  .dock { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; height: min(70dvh, 560px); border-left: 0; border-top: 1px solid var(--line); border-radius: var(--r-lg) var(--r-lg) 0 0; box-shadow: var(--shadow-dialog); padding-bottom: env(safe-area-inset-bottom); }
+  .dock-launcher { bottom: calc(68px + env(safe-area-inset-bottom)); }
+}
