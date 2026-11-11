@@ -91,6 +91,7 @@ ADR 0025 的四模块重构已合入：业务库、显式委派、Routine、助�
 | [0024](adr/0024-assignee-string-default-workdir.md) | `assignee: pi@server` 作为交接开关；`workdir` 缺省 `~` | Implemented（P2-13） |
 | [0029](adr/0029-capabilities-and-agent-access.md) | 能力目录与 agent 访问：Lumio 记录与决策，agent 是可替换的手 | Accepted |
 | [0031](adr/0031-workflows-delegation-push.md) | 交接计划与 agent 接力、委派需要批准、统一推送（先做 PWA） | Accepted |
+| [0055](adr/0055-speech-input-and-output.md) | 语音：浏览器采集、Hub 中转、语音服务并入 AI 配置底座；串联式语音合成 | Proposed |
 
 **安全**
 | 编号 | 一句话 | 状态 |
@@ -100,6 +101,7 @@ ADR 0025 的四模块重构已合入：业务库、显式委派、Routine、助�
 | [0014](adr/0014-hub-and-ai-access.md) | 含卡号的文件不提交、不索引；私密由令牌角色执行 | Implemented |
 | [0017](adr/0017-single-machine-deployment.md) | Hub 默认只监听本机（远程访问方式由 0022 取代：网络由部署者负责） | Implemented（部分被取代） |
 | [0020](adr/0020-privileged-exec-signed-approvals.md) | root 只能凭 Hub 签名、一次性的批准凭据执行 | Implemented |
+| [0055](adr/0055-speech-input-and-output.md) | 不保存原始音频；语音只限 human；第三方服务商明示 | Proposed |
 
 **流程**
 | 编号 | 一句话 | 状态 |
