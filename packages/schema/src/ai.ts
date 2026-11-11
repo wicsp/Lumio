@@ -3,15 +3,20 @@ import { AIQuotaSnapshot, ClaudeQuotaAccount, ClaudeBackgroundResult } from "./a
 import { idOf, Timestamp, Revision, RequestId, RuntimeName } from "./common.ts";
 /** ADR 0041/0042: shared model configuration; credentials never appear in a view. */
 export const TYPESAFE_JEV_BASE_URL = "https://api.typesafe.ai/v1";
-export const AIConnectionKind = z.enum(["codex-account", "openai-compatible", "deepseek", "doubao", "typesafe-jev", "claude-code-subscription"]);
+/** ADR 0055：阿里云百炼（DashScope）语音服务的官方地址，按区域固定；Hub 由此派生 wss 地址。默认北京。 */
+export const DASHSCOPE_BASE_URLS = { beijing: "https://dashscope.aliyuncs.com", singapore: "https://dashscope-intl.aliyuncs.com" } as const;
+/** ADR 0055：只能绑定语音用途的连接类型。 */
+export const SPEECH_CONNECTION_KINDS = ["dashscope"] as const;
+export const AIConnectionKind = z.enum(["codex-account", "openai-compatible", "deepseek", "doubao", "typesafe-jev", "claude-code-subscription", "dashscope"]);
 export const AIConnection = z.strictObject({ id: idOf("aic"), owner: idOf("act"), name: z.string().trim().min(1).max(100), kind: AIConnectionKind,
     host: z.union([z.literal("hub"), RuntimeName]), base_url: z.string().url().optional(), api_key_set: z.boolean(), revision: Revision, created: Timestamp, updated: Timestamp });
 export const AIConnectionInput = z.strictObject({ name: z.string().trim().min(1).max(100), kind: AIConnectionKind, host: z.union([z.literal("hub"), RuntimeName]), base_url: z.string().url().optional(), api_key: z.string().min(1).max(8192).optional(), clear_api_key: z.boolean().optional() })
     .refine(v => !(v.api_key && v.clear_api_key), "Conflicting credential changes")
     .refine(v => v.kind !== "typesafe-jev" || v.base_url === TYPESAFE_JEV_BASE_URL, { path: ["base_url"], message: "Use the official TypeSafe API address" })
+    .refine(v => v.kind !== "dashscope" || (Object.values(DASHSCOPE_BASE_URLS) as string[]).includes(v.base_url ?? ""), { path: ["base_url"], message: "Use an official DashScope region address" })
     .refine(v => (v.kind === "codex-account" || v.kind === "claude-code-subscription") ? v.host !== "hub" && !v.api_key && !v.base_url && (v.kind !== "claude-code-subscription" || !v.clear_api_key) : !!v.base_url && v.host === "hub", "Unsupported connection location")
     .refine(v => !v.base_url || (() => { const u = new URL(v.base_url); return ["http:", "https:"].includes(u.protocol) && !u.username && !u.password && !u.search && !u.hash; })(), "Invalid API address");
-export const AIProfile = z.strictObject({ id: idOf("aip"), owner: idOf("act"), name: z.string().trim().min(1).max(100), connection: idOf("aic"), engine: z.enum(["lumio", "codex"]), model: z.string().trim().min(1).max(200), thinking: z.enum(["default", "off", "on"]).default("default"), effort: z.string().min(1).max(32).optional(), revision: Revision, created: Timestamp, updated: Timestamp });
+export const AIProfile = z.strictObject({ id: idOf("aip"), owner: idOf("act"), name: z.string().trim().min(1).max(100), connection: idOf("aic"), engine: z.enum(["lumio", "codex", "speech"]).describe("speech 只能用于语音用途（ADR 0055）"), model: z.string().trim().min(1).max(200), thinking: z.enum(["default", "off", "on"]).default("default"), effort: z.string().min(1).max(32).optional(), revision: Revision, created: Timestamp, updated: Timestamp });
 export const AIProfileInput = AIProfile.omit({ id: true, owner: true, revision: true, created: true, updated: true });
 export const AIUsageBinding = z.strictObject({ profile: idOf("aip"), purpose: z.enum(["assistant", "job", "routine"]), revision: Revision, workdir: z.literal("managed-session"),
     approval_policy: z.literal("on-request"), reviewer: z.literal("user"), sandbox: z.literal("workspace-write"), command_network: z.literal(false), tools: z.array(z.string().min(1)).max(128), timeout_seconds: z.number().int().min(30).max(7200) });
