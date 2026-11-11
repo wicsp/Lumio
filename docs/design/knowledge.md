@@ -13,7 +13,7 @@ plan/      projects/ → project tasks/ → task  routines/ → routine
 create/    posts/ → post
 ai/        notes/ → ai-note（AI 写的知识，ADR 0051）
 life/      assets/ → asset（私密）
-files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是实体，不扫描
+files/     attachments/  drawings/（Excalidraw）  templates/  originals/（资料原文，ADR 0057）  —— 不是实体，不扫描
 ```
 
 - **类型由所在的类型目录决定**；映射表 `VAULT_LAYOUT`（`packages/knowledge`）是唯一来源，其他代码不得写死路径。
@@ -88,6 +88,21 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
 - **被引用资源的删除**：删除对话、任务等时提示被多少知识引用；仍可删除，知识中显示"已在回收站/已删除"，恢复后复原。对话与执行记录默认长期保留。
 - agent 写 AI 笔记的权限见 [security.md](security.md)。
 
+## 外部资料与 Inbox（ADR 0057，I1）
+
+- **三层**：原文（Lumio 写，只读）、AI 层（该资料的 AI 笔记：入库时的卡片，人要求时的深读）、人的层（`paper` / `source` 实体：笔记、链接、状态）。
+  论文入库为 `paper`（citekey 与去重不变），其他为 `source`。实体正文开头单独一段嵌入它的 AI 笔记，其余归人。
+- **原文**：`files/originals/<标题> <实体 ID>.md`，frontmatter 记 `of`、`url`、`captured`、`extractor`、`lang`、`sha256`；不扫描为实体、不进链接图。
+  只在人要求重新抽取时整体替换（旧版本在 git 历史）。论文 PDF 存 Hub 托管文件并随业务备份，不进 vault；网页图片不下载，视频音频不保存。
+- **Inbox 是未分拣的捕获**：捕获记录（`cap_`）在 `hub.sqlite`，属 Hub 的跨模块协调数据；分拣后离开 Inbox。解析成功即生成实体，未分拣也能检索。
+  阅读状态在实体的 `status`：`to-read`（入库默认）/ `reading` / `read` / `reference`（存档，只留给 AI）。不定时提醒。
+  丢弃：实体、原文、AI 笔记一起进回收站；规范化后的 URL 去重，再次捕获已丢弃的链接时提示。
+- **解析**：轻量抽取（网页正文、arXiv HTML、元数据）在 Hub；重的（PDF 转 Markdown、字幕或音频、本地语音识别）以 command Job 交给执行器，结果经托管文件交回。
+  失败不自动重试，由人重试或手动粘贴正文。需要登录的内容由浏览器插件送来，Cookie 只留在执行器机器上。
+- **卡片**：解析后立即由 Hub 内置的 Inbox 处理身份（`agent`，无工具）用 `knowledge.summary` 用途生成，写入 AI 笔记，关键词作为 `tags`；
+  输入有上限（默认约 8k token）。原文作为不可信数据放在明确边界内。未配置时照常入库，之后可补做。
+- **隐式关联**：由检索实时算出（Inbox"可能相关"、编辑器相关推荐、助手按需检索），不持久化、不写进笔记、不进图谱；人采纳时自己把链接写进正文（ADR 0018）。
+
 ## 全库知识图谱（ADR 0040，K3）
 
 - `GET /v2/knowledge/graph` 只读且只对 human 开放，不进入 agent 能力目录；默认隐藏私密和旧工作笔记，可显式包含私密 / 旧笔记或按类型筛选。
@@ -120,3 +135,5 @@ files/     attachments/  drawings/（Excalidraw）  templates/     —— 不是
   新版 `lumio task list` 使用独立 Work 查询，不伪造笔记路径（ADR 0025）。
 - 索引用 WAL，遇到锁时等待（最多 5 秒）；Hub 与本地 CLI 可以同时使用同一个索引。
 - 没有 ID 的笔记照样能搜到，结果里**不带 `id`**，只能按文件名引用；不生成替代 ID。
+- **原文与语义检索**（ADR 0057，I1）：原文进单独的全文表，结果指向所属实体并标明命中原文。每条知识按"标题 + 卡片"（笔记按标题与正文）存一个向量于 `index.sqlite`（可重建，换模型整体重算），
+  直接算余弦相似度；`knowledge.search` 与相关推荐用全文与向量的 RRF 融合，结果附阅读状态与入库时间。未配置 `knowledge.embedding` 时退回全文检索。私密实体不生成向量、不送模型。分块检索暂不做。

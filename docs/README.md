@@ -63,6 +63,7 @@ ADR 0025 的四模块重构已合入：业务库、显式委派、Routine、助�
 | [0018](adr/0018-links-in-body-ai-recommends.md) | 链接只写在正文；改名只在受控环境；导出时从正文找引用 | Implemented |
 | [0032](adr/0032-task-model-outcome-turn.md) | 任务模型：结局、轮到谁、事件；交接计划取代流程 | Accepted |
 | [0034](adr/0034-knowledge-creation-and-authoring.md) | 知识新建入口、类型模板与后续写作 | Accepted（第 1–5 节） |
+| [0057](adr/0057-inbox-and-captured-sources.md) | 外部资料三层：原文只读、AI 卡片在 AI 笔记、人的笔记；Inbox 是未分拣的捕获；卡片级向量 + 全文混合检索 | Accepted |
 
 **Hub 与运行**
 | 编号 | 一句话 | 状态 |
@@ -92,6 +93,7 @@ ADR 0025 的四模块重构已合入：业务库、显式委派、Routine、助�
 | [0029](adr/0029-capabilities-and-agent-access.md) | 能力目录与 agent 访问：Lumio 记录与决策，agent 是可替换的手 | Accepted |
 | [0031](adr/0031-workflows-delegation-push.md) | 交接计划与 agent 接力、委派需要批准、统一推送（先做 PWA） | Accepted |
 | [0055](adr/0055-speech-input-and-output.md) | 语音：浏览器采集、Hub 中转、语音服务并入 AI 配置底座；串联式语音合成 | Accepted |
+| [0057](adr/0057-inbox-and-captured-sources.md) | 入库时 AI 只写卡片，深读按需；AI 算出的关联实时显示、不持久化、不写进笔记 | Accepted |
 | [0058](adr/0058-aliyun-ai-connection-balance.md) | AI Connection 查询阿里云账户余额 | Implemented |
 
 **安全**
@@ -103,6 +105,7 @@ ADR 0025 的四模块重构已合入：业务库、显式委派、Routine、助�
 | [0017](adr/0017-single-machine-deployment.md) | Hub 默认只监听本机（远程访问方式由 0022 取代：网络由部署者负责） | Implemented（部分被取代） |
 | [0020](adr/0020-privileged-exec-signed-approvals.md) | root 只能凭 Hub 签名、一次性的批准凭据执行 | Implemented |
 | [0055](adr/0055-speech-input-and-output.md) | 不保存原始音频；语音只限 human；第三方服务商明示 | Accepted |
+| [0057](adr/0057-inbox-and-captured-sources.md) | 抓取网页只允许公网地址；外部原文作为不可信数据交给模型 | Accepted |
 
 **流程**
 | 编号 | 一句话 | 状态 |
