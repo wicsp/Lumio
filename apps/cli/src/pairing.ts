@@ -22,7 +22,7 @@ async function writeConfig(path: string, value: unknown) {
   finally { await rm(temp, { force: true }); }
 }
 export async function runPairing(args: string[], options: {
-  home?: string; log?: (line: string) => void; warn?: (line: string) => void; confirm?: () => Promise<boolean>;
+  home?: string; env?: NodeJS.ProcessEnv; log?: (line: string) => void; warn?: (line: string) => void; confirm?: () => Promise<boolean>;
   fetch?: typeof globalThis.fetch;
 } = {}): Promise<number> {
   const parse = () => parseArgs({ args, allowPositionals: true, options: {
@@ -60,12 +60,12 @@ export async function runPairing(args: string[], options: {
   }
   if (command === "login-code") {
     if (positionals.length !== 1 || Object.keys(values).some((k) => k !== "name")) throw new Error(msg("pairing.usage_lumio_login_code_name_cli_hostname"));
-    const client = createClient({ language: language(), ...hubCredentials(readCliConfig({ home, warn: options.warn })), fetch: options.fetch });
+    const client = createClient({ language: language(), ...hubCredentials(readCliConfig({ home, env: options.env, warn: options.warn })), fetch: options.fetch });
     log((await client.clientInvite(values.name ?? `cli@${hostname().toLowerCase().replace(/[^a-z0-9._-]/g, "-").slice(0, 60)}`)).command); return 0;
   }
   if (command === "runtime" && ["add", "remove"].includes(action ?? "")) {
     if (positionals.length !== 3 || !name || Object.keys(values).some((k) => k !== "json")) throw new Error(msg("pairing.usage_lumio_runtime_add_remove_name_json"));
-    const client = createClient({ language: language(), ...hubCredentials(readCliConfig({ home, warn: options.warn })), fetch: options.fetch });
+    const client = createClient({ language: language(), ...hubCredentials(readCliConfig({ home, env: options.env, warn: options.warn })), fetch: options.fetch });
     if (action === "remove") { await client.removeRuntime(name); log(values.json ? "null" : msg("pairing.all_runtime_tokens_revoked")); }
     else {
       const invite = await client.runtimeInvite(name);
