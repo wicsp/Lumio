@@ -26,7 +26,7 @@
 
 | 编号 | 内容 | 负责 | 改动范围 |
 |---|---|---|---|
-| A1-1 | 契约：主对话标识与获取接口；聊天请求的 `focus`（`FocusSnapshot`：路由、主对象与选中对象 ResourceRef、选中文字；`FOCUS_LIMITS` 整包 8 KiB、选中文字 512 字素簇）；`AssistantEvent` 新增 `ui`（`navigate` / `highlight` / `show` / `clear`）、`topic`（话题分隔：锚点 ID 与标题）、`notice`（插话提醒）；待处理条目 `Notice`（来源事件、级别 `important / digest / silent`、对象 ResourceRef、摘要、已读）及列表 / 已读命令；任务与知识对象的"可以探索"标记命令（只授予 human）；AI 用途绑定 `decision.gate`（只能绑 Jev 连接）；Watchdog 报告事件。**锚点关联不进契约**（ADR 0059 第 1 节） | Claude 起草，人类批准 | `packages/schema` |
+| A1-1 ✅ | 契约：主对话标识与获取接口；聊天请求的 `focus`（`FocusSnapshot`：路由、主对象与选中对象 ResourceRef、选中文字；`FOCUS_LIMITS` 整包 8 KiB、选中文字 512 字素簇）；`AssistantEvent` 新增 `ui`（`navigate` / `highlight` / `show` / `clear`）、`topic`（话题分隔：锚点 ID 与标题）、`notice`（插话提醒）；待处理条目 `Notice`（来源事件、级别 `important / digest / silent`、对象 ResourceRef、摘要、已读）及列表 / 已读命令；任务与知识对象的"可以探索"标记命令（只授予 human）；AI 用途绑定 `decision.gate`（只能绑 Jev 连接）；Watchdog 报告事件。**锚点关联不进契约**（ADR 0059 第 1 节） | Claude 起草，人类批准 | `packages/schema` |
 | A1-2 | 锚点与上下文组装：消息 ↔ ResourceRef 内部关联表；每轮锚点解析（焦点、原话、上一轮锚点，不确定时让模型先问）；按预算组装上下文（ADR 0059 第 2 节表格）；链式召回时读取结果只内联下一跳 ID 与摘要；话题切走时记录片段来源范围并排入后台摘要，按来源范围去重；切回时无摘要则放最近几轮完整交互，工具调用与结果成对保留 | 后端（Codex） | `packages/assistant`、`packages/storage` |
 | A1-3 | Hub 主对话：主对话获取 / 创建；`focus` 复验（超限拒绝、按字素截断规则一致）；焦点按实际发送内容进入请求快照；锚点解析所需的读取走助手 agent 身份；`topic` 事件；沉淀提议沿用现有 AI 笔记与任务写入工具（`derived_from` 记消息 ID）；主对话只对兼容 API Profile 开放，原生 Profile 留到 A1-10 | 后端（Codex） | `apps/hub` |
 | A1-4 | 展示工具：`ui.navigate` / `ui.highlight` / `ui.show` / `ui.clear` 只在 human 拥有的主对话里注册给内置助手，不进外部 agent 能力目录；Hub 发事件前校验路由允许名单、助手 agent 身份对每个 ResourceRef 的可见性（私密与无权对象拒绝）、搜索结果须来自本轮已返回给助手的工具结果；不通过时整体拒绝并作为工具错误返回；事件只写入发起该轮的聊天流；原生会话经 MCP 适配层调用时按活跃轮次找到聊天流（新建会话才有这些工具） | 后端（Codex） | `apps/hub` |
@@ -43,7 +43,7 @@ A1-2、A1-3、A1-5 做完即可日常试用（不含后台提醒）；A1-7 做�
 
 ## A1-1 契约交接
 
-契约在 `packages/schema/src/workbench.ts`（2026-11-11 起草，待人类批准），HTTP 路径写在文件头注释里，全部只授予 human：
+契约在 `packages/schema/src/workbench.ts`（2026-11-11 人类批准，#182），HTTP 路径写在文件头注释里，全部只授予 human：
 
 - 新前缀 `ntc_`（提醒）、`xpl_`（提前探索）。锚点关联不进契约。
 - 主对话：`POST /v2/assistant/main`（`AssistantMainEnsure` → `AssistantMain`，幂等，没有时创建）。
