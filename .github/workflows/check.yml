@@ -1,7 +1,9 @@
 name: Check
-# main 的 PR 合并前须通过完整检查。
+# PR 与 main 都跑完整检查。默认流程先合并后在 main 上跑 CI，失败时修复或撤回（PR #188）。
 on:
   pull_request:
+    branches: [main]
+  push:
     branches: [main]
 permissions:
   contents: read
