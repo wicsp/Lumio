@@ -96,8 +96,8 @@ export function usageDetails(connection: AIConnection, usage: AIQuotaView, clien
   if (background) {
     details.append(h("p", { class: "field-hint" }, t(usage.settings.monitor
       ? "Claude Code is queried in the background every 15 minutes." : "Automatic Claude Code refresh is paused.")));
-    if (usage.claude_issue === "login_required" || usage.status === "waiting") {
-      details.append(h("p", { class: "field-hint" }, t("On {0}, run this command once to sign in through Claude Code. Then refresh usage.", connection.host)),
+    if (usage.claude_issue === "login_required") {
+      details.append(h("p", { class: "field-hint" }, t("On {0}, sign in through Claude Code with this command, then refresh usage.", connection.host)),
         h("pre", { class: "ai-quota-command" }, h("code", {}, "lumio runtime claude-quota-login")));
     } else if (usage.claude_issue === "trust_required") {
       details.append(h("p", { class: "field-hint" }, t("On {0}, run this command, approve the dedicated folder if prompted, and exit Claude Code.", connection.host)),

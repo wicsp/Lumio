@@ -44,7 +44,7 @@ export const ZH: Record<string, string> = {
   "Claude Code usage query timed out": "Claude Code 用量查询超时",
   "Claude Code is queried in the background every 15 minutes.": "每 15 分钟在后台查询 Claude Code 用量。",
   "Automatic Claude Code refresh is paused.": "Claude Code 自动刷新已暂停。",
-  "On {0}, run this command once to sign in through Claude Code. Then refresh usage.": "在 {0} 的终端运行一次此命令，通过 Claude Code 登录，然后刷新用量。",
+  "On {0}, sign in through Claude Code with this command, then refresh usage.": "在 {0} 的终端用此命令登录 Claude Code，然后刷新用量。",
   "On {0}, run this command, approve the dedicated folder if prompted, and exit Claude Code.": "在 {0} 的终端运行此命令，如有提示请信任专用目录，然后退出 Claude Code。",
   "Confirm new Claude account": "确认新 Claude 账号",
   "The next successful query will bind this connection to the newly signed-in account.": "下一次成功查询将把此连接绑定到新登录的账号。",

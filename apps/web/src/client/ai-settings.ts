@@ -37,8 +37,11 @@ const authLabel = (view: NativeConnectionView): string =>
   t({ ready: "Signed in", signed_out: "Signed out", authorizing: "Waiting for authorization", offline: "Runtime disconnected", error: "Codex sign-in failed" }[view.state]);
 
 /** 连接一行的副标题：服务、位置与连接级授权或密钥状态。 */
-export function connectionSummary(connection: AIConnection, view?: NativeConnectionView, hasLegacyChat = false): string {
-  if (connection.kind === "claude-code-subscription") return [kindLabel(connection.kind), connection.host, t("Session sampling")].join(" · ");
+export function connectionSummary(connection: AIConnection, view?: NativeConnectionView, hasLegacyChat = false, usage?: AIQuotaView): string {
+  if (connection.kind === "claude-code-subscription") {
+    const source = usage ? t(usage.settings.claude_mode === "background" ? "Background refresh" : "Session sampling") : undefined;
+    return [kindLabel(connection.kind), connection.host, source].filter(Boolean).join(" · ");
+  }
   if (connection.kind === "codex-account") {
     const status = !view ? t("Official sign-in") : view.state === "signed_out" && hasLegacyChat
       ? t("Only existing chats are signed in") : authLabel(view);
@@ -136,9 +139,9 @@ export class AISettings {
     const expanded = new Set([...this.connectionRows.querySelectorAll<HTMLDetailsElement>("details[open]")].map(node => node.dataset.connection));
     const ordered = [...this.config.connections].sort((a, b) => Number(!!this.usage.get(b.id)?.attention) - Number(!!this.usage.get(a.id)?.attention));
     clear(this.connectionRows, ...(ordered.length ? ordered.map(connection => {
-      const row = this.item(["codex-account", "claude-code-subscription"].includes(connection.kind) ? "device" : "globe", connection.name,
-        connectionSummary(connection, this.auth.get(connection.id), this.legacyChatUses(connection)), () => this.editConnection(connection));
       const usage = this.usage.get(connection.id);
+      const row = this.item(["codex-account", "claude-code-subscription"].includes(connection.kind) ? "device" : "globe", connection.name,
+        connectionSummary(connection, this.auth.get(connection.id), this.legacyChatUses(connection), usage), () => this.editConnection(connection));
       const details = usage && ["deepseek", "codex-account", "claude-code-subscription"].includes(connection.kind)
         ? usageDetails(connection, usage, this.client, this.updateUsage) : undefined;
       if (details && expanded.has(connection.id)) details.setAttribute("open", "");
