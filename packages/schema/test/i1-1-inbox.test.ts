@@ -87,13 +87,14 @@ test("knowledge AI bindings and the embedding engine", () => {
   expect(AIProfile.safeParse(profile).success).toBe(true);
 });
 
-test("the original-reading capability is defined but registered by the Hub slice", () => {
+test("the Hub slice registers the existing original-reading contract as read-only", () => {
   expect(KnowledgeOriginalShowArgs.safeParse({ ref: "He_2020_LightGCN" }).success).toBe(true);
   expect(KnowledgeOriginal.safeParse({
     note: { id: `src_${ulid}`, type: "source", title: "T", path: "library/sources/T.md" }, path: `${ORIGINALS_DIRECTORY}/T src_${ulid}.md`,
     frontmatter: { of: `src_${ulid}`, captured: now, extractor: "pasted@1", sha256: sha }, body: "text",
   }).success).toBe(true);
-  expect(CAPABILITIES.some(c => c.name === ORIGINAL_CAPABILITY_NAME)).toBe(false);
+  const capability = CAPABILITIES.find(c => c.name === ORIGINAL_CAPABILITY_NAME);
+  expect(capability).toMatchObject({ kind: "read", args: KnowledgeOriginalShowArgs, result: KnowledgeOriginal });
 });
 
 test("inbox contracts are exported", () => {

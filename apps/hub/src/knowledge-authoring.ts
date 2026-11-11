@@ -20,7 +20,7 @@ export const KNOWLEDGE_ROUTES = [
 type Operation = typeof KNOWLEDGE_ROUTES[number]["operation"];
 export type PaperFetch = (url: string, init: RequestInit) => Promise<Response>;
 
-async function boundedText(body: ReadableStream<Uint8Array> | null, limit: number): Promise<string> {
+export async function boundedText(body: ReadableStream<Uint8Array> | null, limit: number): Promise<string> {
   if (!body) return "";
   const reader = body.getReader(), chunks: Uint8Array[] = []; let size = 0;
   try {

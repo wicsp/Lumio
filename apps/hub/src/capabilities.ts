@@ -5,10 +5,10 @@ import type { WorkCommands } from "./work-commands.ts";
 import { WorkError, type WorkService } from "@lumio/work";
 import type { ExecutionRoutines } from "@lumio/execution";
 import { assertNoteVisible } from "./trash.ts";
-import { AI_NOTE_CAPABILITY_NAMES, KnowledgeAiNoteCommand, capability, RESPONSE_REASONS, CAPABILITIES, toolName, WorkCommandRequest, WorkAttention, type CapabilityChange, type CapabilityNameOf } from "@lumio/schema";
+import { AI_NOTE_CAPABILITY_NAMES, KnowledgeAiNoteCommand, ORIGINAL_CAPABILITY_NAME, capability, RESPONSE_REASONS, CAPABILITIES, toolName, WorkCommandRequest, WorkAttention, type CapabilityChange, type CapabilityNameOf } from "@lumio/schema";
 import type { AssistantTool } from "@lumio/assistant";
 import { KnowledgeService } from "@lumio/knowledge";
-import { FileKnowledgeRepository, readKnowledgeDocument, type SqliteAssistantStore } from "@lumio/storage";
+import { FileKnowledgeRepository, readKnowledgeDocument, showOriginal, type SqliteAssistantStore } from "@lumio/storage";
 import type { HubStore, Identity } from "./store.ts";
 import type { HubConfig } from "./config.ts";
 import { authorize } from "./authorize.ts";
@@ -90,6 +90,14 @@ export class Capabilities {
     if (decision.result === "deny" || (decision.result === "needs_approval" && !taskProposal)) {
       this.store.audit(identity, name, decision.result, undefined, "FORBIDDEN");
       throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: decision.result === "deny" ? decision.reason : msg("v2.approval_required") });
+    }
+    if (name === ORIGINAL_CAPABILITY_NAME) {
+      if (!this.knowledge) throw new HubError("INVALID", { key: "knowledge.no_vault", args: [] });
+      assertNoteVisible(this.store.db, String(args.ref));
+      const original = await showOriginal(this.config.vault, String(args.ref), { stateDir: this.config.stateDir });
+      if (original.note.id) assertNoteVisible(this.store.db, original.note.id);
+      this.store.audit(identity, name, "allow", undefined, `read:${original.note.id}`);
+      return { result: def.result.parse(original) };
     }
     if (aiNote) {
       const input = KnowledgeAiNoteCommand.safeParse({ request_id: requestId, operation: { op: name, args } });

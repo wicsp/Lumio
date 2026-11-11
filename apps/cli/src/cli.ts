@@ -7,7 +7,7 @@ import { printChecks } from "./diagnostics.ts";
 import { runSelftest } from "./selftest.ts";
 import { runUpgrade } from "./upgrade.ts";
 import { runPairing } from "./pairing.ts";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { parseArgs } from "node:util";
 import { createIdea, createPaper } from "@lumio/storage";
 import { generateCitekey, parseArxivMetadata, parseCrossrefMetadata, parsePaperInput, resolveVault } from "@lumio/knowledge";
@@ -37,7 +37,7 @@ export interface CliOptions {
 export async function runCli(args: string[], options: CliOptions = {}): Promise<number> {
   try { if (printHelp(args, options.log ?? console.log)) return 0; return await executeCli(args, options); }
   catch (cause) {
-    if (!["targets", "agent", "ai-note", "job", "task", "project", "plan-template", "attention", "chat", "routine", "proposals", "runtime"].includes(args[0] ?? "") || !args.includes("--json")) throw cause;
+    if (!["targets", "agent", "ai-note", "capture", "original", "job", "task", "project", "plan-template", "attention", "chat", "routine", "proposals", "runtime"].includes(args[0] ?? "") || !args.includes("--json")) throw cause;
     const error = cause instanceof ApiClientError ? {
       code: cause.code, message: errorMessage(cause), operation: cause.operation, reason: cause.reason, proposal: cause.proposal,
     } : { code: "INVALID", message: cause instanceof Error ? errorMessage(cause) : msg("cli.could_not_execute_command") };
@@ -48,6 +48,24 @@ export async function runCli(args: string[], options: CliOptions = {}): Promise<
 
 async function executeCli(args: string[], options: CliOptions): Promise<number> {
   const log = options.log ?? console.log;
+  if (args[0] === "capture" || args[0] === "original") {
+    const capture = args[0] === "capture";
+    const { values, positionals } = parseArgs({
+      args: args.slice(capture ? 1 : 2), allowPositionals: true,
+      options: { json: { type: "boolean" }, ...(capture ? { "request-id": { type: "string" } } as const : {}) },
+    });
+    if (positionals.length !== 1 || (!capture && args[1] !== "show")) throw new Error(msg("capture.usage"));
+    const client = createClient({ ...hubCredentials(readCliConfig({ warn: options.warn })), language: language() });
+    if (capture) {
+      const request = values["request-id"];
+      const result = await client.capture({ channel: "cli", url: positionals[0], request_id: typeof request === "string" ? request : randomUUID() });
+      log(values.json ? JSON.stringify(result) : msg(`capture.${result.duplicate}`, result.capture.id));
+    } else {
+      const result = await client.showOriginal(positionals[0]!);
+      log(values.json ? JSON.stringify(result) : result.body);
+    }
+    return 0;
+  }
   if (args[0] === "targets") {
     const { values, positionals } = parseArgs({ args: args.slice(1), allowPositionals: true, options: { json: { type: "boolean" }, online: { type: "boolean" } } });
     if (positionals.length) throw new Error(msg("targets.usage"));

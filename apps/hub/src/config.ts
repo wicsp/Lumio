@@ -3,7 +3,7 @@ import { browserOrigins } from "./web.ts";
 import { isIP } from "node:net";
 import { randomUUID } from "node:crypto";
 import { readFile, mkdir, writeFile, rename, rm } from "node:fs/promises";
-import { RuntimeName } from "@lumio/schema";
+import { CAPTURE_LIMITS, RuntimeName } from "@lumio/schema";
 import { homedir, hostname } from "node:os";
 import { join, resolve } from "node:path";
 import { modelConfiguration } from "./assistant-model.ts";
@@ -31,7 +31,14 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env) {
       publicUrl = url.href.replace(/\/+$/, "");
     } catch { throw new HubError("INVALID", { key: "config.lumio_public_url_must_be_an_http_s_url_without_credentials_query_or", args: [] }); }
   }
+  const captureCardInputTokens = Number(env.LUMIO_CAPTURE_CARD_INPUT_TOKENS ?? CAPTURE_LIMITS.default_card_input_tokens);
+  const captureSummaryLanguage = (env.LUMIO_CAPTURE_SUMMARY_LANGUAGE ?? "Chinese").trim();
+  if (!Number.isSafeInteger(captureCardInputTokens) || captureCardInputTokens < 1 || captureCardInputTokens > 500_000
+      || !/^[\p{L}][\p{L} -]{0,39}$/u.test(captureSummaryLanguage)) {
+    throw new HubError("INVALID", { key: "inbox.invalid_config", args: [] });
+  }
   return {
+    captureCardInputTokens, captureSummaryLanguage,
     assistantModel: env.LUMIO_ASSISTANT_MANAGED === "1" ? undefined : modelConfiguration(env),
     assistantHome: env.HOME ?? (env === process.env ? homedir() : stateDirectory(env)),
     webOrigins: browserOrigins(env.LUMIO_WEB_ORIGINS),

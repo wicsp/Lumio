@@ -151,6 +151,7 @@ export const CAPABILITIES = [
     summary: { en: "Read one note in full.", zh: "读取一篇笔记的全文。" } }),
   define({ name: "knowledge.note.links", kind: "read", args: KnowledgeLinksArgs, result: LinksResult,
     summary: { en: "List a note's outgoing and incoming links.", zh: "列出一篇笔记的出链与反链。" } }),
+  define({ name: ORIGINAL_CAPABILITY_NAME, kind: "read", args: KnowledgeOriginalShowArgs, result: KnowledgeOriginal, summary: ORIGINAL_SUMMARY }),
   define({ name: AI_NOTE_CAPABILITY_NAMES[0], kind: "write", args: KnowledgeAiNoteCreateArgs, result: KnowledgeAiNoteResult,
     summary: AI_NOTE_SUMMARIES[AI_NOTE_CAPABILITY_NAMES[0]] }),
   define({ name: AI_NOTE_CAPABILITY_NAMES[1], kind: "write", args: KnowledgeAiNoteUpdateArgs, result: KnowledgeAiNoteResult,

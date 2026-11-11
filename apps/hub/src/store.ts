@@ -45,17 +45,22 @@ export class HubStore {
   }
 
   /** A stable internal agent identity is separate from the conversation owner; it receives no token or human delegation. */
-  assistantActor(): Actor {
+  assistantActor(): Actor { return this.internalAgent("assistant-tools", "assistant"); }
+
+  inboxActor(): Actor { return this.internalAgent("inbox-summary", "inbox"); }
+
+  private internalAgent(purpose: string, name: string): Actor {
     return this.db.transaction(() => {
       this.db.exec("CREATE TABLE IF NOT EXISTS internal_actors(purpose TEXT PRIMARY KEY,actor TEXT NOT NULL REFERENCES actors(id))");
-      const binding = this.db.query<{ actor: string }, []>("SELECT actor FROM internal_actors WHERE purpose='assistant-tools'").get();
+      const binding = this.db.query<{ actor: string }, [string]>("SELECT actor FROM internal_actors WHERE purpose=?").get(purpose);
       if (binding) {
         const actor = this.actors().find((value) => value.id === binding.actor);
         if (!actor || actor.role !== "agent") throw new HubError("INVALID", { key: "store.invalid_assistant_tool_identity_configuration", args: [] });
         return actor;
       }
-      const actor = this.createActor(`assistant-${randomBytes(6).toString("hex")}`, "agent");
-      this.db.query("INSERT INTO internal_actors(purpose,actor) VALUES('assistant-tools',?)").run(actor.id); return actor;
+      const actor = this.createActor(`${name}-${randomBytes(6).toString("hex")}`, "agent");
+      this.db.query("INSERT INTO internal_actors(purpose,actor) VALUES(?,?)").run(purpose, actor.id);
+      return actor;
     })();
   }
 

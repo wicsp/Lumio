@@ -24,6 +24,7 @@ type Result = TrashResult | TrashRestoreResult | TrashPurgeResult;
 interface Journal {
   item: TrashItem;
   move: NoteTrashMove;
+  companions?: NoteTrashMove[];
   change: Change;
   result: Result;
   actor: string;
@@ -31,6 +32,12 @@ interface Journal {
   fingerprint: string;
   applied?: boolean;
   system?: boolean;
+}
+
+export interface TrashCompanion { path: string; owner: string; original?: true }
+interface CaptureTrash {
+  companions(entity: string): Promise<TrashCompanion[]>;
+  trashed(entity: string, action: "delete-note" | "restore" | "purge", moves: readonly NoteTrashMove[], notePath?: string): void;
 }
 
 const missing = () => new HubError("NOT_FOUND", { key: "trash.not_found", args: [] });
@@ -51,12 +58,14 @@ export class Trash {
 
   constructor(config: HubConfig, private readonly store: HubStore, private readonly modules: TrashModules,
     private readonly exclusive: <T>(action: () => Promise<T>) => Promise<T>, private readonly now: () => Date,
-    private readonly issue: (path: string, message: string) => void) {
+    private readonly issue: (path: string, message: string) => void, private readonly captures?: CaptureTrash) {
     if (config.vault) this.files = new KnowledgeTrashFiles(config.vault, { stateDir: config.stateDir });
     store.db.exec(`
       CREATE TABLE IF NOT EXISTS trash_requests(actor TEXT NOT NULL,request TEXT NOT NULL,fingerprint TEXT NOT NULL,
         result TEXT NOT NULL CHECK(json_valid(result)),PRIMARY KEY(actor,request));
       CREATE TABLE IF NOT EXISTS knowledge_trash(id TEXT PRIMARY KEY, path TEXT NOT NULL,record TEXT NOT NULL CHECK(json_valid(record)));
+      CREATE TABLE IF NOT EXISTS knowledge_trash_companions(id TEXT PRIMARY KEY REFERENCES knowledge_trash(id) ON DELETE CASCADE,
+        record TEXT NOT NULL CHECK(json_valid(record)));
       CREATE TABLE IF NOT EXISTS knowledge_trash_commits(id INTEGER PRIMARY KEY,record TEXT NOT NULL CHECK(json_valid(record)));
       CREATE TABLE IF NOT EXISTS knowledge_trash_pending(id TEXT PRIMARY KEY,actor TEXT NOT NULL,request TEXT NOT NULL,
         record TEXT NOT NULL CHECK(json_valid(record)),UNIQUE(actor,request));
@@ -115,7 +124,11 @@ export class Trash {
   }
 
   deleteNote(id: string, input: KnowledgeDeleteRequest, identity: Identity): Promise<TrashResult> {
-    return this.exclusive(async () => TrashResult.parse(await this.noteChange("delete-note", id, input.request_id, identity, input.expected_revision)));
+    return this.exclusive(() => this.deleteNoteLocked(id, input, identity));
+  }
+
+  async deleteNoteLocked(id: string, input: KnowledgeDeleteRequest, identity: Identity): Promise<TrashResult> {
+    return TrashResult.parse(await this.noteChange("delete-note", id, input.request_id, identity, input.expected_revision));
   }
 
   async change(change: "restore" | "purge", id: string, request: string, identity: Identity, system = false): Promise<TrashRestoreResult | TrashPurgeResult> {
@@ -177,6 +190,7 @@ export class Trash {
       }
       this.checkPendingRequest(actor, request);
       let item: TrashItem, move: NoteTrashMove, result: Result;
+      let companions: NoteTrashMove[] = [];
       if (change === "delete-note") {
         assertNoteVisible(this.store.db, id);
         const deletion = await this.files.deletion(id, revision!);
@@ -184,12 +198,18 @@ export class Trash {
         item = TrashItem.parse({ kind: "note", id, title: deletion.note.title, path: deletion.note.path, deleted_by: actor,
           deleted_at: now.toISOString(), expires_at: new Date(now.getTime() + TRASH_RETENTION_DAYS * 86_400_000).toISOString() });
         move = deletion.move;
+        for (const companion of await this.captures?.companions(id) ?? []) {
+          companions.push(await this.files.companionDeletion(companion.owner, companion.path, companion.original));
+        }
         result = TrashResult.parse({ request_id: request, item });
       } else {
         const note = this.note(id);
         if (!note) throw missing();
         item = TrashItem.parse(JSON.parse(note.record));
         if (system ? !this.expired(item) : change === "restore" && this.expired(item)) throw missing();
+        const saved = this.store.db.query<{ record: string }, [string]>("SELECT record FROM knowledge_trash_companions WHERE id=?").get(id);
+        const deleted = saved ? JSON.parse(saved.record) as NoteTrashMove[] : [];
+        for (const companion of deleted) companions.push(await this.files.companionChange(change as "restore" | "purge", companion));
         const base = { request_id: request, kind: "note", id };
         if (change === "restore") {
           move = await this.files.restoration(id, note.path, item.path!);
@@ -201,7 +221,7 @@ export class Trash {
       }
       const prior = this.replay(actor, request, fingerprint);
       if (prior) return prior;
-      const journal: Journal = { item, move, change, result, actor, request, fingerprint, system };
+      const journal: Journal = { item, move, companions, change, result, actor, request, fingerprint, system };
       this.store.db.query("INSERT INTO knowledge_trash_pending VALUES (?,?,?,?)").run(id, actor, request, JSON.stringify(journal));
       return await this.finishNote(journal, identity);
     } catch (cause) {
@@ -216,11 +236,14 @@ export class Trash {
   }
 
   private async finishNote(journal: Journal, identity: Identity): Promise<Result> {
-    const { item, move, actor, request, fingerprint, result, change } = journal;
+    const { item, move, companions = [], actor, request, fingerprint, result, change } = journal;
+    const moves = [move, ...companions];
     if (!journal.applied) {
-      try { await this.files!.apply(move); }
+      try {
+        for (const entry of change === "restore" ? [...companions, move] : moves) await this.files!.apply(entry);
+      }
       catch (cause) {
-        if (cause instanceof CoreError && cause.code === "REVISION_CONFLICT" && await this.files!.canAbandon(move).catch(() => false)) {
+        if (cause instanceof CoreError && cause.code === "REVISION_CONFLICT" && (await Promise.all(moves.map(entry => this.files!.canAbandon(entry).catch(() => false)))).every(Boolean)) {
           this.store.db.query("DELETE FROM knowledge_trash_pending WHERE id=?").run(item.id);
         }
         throw cause;
@@ -230,12 +253,14 @@ export class Trash {
     this.store.db.transaction(() => {
       if (change === "delete-note") {
         this.store.db.query("INSERT INTO knowledge_trash VALUES (?,?,?)").run(item.id, move.to!, JSON.stringify(item));
+        if (companions.length) this.store.db.query("INSERT INTO knowledge_trash_companions VALUES (?,?)").run(item.id, JSON.stringify(companions));
       } else {
         this.store.db.query("DELETE FROM knowledge_trash WHERE id=?").run(item.id);
       }
+      if (change !== "delete-conversation") this.captures?.trashed(item.id, change, companions, move.to);
       this.receipt(actor, request, fingerprint, result, identity, change);
       this.store.db.query("INSERT INTO knowledge_trash_commits(record) VALUES (?)").run(JSON.stringify({
-        move, path: item.path!, actor: journal.system ? undefined : actor,
+        move, companions, path: item.path!, actor: journal.system ? undefined : actor,
       }));
       this.store.db.query("DELETE FROM knowledge_trash_pending WHERE id=?").run(item.id);
     })();
@@ -246,9 +271,9 @@ export class Trash {
   private async commitNotes(): Promise<void> {
     const commits = this.store.db.query<{ id: number; record: string }, []>("SELECT id,record FROM knowledge_trash_commits ORDER BY id").all();
     for (const commit of commits) {
-      const { move, actor, path } = JSON.parse(commit.record) as { move: NoteTrashMove; actor?: string; path: string };
+      const { move, companions = [], actor, path } = JSON.parse(commit.record) as { move: NoteTrashMove; companions?: NoteTrashMove[]; actor?: string; path: string };
       try {
-        await this.files!.commit(move, actor);
+        await this.files!.commit([move, ...companions], actor);
         this.store.db.query("DELETE FROM knowledge_trash_commits WHERE id=?").run(commit.id);
       } catch { this.issue(path, msg("knowledge.commit_failed")); }
     }

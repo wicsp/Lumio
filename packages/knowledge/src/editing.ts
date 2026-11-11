@@ -1,4 +1,4 @@
-import { Entity, type KnowledgeContext, type NoteRef } from "@lumio/schema";
+import { Entity, type KnowledgeContext, type NoteRef, type ReadingStatus } from "@lumio/schema";
 import { CoreError } from "@lumio/foundation";
 import { parseDocument } from "yaml";
 import { isDeepStrictEqual } from "node:util";
@@ -11,6 +11,8 @@ export function editableMetadata(data: Record<string, unknown>, type: string): b
 export interface KnowledgeMetadataEdits {
     tags?: string[];
     derived_from?: string[];
+    status?: ReadingStatus;
+    model?: string;
 }
 export function editKnowledgeDocument(bytes: Buffer, title: string, body: string, updated: string, metadata: KnowledgeMetadataEdits = {}): Buffer {
     const parsed = parseFrontmatter(bytes), raw = bytes.toString("utf8");

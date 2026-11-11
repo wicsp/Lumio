@@ -6,10 +6,14 @@ import type { BusinessModules } from "./modules.ts";
 import { HubError } from "./errors.ts";
 import type { HubStore, Identity } from "./store.ts";
 import type { authorize } from "./authorize.ts";
+import { INBOX_ROUTES } from "./inbox.ts";
+import { ORIGINAL_CAPABILITY_NAME } from "@lumio/schema";
 import { handleArtifacts } from "./artifacts.ts";
 import { isTaskProposalCapability } from "./capabilities.ts";
 
 export const V2_ROUTES = [
+  ...INBOX_ROUTES,
+  { operation: "show", method: "GET", pattern: /^\/v2\/knowledge\/originals$/, path: "/v2/knowledge/originals" },
   { operation: "resource.read", method: "GET", pattern: /^\/v2\/resources\/([^/]+)$/, path: "/v2/resources/<id>" },
   { operation: "knowledge.ai-note", method: "POST", pattern: /^\/v2\/knowledge\/ai-note-commands$/, path: "/v2/knowledge/ai-note-commands" },
   { operation: "knowledge.graph", method: "GET", pattern: /^\/v2\/knowledge\/graph$/, path: "/v2/knowledge/graph" },
@@ -74,6 +78,15 @@ export async function handleV2(request: Request, server: Pick<Bun.Server<undefin
   try {
     if (decision.result !== "allow") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: decision.result === "deny" ? decision.reason : msg("v2.approval_required") });
     const url = new URL(request.url), id = route.pattern.exec(url.pathname)?.[1];
+    if (route.operation === "inbox.create" || route.operation === "inbox.read" ||
+        route.operation === "inbox.command" || route.operation === "inbox.bindings") {
+      return await modules.inbox.handle(request, route.operation, id, identity);
+    }
+    if (route.operation === "show") {
+      audited = true;
+      const result = await modules.capabilities.execute(ORIGINAL_CAPABILITY_NAME, Object.fromEntries(url.searchParams), identity);
+      return Response.json(result.result, { headers: { "Cache-Control": "no-store" } });
+    }
     if (route.operation === "resource.read") {
       const resource = Id.safeParse(id);
       const privateValue = url.searchParams.get("include_private"), includePrivate = privateValue === "true";

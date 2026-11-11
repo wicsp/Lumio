@@ -1,4 +1,4 @@
-import { AI_NOTE_CAPABILITY_NAMES, CAPABILITIES } from "@lumio/schema";
+import { AI_NOTE_CAPABILITY_NAMES, CAPABILITIES, ORIGINAL_CAPABILITY_NAME } from "@lumio/schema";
 
 /** Executable spellings shared by command parsing, --help and generated skill documentation. */
 export const WORK_OPTIONS = {
@@ -17,6 +17,8 @@ const def = (path: string, positional = "", options: string[] = [], capability?:
 export const COMMANDS: CommandDefinition[] = [
   def("search", "<query>", ["type", "limit", "include-private", "vault"], "knowledge.note.search"),
   def("show", "<ref>", ["include-private", "vault"], "knowledge.note.show"), def("links", "<ref>", ["include-private", "vault"], "knowledge.note.links"),
+  def("capture", "<url>", write),
+  def("original show", "<ref>", [], ORIGINAL_CAPABILITY_NAME),
   def("ai-note create", "<title>", ["file", "tags", "sources", "model", ...write], AI_NOTE_CAPABILITY_NAMES[0], { required: ["file"] }),
   def("ai-note update", "<id>", ["revision", "title", "file", "tags", "sources", ...write], AI_NOTE_CAPABILITY_NAMES[1], { required: ["revision"] }),
   def("check", "", ["include-private", "vault"]), def("export bib", "<ref>", ["from", "out", "vault"]),

@@ -4,6 +4,7 @@ import { extname, join } from "node:path";
 import { CoreError } from "@lumio/foundation";
 import { isVaultNotePath, parseFrontmatter } from "@lumio/knowledge";
 import { textContainsCardNumber } from "@lumio/schema";
+import { isOriginalPath, parseOriginal } from "./originals.ts";
 import { openVaultGit } from "./git.ts";
 import { showNote } from "./index/query.ts";
 import { updateIndex, type IndexOptions } from "./index/store.ts";
@@ -14,6 +15,8 @@ export interface NoteTrashMove {
   to?: string;
   revision?: string;
   file?: string;
+  owner?: string;
+  original?: true;
 }
 
 const revisionOf = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
@@ -43,18 +46,32 @@ export class KnowledgeTrashFiles {
     return await this.entry(from) ? this.prepare(from, undefined, id) : { from };
   }
 
-  private async prepare(from: string, to: string | undefined, id: string, expected?: string): Promise<NoteTrashMove> {
-    const file = await this.entry(from);
+  async companionDeletion(id: string, path: string, original?: true): Promise<NoteTrashMove> {
+    const to = await this.available(`.trash/${path}`, original);
+    return this.prepare(path, to, id, undefined, original);
+  }
+
+  async companionChange(change: "restore" | "purge", deleted: NoteTrashMove): Promise<NoteTrashMove> {
+    const { to: from, owner, original } = deleted;
+    if (!from || !owner) throw conflict();
+    if (change === "purge" && !await this.entry(from, false, original)) return { from, owner, original };
+    const to = change === "restore" ? await this.available(deleted.from, original) : undefined;
+    return this.prepare(from, to, owner, undefined, original);
+  }
+
+  private async prepare(from: string, to: string | undefined, id: string, expected?: string, original?: true): Promise<NoteTrashMove> {
+    const file = await this.entry(from, false, original);
     if (!file?.isFile()) throw conflict();
     const bytes = await readFile(join(this.root, from));
     const revision = revisionOf(bytes);
-    if ((expected && expected !== revision) || parseFrontmatter(bytes).data.id !== id) throw conflict();
-    return { from, to, revision, file: identityOf(file) };
+    const owner = original ? parseOriginal(bytes).frontmatter.of : parseFrontmatter(bytes).data.id;
+    if ((expected && expected !== revision) || owner !== id) throw conflict();
+    return { from, to, revision, file: identityOf(file), ...(original ? { original } : {}), owner: id };
   }
 
-  private async entry(path: string, createParents = false) {
+  private async entry(path: string, createParents = false, original?: true) {
     const relative = path.startsWith(".trash/") ? path.slice(".trash/".length) : path;
-    if (!isVaultNotePath(relative)) throw conflict();
+    if (!(original ? isOriginalPath(relative) : isVaultNotePath(relative))) throw conflict();
     let current = this.root;
     const parts = path.split("/");
     for (const part of parts.slice(0, -1)) {
@@ -74,21 +91,21 @@ export class KnowledgeTrashFiles {
     catch (cause) { if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause; }
   }
 
-  private async available(path: string): Promise<string> {
+  private async available(path: string, original?: true): Promise<string> {
     const extension = extname(path);
     const stem = path.slice(0, -extension.length);
     let candidate = path;
-    for (let suffix = 2; await this.entry(candidate); suffix++) candidate = `${stem}-${suffix}${extension}`;
+    for (let suffix = 2; await this.entry(candidate, false, original); suffix++) candidate = `${stem}-${suffix}${extension}`;
     return candidate;
   }
 
   /** The journal stores the inode before linking so replay can recognize a move interrupted between link and unlink. */
   async apply(move: NoteTrashMove): Promise<void> {
     const from = join(this.root, move.from), to = move.to && join(this.root, move.to);
-    const source = await this.entry(move.from);
+    const source = await this.entry(move.from, false, move.original);
     const sameFile = (info: typeof source) => info?.isFile() && identityOf(info) === move.file;
     if (to && move.to) {
-      const target = await this.entry(move.to, true);
+      const target = await this.entry(move.to, true, move.original);
       if (!sameFile(target)) {
         if (target || !sameFile(source) || revisionOf(await readFile(from)) !== move.revision) throw conflict();
         try { await link(from, to); }
@@ -106,27 +123,30 @@ export class KnowledgeTrashFiles {
   }
 
   async canAbandon(move: NoteTrashMove): Promise<boolean> {
-    const from = await this.entry(move.from);
-    const to = move.to ? await this.entry(move.to) : undefined;
+    const from = await this.entry(move.from, false, move.original);
+    const to = move.to ? await this.entry(move.to, false, move.original) : undefined;
     return !!from?.isFile() && identityOf(from) === move.file && (!to || identityOf(to) !== move.file);
   }
 
-  async commit(move: NoteTrashMove, actor?: string): Promise<void> {
+  async commit(input: NoteTrashMove | readonly NoteTrashMove[], actor?: string): Promise<void> {
     const git = await openVaultGit(this.root);
     if (!git) return;
     const changed = await git.changedFiles();
     const paths: string[] = [];
-    if (changed.includes(move.from) && !await this.entry(move.from)) {
-      await git.add(move.from, null, move.from.startsWith(".trash/"));
-      paths.push(move.from);
-    }
-    if (move.to) {
-      const entry = await this.entry(move.to);
-      if (entry?.isFile() && identityOf(entry) === move.file) {
-        const bytes = await readFile(join(this.root, move.to));
-        if (!textContainsCardNumber(bytes.toString("utf8"))) {
-          await git.add(move.to, bytes, true);
-          paths.push(move.to);
+    const moves = "from" in input ? [input] : input;
+    for (const move of moves) {
+      if (changed.includes(move.from) && !await this.entry(move.from, false, move.original)) {
+        await git.add(move.from, null, move.from.startsWith(".trash/"));
+        paths.push(move.from);
+      }
+      if (move.to) {
+        const entry = await this.entry(move.to, false, move.original);
+        if (entry?.isFile() && identityOf(entry) === move.file) {
+          const bytes = await readFile(join(this.root, move.to));
+          if (!textContainsCardNumber(bytes.toString("utf8"))) {
+            await git.add(move.to, bytes, true);
+            paths.push(move.to);
+          }
         }
       }
     }

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>http://arxiv.org/abs/2611.01234v3</id>
+    <title>Basalt: a synthetic experiment</title>
+    <published>2026-11-11T00:00:00Z</published>
+    <updated>2026-11-11T00:00:00Z</updated>
+    <summary>Abstract metadata only.</summary>
+    <author><name>Ada Example</name></author>
+  </entry>
+</feed>
