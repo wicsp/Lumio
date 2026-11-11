@@ -49,6 +49,8 @@ export class HubStore {
 
   inboxActor(): Actor { return this.internalAgent("inbox-summary", "inbox"); }
 
+  decisionGateActor(): Actor { return this.internalAgent("decision-gate", "decision-gate"); }
+
   private internalAgent(purpose: string, name: string): Actor {
     return this.db.transaction(() => {
       this.db.exec("CREATE TABLE IF NOT EXISTS internal_actors(purpose TEXT PRIMARY KEY,actor TEXT NOT NULL REFERENCES actors(id))");
