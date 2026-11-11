@@ -1,5 +1,8 @@
 import { text as msg } from "./messages.ts";
 import { Id, KnowledgeAiNoteCommand, KnowledgeAiNoteResult, ResourceSummary, KnowledgeGraph, KnowledgeGraphArgs, AgentInfo, AgentTokenRequest, AgentRevokeRequest, AssistantChatRequest, WorkCommandRequest, ExecutionRoutineCommandRequest, RequestId, AssistantToolCall, capability, ExecutionRoutine, PlanTemplate, WorkCommandResult, type AssistantEvent, KnowledgeDeleteRequest, AssistantConversationDeleteRequest, TrashListArgs, TrashPurgeRequest, TrashRestoreRequest } from "@lumio/schema";
+import { AssistantConversation, AssistantMain, AssistantMainEnsure } from "@lumio/schema";
+import { newId } from "@lumio/foundation";
+import { randomBytes } from "node:crypto";
 import { AssistantError } from "@lumio/assistant";
 import { WorkError } from "@lumio/work";
 import type { BusinessModules } from "./modules.ts";
@@ -59,6 +62,7 @@ export const V2_ROUTES = [
   { operation: "execution.archive", method: "PUT", pattern: /^\/v2\/execution\/artifacts\/(art_[0-9A-HJKMNP-TV-Z]{26})$/, path: "/v2/execution/artifacts/<artifact>" },
   { operation: "assistant.read", method: "GET", pattern: /^\/v2\/assistant\/conversations$/, path: "/v2/assistant/conversations" },
   { operation: "assistant.read", method: "GET", pattern: /^\/v2\/assistant\/conversations\/(conv_[0-9A-HJKMNP-TV-Z]{26})$/, path: "/v2/assistant/conversations/<id>" },
+  { operation: "assistant.main", method: "POST", pattern: /^\/v2\/assistant\/main$/, path: "/v2/assistant/main" },
   { operation: "assistant.chat", method: "POST", pattern: /^\/v2\/assistant\/chat$/, path: "/v2/assistant/chat" },
 ] as const;
 export type V2Route = (typeof V2_ROUTES)[number];
@@ -255,14 +259,44 @@ export async function handleV2(request: Request, server: Pick<Bun.Server<undefin
       audited = true; return Response.json(result);
     }
     if (route.operation === "assistant.read") return Response.json(id ? modules.assistant.detail(id, identity.actor.id) : modules.assistant.conversations(identity.actor.id));
+    if (route.operation === "assistant.main") {
+      if (identity.actor.role !== "human") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] });
+      if (!AssistantMainEnsure.safeParse(await json(request)).success)
+        throw new HubError("INVALID", { key: "v2.invalid_assistant_request_parameters", args: [] });
+      const owner = identity.actor.id;
+      const main = store.db.transaction(() => {
+        const existing = modules.assistantMain.mainConversation(owner);
+        const conversation = existing ?? newId("conv", now, randomBytes);
+        if (!existing) {
+          const time = now.toISOString();
+          modules.assistantStore.putConversation(AssistantConversation.parse({
+            id: conversation, owner, title: msg("assistant.main.title"), revision: 1, created: time, updated: time,
+          }));
+          modules.assistantMain.bindMain(owner, conversation);
+        }
+        store.audit(identity, route.operation, decision.result, undefined, "applied");
+        return AssistantMain.parse({ conversation, created: !existing });
+      }).immediate();
+      audited = true;
+      return Response.json(main, { headers: { "Cache-Control": "no-store" } });
+    }
     const parsed = AssistantChatRequest.safeParse(await json(request));
     if (!parsed.success) throw new HubError("INVALID", { key: "v2.invalid_assistant_request_parameters", args: [] });
+    const owner = identity.actor.id;
+    const conversation = parsed.data.conversation && modules.assistant.detail(parsed.data.conversation, owner).conversation;
+    const native = conversation ? conversation.native_session : undefined;
+    const main = !!conversation && !native && modules.assistantMain.isMain(owner, conversation.id);
+    if (parsed.data.focus && !main) throw new HubError("INVALID", { key: "v2.invalid_assistant_request_parameters", args: [] });
+    const profile = parsed.data.profile ?? (conversation ? conversation.profile : undefined);
+    if (main && profile) {
+      const selected = modules.ai.get(owner, profile);
+      if (selected.profile.engine !== "lumio" || !selected.connection.base_url)
+        throw new HubError("INVALID", { key: "ai.api_profile_required", args: [] }, { reason: "ai-api-profile-required" });
+    }
     // A model can be silent while thinking. The chat deadline below bounds the turn.
     server.timeout(request, 0);
     await modules.assistantConfig.refresh();
-    const native=parsed.data.conversation?modules.assistant.detail(parsed.data.conversation,identity.actor.id).conversation.native_session:undefined;
-    const signal = AbortSignal.any([...(native?[]:[request.signal]), modules.signal, AbortSignal.timeout(native?1800000:120000)]);
-    if (parsed.data.conversation) modules.assistant.detail(parsed.data.conversation, identity.actor.id);
+    const signal = AbortSignal.any([...(native ? [] : [request.signal]), modules.signal, AbortSignal.timeout(native ? 1800000 : 120000)]);
     if (request.headers.get("accept")?.includes("application/x-ndjson")) {
       const progress = request.headers.get("X-Lumio-Assistant-Progress") === "1";
       const encoder = new TextEncoder();

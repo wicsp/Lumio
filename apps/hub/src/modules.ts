@@ -1,4 +1,5 @@
 import { Resources } from "./resources.ts";
+import { AssistantWorkbenchAnchors } from "./assistant-workbench-anchors.ts";
 import type { AiNotes } from "./ai-notes.ts";
 import {AIConfigurationService} from "./ai-config.ts";
 import {NativeAssistant} from "./native-assistant.ts";
@@ -17,7 +18,8 @@ import { join } from "node:path";
 import { CoreError, newId } from "@lumio/foundation";
 import { parseAssignee, type WorkCommandResult, type AgentRun, type WorkTask } from "@lumio/schema";
 import { mergeStageGrant, PlanDispatchUnavailable, WorkService } from "@lumio/work";
-import { AssistantService, type AssistantModel, type AssistantTool } from "@lumio/assistant";
+import { AssistantService, type AssistantContext, type AssistantModel, type AssistantTool } from "@lumio/assistant";
+import { AssistantMainConversations } from "./assistant-main.ts";
 import { FileKnowledgeRepository, SqliteWorkStore, SqliteAssistantStore, SqliteRoutineStore, SqliteArtifacts } from "@lumio/storage";
 import { ExecutionRoutines } from "@lumio/execution";
 import type { HubConfig } from "./config.ts";
@@ -59,6 +61,7 @@ export class BusinessModules {
   readonly work: WorkService;
   readonly workCommands: WorkCommands;
   readonly assistant: AssistantService;
+  readonly assistantMain: AssistantMainConversations;
   readonly capabilities: Capabilities;
   readonly resources: Resources;
   aiNotes?: AiNotes;
@@ -133,6 +136,7 @@ export class BusinessModules {
     this.resources = new Resources(this, store, config, options.authorize ?? authorize);
     this.capabilities = new Capabilities(this, store, config, options.authorize);
     this.assistantStore = new SqliteAssistantStore(store.db);
+    this.assistantMain = new AssistantMainConversations(store, this.assistantStore);
     this.ai=new AIConfigurationService(new SqliteAIStore(store.db),config.assistantModel);
     this.ai.migrateLegacy(store.actors().filter(actor => actor.role === "human").map(actor => actor.id));
     this.ai.store.installConversationPurge();
@@ -141,14 +145,25 @@ export class BusinessModules {
     this.speech = new SpeechConfiguration(new SqliteSpeechStore(store.db), this.ai.store, this.funAsr,
       () => this.work.projects().map(project => project.title), now);
     this.native=new NativeAssistant(this.ai.store,this,store,config,{ fetch: options.quotaFetch, now });
+    const assistantContext: AssistantContext = {
+      text: msg, now, id, toolActor: store.assistantActor(),
+      resolveModel: (profile, owner) => this.ai.model(owner, profile),
+      workbench: new AssistantWorkbenchAnchors(this, store, this.assistantMain),
+      native: {
+        validate: (conversation, request) => this.native.validate(conversation, request),
+        run: this.native.run,
+        cancel: conversation => this.native.cancelConversation(conversation),
+      },
+    };
     this.assistant = new AssistantService(this.assistantStore, options.assistantModel ?? configuredModel(config.assistantModel),
-      [...this.capabilities.tools(), ...(options.assistantTools ?? [])], { text: msg, now, id, toolActor: store.assistantActor(),resolveModel:(profile,owner)=>this.ai.model(owner,profile),native:{validate:(c,r)=>this.native.validate(c,r),run:this.native.run,cancel:c=>this.native.cancelConversation(c)} });
+      [...this.capabilities.tools(), ...(options.assistantTools ?? [])], assistantContext);
     this.assistant.recover();
     this.reconcile();
     this.timer = setInterval(() => {
       try { this.reconcile(); } catch { /* Persisted pending results remain for the next pass. */ }
       try { this.native.usage.tick(); } catch { /* The next tick can retry quota collection. */ }
       void this.notifications.drain().catch(() => {});
+      void this.assistant.drainWorkbenchSummaries(this.signal).catch(() => { /* The durable queue retains the source range. */ });
     }, 1000);
   }
   async undo(callId: string, identity: Identity, requestId: string): Promise<WorkCommandResult> {
