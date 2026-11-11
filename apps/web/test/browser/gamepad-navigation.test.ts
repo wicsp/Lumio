@@ -4,7 +4,7 @@ import { BUTTONS, DEFAULT_BINDINGS, PadInputState, type PadCommand } from "../..
 import { nextListItem } from "../../src/client/list-keys.ts";
 
 const ROWS = "[data-pad-row], .row[data-id]";
-const ITEMS = ROWS + ', .split.has-detail [data-pad-action="primary"], .split.has-detail [data-pad-action="delegate"], .split.has-detail [data-pad-action="reject"]';
+const ITEMS = ROWS + ', .split.has-detail [data-pad-action="primary"], .split.has-detail [data-pad-action="delegate"], .split.has-detail [data-pad-action="reject"], [data-pad-input]';
 const PRIMARY = '[data-pad-action="primary"]';
 
 // A narrow DOM surface for the real controller dispatcher. Full rendering is
@@ -129,7 +129,7 @@ beforeEach(() => {
     backLabel: () => "Back",
     sectionLabel: step => step < 0 ? "Previous" : "Next",
     buttonLabel: command => BUTTONS[DEFAULT_BINDINGS[command]],
-    returnFromToast: () => false,
+    openAssistant: async () => undefined,
     paletteAction() {}, delegate() {},
   });
 });
@@ -197,11 +197,11 @@ test("visibility/device reset cancels a pending approval and removes progress", 
   expect(frameCallbacks.size).toBe(0);
 });
 
-test("typing suppresses all commands and scroll, B leaves the field without submitting", () => {
+test("typing suppresses navigation and scroll, B leaves the field, A finishes a field outside a form (G1-6)", () => {
   const input = new ElementStub("TEXTAREA");
   input.parent = row;
   doc.activeElement = input;
-  for (const command of ["activate", "next", "previous", "palette", "down"] as const) press(command);
+  for (const command of ["next", "previous", "palette", "down", "delegate", "more"] as const) press(command);
   navigation.handle({ phase: "scroll", x: 10, y: 10 });
   expect(button.clicks).toBe(0);
   expect(moduleSteps).toEqual([]);
@@ -211,6 +211,11 @@ test("typing suppresses all commands and scroll, B leaves the field without subm
   expect(doc.activeElement).toBe(row);
   expect(returned).toBe(0);
   press("activate");
+  expect(button.clicks).toBe(1);
+  // 不在表单里的输入框（如任务说明）：A 等于完成编辑，不点卡片上的按钮。
+  doc.activeElement = input;
+  press("activate");
+  expect(doc.activeElement).not.toBe(input);
   expect(button.clicks).toBe(1);
 });
 
@@ -262,7 +267,8 @@ test("View clicks the current toast action once, and disappears when there is no
   newest.addEventListener("click", () => { toastButtons = []; });
   toastButtons = [old, newest];
   press("down");
-  expect(hints().length).toBeLessThanOrEqual(5);
+  // 层级标签 + 最多 6 个键（G1-6）。
+  expect(hints().length).toBeLessThanOrEqual(7);
   expect(hints().some(hint => hint.children.includes("Undo"))).toBe(true);
   press("view");
   press("view");

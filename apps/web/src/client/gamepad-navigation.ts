@@ -3,19 +3,31 @@ import { HOLD_MS, type PadCommand, type PadInput } from "./gamepad-input.ts";
 import { adjacentFocus, type PadDirection } from "./gamepad-focus.ts";
 import { focusListItem, nextListItem, visibleItems } from "./list-keys.ts";
 import { t } from "./i18n.ts";
-import { speechService } from "./speech-input.ts";
+import { canDictate, dictate, recordingField, speechService } from "./speech-input.ts";
 
 const ROWS = "[data-pad-row], .row[data-id]";
 const DETAIL_ACTIONS = '.split.has-detail [data-pad-action="primary"], .split.has-detail [data-pad-action="delegate"], .split.has-detail [data-pad-action="reject"]';
 const REGIONS = "[data-pad-region], .bar, .list-pane, .detail-pane";
 const PRIMARY = '[data-pad-action="primary"]';
+/** 可以用 A 进入的输入区（助手输入框、任务讨论、卡片里的回答框）。 */
+const INPUTS = "[data-pad-input]";
+const FIELD = "textarea, input[type=text], input:not([type])";
+type Field = HTMLTextAreaElement | HTMLInputElement;
+/** 提示条的层级标签（G1-6）：让人一眼看出现在在哪一层，B 退回上一层。 */
+type Layer = "page" | "detail" | "menu" | "dialog" | "input" | "recording";
+const LAYER_LABEL: Record<Layer, string> = { page: "Browsing", detail: "Details", menu: "Menu", dialog: "Dialog", input: "Typing", recording: "Recording" };
+/** 提示条按键顺序固定；空间不够时从后往前省略，A 与 B 始终保留。 */
+const HINT_ORDER: PadCommand[] = ["activate", "delegate", "more", "back", "talk", "view", "previous", "next", "palette"];
+const MAX_HINTS = 6;
 const ACTIONS = "[data-pad-action]";
 
 interface Navigation {
   pane(): HTMLElement | undefined;
+  /** 页面层的 B：回到上一个访问过的模块。 */
   back(): void;
   backLabel(): string | undefined;
-  returnFromToast(): boolean;
+  /** RT 在当前上下文没有输入框时：打开助手并返回它的输入框。 */
+  openAssistant(): Promise<HTMLTextAreaElement | undefined>;
   section(step: number): void;
   sectionLabel(step: number): string | undefined;
   palette(): void;
@@ -33,7 +45,7 @@ interface Hold {
 }
 interface Cursor { item: HTMLElement; key?: string; region: string; index: number }
 interface Overlay { dialog?: HTMLDialogElement; menu?: HTMLElement }
-interface Action { command: PadCommand; label: string; run(): void }
+interface Action { command: PadCommand; label: string; run(): void; progress?: HTMLProgressElement }
 
 export class GamepadNavigation {
   private active = false;
@@ -49,6 +61,8 @@ export class GamepadNavigation {
   private observer?: MutationObserver;
   private hold?: Hold;
   private frame?: number;
+  /** RT 按下时开始录音的输入框，松开时结束它。 */
+  private talking?: Field;
 
   constructor(private view: Navigation) {}
 
@@ -82,6 +96,7 @@ export class GamepadNavigation {
       this.selectionAtExit.set(pane, selected && this.key(selected));
     }
     this.active = false;
+    this.stopTalking();
     this.pendingDetail = undefined;
     this.needsFocus = false;
     this.cancelHold();
@@ -109,7 +124,13 @@ export class GamepadNavigation {
   }
 
   handle(input: PadInput): void {
-    if (input.phase === "reset") { this.leave(); return; }
+    if (input.phase === "reset") { this.stopTalking(); this.leave(); return; }
+    if ("command" in input && input.command === "talk" && !this.testPanel()) {
+      if (input.phase === "press") { if (!this.active) this.enter(); this.talk(); }
+      else if (input.phase === "release") this.stopTalking();
+      this.refresh();
+      return;
+    }
     if (input.phase === "release") {
       if (input.command === "activate") this.cancelHold();
       return;
@@ -150,7 +171,15 @@ export class GamepadNavigation {
     if (input.phase === "activity") { this.refresh(); return; }
     const { command, phase } = input;
     if (typing) {
-      if (phase === "press" && command === "back") this.exitInput(focused, scope, items, saved);
+      // 输入层（G1-6）：A 提交，B 退出输入；录音中 A 结束、B 取消这一句。
+      const recording = recordingField();
+      if (phase === "press" && command === "back") {
+        if (recording) dictate(recording, "cancel");
+        else this.exitInput(focused, scope, items, saved);
+      } else if (phase === "press" && command === "activate") {
+        if (recording) dictate(recording, "stop");
+        else this.submit(focused);
+      }
       this.refresh();
       return;
     }
@@ -214,7 +243,7 @@ export class GamepadNavigation {
     if (!this.active) return;
     if (this.testPanel()) {
       this.mark(undefined);
-      this.renderHints(document.body, [{ command: "back", label: t("Stop testing"), run() {} }]);
+      this.renderHints(document.body, "page", [{ command: "back", label: t("Stop testing"), run() {} }]);
       return;
     }
     const overlay = this.overlays();
@@ -240,7 +269,10 @@ export class GamepadNavigation {
     const highlighted = overlay.menu?.querySelector<HTMLElement>(".menu-item.is-active")
       ?? (overlay.dialog?.matches(".palette") ? overlay.dialog.querySelector<HTMLElement>(".palette-item.is-active") : row);
     this.mark(typing ? undefined : highlighted ?? undefined);
-    this.renderHints(overlay.dialog ?? document.body, typing ? this.inputActions() : this.actions(overlay, row));
+    const recording = !!recordingField();
+    const level: Layer = recording ? "recording" : typing ? "input" : overlay.menu ? "menu" : overlay.dialog ? "dialog"
+      : row?.closest(".detail-pane, .work-detail-layout") ? "detail" : "page";
+    this.renderHints(overlay.dialog ?? document.body, level, typing || recording ? this.inputActions(recording) : this.actions(overlay, row));
   }
 
   private mark(item?: HTMLElement): void {
@@ -250,28 +282,28 @@ export class GamepadNavigation {
     item?.setAttribute("data-pad-focus", "");
   }
 
-  private renderHints(host: HTMLElement, actions: Action[]): void {
-    const hints = actions.flatMap(({ command, label }) => {
-      const button = this.view.buttonLabel(command);
-      return button ? [[button, label] as const] : [];
-    }).slice(0, 5);
-    const signature = JSON.stringify(hints);
-    if (!hints.length) {
-      this.hints?.remove();
-      this.hints = undefined;
-      this.hintSignature = "";
-      return;
-    }
+  private renderHints(host: HTMLElement, layer: Layer, actions: Action[]): void {
+    const labelled = actions.flatMap(action => {
+      const button = this.view.buttonLabel(action.command);
+      return button ? [{ ...action, button }] : [];
+    }).sort((a, b) => HINT_ORDER.indexOf(a.command) - HINT_ORDER.indexOf(b.command));
+    // A 与 B 始终显示；其余按固定顺序填到上限。
+    const keep = labelled.filter(action => action.command === "activate" || action.command === "back");
+    const rest = labelled.filter(action => !keep.includes(action)).slice(0, Math.max(0, MAX_HINTS - keep.length));
+    const shown = labelled.filter(action => keep.includes(action) || rest.includes(action));
+    const signature = JSON.stringify([layer, shown.map(({ command, button, label, progress }) => [command, button, label, !!progress])]);
     this.hints ??= h("div", { class: "pad-hints", role: "group", "aria-label": t("Gamepad controls") });
     if (this.hints.parentElement !== host) host.append(this.hints);
     if (signature === this.hintSignature) return;
     this.hintSignature = signature;
-    clear(this.hints, ...hints.map(([button, label]) => h("span", {}, h("kbd", {}, button), label)));
+    this.hints.dataset.layer = layer;
+    clear(this.hints, h("span", { class: "pad-layer" }, t(LAYER_LABEL[layer])),
+      ...shown.map(({ button, label, progress }) => h("span", {}, h("kbd", {}, button), label, progress ?? null)));
   }
 
   private items(scope: HTMLElement, dialog: boolean): HTMLElement[] {
     if (dialog) return visibleItems(scope, "button, summary");
-    const rows = visibleItems(scope, ROWS + ", " + DETAIL_ACTIONS)
+    const rows = visibleItems(scope, ROWS + ", " + DETAIL_ACTIONS + ", " + INPUTS)
       .filter(item => !item.parentElement?.closest(ROWS));
     // A note opened from a link, or on a narrow screen, can be absent from the visible list.
     const detail = visibleItems(scope, "[data-pad-selection]")[0];
@@ -350,12 +382,91 @@ export class GamepadNavigation {
     if (row && scope) this.focus(scope, row);
   }
 
-  private inputActions(): Action[] {
+  private inputActions(recording: boolean): Action[] {
+    const field = document.activeElement as HTMLElement | null;
+    if (recording) {
+      return [
+        { command: "activate", label: t("Stop and insert"), run() {} },
+        { command: "back", label: t("Cancel recording"), run() {} },
+        { command: "talk", label: t("Release to finish"), run() {} },
+      ];
+    }
     const actions: Action[] = [{ command: "back", label: t("Leave input"), run() {} }];
-    // G1-4：输入框旁有可用的麦克风时提示 RT。
-    const field = document.activeElement;
-    if (field?.closest("form, .composer, .attn-composer, .form-stack")?.querySelector(".speech-input:not([hidden])")) actions.push({ command: "talk", label: t("Hold to talk"), run() {} });
+    const submit = this.submitLabel(field);
+    if (submit) actions.push({ command: "activate", label: submit, run() {} });
+    if (canDictate(field)) actions.push({ command: "talk", label: t("Hold to talk"), run() {} });
     return actions;
+  }
+
+  /** 输入层的 A：提交所在的表单（发送、评论、确认）；不在表单里时（如任务说明）退出编辑即保存。 */
+  private submit(field: HTMLElement | null): void {
+    if (!field) return;
+    const form = field.closest("form");
+    if (form) {
+      const button = this.submitButton(form);
+      if (button && button.disabled) return;
+      form.requestSubmit();
+      return;
+    }
+    if (field.tagName === "TEXTAREA") field.blur();
+  }
+
+  private submitButton(form: HTMLFormElement): HTMLButtonElement | undefined {
+    return form.querySelector<HTMLButtonElement>("button[type=submit]")
+      ?? (form.id ? document.querySelector<HTMLButtonElement>(`button[type=submit][form="${CSS.escape(form.id)}"]`) : null) ?? undefined;
+  }
+
+  private submitLabel(field: HTMLElement | null): string | undefined {
+    if (!field || field.isContentEditable) return undefined;
+    const form = field.closest("form");
+    // 表单里的空输入框没有可提交的内容，不显示 A。
+    if (form && "value" in field && !String((field as Field).value).trim()) return undefined;
+    if (!form) return field.tagName === "TEXTAREA" ? t("Finish editing") : undefined;
+    const button = this.submitButton(form);
+    if (button?.disabled) return undefined;
+    return button ? this.label(button) : t("Submit");
+  }
+
+  /** RT 的目标（G1-6）：当前输入框 → 焦点条目里的输入框 → 本页的主输入框 → 助手。弹层打开时只用弹层里的输入框。 */
+  private talkTarget(): { field?: Field; assistant?: boolean } | undefined {
+    if (!speechService()?.ready) return undefined;
+    const focused = document.activeElement;
+    if (canDictate(focused)) return { field: focused };
+    const { dialog, menu } = this.overlays();
+    if (menu) return undefined;
+    if (dialog) {
+      const field = visibleItems(dialog, FIELD).find(canDictate);
+      return field ? { field } : undefined;
+    }
+    const inside = (root: Element | undefined) => {
+      if (!root) return undefined;
+      const area = root.matches(INPUTS) ? root : root.querySelector(INPUTS);
+      return area ? visibleItems(area as HTMLElement, FIELD).find(canDictate) : undefined;
+    };
+    const field = inside(this.marked) ?? visibleItems(this.view.pane() ?? document.body, INPUTS)
+      .filter(area => !area.parentElement?.closest(ROWS)).map(area => inside(area)).find(Boolean);
+    return field ? { field } : { assistant: true };
+  }
+
+  private talk(): void {
+    if (this.talking) return;
+    const target = this.talkTarget();
+    if (!target) return;
+    const start = (field: Field) => {
+      if (document.activeElement !== field) {
+        field.focus();
+        field.setSelectionRange(field.value.length, field.value.length);
+      }
+      if (dictate(field, "start")) this.talking = field;
+    };
+    if (target.field) { start(target.field); return; }
+    void this.view.openAssistant().then(field => { if (field && canDictate(field) && this.active) start(field); this.refresh(); });
+  }
+
+  private stopTalking(): void {
+    const field = this.talking;
+    this.talking = undefined;
+    if (field) dictate(field, "stop");
   }
 
   private actions({ menu, dialog }: Overlay, row: HTMLElement | undefined): Action[] {
@@ -365,6 +476,7 @@ export class GamepadNavigation {
       if (target && this.canActivate(target)) {
         const name = label ?? this.label(target);
         add(command, target.hasAttribute("data-pad-hold") ? t("Hold to {0}", name) : name, () => this.activate(target));
+        if (this.hold?.target === target) actions.at(-1)!.progress = this.hold.progress;
       }
     };
     if (menu || dialog?.matches(".palette")) {
@@ -377,14 +489,15 @@ export class GamepadNavigation {
     const pane = this.view.pane();
     const back = pane?.querySelector<HTMLElement>(".split.has-detail [data-pad-back], [data-pad-back]:not(.mobile-only)");
     if (menu || dialog || back || this.view.backLabel() || this.hold) {
-      add("back", this.hold ? t("Cancel") : menu || dialog ? t("Close") : this.view.backLabel() ?? t("Back"), () => {
+      add("back", this.hold ? t("Cancel") : menu || dialog ? t("Close") : back ? t("Back to list") : this.view.backLabel() ?? t("Back"), () => {
         if (menu) this.menuKey(menu, "Escape");
         else if (dialog) dialog.close();
-        else if (!this.view.returnFromToast()) this.goBack(pane, back ?? undefined);
+        else this.goBack(pane, back ?? undefined);
       });
     }
+    const talk = this.talkTarget();
+    if (talk) add("talk", talk.assistant ? t("Hold to talk to the assistant") : t("Hold to talk"), () => {});
     if (dialog || menu) return actions;
-    if (speechService()?.ready) add("talk", t("Hold to talk"), () => {});
 
     const toast = Array.from(document.querySelectorAll<HTMLElement>(".toast-action:not(.leaving) .toast-btn")).at(-1);
     button("view", toast);
@@ -419,11 +532,13 @@ export class GamepadNavigation {
 
   private primary(row?: HTMLElement): HTMLElement | undefined {
     if (!row) return undefined;
-    if (row.matches("button, summary, a, .row[data-id]")) return row;
-    return visibleItems(row, PRIMARY)[0];
+    if (row.matches(INPUTS) || row.matches("button, summary, a, .row[data-id]")) return row;
+    // 卡片里展开了回答框时，A 先进入输入（在输入层再按 A 提交）。
+    return visibleItems(row, INPUTS)[0] ?? visibleItems(row, PRIMARY)[0];
   }
 
   private label(item: HTMLElement): string {
+    if (item.matches(INPUTS)) return t("Type");
     if (item.matches(".group-head")) {
       const title = item.textContent?.trim() ?? "";
       return item.getAttribute("aria-expanded") === "true" ? t("Collapse {0}", title) : t("Expand {0}", title);
@@ -439,6 +554,11 @@ export class GamepadNavigation {
 
   private activate(target: HTMLElement): void {
     if (!this.canActivate(target)) return;
+    if (target.matches(INPUTS)) {
+      const field = visibleItems(target, FIELD)[0] as Field | undefined;
+      if (field && !field.disabled) { field.focus(); field.setSelectionRange(field.value.length, field.value.length); }
+      return;
+    }
     if (target.hasAttribute("data-pad-hold")) { this.startHold(target); return; }
     const pane = this.view.pane();
     if (pane && target.matches(".list-pane .row[data-id]")) {
@@ -465,7 +585,8 @@ export class GamepadNavigation {
       choices.push(action);
     };
     for (const action of visibleItems(scope, ACTIONS)) {
-      if (action.dataset.padAction !== "primary" && this.canActivate(action)) add(this.label(action), () => this.activate(action));
+      // 需要长按确认的操作不进菜单，只能在卡片上按住 A，避免从菜单绕过（G1-6）。
+      if (this.canActivate(action) && !action.hasAttribute("data-pad-hold")) add(this.label(action), () => this.activate(action));
     }
     for (const control of visibleItems(scope, ".attn-grant input[type=checkbox], .attn-grant select") as (HTMLInputElement | HTMLSelectElement)[]) {
       if (control instanceof HTMLInputElement) {
@@ -495,12 +616,11 @@ export class GamepadNavigation {
   }
 
   private startHold(target: HTMLElement): void {
-    const progress = h("progress", { max: HOLD_MS, value: 0, "aria-label": t("Hold to confirm") });
-    const tip = h("span", { class: "pad-hold" }, h("span", { role: "status" }, t("Hold to confirm")), progress);
-    this.hold = { target, focus: document.activeElement, started: performance.now(), progress, tip };
-    target.after(tip);
-    tip.scrollIntoView({ block: "nearest" });
+    // 进度显示在提示条里，不往页面插元素，避免布局跳动（G1-6）。
+    const progress = h("progress", { class: "pad-hold", max: HOLD_MS, value: 0, "aria-label": t("Hold to confirm") });
+    this.hold = { target, focus: document.activeElement, started: performance.now(), progress, tip: progress };
     this.frame = window.requestAnimationFrame(this.updateHold);
+    this.refresh();
   }
 
   private readonly updateHold = (now: number) => {
@@ -513,7 +633,8 @@ export class GamepadNavigation {
   private cancelHold(): void {
     if (this.frame !== undefined) window.cancelAnimationFrame(this.frame);
     this.frame = undefined;
-    this.hold?.tip.remove();
+    const had = !!this.hold;
     this.hold = undefined;
+    if (had) this.refresh();
   }
 }
