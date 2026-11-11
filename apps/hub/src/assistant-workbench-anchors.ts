@@ -1,7 +1,7 @@
 import type { AssistantAnchorResource, AssistantWorkbenchContext, AssistantWorkbenchScope } from "@lumio/assistant";
 import {
   Job, LinksResult, MODULE_ID_PREFIXES, NoteDetail, ResourceRef, WorkProject, WorkTaskDetail,
-  toolName, type AssistantConversation,
+  toolName, type ActorRole, type AssistantConversation, type WorkComment,
 } from "@lumio/schema";
 import type { AssistantMainConversations } from "./assistant-main.ts";
 import type { SqliteAssistantStore, SqliteRoutineStore, SqliteWorkStore } from "@lumio/storage";
@@ -52,6 +52,33 @@ function relatedNotes(links: LinksResult): Neighbor[] {
 
 function summary(text: string | undefined, fallback: string): string {
   return text?.trim().replace(/\s+/gu, " ").slice(0, 240) || fallback;
+}
+
+const commentHistoryBytes = 1600;
+const commentBodyBytes = 900;
+const recentCommentLimit = 5;
+
+function recentComments(comments: WorkComment[], roles: ReadonlyMap<string, ActorRole>) {
+  const recent = [];
+  let remaining = commentHistoryBytes - 2; // Array brackets.
+  for (const comment of comments.slice(-recentCommentLimit).reverse()) {
+    const { id, author, created } = comment;
+    const entry = { id, author, author_role: roles.get(author) ?? "unknown", created, body: "" };
+    const overhead = Buffer.byteLength(JSON.stringify(entry)) + (recent.length ? 1 : 0);
+    const budget = Math.min(commentBodyBytes, remaining - overhead);
+    let bodyBytes = 0;
+    for (const character of comment.body) {
+      // Count escaped JSON bytes, and stop at a Unicode code point boundary.
+      const bytes = Buffer.byteLength(JSON.stringify(character)) - 2;
+      if (bodyBytes + bytes > budget) break;
+      entry.body += character;
+      bodyBytes += bytes;
+    }
+    if (!entry.body) break;
+    recent.push(entry);
+    remaining -= overhead + bodyBytes;
+  }
+  return recent.reverse();
 }
 
 /** Every automatic resource read is under the internal assistant agent, without private delegation. */
@@ -139,11 +166,20 @@ export class AssistantWorkbenchAnchors implements AssistantWorkbenchContext {
   private async project(capability: ReadCapability, result: unknown, identity: Identity): Promise<ResourceContent | undefined> {
     switch (capability) {
       case "work.task.show": {
-        const { task, dependents, children, executions } = WorkTaskDetail.parse(result);
+        const { task, dependents, children, executions, comments, turns } = WorkTaskDetail.parse(result);
         const { id, title, description, revision, outcome, turn, tags, due } = task;
+        const roles = new Map(comments.length ? this.hub.actors().map(actor => [actor.id, actor.role]) : []);
+        const handoff = turns.at(-1);
         return {
           title, summary: summary(description, title),
-          body: { id, title, description, revision, outcome, turn: { holder: turn.holder, reason: turn.reason }, tags, due },
+          body: {
+            id, title, description, revision, outcome, turn: { holder: turn.holder, reason: turn.reason }, tags, due,
+            comments: recentComments(comments, roles),
+            ...(handoff ? { latest_handoff: {
+              at: handoff.at, from: handoff.from.holder, to: handoff.to.holder,
+              reason: handoff.to.reason, note: handoff.to.note,
+            } } : {}),
+          },
           neighbors: [
             neighbor("Project", task.project), neighbor("Parent", task.parent),
             ...task.dependencies.map(id => neighbor("Prerequisite", id)),

@@ -7,7 +7,8 @@ import type { AssistantModel } from "@lumio/assistant";
 import { parseFrontmatter } from "@lumio/knowledge";
 import {
   AI_NOTE_CAPABILITY_NAMES, AiNote, ApiError, AssistantChatResult, AssistantConversationDetail, AssistantEvent,
-  AssistantMain, AssistantModelRequest, KnowledgeAiNoteResult, ResourceRef, WorkCommandResult, toolName,
+  AssistantMain, AssistantModelRequest, KnowledgeAiNoteResult, ResourceRef, WorkCommandRequest, WorkCommandResult,
+  WorkTaskDetail, toolName, type WorkCommand,
 } from "@lumio/schema";
 import { authorize } from "../src/authorize.ts";
 import { readConfig } from "../src/config.ts";
@@ -193,5 +194,60 @@ test("main preflights native profiles and retains the AI note's current message 
     expect(saved).toBeDefined();
     const note = AiNote.parse(parseFrontmatter(await readFile(join(f.vault, saved!.note.path))).data);
     expect(note.derived_from).toEqual([result.messages.find(message => message.role === "user")!.id]);
+  } finally { await f.close(); }
+});
+
+test("reading a task in the main conversation includes recent discussion and the latest handoff", async () => {
+  let taskId: string;
+  let toolResult: string | undefined;
+  const f = await fixture({ async complete(input) {
+    const last = input.messages.at(-1)!;
+    if (last.role === "user") return {
+      content: "", tool_calls: [{ id: "synthetic-task-read", name: toolName("work.task.show"), args: { task: taskId } }],
+    };
+    toolResult = last.content;
+    return reply;
+  } });
+  try {
+    const task = await f.task({ title: "Synthetic pre-read target" });
+    taskId = task.id;
+    const agent = f.credential("pre-read-agent", "agent");
+    const command = async (operation: WorkCommand, token?: string) => {
+      const body = WorkCommandRequest.parse({ request_id: randomUUID(), operation });
+      const response = await f.api("/v2/work/commands", "POST", body, token);
+      expect(response.status).toBe(200);
+      return WorkCommandResult.parse(await response.json());
+    };
+    for (let index = 0; index < 6; index++) {
+      await command({ op: "work.task.comment", args: { task: taskId, body: "Older discussion " + index } });
+    }
+    const long = "界🙂\\\"\n".repeat(600);
+    await command({ op: "work.task.comment", args: { task: taskId, body: long } });
+    const preRead = "Pre-read: the result passed the synthetic checks.";
+    const saved = await command({ op: "work.task.comment", args: { task: taskId, body: preRead } }, agent.token);
+    if (saved.kind !== "comment") throw new Error("Expected a comment");
+    await command({ op: "work.task.hand", args: {
+      task: taskId, expected_revision: task.revision, to: "external", note: "Waiting for synthetic sign-off",
+    } });
+    const detail = WorkTaskDetail.parse(await (await f.api("/v2/work/tasks/" + taskId, "GET")).json());
+
+    const conversation = AssistantMain.parse(await (await f.ensure()).json()).conversation;
+    const chat = AssistantChatResult.parse(await (await f.chat({ conversation, message: "Read the task status" })).json());
+    expect(chat.turn.status).toBe("done");
+    const { item } = JSON.parse(toolResult!);
+    expect(item.comments.at(-1)).toEqual({
+      id: saved.comment.id, author: agent.actor.id, author_role: "agent", created: saved.comment.created, body: preRead,
+    });
+    const humanComment = item.comments.at(-2);
+    expect(humanComment).toMatchObject({ author: f.owner.actor.id, author_role: "human" });
+    expect(humanComment.body.length).toBeLessThan(long.length);
+    expect(long.startsWith(humanComment.body)).toBe(true);
+    expect(humanComment.body.isWellFormed()).toBe(true);
+    expect(item.comments.length).toBeLessThanOrEqual(5);
+    expect(Buffer.byteLength(JSON.stringify(item.comments))).toBeLessThanOrEqual(1600);
+    expect(item.comments.some((comment: { id: string }) => comment.id === detail.comments[0]!.id)).toBe(false);
+    expect(item.latest_handoff).toEqual({
+      at: detail.turns.at(-1)!.at, from: "human", to: "external", reason: "waiting", note: "Waiting for synthetic sign-off",
+    });
   } finally { await f.close(); }
 });

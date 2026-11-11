@@ -34,7 +34,7 @@ export class AssistantMainConversations {
       }
       const current = this.mainConversation(owner);
       if (current === conversation) return;
-      if (current) throw new HubError("CONFLICT", { key: "index.request_id_was_used_for_a_different_operation", args: [] });
+      if (current) throw new HubError("CONFLICT", { key: "assistant.main.already_bound", args: [] });
       this.hub.db.query(`INSERT INTO assistant_main_conversations (owner, conversation) VALUES (?, ?)
         ON CONFLICT(owner) DO UPDATE SET conversation=excluded.conversation`).run(owner, conversation);
     })();
