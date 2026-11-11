@@ -69,7 +69,7 @@
 | [K3-1 至 K3-3](K3-0-knowledge-graph.md) | 全库知识图谱：一次读出链接图的 Hub 接口与 Web 图谱视图（ADR 0040，Implemented） | Claude + Codex | 完成 |
 | [K4-1 至 K4-4](K4-0-sources-and-ai-notes.md) | 知识来源 `derived_from`、`lumio:` 资源链接与独立的 AI 笔记（ADR 0051，Implemented） | Claude + Codex | 完成 |
 | [S1-0](S1-0-speech.md) | 内置语音输入（ADR 0055，Accepted；S1-1 预研 Codex，S1-2 契约 Claude，S1-3 Hub Codex，S1-4 Web Claude；纠错与语音合成在后） | 见任务说明 | — |
-| [G1-0](G1-0-gamepad.md) | 用手柄操作 Lumio：输入层、焦点导航、审批长按确认、按住说话（无新 ADR） | 前端（Claude） | G1-4 依赖 S1-4 |
+| [G1-0](G1-0-gamepad.md) | 用手柄操作 Lumio：手柄模式与提示条、两层焦点导航、审批长按确认、按住说话（无新 ADR） | G1-1～G1-3 Codex | G1-4 依赖 S1-4 |
 
 P1 的设计决定见 ADR 0014、0016、0017、0018；P2 见 ADR 0019、0020、0021、0022 与修订后的 ADR 0005；契约见 `packages/schema/src/` 中的 `query.ts`、`actor.ts`、`operation.ts`、`proposal.ts`、`api.ts`。
 
