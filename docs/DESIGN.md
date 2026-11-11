@@ -103,7 +103,7 @@ Foundation 提供 ID 和错误；Platform 提供终端、诊断、下载与升�
 
 | 分册 | 内容 |
 |---|---|
-| [`design/knowledge.md`](design/knowledge.md) | vault 目录、实体类型、元数据补全、citekey、链接与 AI 区块、自动提交、搜索 |
+| [`design/knowledge.md`](design/knowledge.md) | vault 目录、实体类型、元数据补全、citekey、链接与 AI 区块、外部资料与 Inbox、自动提交、搜索 |
 | [`design/work.md`](design/work.md) | 数据库项目与任务：任务模型、交接计划、通知、提问与验收、CLI |
 | [`design/execution.md`](design/execution.md) | 执行器与 Job、日志与托管文件、旧任务笔记兼容、数据库 Routine |
 | [`design/assistant.md`](design/assistant.md) | 内置助手：对话、模型适配、显式记忆、工具状态 |

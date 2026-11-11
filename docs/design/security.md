@@ -11,7 +11,7 @@
 - **AI 的入口是 CLI + skill**：`lumio … --json`，配合 `skills/lumio/SKILL.md`（命令表由能力目录生成，英文；`lumio skill install` 安装）；
   Claude Code、Codex、pi 共用一份。内置助手直接把能力目录注册为工具。原生 Assistant 使用从同一目录生成的 MCP 薄适配层（ADR 0042）。
 - **agent 的权限**（ADR 0029、0031、0032）：读允许；新建任务与项目、改字段、评论、交给人或外部（附说明）可直接执行并记录执行者；委派与设置计划生成提议，人批准后以原作者、原 request_id 执行，任务 revision 已变则 CONFLICT。
-  知识方面，agent 只能新建和带版本更新 AI 笔记（`knowledge.ainote.create/update`，可直接执行并记录执行者；`derived_from` 指向其不可见的资源时拒绝），不能写其他类型的知识或删除 AI 笔记（ADR 0051）。
+  知识方面，agent 只能新建和带版本更新 AI 笔记（`knowledge.ainote.create/update`，可直接执行并记录执行者；`derived_from` 指向其不可见的资源时拒绝），不能写其他类型的知识或删除 AI 笔记（ADR 0051）。agent 可读资料原文（`knowledge.original.show`）与混合检索；捕获、分拣、重新抽取、丢弃只对 human 开放（ADR 0056）。
   完成、取消、重新打开、交给无人、处理检查点、管理计划模板、修改 Routine、决定提议、高权限命令、删除归档拒绝（包括 ADR 0038 的删除、恢复与彻底删除，不生成提议，也不进入 agent 能力目录）。
   派出的一轮拿到只属于该轮的 agent 凭据，该轮结束即作废；执行器自己的令牌仍不交出。用户自己的 agent 用 `lumio agent add` 取得令牌。
 - **身份与令牌分开**（ADR 0016）：人和每个 AI agent 各是一个身份（`act_<ULID>`），角色是 `human` 或 `agent`；
@@ -37,6 +37,7 @@
 
 ## 安全
 
+- **抓取网页**（ADR 0056）：Hub 只抓 `http`/`https` 公网地址；解析域名后拒绝回环、内网与链路本地地址，每次重定向重查，限制大小与时间，不带 Cookie。资料内容发给哪个摘要与向量服务在设置页写明。
 - **卡号防护**（ADR 0012）：写法像卡号（连续 13–19 位，或 4-4-4-4 / 4-6-5 分组）且通过 Luhn 校验即视为疑似卡号。
   - asset 校验报错；Hub 自动提交前和建索引前检查**所有文件**，命中的不提交、不索引，提醒人删除；
   - 错误和日志里永远不出现这串数字；判定函数在 `packages/schema/src/secrets.ts`。

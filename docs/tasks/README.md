@@ -70,6 +70,7 @@
 | [K4-1 至 K4-4](K4-0-sources-and-ai-notes.md) | 知识来源 `derived_from`、`lumio:` 资源链接与独立的 AI 笔记（ADR 0051，Implemented） | Claude + Codex | 完成 |
 | [S1-0](S1-0-speech.md) | 内置语音输入（ADR 0055，Accepted；S1-1 预研 Codex，S1-2 契约 Claude，S1-3 Hub Codex，S1-4 Web Claude；纠错与语音合成在后） | 见任务说明 | — |
 | [G1-0](G1-0-gamepad.md) | 用手柄操作 Lumio：手柄模式与提示条、两层焦点导航、审批长按确认、按住说话（无新 ADR） | G1-1～G1-3 Codex | G1-4 依赖 S1-4 |
+| [I1-0](I1-0-inbox-and-captured-sources.md) | Inbox 与外部资料入库：原文、AI 卡片、分拣、混合检索与关联建议（ADR 0056，Accepted；I1-1 契约 Claude，I1-2～I1-4、I1-6 后端 Codex，I1-5、I1-7 前端 Claude） | 见任务说明 | — |
 
 P1 的设计决定见 ADR 0014、0016、0017、0018；P2 见 ADR 0019、0020、0021、0022 与修订后的 ADR 0005；契约见 `packages/schema/src/` 中的 `query.ts`、`actor.ts`、`operation.ts`、`proposal.ts`、`api.ts`。
 
@@ -119,7 +120,7 @@ pi 的 skill 验收说明：pi 的回答完全正确（推荐了 `[[渲染格式
 | 内容 | 大约在 | 备注 |
 |---|---|---|
 | 论文笔记半手动补全：手写的笔记里有 `arxiv` 或 `doi` 时，联网取元数据补齐其余字段 | P1 之后 | 联网放在 CLI 或 Hub，不进 core |
-| 语义搜索 / RAG：按意思找笔记，方便按想法引用论文 | P2 之后 | 向量和 `index.sqlite` 放在一起；本地模型还是 API 到时再定 |
+| 语义搜索 / RAG：按意思找笔记，方便按想法引用论文 | 已排期 | 卡片级向量与混合检索见 I1-6（ADR 0056）；分块检索仍待定 |
 | 在 frontmatter 里看得到上一轮的结果（完成 / 有问题 / 失败），方便总览 | 打磨期 | 和 `status` 有重叠，人类要求想清楚再定（ADR 0024 讨论） |
 | 测试能否调用真实 AI | P2 | 未决定；P2-3、P2-4 的自动测试一律用假的 agent，真实 agent 只做人工验证 |
 | Python 实验 SDK | 不做 | 实验结果怎么记由各项目自己的 `AGENTS.md` 决定（ADR 0019 背景） |
