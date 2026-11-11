@@ -41,6 +41,8 @@ For AI notes, pass Markdown with `--file` and JSON arrays with `--tags` or `--so
 | work.task.create | `lumio task new <title> [--description <description>] [--file <file>] [--project <project>] [--parent <parent>] [--depends <depends>] [--due <due>] [--workdir <workdir>] [--model <model>] [--gpus <gpus>] [--timeout <timeout>] [--request-id <request-id>] --json` | Create a task with the human todo turn. Creation never starts a run. |
 | work.task.update | `lumio task update <id> [--patch <patch>] [--revision <revision>] [--description <description>] [--file <file>] [--project <project>] [--parent <parent>] [--depends <depends>] [--due <due>] [--workdir <workdir>] [--model <model>] [--gpus <gpus>] [--timeout <timeout>] [--request-id <request-id>] --json` | Change task fields. Tasks have outcome and turn, with no status or assignee; only the user decides completion. |
 | work.task.comment | `lumio task comment <id> [<text>] [--file <file>] [--request-id <request-id>] --json` | Add a comment to a task's discussion. |
+| work.task.dispatch | `lumio task continue <id> [--to <to>] [--comment <comment>] [--revision <revision>] [--legacy] [--request-id <request-id>] --json` | Delegate or continue a task. Agent calls propose the delegation and require user approval before it starts. |
+| work.task.plan.set | `lumio task plan set <id> --file <file> [--from <from>] [--revision <revision>] [--request-id <request-id>] --json` | Set, replace, or clear a task handoff plan. Agent calls require user approval. Saving the plan does not start a round. Use null to clear it. |
 | work.task.hand | `lumio task hand <id> --to <to> [--note <note>] [--revision <revision>] [--request-id <request-id>] --json` | Hand a task back to the human or to external waiting (with a note). Agents cannot hand to nobody. |
 | work.project.create | `lumio project new <title> [--description <description>] [--file <file>] [--goal <goal>] [--repo <repo>] [--deadline <deadline>] [--workdir <workdir>] [--default-target <default-target>] [--request-id <request-id>] --json` | Create a project, optionally with a default_target used for tasks never dispatched before. |
 | work.project.update | `lumio project update <id> [--patch <patch>] [--revision <revision>] [--description <description>] [--file <file>] [--goal <goal>] [--repo <repo>] [--deadline <deadline>] [--workdir <workdir>] [--default-target <default-target>] [--default-plan <default-plan>] [--request-id <request-id>] --json` | Change project fields, including default_target (null clears it). |
@@ -50,12 +52,10 @@ Additional Work commands (generated from the same CLI definitions):
 | Command |
 |---|
 | `lumio task edit <id> [--file <file>] [--revision <revision>] [--request-id <request-id>] [--json]` |
-| `lumio task continue <id> [--to <to>] [--comment <comment>] [--revision <revision>] [--legacy] [--request-id <request-id>] [--json]` |
 | `lumio task finish <id> [--revision <revision>] [--request-id <request-id>] [--json]` |
 | `lumio task cancel <id> [--revision <revision>] [--request-id <request-id>] [--json]` |
 | `lumio task reopen <id> [--revision <revision>] [--request-id <request-id>] [--json]` |
 | `lumio task plan show <id> [--json]` |
-| `lumio task plan set <id> --file <file> [--from <from>] [--revision <revision>] [--request-id <request-id>] [--json]` |
 | `lumio task checkpoint <id> --stage <stage> --action <action> [--back-to <back-to>] [--comment <comment>] [--request-id <request-id>] [--json]` |
 | `lumio project edit <id> [--file <file>] [--revision <revision>] [--request-id <request-id>] [--json]` |
 | `lumio project status <id> [<status>] [--status <status>] [--revision <revision>] [--request-id <request-id>] [--json]` |

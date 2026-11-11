@@ -58,7 +58,7 @@ describe("moving the turn (ADR 0032 §3)", () => {
     expect(command("work.task.reopen", { task: TASK, expected_revision: 3 })).toBe(true);
   });
   test("none of the human-only commands is an agent capability", () => {
-    for (const name of ["work.task.finish", "work.task.reopen", "work.task.plan.set", "work.task.checkpoint", "work.task.dispatch"]) expect(capability(name)).toBeUndefined();
+    for (const name of ["work.task.finish", "work.task.reopen", "work.task.checkpoint"]) expect(capability(name)).toBeUndefined();
   });
 });
 

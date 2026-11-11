@@ -375,9 +375,9 @@ test("an intervening human edit conflicts with the first undo without overwritin
   expect((await client().assistantTools(chat.conversation.id))[0]?.change?.undone).toBeUndefined();
 });
 
-test("a model attempting unavailable dispatch, approval and acknowledge tools receives explicit failure reasons", async () => {
+test("a model attempting unavailable approval and acknowledge tools receives explicit failure reasons", async () => {
   let step = 0;
-  const names = ["work.task.dispatch", "approval.proposal.accept", "work.task.acknowledge"];
+  const names = ["approval.proposal.accept", "work.task.acknowledge"];
   model = { async complete(input) {
     if (step) { const result = JSON.parse(input.messages.at(-1)!.content); expect(result.code).toBe("INVALID"); expect(result.reason).toContain("not provided"); }
     return step < names.length ? { content: "", tool_calls: [{ id: "synthetic", name: toolName(names[step++]!), args: {} }] } : { content: "Those operations require the user.", tool_calls: [] };
@@ -386,6 +386,57 @@ test("a model attempting unavailable dispatch, approval and acknowledge tools re
   expect(result.turn.status).toBe("done"); expect((await client().assistantTools(result.conversation.id)).every(call => call.status === "failed")).toBe(true);
 });
 
+
+test("assistant task tools create proposals that take effect only after human approval", async () => {
+  const delegation = await task({ title: "Synthetic delegation" });
+  const planned = await task({ title: "Synthetic plan" });
+  const operations = [
+    { name: "work.task.dispatch", args: { task: delegation.id, expected_revision: delegation.revision, to: "pi@server" } },
+    { name: "work.task.plan.set", args: { task: planned.id, expected_revision: planned.revision,
+      plan: { stages: [{ kind: "agent", id: "implement", agent: "pi@server", instruction: "Synthetic implementation" }] } } },
+  ];
+  const results: WorkCommandResult[] = [];
+  model = { async complete(input) {
+    const last = input.messages.at(-1)!;
+    if (last.role === "tool") {
+      results.push(...input.messages.filter(message => message.role === "tool").map(message => WorkCommandResult.parse(JSON.parse(message.content))));
+      return { content: "Submitted for approval.", tool_calls: [] };
+    }
+    return { content: "", tool_calls: operations.map(({ name, args }, index) => {
+      const tool = input.tools.find(value => value.name === toolName(name));
+      expect(tool?.description).toContain("approv");
+      return { id: "synthetic-proposal-" + index, name: toolName(name), args };
+    }) };
+  } };
+  const chat = await client().assistantChat({ request_id: requestId(), message: "Propose a delegation and a plan" });
+  expect(chat.turn.status, JSON.stringify(chat)).toBe("done");
+  const calls = await client().assistantTools(chat.conversation.id);
+  const author = hub.store.assistantActor().id;
+  expect(calls).toHaveLength(operations.length);
+  expect(results).toHaveLength(operations.length);
+  for (const { name, args } of operations) {
+    const call = calls.find(value => value.capability === name)!;
+    expect(call.status).toBe("succeeded");
+    expect(call.change).toBeUndefined();
+    const result = WorkCommandResult.parse(call.result);
+    if (result.kind !== "proposal") throw new Error("proposal expected");
+    expect(results).toContainEqual(result);
+    expect(hub.store.proposal(result.proposal)).toMatchObject({ status: "pending", author,
+      operation: { op: "work.command", args: { request_id: call.id, operation: { op: name, args } } } });
+    const before = await client().workTask(args.task);
+    expect(before.executions).toEqual([]);
+    expect(before.task.revision).toBe(args.expected_revision);
+    expect(before.task.plan).toBeUndefined();
+    expect((await api("/v1/proposals/" + result.proposal + "/accept", {}, agent)).status).toBe(403);
+    expect((await api("/v1/proposals/" + result.proposal + "/accept", {})).status).toBe(200);
+  }
+  const dispatched = await client().workTask(delegation.id);
+  expect(dispatched.executions).toHaveLength(1);
+  expect(dispatched.task).toMatchObject({ updated_by: author, turn: { holder: "pi@server", reason: "working" } });
+  const saved = await client().workTask(planned.id);
+  expect(saved.executions).toEqual([]);
+  expect(saved.task).toMatchObject({ updated_by: author, plan: { stage: "implement", rounds: 0 } });
+});
 
 test("answer-and-continue defaults to the previous agent even if the task owner has changed", async () => {
   const created = await task(), first = await dispatch(created.id); await finish(first, "waiting_for_human");

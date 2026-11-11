@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { startHub } from "../apps/hub/src/server.ts";
 import { readConfig } from "../apps/hub/src/config.ts";
 import { createClient } from "../packages/api-client/src/index.ts";
-import { NativeRuntimeCommand, NativeSession, WorkCommandResult, type NativeRuntimeMessage } from "../packages/schema/src/index.ts";
+import { ApiError, NativeRuntimeCommand, NativeSession, WorkCommandResult, toolName, type NativeRuntimeMessage } from "../packages/schema/src/index.ts";
 import { NativeManager } from "../apps/runtime/src/native/manager.ts";
 import { NativeRpc } from "../apps/runtime/src/native/rpc.ts";
 import { NativeLocalStore } from "../apps/runtime/src/native/store.ts";
@@ -266,6 +266,64 @@ test("native MCP writes have durable receipts and retain ordinary agent permissi
         expect((await f.create()).view.state).toBe("ready");
     }
     finally {
+        await f.close();
+    }
+}, 20000);
+test("native MCP discovers task proposals and applies them only after human approval", async () => {
+    const f = await fixture();
+    try {
+        const created = await f.client.workCommand({ request_id: "synthetic-native-proposal-task",
+            operation: { op: "work.task.create", args: { title: "Synthetic task for proposals" } } });
+        if (created.kind !== "task") throw new Error("Synthetic task expected");
+        const s = await f.create();
+        const pending = f.client.assistantChat({ request_id: "synthetic-native-proposal-turn", conversation: s.conversation, message: "WAIT" });
+        await until(() => f.client.nativeSession(s.id), session => session.view.state === "running");
+        const base = f.url + "/v2/native-mcp/" + s.id;
+        const headers = { Authorization: "Bearer " + f.store.get(s.id)!.token, "Content-Type": "application/json" };
+        const tools = await fetch(base + "/tools", { headers });
+        expect(tools.status).toBe(200);
+        const catalog = await tools.json() as { tools: { name: string }[] };
+        const planTool = toolName("work.task.plan.set"), dispatchTool = toolName("work.task.dispatch");
+        expect(catalog.tools.map(tool => tool.name)).toEqual(expect.arrayContaining([planTool, dispatchTool]));
+        const invoke = (request_id: string, tool: string, args: unknown) => fetch(base + "/call", {
+            method: "POST", headers, body: JSON.stringify({ request_id, tool, args }),
+        });
+        const propose = async (request: string, tool: string, args: unknown) => {
+            const response = await invoke(request, tool, args);
+            expect(response.status).toBe(200);
+            const result = WorkCommandResult.parse((await response.json() as { result: unknown }).result);
+            if (result.kind !== "proposal") throw new Error("Synthetic proposal expected");
+            return result;
+        };
+
+        const task = created.task.id, target = "codex@synthetic-runtime";
+        const planArgs = { task, expected_revision: created.task.revision, plan: {
+            stages: [{ kind: "agent", id: "implement", agent: target, instruction: "Synthetic implementation" }],
+        } };
+        const plan = await propose("synthetic-native-plan", planTool, planArgs);
+        expect(await propose("synthetic-native-plan", planTool, planArgs)).toEqual(plan);
+        const initial = await f.client.workTask(task);
+        expect(initial.task.plan).toBeUndefined();
+        expect(initial.executions).toEqual([]);
+        const accepted = await f.client.acceptProposal(plan.proposal);
+        expect(accepted.status).toBe("accepted");
+        expect(accepted.author).not.toBe(f.owner.id);
+        const saved = await f.client.workTask(task);
+        expect(saved.task).toMatchObject({ updated_by: accepted.author, plan: { stage: "implement", rounds: 0 } });
+        expect(saved.executions).toEqual([]);
+
+        const stale = await invoke("synthetic-native-stale-dispatch", dispatchTool, { task, to: target, expected_revision: created.task.revision });
+        expect(stale.status).toBe(409);
+        expect(ApiError.parse(await stale.json()).error).toMatchObject({ code: "CONFLICT", reason: "revision_conflict" });
+        expect((await f.client.nativeSession(s.id)).quarantined).toBe(false);
+        const delegation = await propose("synthetic-native-dispatch", dispatchTool, { task, to: target, expected_revision: saved.task.revision });
+        expect((await f.client.workTask(task)).executions).toEqual([]);
+        expect(await f.client.acceptProposal(delegation.proposal)).toMatchObject({ status: "accepted", author: accepted.author });
+        expect((await f.client.workTask(task)).executions).toHaveLength(1);
+
+        await f.client.nativeAction(s.id, { action: "interrupt" });
+        await pending;
+    } finally {
         await f.close();
     }
 }, 20000);
