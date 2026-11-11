@@ -31,11 +31,15 @@ import { assistantToolDescription, isAiNoteCapability, isTaskProposalCapability,
 import { AIUsage } from "./ai-usage.ts";
 import type { Notifications } from "./notifications.ts";
 import type { SpeechConfiguration } from "./speech-config.ts";
+import type { AssistantMainConversations } from "./assistant-main.ts";
+import { workbenchSearchCards, workbenchToolSpecs, type WorkbenchTools } from "./workbench-tools.ts";
 interface NativeModules {
   ai: AIConfigurationService;
   speech: SpeechConfiguration;
   assistant: AssistantService;
   assistantStore: SqliteAssistantStore;
+  assistantMain: AssistantMainConversations;
+  workbench: WorkbenchTools;
   capabilities: Capabilities;
   resources: import("./resources.ts").Resources;
   signal: AbortSignal;
@@ -56,6 +60,8 @@ interface Socket {
 type Active = {
   turn: string;
   event: (e: AssistantEvent) => void;
+  workbenchEvent?: (e: AssistantEvent) => void;
+  returnedTools: Map<string, string>;
   resolve: (v: { text: string; status: "done" | "failed" | "unknown" | "cancelled"; error?: string }) => void;
   stopping?: ReturnType<typeof setTimeout>;
 };
@@ -470,9 +476,9 @@ export class NativeAssistant {
   private hubUrl() {
     return `http://${this.config.hostname.includes(":") ? `[${this.config.hostname}]` : this.config.hostname}:${this.config.port}`;
   }
-  async create(owner: string, raw: unknown) {
+  async create(owner: string, raw: unknown, options: { main?: boolean } = {}) {
     const input = NativeCreate.parse(raw),
-      fingerprint = JSON.stringify(input);
+      fingerprint = JSON.stringify(options.main ? { input, main: true } : input);
     const receipt = this.ai.receipt(owner, input.request_id, fingerprint);
     if (receipt) {
       if (!receipt.matches) throw problem("ai.conflict", "CONFLICT");
@@ -489,7 +495,10 @@ export class NativeAssistant {
     const time = new Date().toISOString(),
       id = newId("ais", new Date(), randomBytes),
       conversation = newId("conv", new Date(), randomBytes),
-      capabilities = CAPABILITIES.map((c) => toolName(c.name));
+      capabilities = [
+        ...CAPABILITIES.map((c) => toolName(c.name)),
+        ...(options.main ? workbenchToolSpecs.map(spec => spec.name) : []),
+      ];
     const memories = await this.modules.assistant.memories(owner),
       context_revision = createHash("sha256")
         .update(JSON.stringify(memories.map((m) => [m.id, m.revision])))
@@ -546,13 +555,15 @@ export class NativeAssistant {
           revision: 1,
         }),
       );
+      if (options.main) this.modules.assistantMain.bindMain(owner, conversation);
       this.ai.putSession(s);
       this.ai.putReceipt(owner, input.request_id, fingerprint, id);
     })();
     this.open(s);
     return s;
   }
-  readonly run: NonNullable<AssistantContext["native"]>["run"] = async (input) => {
+  readonly run = async (input: Parameters<NonNullable<AssistantContext["native"]>["run"]>[0],
+    workbenchEvent?: (event: AssistantEvent) => void) => {
     const s = this.owned(input.conversation.native_session!, input.conversation.owner);
     this.validate(input.conversation, input.request);
     const context_revision = createHash("sha256")
@@ -588,7 +599,9 @@ export class NativeAssistant {
       text: string;
       status: "done" | "failed" | "unknown" | "cancelled";
       error?: string;
-    }>((resolve) => this.active.set(s.id, { turn: input.turn.id, event: input.event, resolve }));
+    }>((resolve) => this.active.set(s.id, {
+      turn: input.turn.id, event: input.event, workbenchEvent, returnedTools: new Map(), resolve,
+    }));
     const abort = () => {
       void this.interrupt(s.id);
     };
@@ -806,46 +819,55 @@ export class NativeAssistant {
     )
       throw problem("native.forbidden", "FORBIDDEN");
     const defs = CAPABILITIES.filter((c) => s.capabilities.includes(toolName(c.name)));
+    const workbench = this.modules.assistantMain.isMain(s.owner, s.conversation)
+      ? workbenchToolSpecs.filter(spec => s.capabilities.includes(spec.name)) : [];
     if (id[2] === "tools" && request.method === "GET")
       return Response.json({
-        tools: defs.map((c) => ({
-          name: toolName(c.name),
-          description: assistantToolDescription(c),
-          inputSchema: c.args.toJSONSchema(),
-        })),
+        tools: [
+          ...defs.map((c) => ({
+            name: toolName(c.name),
+            description: assistantToolDescription(c),
+            inputSchema: c.args.toJSONSchema(),
+          })),
+          ...workbench.map(spec => ({ name: spec.name, description: spec.description, inputSchema: spec.input_schema })),
+        ],
       });
     if (id[2] !== "call" || request.method !== "POST") throw problem("native.forbidden", "FORBIDDEN");
     const input = NativeMCPRequest.parse({ ...((await request.json()) as object), session: s.id }),
       def = defs.find((c) => toolName(c.name) === input.tool),
+      action = workbench.find(spec => spec.name === input.tool),
+      name = def?.name ?? action?.name,
       active = this.active.get(s.id);
     if (
-      !def ||
+      !name ||
       !active ||
-      (def.kind === "write" && this.ai.sessions(s.owner).some((v) => v.quarantined)) ||
+      (def?.kind === "write" && this.ai.sessions(s.owner).some((v) => v.quarantined)) ||
       !["running", "awaiting_approval"].includes(s.view.state)
     )
       throw problem("native.forbidden", "FORBIDDEN");
-    const conversation = isAiNoteCapability(def.name) ? this.modules.resources.conversationSource(s.owner, active.turn) : undefined;
-    if (isAiNoteCapability(def.name) && !conversation) throw problem("native.forbidden", "FORBIDDEN");
+    const aiNote = def && isAiNoteCapability(def.name);
+    const conversation = aiNote ? this.modules.resources.conversationSource(s.owner, active.turn) : undefined;
+    if (aiNote && !conversation) throw problem("native.forbidden", "FORBIDDEN");
     const old = this.ai.db
       .query<
         {
           name: string;
           args: string;
+          turn: string;
           status: string;
           result: string | null;
         },
         [string, string]
-      >("SELECT name,args,status,result FROM native_operations WHERE session=? AND request=?")
+      >("SELECT name,args,turn,status,result FROM native_operations WHERE session=? AND request=?")
       .get(s.id, input.request_id);
     if (old) {
-      if (old.name !== def.name || old.args !== JSON.stringify(input.args)) throw problem("ai.conflict", "CONFLICT");
+      if (old.name !== name || old.args !== JSON.stringify(input.args) || (action && old.turn !== active.turn)) throw problem("ai.conflict", "CONFLICT");
       if (old.status === "done") return Response.json({ result: JSON.parse(old.result!) });
       throw problem("native.unknown", "CONFLICT");
     }
     this.ai.db
       .query("INSERT INTO native_operations VALUES(?,?,?,?,?,'running',NULL)")
-      .run(s.id, input.request_id, active.turn, def.name, JSON.stringify(input.args));
+      .run(s.id, input.request_id, active.turn, name, JSON.stringify(input.args));
     const actor = this.hub.actors().find((a) => a.id === meta.agent && a.role === "agent");
     if (!actor) throw problem("native.forbidden", "FORBIDDEN");
     const callId = newId("tool", new Date(), randomBytes);
@@ -855,23 +877,26 @@ export class NativeAssistant {
       name: input.tool,
       args: input.args,
       status: "running",
-      capability: def.name,
+      capability: def?.name,
       created: new Date().toISOString(),
     });
     this.modules.assistantStore.putCall(call);
     try {
-      const outcome = await this.modules.capabilities.execute(
-        def.name,
-        input.args,
-        { actor, label: `native-${s.id}` },
-        input.request_id,
-        { conversation },
-      );
-      const result = JSON.parse(JSON.stringify(outcome.result ?? null));
+      const identity = { actor, label: `native-${s.id}` };
+      const outcome = def
+        ? await this.modules.capabilities.execute(def.name, input.args, identity, input.request_id, { conversation })
+        : { result: await this.modules.workbench.execute(name, input.args, {
+          owner: s.owner, conversation: s.conversation, turn: active.turn, tool: callId, identity,
+          returnedTools: active.returnedTools,
+          active: () => this.active.get(s.id) === active && !active.stopping,
+          emit: active.workbenchEvent,
+        }) };
+      const content = JSON.stringify(outcome.result ?? null);
+      const result = JSON.parse(content);
       this.ai.db.transaction(() => {
         this.ai.db
           .query("UPDATE native_operations SET status='done',result=? WHERE session=? AND request=?")
-          .run(JSON.stringify(result), s.id, input.request_id);
+          .run(content, s.id, input.request_id);
         call = { ...call, status: "succeeded", result, change: outcome.change, finished: new Date().toISOString() };
         this.modules.assistantStore.putCall(call);
         this.modules.assistantStore.putMessage(
@@ -881,12 +906,17 @@ export class NativeAssistant {
             turn: active.turn,
             role: "tool",
             tool_call: callId,
-            content: JSON.stringify(result),
+            content,
             created: new Date().toISOString(),
           }),
         );
       })();
-      return Response.json({ result });
+      const response = Response.json({ result });
+      if (active.workbenchEvent) {
+        const cards = workbenchSearchCards(result);
+        if (cards.length) active.returnedTools.set(callId, JSON.stringify(cards));
+      }
+      return response;
     } catch (e) {
       const known = e instanceof HubError && ["FORBIDDEN", "INVALID", "NOT_FOUND", "CONFLICT"].includes(e.code);
       this.ai.db
@@ -898,7 +928,7 @@ export class NativeAssistant {
         error: "native.tool_failed",
         finished: new Date().toISOString(),
       });
-      if (!known && def.kind === "write") {
+      if (!known && def?.kind === "write") {
         const current = this.ai.session(s.id)!;
         current.quarantined = true;
         current.view = { ...current.view, state: "unknown", error: "native.unknown" };
@@ -906,7 +936,7 @@ export class NativeAssistant {
         this.ai.invalidate(s.id);
         await this.interrupt(s.id);
       }
-      if (known) throw isAiNoteCapability(def.name) || isTaskProposalCapability(def.name) ? e : problem("native.tool_failed", "FORBIDDEN");
+      if (known) throw action || aiNote || (def && isTaskProposalCapability(def.name)) ? e : problem("native.tool_failed", "FORBIDDEN");
       throw problem("native.unknown", "CONFLICT");
     }
   }

@@ -17,8 +17,10 @@ import { join } from "node:path";
 import { CoreError, newId } from "@lumio/foundation";
 import { parseAssignee, type WorkCommandResult, type AgentRun, type WorkTask } from "@lumio/schema";
 import { mergeStageGrant, PlanDispatchUnavailable, WorkService } from "@lumio/work";
-import { AssistantService, type AssistantContext, type AssistantModel, type AssistantTool } from "@lumio/assistant";
+import type { AssistantContext, AssistantModel, AssistantTool } from "@lumio/assistant";
 import { AssistantMainConversations } from "./assistant-main.ts";
+import { WorkbenchAssistant } from "./workbench-assistant.ts";
+import { WorkbenchTools } from "./workbench-tools.ts";
 import { FileKnowledgeRepository, SqliteWorkStore, SqliteAssistantStore, SqliteRoutineStore, SqliteArtifacts } from "@lumio/storage";
 import { ExecutionRoutines } from "@lumio/execution";
 import type { HubConfig } from "./config.ts";
@@ -59,8 +61,9 @@ export class BusinessModules {
   readonly workStore: SqliteWorkStore;
   readonly work: WorkService;
   readonly workCommands: WorkCommands;
-  readonly assistant: AssistantService;
+  readonly assistant: WorkbenchAssistant;
   readonly assistantMain: AssistantMainConversations;
+  readonly workbench: WorkbenchTools;
   readonly capabilities: Capabilities;
   readonly resources: Resources;
   aiNotes?: AiNotes;
@@ -136,6 +139,7 @@ export class BusinessModules {
     this.capabilities = new Capabilities(this, store, config, options.authorize);
     this.assistantStore = new SqliteAssistantStore(store.db);
     this.assistantMain = new AssistantMainConversations(store, this.assistantStore);
+    this.workbench = new WorkbenchTools(this.assistantMain, this.assistantStore, this.resources);
     this.ai=new AIConfigurationService(new SqliteAIStore(store.db),config.assistantModel);
     this.ai.migrateLegacy(store.actors().filter(actor => actor.role === "human").map(actor => actor.id));
     this.ai.store.installConversationPurge();
@@ -153,8 +157,8 @@ export class BusinessModules {
         cancel: conversation => this.native.cancelConversation(conversation),
       },
     };
-    this.assistant = new AssistantService(this.assistantStore, options.assistantModel ?? configuredModel(config.assistantModel),
-      [...this.capabilities.tools(), ...(options.assistantTools ?? [])], assistantContext);
+    this.assistant = new WorkbenchAssistant(this.assistantStore, options.assistantModel ?? configuredModel(config.assistantModel),
+      [...this.capabilities.tools(), ...(options.assistantTools ?? [])], assistantContext, this.assistantMain, this.workbench);
     this.assistant.recover();
     this.reconcile();
     this.timer = setInterval(() => {
