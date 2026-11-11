@@ -3,7 +3,7 @@ import { browserOrigins } from "./web.ts";
 import { isIP } from "node:net";
 import { randomUUID } from "node:crypto";
 import { readFile, mkdir, writeFile, rename, rm } from "node:fs/promises";
-import { CAPTURE_LIMITS, DECISION_GATE_DEFAULTS, RuntimeName } from "@lumio/schema";
+import { CAPTURE_LIMITS, DECISION_GATE_DEFAULTS, EXPLORATION_DEFAULTS, RuntimeName } from "@lumio/schema";
 import { homedir, hostname } from "node:os";
 import { join, resolve } from "node:path";
 import { modelConfiguration } from "./assistant-model.ts";
@@ -43,8 +43,18 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env) {
       !Number.isFinite(decisionGateMinConfidence) || decisionGateMinConfidence < 0 || decisionGateMinConfidence > 1) {
     throw new HubError("INVALID", { key: "ai.decision_gate_config", args: [] });
   }
+  // A1-8 / A1-9：Watchdog 巡检间隔（0 表示关闭）与提前探索的默认预算。
+  const watchdogIntervalMinutes = Number(env.LUMIO_WATCHDOG_INTERVAL_MINUTES ?? 30);
+  const explorationMaxTokens = Number(env.LUMIO_EXPLORATION_MAX_TOKENS ?? EXPLORATION_DEFAULTS.max_tokens);
+  const explorationMaxMinutes = Number(env.LUMIO_EXPLORATION_MAX_MINUTES ?? EXPLORATION_DEFAULTS.max_ms / 60_000);
+  if (!Number.isSafeInteger(watchdogIntervalMinutes) || watchdogIntervalMinutes < 0 || watchdogIntervalMinutes > 1440 ||
+      !Number.isSafeInteger(explorationMaxTokens) || explorationMaxTokens < 1000 || explorationMaxTokens > 5_000_000 ||
+      !Number.isSafeInteger(explorationMaxMinutes) || explorationMaxMinutes < 1 || explorationMaxMinutes > 720) {
+    throw new HubError("INVALID", { key: "config.invalid_workbench", args: [] });
+  }
   return {
     captureCardInputTokens, captureSummaryLanguage, decisionGateTimeoutMs, decisionGateMinConfidence,
+    watchdogIntervalMinutes, explorationMaxTokens, explorationMaxMs: explorationMaxMinutes * 60_000,
     assistantModel: env.LUMIO_ASSISTANT_MANAGED === "1" ? undefined : modelConfiguration(env),
     assistantHome: env.HOME ?? (env === process.env ? homedir() : stateDirectory(env)),
     webOrigins: browserOrigins(env.LUMIO_WEB_ORIGINS),

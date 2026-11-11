@@ -91,7 +91,7 @@ test("all v2 routes obey the shared deny policy before reading bodies or exposin
   await hub.stop(); hub = await startHub({ ...readConfig({ LUMIO_STATE_DIR: temp }), port: 0 }, { log() {}, authorize: () => ({ result: "deny", reason: "synthetic denial" }) });
   const prefixes = {
     "/inbox/captures/": "cap", "/proposals/": "prop", "/push/devices/": "pdev", "/tools/": "tool",
-    "/conversations/": "conv", "/projects/": "prj", "/routines/": "rtn",
+    "/conversations/": "conv", "/projects/": "prj", "/routines/": "rtn", "/explorations/": "xpl",
   };
   const id = (prefix: string) => `${prefix}_00000000000000000000000001`;
   for (const route of V2_ROUTES) {

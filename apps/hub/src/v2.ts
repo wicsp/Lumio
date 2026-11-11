@@ -18,6 +18,9 @@ import { isTaskProposalCapability } from "./capabilities.ts";
 export const V2_ROUTES = [
   ...INBOX_ROUTES,
   ...NOTICE_ROUTES,
+  { operation: "explorations.read", method: "GET", pattern: /^\/v2\/explorations$/, path: "/v2/explorations" },
+  { operation: "explorations.read", method: "GET", pattern: /^\/v2\/explorations\/(xpl_[0-9A-HJKMNP-TV-Z]{26})$/, path: "/v2/explorations/<id>" },
+  { operation: "explorations.command", method: "POST", pattern: /^\/v2\/explorations\/commands$/, path: "/v2/explorations/commands" },
   { operation: "show", method: "GET", pattern: /^\/v2\/knowledge\/originals$/, path: "/v2/knowledge/originals" },
   { operation: "resource.read", method: "GET", pattern: /^\/v2\/resources\/([^/]+)$/, path: "/v2/resources/<id>" },
   { operation: "knowledge.ai-note", method: "POST", pattern: /^\/v2\/knowledge\/ai-note-commands$/, path: "/v2/knowledge/ai-note-commands" },
@@ -84,6 +87,11 @@ export async function handleV2(request: Request, server: Pick<Bun.Server<undefin
   try {
     if (decision.result !== "allow") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: decision.result === "deny" ? decision.reason : msg("v2.approval_required") });
     const url = new URL(request.url), id = route.pattern.exec(url.pathname)?.[1];
+    if (route.operation === "explorations.read" || route.operation === "explorations.command") {
+      const response = await modules.explorations.handle(request, id, identity);
+      audited = true;
+      return response;
+    }
     if (route.operation === "notices.read" || route.operation === "notices.command") {
       const response = await modules.notices.handle(request, route.operation, identity);
       audited = true;

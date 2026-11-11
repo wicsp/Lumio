@@ -14,6 +14,7 @@ import type { Trash } from "./trash.ts";
 import { stageDispatchOptions, validateTarget } from "./targets.ts";
 import { Notifications } from "./notifications.ts";
 import { Notices } from "./notices.ts";
+import { Explorations, Watchdog } from "./workbench-background.ts";
 import { WorkCommands } from "./work-commands.ts";
 import { text as msg } from "./messages.ts";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
@@ -64,6 +65,8 @@ export class BusinessModules {
   readonly knowledge?: KnowledgeService;
   readonly notifications: Notifications;
   readonly notices: Notices;
+  readonly explorations: Explorations;
+  private readonly watchdog: Watchdog;
   readonly workStore: SqliteWorkStore;
   readonly work: WorkService;
   readonly workCommands: WorkCommands;
@@ -161,6 +164,11 @@ export class BusinessModules {
       },
     });
     this.notices = new Notices(store, this, now, this.signal);
+    // A1-8 / A1-9：后台巡检与提前探索。探索优先用人的 API Profile，没有时用 Hub 的旧 API 设置。
+    this.explorations = new Explorations(store, this,
+      () => options.assistantModel ?? (config.assistantModel ? configuredModel(config.assistantModel) : undefined),
+      { max_tokens: config.explorationMaxTokens, max_ms: config.explorationMaxMs }, now, this.signal);
+    this.watchdog = new Watchdog(store, this.notices, () => this.workStore.tasks(), config.watchdogIntervalMinutes * 60_000, now);
     this.funAsr = new FunAsr(options.funAsr, this.signal);
     // Work's live database projects are public; the knowledge vault is never consulted.
     this.speech = new SpeechConfiguration(new SqliteSpeechStore(store.db), this.ai.store, this.funAsr,
@@ -185,6 +193,8 @@ export class BusinessModules {
       try { this.native.usage.tick(); } catch { /* The next tick can retry quota collection. */ }
       void this.notifications.drain().catch(() => {});
       void this.notices.drain().catch(() => { /* Pending sources are retained for the next pass. */ });
+      try { this.watchdog.tick(); } catch { /* The next interval reads the current state again. */ }
+      void this.explorations.drain().catch(() => { /* Failures are recorded on the exploration. */ });
       void this.assistant.drainWorkbenchSummaries(this.signal).catch(() => { /* The durable queue retains the source range. */ });
     }, 1000);
   }
