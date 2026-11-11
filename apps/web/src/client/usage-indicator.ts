@@ -1,6 +1,7 @@
 /**
  * 侧栏 AI 用量指示器：在侧栏底部、账号上方，每个开启监控的连接一行。
  * 订阅额度显示各窗口中最少的剩余百分比，细条依次是从短到长的窗口；API 余额显示余额。
+ * 每条细条上有一根竖线，表示离该窗口重置还剩的时间占比：亮条越过竖线说明额度撑得到重置，没到说明会提前用完。
  * 平时是灰色，低于监控阈值变黄，用完变红；收起侧栏时只剩一个圆环，表示最紧张的额度。
  * 点一行弹出详情（各窗口剩余与重置时间、刷新、去设置）。数据复用 ADR 0052 的用量接口，不新增契约。
  */
@@ -20,6 +21,8 @@ export type UsageGlance = {
   remaining?: number;
   /** 每个窗口的剩余百分比，从短窗口到长窗口，最多两条。 */
   bars: number[];
+  /** 与 bars 一一对应：离该窗口重置还剩的时间占窗口长度的百分比；缺少重置时间或窗口长度时为 undefined，不画竖线。 */
+  resets: Array<number | undefined>;
   /** 行尾显示的值：百分比、余额，或无法读取时的「—」。 */
   value: string;
 };
@@ -29,25 +32,33 @@ const BROKEN = new Set<AIQuotaView["status"]>(["credentials", "error", "unsuppor
 const SEVERITY: Record<UsageLevel, number> = { ok: 0, issue: 1, low: 2, empty: 3 };
 
 const remainingOf = (window: AIQuotaWindow) => Math.max(0, Math.round(100 - window.used_percent!));
+/** 离重置还剩的时间占窗口长度的百分比，限制在 0～100。 */
+export function timeLeftOf(window: AIQuotaWindow, now = Date.now()): number | undefined {
+  if (!window.minutes || !window.resets_at) return undefined;
+  const left = (Date.parse(window.resets_at) - now) / (window.minutes * 60_000);
+  return Number.isFinite(left) ? Math.min(100, Math.max(0, left * 100)) : undefined;
+}
 
-export function usageGlance(connection: AIConnection, usage: AIQuotaView): UsageGlance | undefined {
+export function usageGlance(connection: AIConnection, usage: AIQuotaView, now = Date.now()): UsageGlance | undefined {
   if (!usage.settings.monitor || usage.aliyun_billing_configured !== undefined) return undefined;
   const base = { connection: connection.id, name: connection.name };
   const snapshot = usage.snapshot;
-  if (!snapshot || BROKEN.has(usage.status) || usage.claude_issue) return { ...base, level: "issue", bars: [], value: "—" };
+  if (!snapshot || BROKEN.has(usage.status) || usage.claude_issue) return { ...base, level: "issue", bars: [], resets: [], value: "—" };
   if (snapshot.source === "deepseek") {
     const balance = snapshot.balances.find(b => b.currency === "CNY") ?? snapshot.balances[0];
     const level: UsageLevel = !snapshot.available ? "empty" : usage.attention ? "low" : "ok";
-    return { ...base, level, bars: [], value: balance ? amount(balance.currency, balance.total) : "—" };
+    return { ...base, level, bars: [], resets: [], value: balance ? amount(balance.currency, balance.total) : "—" };
   }
   if (!("windows" in snapshot)) return undefined;
   const windows = snapshot.windows.filter(window => window.used_percent !== undefined)
     .sort((a, b) => (a.minutes ?? Infinity) - (b.minutes ?? Infinity));
-  if (!windows.length) return { ...base, level: "issue", bars: [], value: "—" };
-  const bars = windows.slice(0, 2).map(remainingOf);
+  if (!windows.length) return { ...base, level: "issue", bars: [], resets: [], value: "—" };
+  const shown = windows.slice(0, 2);
+  const bars = shown.map(remainingOf);
+  const resets = shown.map(window => timeLeftOf(window, now));
   const remaining = Math.min(...windows.map(remainingOf));
   const level: UsageLevel = remaining === 0 ? "empty" : usage.attention ? "low" : "ok";
-  return { ...base, level, remaining, bars, value: `${remaining}%` };
+  return { ...base, level, remaining, bars, resets, value: `${remaining}%` };
 }
 
 /** 收起侧栏时的圆环：颜色取最严重的一行，弧长取订阅额度里最少的剩余；只有 API 余额时画满。 */
@@ -143,10 +154,17 @@ export class UsageIndicator {
       title: label, "aria-label": label, "aria-haspopup": "dialog", "aria-expanded": String(this.popover?.connection === g.connection),
       onclick: () => this.toggle(button, g.connection) },
       h("span", { class: "usage-name" }, g.name),
-      h("span", { class: "usage-bars", "aria-hidden": "true" }, ...g.bars.map(value => {
+      h("span", { class: "usage-bars", "aria-hidden": "true" }, ...g.bars.map((value, index) => {
         const fill = h("i");
         fill.style.width = `${value}%`; // CSP 不允许内联 style 属性，用 CSSOM 设置
-        return h("span", { class: "usage-bar" }, fill);
+        const bar = h("span", { class: "usage-bar" }, h("span", { class: "usage-track" }, fill));
+        const left = g.resets[index];
+        if (left !== undefined) {
+          const marker = h("b", { class: "usage-reset" });
+          marker.style.left = `${left}%`;
+          bar.append(marker);
+        }
+        return bar;
       })),
       h("span", { class: "usage-value" }, g.level === "issue" ? icon("alert") : g.value));
     return button;
