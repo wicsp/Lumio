@@ -379,7 +379,8 @@ export class AssistantService {
       }
       const fragments = this.store.recentFragments(conversation.id, anchors);
       const messages = resolution ? this.history([turn.user]) : this.history(records);
-      const tools = resolution?.clarify ? [] : this.tools;
+      // Clarify mode: keep read tools (search, get) but remove write tools (create, update)
+      const tools = resolution?.clarify ? this.tools.filter(tool => tool.effect === "read") : this.tools;
       const maximum = this.context.maxSteps ?? 12;
       for (let step = 0; step < maximum; step++) {
         signal.throwIfAborted();
