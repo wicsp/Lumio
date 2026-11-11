@@ -6,6 +6,7 @@
 import type { WebAssets } from "./build.ts";
 import { ICON_SVG, iconPng } from "./icons.ts";
 import { SERVICE_WORKER } from "./sw.ts";
+import { SPEECH_WORKLET } from "./speech-worklet.ts";
 
 export interface WebFile { body: string | Uint8Array; type: string }
 export interface PageOptions {
@@ -72,6 +73,7 @@ export function webFiles(assets: WebAssets, options: PageOptions): Map<string, W
     ["/assets/app.js", { body: assets.js, type: "text/javascript; charset=utf-8" }],
     ["/assets/app.css", { body: assets.css, type: "text/css; charset=utf-8" }],
     ["/sw.js", { body: SERVICE_WORKER, type: "text/javascript; charset=utf-8" }],
+    ["/assets/speech-worklet.js", { body: SPEECH_WORKLET, type: "text/javascript; charset=utf-8" }],
     ["/manifest.webmanifest", { body: JSON.stringify(MANIFEST), type: "application/manifest+json; charset=utf-8" }],
     ["/favicon.svg", { body: ICON_SVG, type: "image/svg+xml" }],
     ["/assets/icon.svg", { body: ICON_SVG, type: "image/svg+xml" }],

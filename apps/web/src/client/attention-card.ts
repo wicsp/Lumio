@@ -13,6 +13,7 @@ import { helperMissingNotice } from "./privileged-helper.ts";
 import { agentStages, checkpointCommand, type CheckpointAction } from "./plan.ts";
 import { finishCommand, handCommand } from "./turn.ts";
 import { autosize, clear, failure, h, icon, openMenu, select, toast } from "./dom.ts";
+import { speechButton } from "./speech-input.ts";
 import { ago } from "./format.ts";
 import { textDraft } from "./drafts.ts";
 import { t } from "./i18n.ts";
@@ -74,7 +75,7 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
       } catch (cause) { clear(error, failure(errorText(cause))); }
     });
     const submit = h("button", { type: "submit", class: "btn btn-primary btn-small", "data-pad-action": "primary" }, icon("send"), button);
-    const form = h("form", { class: "attn-composer" }, text, h("div", { class: "attn-composer-foot" }, chip, submit));
+    const form = h("form", { class: "attn-composer" }, text, h("div", { class: "attn-composer-foot" }, chip, speechButton(text), submit));
     let requestId = newRequestId(), previous = "";
     text.addEventListener("keydown", event => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); form.requestSubmit(); } });
     form.addEventListener("submit", event => {
@@ -126,7 +127,7 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
         const text = autosize(h("textarea", { rows: "2", placeholder: t("What should change?"), "aria-label": t("What should change?") }));
         textDraft(text, `checkpoint:${item.task}:${stage}`);
         const send = h("button", { type: "submit", class: "btn btn-primary btn-small", "data-pad-action": "primary" }, icon("undo"), t("Send back"));
-        const form = h("form", { class: "attn-composer" }, text, h("div", { class: "attn-composer-foot" }, h("label", { class: "attn-back" }, t("Back to"), to), send));
+        const form = h("form", { class: "attn-composer" }, text, h("div", { class: "attn-composer-foot" }, h("label", { class: "attn-back" }, t("Back to"), to), speechButton(text), send));
         form.addEventListener("submit", event => {
           event.preventDefault();
           if (!text.value.trim()) { text.focus(); return; }

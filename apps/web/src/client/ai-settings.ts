@@ -4,7 +4,8 @@
  * Profile 是「用哪个模型、怎么思考」，助手和执行器共用。密钥只写不读。
  */
 import type { AIConfiguration, AIConnection, AIProfile, AIQuotaView, AIRuntime, NativeSession, NativeConnectionView, NativeConnectionAction } from "@lumio/schema";
-import { TYPESAFE_JEV_BASE_URL } from "@lumio/schema";
+import { DASHSCOPE_BASE_URLS, TYPESAFE_JEV_BASE_URL } from "@lumio/schema";
+import { SpeechSettings } from "./speech-settings.ts";
 import { errorText, type Client } from "./api.ts";
 import { clear, failure, h, icon, openDialog, toast } from "./dom.ts";
 import { t } from "./i18n.ts";
@@ -17,7 +18,7 @@ type Kind = AIConnection["kind"];
 
 export const CONNECTION_KINDS: ReadonlyArray<readonly [Kind, string]> = [
   ["codex-account", "Codex account"], ["deepseek", "DeepSeek API"], ["doubao", "Doubao API"], ["openai-compatible", "Compatible API"],
-  ["typesafe-jev", "TypeSafe Jev"], ["claude-code-subscription", "Claude Code subscription"],
+  ["typesafe-jev", "TypeSafe Jev"], ["claude-code-subscription", "Claude Code subscription"], ["dashscope", "Alibaba Cloud Model Studio (speech)"],
 ];
 const BASE_URL: Partial<Record<Kind, string>> = { deepseek: "https://api.deepseek.com/v1", doubao: "https://ark.cn-beijing.volces.com/api/v3" };
 const DEEPSEEK_EFFORTS = ["low", "high", "max"];
@@ -25,11 +26,12 @@ const DEEPSEEK_EFFORTS = ["low", "high", "max"];
 export const kindLabel = (kind: Kind) => t(CONNECTION_KINDS.find(([value]) => value === kind)?.[1] ?? kind);
 
 export function profileConnections(connections: readonly AIConnection[]): AIConnection[] {
-  return connections.filter(connection => connection.kind !== "typesafe-jev" && connection.kind !== "claude-code-subscription");
+  return connections.filter(connection => connection.kind !== "typesafe-jev" && connection.kind !== "claude-code-subscription" && connection.kind !== "dashscope");
 }
 
 /** Profile 一行的副标题：引擎 · 模型 · 思考强度。 */
 export function profileSummary(profile: AIProfile, connection?: AIConnection): string {
+  if (profile.engine === "speech") return [connection ? connection.name : t("Missing connection"), profile.model, t("Voice input")].join(" · ");
   return [connection ? connection.name : t("Missing connection"), profile.model === "default" ? t("Client default model") : profile.model, profile.effort ?? t("Default effort")].join(" · ");
 }
 
@@ -67,11 +69,15 @@ export class AISettings {
   private newProfile = h("button", { type: "button", class: "btn btn-quiet btn-small", onclick: () => this.editProfile() }, icon("plus"), t("New profile"));
   private newConnection = h("button", { type: "button", class: "btn btn-quiet btn-small", onclick: () => this.editConnection() }, icon("plus"), t("Add connection"));
 
+  private speech: SpeechSettings;
+
   constructor(private client: Client, group: Group) {
+    this.speech = new SpeechSettings(client, kind => this.editConnection(undefined, kind), () => void this.load());
     this.element.append(
       group(t("Default assistant model"), t("New chats start with this profile. This preference is saved in this browser."), this.defaultRows),
       group(t("AI profiles"), t("Choose an API or an official Codex session. Profiles share model settings; each conversation keeps its own permissions and history."), this.profileRows, this.newProfile),
-      group(t("Connections"), t("Manage API connections, runtime sign-ins, and usage monitoring."), this.connectionRows, this.newConnection));
+      group(t("Connections"), t("Manage API connections, runtime sign-ins, and usage monitoring."), this.connectionRows, this.newConnection),
+      group(t("Voice input"), t("Dictate into text boxes with the mic button. Audio goes through the Hub to the speech service and isn't stored."), this.speech.element));
     for (const rows of [this.defaultRows, this.connectionRows, this.profileRows]) {
       clear(rows, h("p", { class: "set-empty" }, t("Loading…")));
     }
@@ -79,7 +85,7 @@ export class AISettings {
     this.usageTimer = setInterval(() => void this.loadUsage(), 30_000);
   }
 
-  dispose(): void { this.active = false; clearInterval(this.usageTimer); }
+  dispose(): void { this.active = false; clearInterval(this.usageTimer); this.speech.dispose(); }
 
   private async loadUsage(): Promise<void> {
     const version = ++this.usageVersion;
@@ -110,6 +116,7 @@ export class AISettings {
       }
       this.config = config; this.runtimes = runtimes; this.sessions = sessions;
       this.render();
+      this.speech.update(config);
       void this.loadUsage();
       await Promise.all(config.connections.filter(c => c.kind === "codex-account").map(async c => {
         try { this.auth.set(c.id, await this.client.nativeConnection(c.id)); } catch { /* Older Hub. */ }
@@ -130,7 +137,8 @@ export class AISettings {
     this.newProfile.disabled = !hasChatConnection;
     this.newProfile.title = hasChatConnection ? "" : t("Add a chat connection first.");
     clear(this.profileRows, ...(this.config.profiles.length ? this.config.profiles.map(profile => this.item(
-      profile.engine === "codex" ? "terminal" : "assistant", profile.name, profileSummary(profile, byId.get(profile.connection)), () => this.editProfile(profile)))
+      profile.engine === "codex" ? "terminal" : profile.engine === "speech" ? "mic" : "assistant", profile.name, profileSummary(profile, byId.get(profile.connection)),
+      () => profile.engine === "speech" ? this.speech.rename(profile) : this.editProfile(profile)))
       : [h("p", { class: "set-empty" }, hasChatConnection ? t("No profiles yet. Create one to choose a model for the assistant.") : t("Add a chat connection first, then create a profile."))]));
     this.renderConnections();
   }
@@ -156,7 +164,7 @@ export class AISettings {
   }
 
   private renderDefault(): void {
-    const profiles = this.config.profiles;
+    const profiles = this.config.profiles.filter(profile => profile.engine !== "speech");
     const owner = profiles[0]?.owner;
     if (!owner) {
       clear(this.defaultRows, h("p", { class: "set-empty" }, t("Add a chat connection and create a profile to choose a default.")));
@@ -190,9 +198,9 @@ export class AISettings {
     return h("label", { class: "field" }, h("span", { class: "field-label" }, label), control, hint && h("span", { class: "field-hint" }, hint));
   }
 
-  private editConnection(old?: AIConnection): void {
+  private editConnection(old?: AIConnection, preset?: Kind): void {
     const name = h("input", { required: true, maxLength: 100, value: old?.name ?? "", placeholder: t("Connection name"), autocomplete: "off" });
-    const kind = h("select", { disabled: !!old }, ...CONNECTION_KINDS.map(([value, label]) => h("option", { value, selected: (old?.kind ?? "deepseek") === value }, t(label))));
+    const kind = h("select", { disabled: !!old }, ...CONNECTION_KINDS.map(([value, label]) => h("option", { value, selected: (old?.kind ?? preset ?? "deepseek") === value }, t(label))));
     const host = h("select", { disabled: !!old },
       old && old.host !== "hub" && !this.runtimes.some(runtime => runtime.name === old.host)
         ? h("option", { value: old.host }, `${old.host} · ${t("Offline")}`) : undefined,
@@ -201,7 +209,8 @@ export class AISettings {
     const base = h("input", { type: "url", value: old?.base_url ?? "", placeholder: "https://…/v1", autocomplete: "off", spellcheck: "false" });
     const key = h("input", { type: "password", autocomplete: "new-password", spellcheck: "false" });
     const jevHint = h("p", { class: "field-hint" }, t("TypeSafe Jev is for structured decisions and is unavailable in chat profiles."));
-    const api = h("div", { class: "form-stack" }, this.field(t("API address"), base), this.field(t("API key"), key, t("Stored only on the Hub, never shown again, and never sent to agents.")), jevHint);
+    const speechHint = h("p", { class: "field-hint" }, t("For voice input only (Beijing region). Audio and your vocabulary are sent to Alibaba Cloud."));
+    const api = h("div", { class: "form-stack" }, this.field(t("API address"), base), this.field(t("API key"), key, t("Stored only on the Hub, never shown again, and never sent to agents.")), jevHint, speechHint);
     const authSection = h("section", { class: "codex-auth", "aria-label": t("Codex sign-in") });
     const samplingHint = h("p", { class: "field-hint" }, t("After saving, open Usage & balance to set up sampling."));
     const native = h("div", { class: "form-stack" },
@@ -212,23 +221,26 @@ export class AISettings {
       const codex = kind.value === "codex-account";
       const claude = kind.value === "claude-code-subscription";
       const jev = kind.value === "typesafe-jev";
+      const speech = kind.value === "dashscope";
+      speechHint.hidden = !speech;
       api.hidden = codex || claude; native.hidden = !(codex || claude);
       authSection.hidden = !codex;
       samplingHint.hidden = !claude;
       jevHint.hidden = !jev;
-      if (jev) {
-        editableAddress = base.value;
-        base.value = TYPESAFE_JEV_BASE_URL;
+      if (jev || speech) {
+        if (!base.readOnly) editableAddress = base.value;
+        // 语音首版只支持北京区域（ADR 0055 第 3 节）。
+        base.value = jev ? TYPESAFE_JEV_BASE_URL : old?.base_url ?? DASHSCOPE_BASE_URLS.beijing;
       } else if (base.readOnly) {
         base.value = editableAddress;
       }
-      base.readOnly = jev;
+      base.readOnly = jev || speech;
       const preset = BASE_URL[kind.value as Kind];
       if (!old && preset && (!base.value || Object.values(BASE_URL).includes(base.value))) base.value = preset;
       base.required = !(codex || claude);
-      key.required = jev && !old?.api_key_set;
+      key.required = (jev || speech) && !old?.api_key_set;
       key.placeholder = old?.api_key_set ? t("Saved. Leave blank to keep it.")
-        : jev ? t("Enter your TypeSafe API key") : t("Leave blank if the service needs no key");
+        : jev ? t("Enter your TypeSafe API key") : speech ? t("Enter your Model Studio API key") : t("Leave blank if the service needs no key");
     };
     kind.addEventListener("change", () => { key.value = ""; sync(); });
     sync();

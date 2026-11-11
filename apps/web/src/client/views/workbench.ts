@@ -19,6 +19,8 @@ import { TrashPane } from "../panes/trash.ts";
 import { DEFAULT_BINDINGS, GamepadInput } from "../gamepad-input.ts";
 import { padButtonLabel } from "../gamepad-settings.ts";
 import { GamepadNavigation } from "../gamepad-navigation.ts";
+import { SpeechService, setSpeechService, speechKey } from "../speech-input.ts";
+import type { PadInput } from "../gamepad-input.ts";
 import { UsageIndicator } from "../usage-indicator.ts";
 
 /** 记住侧栏是否收起（只影响本设备）。 */
@@ -39,6 +41,9 @@ type MountedPane = { target: HTMLElement; pane: Pane };
 
 export class WorkbenchView {
   private gamepad: GamepadInput;
+  private speech: SpeechService;
+  /** RT 按住说话（G1-4）时正在录音的输入框。 */
+  private talking?: Element;
   private padNavigation: GamepadNavigation;
   private unsubscribePadStatus: () => void;
   private toastReturn?: { section: Section; id?: string };
@@ -135,7 +140,9 @@ export class WorkbenchView {
       paletteAction: step => this.palette.gamepad(step),
     });
     this.padNavigation.mount();
-    this.gamepad = new GamepadInput(input => this.padNavigation.handle(input));
+    this.speech = new SpeechService(session);
+    setSpeechService(this.speech);
+    this.gamepad = new GamepadInput(input => { if (!this.talk(input)) this.padNavigation.handle(input); });
     const warned = new Set<string>();
     this.unsubscribePadStatus = this.gamepad.subscribe(({ pad }) => {
       if (pad && pad.mapping !== "standard" && !warned.has(pad.id)) {
@@ -329,7 +336,29 @@ export class WorkbenchView {
     return this.current?.pane.canLeave?.() ?? true;
   }
 
+  /** 手柄 RT（G1-4）：按下时对当前输入框录音；焦点不在可录音的输入框时先打开助手输入框。返回 true 表示已处理。 */
+  private talk(input: PadInput): boolean {
+    if (!("command" in input) || input.command !== "talk") return false;
+    if (input.phase === "release") {
+      if (this.talking) speechKey("release", this.talking);
+      this.talking = undefined;
+      return true;
+    }
+    if (input.phase !== "press" || !this.speech.ready) return true;
+    const focused = document.activeElement;
+    if (focused && speechKey("press", focused)) { this.talking = focused; return true; }
+    void (async () => {
+      if (this.section !== "assistant") await this.go("assistant");
+      const field = this.current?.target.querySelector<HTMLTextAreaElement>("textarea[name=chat-message]");
+      if (!field || field.disabled) return;
+      field.focus();
+      if (speechKey("press", field)) this.talking = field;
+    })();
+    return true;
+  }
+
   dispose(): void {
+    setSpeechService(undefined);
     this.unsubscribePadStatus();
     this.gamepad.dispose();
     this.padNavigation.dispose();

@@ -10,6 +10,7 @@ import type { AIConnection, AIProfile, NativeCreate, NativeEventRecord, Assistan
 import { errorText, type Client, type HubExtras } from "../api.ts";
 import { formatTime, newRequestId } from "../commands.ts";
 import { autosize, clear, empty, failure, h, icon, loading, openDialog, toast } from "../dom.ts";
+import { speechButton } from "../speech-input.ts";
 import { ago } from "../format.ts";
 import { renderMarkdown } from "../utils/markdown.ts";
 import { toolCallView } from "../tool-call-view.ts";
@@ -94,7 +95,7 @@ export class AssistantPane {
     this.composer = h("form", { class: "composer" }, this.text,
       h("div", { class: "composer-foot" },
         h("div", { class: "chat-turn-controls" }, this.profile, this.apiControls, this.native.controls, this.native.advanced),
-        this.stop, this.send));
+        speechButton(this.text), this.stop, this.send));
     this.composer.addEventListener("submit", event => { event.preventDefault(); void this.submit(); });
     this.text.addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); this.composer.requestSubmit(); } });
     this.dock = h("div", { class: "chat-dock" }, this.native.element, this.notice, this.profileStatus, this.composer);
@@ -164,7 +165,7 @@ export class AssistantPane {
   private loadProfiles(): Promise<void> {
     return this.profileLoad ??= this.client.aiConfiguration().then(config => {
       if (!this.active) return;
-      this.profiles = config.profiles;
+      this.profiles = config.profiles.filter(profile => profile.engine !== "speech"); // 语音 Profile 不能用于聊天（ADR 0055）
       this.connections = config.connections;
       this.profilesLoaded = true;
       this.renderProfiles();

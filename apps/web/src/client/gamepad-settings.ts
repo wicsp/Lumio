@@ -5,7 +5,7 @@ import { t } from "./i18n.ts";
 export const PAD_LABELS: Record<PadCommand, string> = {
   up: "Move up", down: "Move down", left: "Move left", right: "Move right", activate: "Open / primary action",
   back: "Back / leave input", delegate: "Delegate / reject", more: "More actions", previous: "Previous section", next: "Next section",
-  view: "Notification action", palette: "Command menu", talk: "Hold to talk (G1-4)",
+  view: "Notification action", palette: "Command menu", talk: "Hold to talk",
 };
 
 export function padButtonLabel(index: number, pad?: PadSample): string {
@@ -24,7 +24,7 @@ export class GamepadSettings {
 
   constructor(private input: GamepadInput) {
     this.element.append(this.status,
-      h("p", { class: "muted" }, t("Connect a controller and press a button. Left stick moves focus. Right stick scrolls. Hold a dangerous action for one second. RT speech requires G1-4.")),
+      h("p", { class: "muted" }, t("Connect a controller and press a button. Left stick moves focus. Right stick scrolls. Hold a dangerous action for one second. Hold RT to talk when voice input is on.")),
       h("div", { class: "button-row" }, this.test, h("button", { type: "button", class: "btn btn-small", onclick: () => {
         this.configure({ ...DEFAULT_BINDINGS });
       } }, t("Restore defaults"))), this.readout, this.mappings);

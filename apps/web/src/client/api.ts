@@ -2,7 +2,8 @@
  * 浏览器会话（ADR 0026）：请求会话持有令牌；保存与恢复由 App 负责。登出或 401 时中止所有未完成请求。
  */
 import { ApiClientError, createClient } from "@lumio/api-client";
-import type { AssistantConfigUpdate, AssistantConfigView, AssistantToolCall, WorkAttention } from "@lumio/schema";
+import { ApiError } from "@lumio/schema";
+import type { AssistantConfigUpdate, AssistantConfigView, AssistantToolCall, SpeechBinding, SpeechBindingUpdate, SpeechVocabulary, SpeechVocabularyUpdate, WorkAttention } from "@lumio/schema";
 import { acceptLanguage, t } from "./i18n.ts";
 
 /**
@@ -24,6 +25,8 @@ export interface Session {
   health(): Promise<{ ok: boolean; version?: string }>;
   /** ADR 0029/0030 的接口，处理旧 Hub 没有接口的情况。 */
   hub: HubExtras;
+  /** 语音 WebSocket 的第一条消息需要令牌（ADR 0055 第 2 节：浏览器 WebSocket 不能带 Authorization 头）。 */
+  readonly token?: string;
 }
 
 export interface HubExtras {
@@ -35,6 +38,11 @@ export interface HubExtras {
   assistantTools(conversation: string): Promise<AssistantToolCall[]>;
   saveAssistantConfig(update: AssistantConfigUpdate): Promise<AssistantConfigView>;
   clearAssistantConfig(): Promise<AssistantConfigView>;
+  /** 语音（ADR 0055）：旧 Hub 没有这些接口时 speechBindings 返回 []，界面不显示麦克风。 */
+  speechBindings(): Promise<SpeechBinding[]>;
+  saveSpeechBinding(update: SpeechBindingUpdate): Promise<SpeechBinding | null>;
+  speechVocabulary(): Promise<SpeechVocabulary>;
+  saveSpeechVocabulary(update: SpeechVocabularyUpdate): Promise<SpeechVocabulary>;
 }
 
 /** 返回绑定当前页面 API 地址（见 apiBase）的会话；任何 401 都调用 onUnauthorized。 */
@@ -60,6 +68,18 @@ export function createSession(token: string | undefined, onUnauthorized: () => v
     const body = await response.json() as { ok?: unknown; version?: unknown };
     return { ok: body.ok === true, ...(typeof body.version === "string" ? { version: body.version } : {}) };
   };
+  // 语音配置接口不在 api-client 的路由表里（ADR 0055）：直接用同一个 fetcher，错误按 ApiError 转成 ApiClientError。
+  const speechRequest = async <T>(path: "bindings" | "vocabulary", body?: unknown): Promise<T> => {
+    const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+    if (body !== undefined) headers["Content-Type"] = "application/json";
+    const response = await fetcher(`${apiBase()}/v2/speech/${path}`, { method: body === undefined ? "GET" : "PUT", headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    const data: unknown = await response.json().catch(() => undefined);
+    if (!response.ok) {
+      const parsed = ApiError.safeParse(data);
+      throw new ApiClientError(parsed.success ? parsed.data.error : { code: "INTERNAL", message: `HTTP ${response.status}` }, response.status);
+    }
+    return data as T;
+  };
   // 旧 Hub（R3-2 之前）没有这些接口：需要你处理退回按 Job 显示，工具记录为空。
   const missing = (cause: unknown) => cause instanceof ApiClientError && cause.code === "NOT_FOUND";
   const hub: HubExtras = {
@@ -69,8 +89,12 @@ export function createSession(token: string | undefined, onUnauthorized: () => v
     saveAssistantConfig: (update) => client.updateAssistantConfig(update),
     clearAssistantConfig: () => client.clearAssistantConfig(),
     assistantTools: (conversation) => client.assistantTools(conversation).catch((cause: unknown) => { if (missing(cause)) return []; throw cause; }),
+    speechBindings: () => speechRequest<SpeechBinding[]>("bindings").catch((cause: unknown) => { if (missing(cause)) return []; throw cause; }),
+    saveSpeechBinding: (update) => speechRequest<SpeechBinding | null>("bindings", update),
+    speechVocabulary: () => speechRequest<SpeechVocabulary>("vocabulary"),
+    saveSpeechVocabulary: (update) => speechRequest<SpeechVocabulary>("vocabulary", update),
   };
-  return { client, health, hub, signal: controller.signal, close: () => {closed=true;controller.abort();} };
+  return { client, health, hub, ...(token ? { token } : {}), signal: controller.signal, close: () => {closed=true;controller.abort();} };
 }
 
 const CODE_TEXT: Record<string, string> = {
