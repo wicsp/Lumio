@@ -343,7 +343,11 @@ export class WorkbenchResources {
       !summaries.some(summary => summary.start <= index && index <= summary.end)).slice(0, budgets.anchorTurns);
     const eligible = [];
     for (const { turn, index } of new Map([...matching, ...recent].map(item => [item.index, item])).values()) {
-      if (!resolution.clarify && await this.visible(turn.anchors)) eligible.push({ index, messages: turn.messages });
+      // In clarify mode, keep recent messages (last 2 turns) even without visible anchors
+      const keepInClarify = resolution.clarify && byRecency.indexOf(byRecency.find(item => item.index === index)!) < 2;
+      if (keepInClarify || (!resolution.clarify && await this.visible(turn.anchors))) {
+        eligible.push({ index, messages: turn.messages });
+      }
     }
     const messages = takeWithin(eligible, budgets.historyBytes).sort((left, right) => left.index - right.index).flatMap(turn => turn.messages);
     const notices = await this.adapter.pendingNotices?.(this.scope.owner, this.actor, this.signal, this.scope) ?? [];
