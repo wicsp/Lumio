@@ -53,6 +53,36 @@ describe("T1-4 structure helpers", () => {
     expect(ids).toEqual([id(5), id(6)]); // open before done
   });
 
+  test("prerequisite candidates only include other tasks in the same project", () => {
+    const project = "prj_01JABCDEFGHJKMNPQRSTVWXYZ0";
+    const current = task(1, { project });
+    const candidates = [
+      current, task(2, { project }),
+      task(3, { project: "prj_01JABCDEFGHJKMNPQRSTVWXYZ1" }),
+      task(4),
+    ];
+    expect(prerequisiteCandidates(current, candidates).map(value => value.id)).toEqual([id(2)]);
+    expect(prerequisiteCandidates(current, [current, candidates[2]!, candidates[3]!])).toEqual([]);
+  });
+
+  test("tasks without a project only offer other tasks without a project", () => {
+    const current = task(1);
+    const candidates = [current, task(2), task(3, { project: "prj_01JABCDEFGHJKMNPQRSTVWXYZ0" })];
+    expect(prerequisiteCandidates(current, candidates).map(value => value.id)).toEqual([id(2)]);
+  });
+
+  test("cycle detection still follows existing dependencies through other projects", () => {
+    const project = "prj_01JABCDEFGHJKMNPQRSTVWXYZ0";
+    const current = task(1, { project });
+    const candidates = [
+      current,
+      task(2, { project: "prj_01JABCDEFGHJKMNPQRSTVWXYZ1", dependencies: [id(1)] }),
+      task(3, { project, dependencies: [id(2)] }),
+      task(4, { project }),
+    ];
+    expect(prerequisiteCandidates(current, candidates).map(value => value.id)).toEqual([id(4)]);
+  });
+
   test("parent candidates exclude self and every descendant", () => {
     const ids = parentCandidates(tasks[4]!, tasks).map(value => value.id); // T5 is parent of T4, T4 of T6
     expect(ids).not.toContain(id(5));
