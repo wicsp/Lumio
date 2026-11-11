@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { AIConnection, AIQuotaView } from "@lumio/schema";
-import { usageGlance, usageRing } from "../../src/client/usage-indicator.ts";
+import { timeLeftOf, usageGlance, usageRing } from "../../src/client/usage-indicator.ts";
 
 const at = "2026-11-10T12:00:00+08:00";
 const connection = (kind: "codex-account" | "claude-code-subscription" | "deepseek", name: string, id: string) => AIConnection.parse({
@@ -32,7 +32,7 @@ describe("sidebar usage indicator", () => {
   test("API balances show the CNY total and become empty when calls are blocked", () => {
     const balances = [{ currency: "USD", total: "3.00", topped_up: "3.00", granted: "0" }, { currency: "CNY", total: "48.20", topped_up: "40.00", granted: "8.20" }] as const;
     expect(usageGlance(deepseek, view(deepseek.id, { snapshot: { source: "deepseek", sampled_at: at, available: true, balances: [...balances] } })))
-      .toMatchObject({ level: "ok", value: "¥48.20", bars: [] });
+      .toMatchObject({ level: "ok", value: "¥48.20", bars: [], resets: [] });
     expect(usageGlance(deepseek, view(deepseek.id, { snapshot: { source: "deepseek", sampled_at: at, available: false, balances: [...balances] } }))?.level).toBe("empty");
   });
   test("unmonitored connections are hidden and broken sources show an issue", () => {
@@ -53,5 +53,17 @@ describe("sidebar usage indicator", () => {
     expect(usageRing(glances)).toEqual({ level: "low", remaining: 12 });
     expect(usageRing([glances[2]!])).toEqual({ level: "issue", remaining: 100 });
     expect(usageRing([])).toBeUndefined();
+  });
+
+  test("each bar carries the share of its window left before reset", () => {
+    const now = Date.parse(at);
+    const glance = usageGlance(codex, view(codex.id, { snapshot: { source: "codex", sampled_at: at, windows: [
+      { id: "five_hour", minutes: 300, used_percent: 30, resets_at: "2026-11-10T15:30:00+08:00" },
+      { id: "seven_day", minutes: 10080, used_percent: 50 },
+    ] } }), now);
+    expect(glance).toMatchObject({ bars: [70, 50], resets: [70, undefined] });
+    expect(timeLeftOf({ id: "w", minutes: 60, resets_at: "2026-11-10T11:00:00+08:00" }, now)).toBe(0);
+    expect(timeLeftOf({ id: "w", minutes: 60, resets_at: "2026-11-10T15:00:00+08:00" }, now)).toBe(100);
+    expect(timeLeftOf({ id: "w", resets_at: at }, now)).toBeUndefined();
   });
 });
