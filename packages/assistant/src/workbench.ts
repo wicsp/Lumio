@@ -38,6 +38,9 @@ export interface AssistantFragmentSource {
   anchors: readonly ResourceRef[];
 }
 
+/** Each source range can reserve at most three provider calls, including failed or interrupted calls. */
+export const ASSISTANT_FRAGMENT_MAX_ATTEMPTS = 3;
+
 export interface AssistantFragment extends AssistantFragmentSource {
   attempts: number;
   summary?: string;
@@ -150,6 +153,12 @@ function sameAnchors(left: readonly ResourceRef[], right: readonly ResourceRef[]
   return left.length === right.length && left.every(ref => right.some(other => other.id === ref.id));
 }
 
+/** Only a changed primary or selected object set is a topic signal. */
+export function sameWorkbenchFocus(left?: FocusSnapshot, right?: FocusSnapshot): boolean {
+  return left?.primary?.id === right?.primary?.id &&
+    sameAnchors(unique(left?.selected ?? []), unique(right?.selected ?? []));
+}
+
 export function fragmentOnSwitch(
   conversation: string,
   history: readonly HistoricalTurn[],
@@ -250,7 +259,7 @@ export class WorkbenchResources {
     return resources.every(value => value !== undefined);
   }
 
-  async resolve(message: string, previous: readonly ResourceRef[], focus?: FocusSnapshot): Promise<Resolution> {
+  async resolve(message: string, previous: readonly ResourceRef[], focus: FocusSnapshot | undefined, focusChanged: boolean): Promise<Resolution> {
     const explicit = referencedIds(message);
     const candidates = unique([...(focus?.selected ?? []), ...(focus?.primary ? [focus.primary] : []), ...previous, ...explicit.slice(0, budgets.anchors)]);
     const visible = new Map<string, AssistantAnchorResource>();
@@ -281,12 +290,14 @@ export class WorkbenchResources {
     if (titled.length === 1 || (titled.length > 1 && requestsMultiple.test(message) && titled.length <= budgets.anchors)) {
       return { anchors: titled, focus: safeFocus, clarify: false };
     }
-    if (titled.length || changesTopic.test(message)) return { anchors: [], focus: safeFocus, clarify: true };
-    if (selected.length || focus?.selected.length) {
+    if (titled.length) return { anchors: [], focus: safeFocus, clarify: true };
+    const preferFocus = focusChanged || !previous.length;
+    if (preferFocus && focus?.selected.length) {
       const ambiguous = !selectedVisible || selected.length > budgets.anchors || (selected.length > 1 && !requestsMultiple.test(message));
       return { anchors: ambiguous ? [] : selected, focus: safeFocus, clarify: ambiguous };
     }
-    if (focus?.primary) return { anchors: primary ? [primary] : [], focus: safeFocus, clarify: !primary };
+    if (preferFocus && focus?.primary) return { anchors: primary ? [primary] : [], focus: safeFocus, clarify: !primary };
+    if (changesTopic.test(message)) return { anchors: [], focus: safeFocus, clarify: true };
 
     const anchors = available(previous);
     const clarify = anchors.length !== previous.length || (pointsToObject.test(message) &&

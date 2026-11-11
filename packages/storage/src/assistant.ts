@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Database } from "bun:sqlite";
 import { AssistantConversation, AssistantMessage, AssistantTurn, AssistantToolCall, AssistantMemory, AssistantMemoryCommandResult, AssistantModelRequest, ResourceRef, TrashItem, Timestamp, idOf } from "@lumio/schema";
-import { AssistantError, type AssistantFragment, type AssistantFragmentSource, type AssistantStore } from "@lumio/assistant";
+import { ASSISTANT_FRAGMENT_MAX_ATTEMPTS, AssistantError, type AssistantFragment, type AssistantFragmentSource, type AssistantStore } from "@lumio/assistant";
 import { StorageError } from "./errors.ts";
 
 const conversationAnchors = `
@@ -201,27 +201,27 @@ export class SqliteAssistantStore implements AssistantStore {
     `).all(conversation, JSON.stringify(anchors.map(ref => ref.id))).map(fragmentFromRow);
   }
   nextFragment(now: string): AssistantFragment | undefined {
-    const row = this.db.query<FragmentRow, [string]>(`
+    const row = this.db.query<FragmentRow, [string, number]>(`
       SELECT fragment.* FROM assistant_fragments AS fragment
-      WHERE fragment.summary IS NULL AND fragment.retry_at<=?
+      WHERE fragment.summary IS NULL AND fragment.retry_at<=? AND fragment.attempts<?
         AND NOT EXISTS (SELECT 1 FROM assistant_trash WHERE id=fragment.conversation)
       ORDER BY fragment.retry_at,fragment.rowid LIMIT 1
-    `).get(Timestamp.parse(now));
+    `).get(Timestamp.parse(now), ASSISTANT_FRAGMENT_MAX_ATTEMPTS);
     return row ? fragmentFromRow(row) : undefined;
   }
   deferFragment(fragment: AssistantFragment, retryAt: string): void {
     this.db.query(`
       UPDATE assistant_fragments SET retry_at=?
-      WHERE first_message=? AND last_message=? AND attempts=? AND summary IS NULL AND retry_at<?
-    `).run(Timestamp.parse(retryAt), fragment.firstMessage, fragment.lastMessage, fragment.attempts, retryAt);
+      WHERE first_message=? AND last_message=? AND attempts=? AND summary IS NULL AND retry_at<? AND attempts<?
+    `).run(Timestamp.parse(retryAt), fragment.firstMessage, fragment.lastMessage, fragment.attempts, retryAt, ASSISTANT_FRAGMENT_MAX_ATTEMPTS);
   }
   startFragment(fragment: AssistantFragment, request: AssistantModelRequest, actor: string, now: string, retryAt: string): boolean {
     return this.db.transaction(() => {
       const result = this.db.query(`
         UPDATE assistant_fragments SET attempts=attempts+1,retry_at=?
-        WHERE first_message=? AND last_message=? AND attempts=? AND summary IS NULL AND retry_at<=?
+        WHERE first_message=? AND last_message=? AND attempts=? AND summary IS NULL AND retry_at<=? AND attempts<?
           AND NOT EXISTS (SELECT 1 FROM assistant_trash WHERE id=assistant_fragments.conversation)
-      `).run(Timestamp.parse(retryAt), fragment.firstMessage, fragment.lastMessage, fragment.attempts, Timestamp.parse(now));
+      `).run(Timestamp.parse(retryAt), fragment.firstMessage, fragment.lastMessage, fragment.attempts, Timestamp.parse(now), ASSISTANT_FRAGMENT_MAX_ATTEMPTS);
       if (!result.changes) return false;
       this.db.query(`
         INSERT INTO assistant_fragment_requests(first_message,last_message,attempt,request,created,tool_actor)
