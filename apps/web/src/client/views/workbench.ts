@@ -16,6 +16,8 @@ import type { Navigate, Pane, Section } from "../navigation.ts";
 import { t } from "../i18n.ts";
 import { SettingsPane } from "../panes/settings-page.ts";
 import { TrashPane } from "../panes/trash.ts";
+import { GamepadInput } from "../gamepad-input.ts";
+import { GamepadNavigation } from "../gamepad-navigation.ts";
 import { UsageIndicator } from "../usage-indicator.ts";
 
 /** 记住侧栏是否收起（只影响本设备）。 */
@@ -35,6 +37,8 @@ type PaneKey = Section | "projects";
 type MountedPane = { target: HTMLElement; pane: Pane };
 
 export class WorkbenchView {
+  private gamepad: GamepadInput;
+  private padNavigation: GamepadNavigation;
   private main = h("main", { class: "main", id: "content", tabindex: "-1" });
   private nav = new Map<Section, HTMLButtonElement>();
   private counts = new Map<Section, HTMLElement>();
@@ -57,12 +61,18 @@ export class WorkbenchView {
     this.show(route.section, route.id);
   };
   private readonly onKey = (event: KeyboardEvent) => {
+    if (event.defaultPrevented) return;
     const mod = event.metaKey || event.ctrlKey;
     if (mod && event.key.toLowerCase() === "k") { event.preventDefault(); this.palette.open(); return; }
     if (typing(event) || mod || event.altKey || document.querySelector("dialog[open]")) return;
     const section = SECTIONS.find(s => s.key2 === event.key);
     if (section) { event.preventDefault(); this.go(section.key); return; }
     if (event.key === "c") { event.preventDefault(); this.go("work", undefined, "new"); return; }
+    if (this.section === "overview" && ["j", "k", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
+      const step = ["k", "ArrowUp", "ArrowLeft"].includes(event.key) ? -1 : 1;
+      if (this.padNavigation.move(step)) event.preventDefault();
+      return;
+    }
     if (event.key === "/") {
       const search = this.current?.target.querySelector<HTMLInputElement>("input[type=search]");
       if (search && search.offsetParent !== null) { event.preventDefault(); search.focus(); search.select(); }
@@ -93,6 +103,26 @@ export class WorkbenchView {
     this.disposeReferenceLinks = referenceLinks(this.main, session.client, ref => this.go("knowledge",ref));
     this.disposeResourceLinks = resourceLinks(this.main, session.client, (section, id, intent) => void this.go(section, id, intent));
     this.palette = new CommandPalette(session.client, (section, id, intent) => this.go(section, id, intent));
+    this.padNavigation = new GamepadNavigation({
+      pane: () => this.current?.target,
+      back: () => { if (this.section === "settings") this.leaveSettings(); else void this.go("overview"); },
+      section: step => {
+        const index = SECTIONS.findIndex(s => s.key === this.section);
+        const next = SECTIONS[(index + step + SECTIONS.length) % SECTIONS.length]!;
+        void this.go(next.key);
+      },
+      delegate: id => this.current?.pane.intent?.(`delegate:${id}`),
+      palette: () => this.palette.open(true),
+      paletteAction: step => this.palette.gamepad(step),
+    });
+    this.gamepad = new GamepadInput(input => {
+      const test = this.current?.target.querySelector<HTMLElement>("[data-pad-testing]");
+      if (test && test.getClientRects().length) {
+        if ("command" in input && input.phase === "press" && input.command === "back") test.removeAttribute("data-pad-testing");
+        return;
+      }
+      this.padNavigation.handle(input);
+    });
     const nav = h("nav", { class: "nav", "aria-label": t("Main navigation") });
     for (const s of SECTIONS) {
       if (s.key === "execution") nav.append(h("p", { class: "nav-group-label" }, t("Automation")));
@@ -205,6 +235,7 @@ export class WorkbenchView {
       if (id || section === "settings") mounted.pane.open?.(id ?? "");
     }
     this.current = mounted;
+    this.padNavigation.reset();
     if (intent) mounted.pane.intent?.(intent);
   }
 
@@ -216,7 +247,7 @@ export class WorkbenchView {
     const changed = () => void this.refreshCounts();
     let pane: Pane;
     if (section === "overview") pane = new OverviewPane(target, client, this.session.hub, navigate, this.name, changed);
-    else if (section === "settings") pane = new SettingsPane(target, this.session, this.name, () => void this.signOut(), () => this.leaveSettings(), sub => void this.go("settings", sub), id);
+    else if (section === "settings") pane = new SettingsPane(target, this.session, this.name, () => void this.signOut(), () => this.leaveSettings(), sub => void this.go("settings", sub), id, this.gamepad);
     else if (section === "knowledge") pane = new KnowledgePane(target, client, id);
     else if (section === "work") pane = new WorkPane(target, client, this.session.hub, this.workMode, id, navigate, changed);
     else if (section === "execution") pane = new ExecutionPane(target, client, this.session.hub, id, navigate, changed);
@@ -273,6 +304,8 @@ export class WorkbenchView {
   }
 
   dispose(): void {
+    this.gamepad.dispose();
+    this.padNavigation.reset();
     this.disposeReferenceLinks();
     this.disposeResourceLinks();
     this.routeGeneration++;

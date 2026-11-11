@@ -13,6 +13,8 @@ import { onTheme, setTheme, themeChoice, type ThemeChoice } from "../theme.ts";
 import { LANGS, THEMES } from "../settings.ts";
 import { AISettings } from "../ai-settings.ts";
 import { AgentsSettings } from "../agents-settings.ts";
+import type { GamepadInput } from "../gamepad-input.ts";
+import { GamepadSettings } from "../gamepad-settings.ts";
 import { NotificationSettings } from "../notification-settings.ts";
 import { DEFAULT_SETTINGS_SECTION, SETTINGS_SECTIONS, settingsSection, type SettingsSection } from "../settings-sections.ts";
 
@@ -34,7 +36,7 @@ export class SettingsPane {
   private health?: Promise<Health>;
 
   constructor(owner: HTMLElement, private session: Session, private name: string, private logout: () => void,
-    private back: () => void, private navigate: (section?: SettingsSection) => void, initial?: string) {
+    private back: () => void, private navigate: (section?: SettingsSection) => void, initial?: string, private gamepad?: GamepadInput) {
     const bar = h("header", { class: "bar set-bar" },
       h("button", { type: "button", class: "icon-btn mobile-only", title: t("Back"), "aria-label": t("Back"), onclick: () => this.goBack() }, icon("back")),
       this.title);
@@ -102,13 +104,16 @@ export class SettingsPane {
     const page = (...children: Array<Node | null | undefined | false>) => h("div", { class: "set-page" },
       h("header", { class: "set-head" }, h("h2", { class: "set-title" }, t(info.label)), h("p", { class: "set-lede" }, t(info.hint))), ...children);
     switch (key) {
-      case "general":
+      case "general": {
+        const gamepad = this.gamepad ? new GamepadSettings(this.gamepad) : undefined;
         return { element: page(
           this.group(t("Appearance"), t("Choose how Lumio looks on this device."), this.themes()),
           this.group(t("Language"), t("Used for menus, dates and messages from the Hub."), this.languages()),
           this.group(t("Keyboard shortcuts"), undefined, h("div", { class: "set-rows" },
             this.row(t("Command menu"), h("span", { class: "set-value" }, h("kbd", {}, "⌘K"))),
-            this.row(t("Switch sections"), h("span", { class: "set-value" }, h("kbd", {}, "1"), "–", h("kbd", {}, "6")))))) };
+            this.row(t("Switch sections"), h("span", { class: "set-value" }, h("kbd", {}, "1"), "–", h("kbd", {}, "6"))))),
+          gamepad && this.group(t("Gamepad"), undefined, gamepad.element)), dispose: () => gamepad?.dispose() };
+      }
       case "notifications": {
         const notifications = new NotificationSettings(this.session.client);
         return { element: page(this.group("", t("Lumio notifies you only when it's your turn to answer, review or handle a failed round, and when an agent asks for approval. Notifications show the task title only."), notifications.element)),

@@ -7,16 +7,17 @@ import type { WorkProject, WorkTask, WorkTaskDetail } from "@lumio/schema";
 import { PROJECT_STATUSES } from "@lumio/schema";
 import { errorText, isConflict, type Client, type HubExtras } from "../api.ts";
 import { newRequestId, projectCreateCommand, taskCreateCommand } from "../commands.ts";
-import { autosize, clear, confirmDialog, debounce, empty, failure, field, h, icon, loading, openDialog, openMenu, placeholder, promptDialog, select, statusIcon, toast } from "../dom.ts";
+import { autosize, clear, debounce, empty, failure, field, h, icon, loading, openDialog, openMenu, placeholder, select, statusIcon, toast } from "../dom.ts";
 import { drafts } from "../drafts.ts";
 import { confirmDelete, deletableRow } from "../trash-actions.ts";
 import { dueLabel } from "../format.ts";
 import { PROJECT_LABELS } from "../labels.ts";
-import { TURN_ACTION_DONE, TURN_ACTION_ICONS, TURN_ACTION_LABELS, TURN_GROUPS, TURN_GROUP_LABELS, isBlocked, turnActionCommand, turnActions, turnGroup, turnIcon, turnText, type TurnAction, type TurnGroup } from "../turn.ts";
+import { TURN_GROUPS, TURN_GROUP_LABELS, isBlocked, turnGroup, turnIcon, turnText, type TurnGroup } from "../turn.ts";
 import { allTags, blockingTitles } from "../task-structure.ts";
 import { listKeys, markSelected } from "../list-keys.ts";
 import type { Navigate } from "../navigation.ts";
 import { WorkEditor } from "./work-editor.ts";
+import { taskTurnMenu } from "../turn-menu.ts";
 import { t } from "../i18n.ts";
 
 type Mode = "tasks" | "projects";
@@ -58,8 +59,8 @@ export class WorkPane {
       h("header", { class: "bar" },
         h("h1", { class: "bar-title" }, t("Work")),
         h("div", { class: "segmented", role: "group", "aria-label": t("View") },
-          h("button", { type: "button", "aria-pressed": String(mode === "tasks"), onclick: () => navigate("work", "tasks") }, t("Tasks")),
-          h("button", { type: "button", "aria-pressed": String(mode === "projects"), onclick: () => navigate("work", "projects") }, t("Projects"))),
+          h("button", { type: "button", "data-pad-row": "work:tasks", "aria-pressed": String(mode === "tasks"), onclick: () => navigate("work", "tasks") }, t("Tasks")),
+          h("button", { type: "button", "data-pad-row": "work:projects", "aria-pressed": String(mode === "projects"), onclick: () => navigate("work", "projects") }, t("Projects"))),
         h("span", { class: "bar-spacer" }),
         h("button", { type: "button", class: "icon-btn", title: t("Refresh"), "aria-label": t("Refresh"), onclick: (event: Event) => { spin(event); void this.load(); if (this.selected) void this.open(this.selected, true); } }, icon("refresh")),
         h("button", { type: "button", class: "btn btn-primary", title: t("New (C)"), onclick: () => this.create() }, icon("plus"), h("span", { class: "hide-narrow" }, t("New")))),
@@ -100,6 +101,16 @@ export class WorkPane {
   canLeave(): boolean { return this.editor?.canLeave() ?? true; }
   intent(name: string): void {
     if (name === "new" || name === "new-project") this.create();
+    if (name.startsWith("delegate:")) void this.delegateFromList(name.slice("delegate:".length));
+  }
+
+  private async delegateFromList(id: string): Promise<void> {
+    if (this.mode !== "tasks") return;
+    const focus = document.activeElement;
+    await this.open(id);
+    if (!this.active || this.root.hidden || this.selected !== id || document.activeElement !== focus
+      || document.querySelector("dialog[open]")) return;
+    this.detail.querySelector<HTMLButtonElement>('[data-pad-action="delegate"]:not(:disabled)')?.click();
   }
 
   // ───────────── 列表 ─────────────
@@ -176,7 +187,7 @@ export class WorkPane {
     const groups = order.map(status => [status, items.filter(i => groupOf(i) === status)] as const).filter(([, list]) => list.length);
     clear(this.list, ...groups.map(([status, list]) => {
       const group = h("section", { class: `group${this.folded.has(status) && !this.statusFilter ? " collapsed" : ""}` });
-      const head = h("button", { type: "button", class: "group-head", "aria-expanded": String(!group.classList.contains("collapsed")), onclick: () => {
+      const head = h("button", { type: "button", class: "group-head", "data-pad-row": `group:${status}`, "aria-expanded": String(!group.classList.contains("collapsed")), onclick: () => {
         const collapsed = group.classList.toggle("collapsed");
         head.setAttribute("aria-expanded", String(!collapsed));
         if (collapsed) this.folded.add(status); else this.folded.delete(status);
@@ -191,7 +202,7 @@ export class WorkPane {
     const due = dueLabel(task.due);
     const group = turnGroup(task);
     const project = !this.projectFilter && task.project ? this.projects.find(p => p.id === task.project)?.title : undefined;
-    const statusBtn = h("button", { type: "button", class: "status-btn", title: turnText(task), "aria-label": t("Change who has it (now: {0})", turnText(task)),
+    const statusBtn = h("button", { type: "button", class: "status-btn", "data-pad-action": "more", title: turnText(task), "aria-label": t("Change who has it (now: {0})", turnText(task)),
       onclick: (event: Event) => { event.stopPropagation(); this.quickTurn(task, statusBtn); } }, turnIcon(group));
     // 不是轮到你的待办时，副标题说明轮到谁（agent、外部、搁置、需要你处理的原因）。
     const holder = group === "todo" || group === "blocked" || group === "done" || group === "cancelled" ? undefined : turnText(task);
@@ -271,22 +282,11 @@ export class WorkPane {
   }
 
   private quickTurn(task: WorkTask, anchor: HTMLElement): void {
-    openMenu(anchor, turnActions(task).map(action => ({ value: action, label: TURN_ACTION_LABELS[action], icon: icon(TURN_ACTION_ICONS[action]) })), async value => {
-      const action = value as TurnAction;
-      let note: string | undefined;
-      if (action === "external") { note = await promptDialog({ title: t("What are you waiting for?"), placeholder: t("e.g. a reply from someone, a delivery…"), confirm: t("Continue") }); if (!note) return; }
-      if (task.turn.reason === "working" && action !== "external" && !(await confirmDialog({ title: t("Stop the running round?"), message: t("An agent is still working on this task. Stop its round and continue?"), confirm: t("Continue"), danger: true }))) return;
-      try {
-        await this.client.workCommand(turnActionCommand(task, action, note));
-        toast(TURN_ACTION_DONE[action]);
-        this.changed();
-        await this.load();
-        if (this.selected === task.id && !this.editor?.dirty) void this.open(task.id, true);
-      } catch (cause) {
-        toast(isConflict(cause) ? t("The task changed elsewhere; the list was refreshed") : errorText(cause), "error");
-        void this.load();
-      }
-    });
+    taskTurnMenu(this.client, task, anchor, async () => {
+      this.changed();
+      await this.load();
+      if (this.selected === task.id && !this.editor?.dirty) void this.open(task.id, true);
+    }, () => { void this.load(); });
   }
 
   // ───────────── 详情 ─────────────

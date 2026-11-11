@@ -61,16 +61,16 @@ export class TrashPane {
     const days = Math.max(0, Math.ceil((Date.parse(item.expires_at) - Date.now()) / 86_400_000));
     const extra = item.kind === "project" && item.detached_tasks?.length ? t("{0} tasks moved to No project", item.detached_tasks.length)
       : item.kind === "note" && item.path ? item.path : "";
-    const restore = h("button", { type: "button", class: "btn btn-small", onclick: async () => {
+    const restore = h("button", { type: "button", class: "btn btn-small", "data-pad-action": "primary", onclick: async () => {
       restore.disabled = purge.disabled = true;
       const ok = await restoreItem(this.client, item, undefined, true);
       if (!this.active) return;
       if (ok) { this.changed(); void this.load(true); this.offerOpen(item); }
       else restore.disabled = purge.disabled = false;
     } }, icon("restore"), t("Restore"));
-    const purge = h("button", { type: "button", class: "icon-btn row-delete", title: t("Delete permanently"), "aria-label": t("Delete {0} permanently", item.title || KIND_LABEL[item.kind]),
+    const purge = h("button", { type: "button", class: "icon-btn row-delete", "data-pad-action": "purge", title: t("Delete permanently"), "aria-label": t("Delete {0} permanently", item.title || KIND_LABEL[item.kind]),
       onclick: () => this.confirmPurge(item) }, icon("trash"));
-    return h("article", { class: "trash-row" },
+    return h("article", { class: "trash-row", tabindex: "0", "data-pad-row": item.id },
       h("span", { class: "trash-kind", title: KIND_LABEL[item.kind] }, icon(KIND_ICON[item.kind])),
       h("div", { class: "trash-main" },
         h("strong", {}, item.title || t("Untitled")),
@@ -88,7 +88,7 @@ export class TrashPane {
   private confirmPurge(item: TrashItem): void {
     const error = h("div", { role: "alert" });
     const requestId = newRequestId("purge");
-    const button = h("button", { type: "button", class: "btn btn-danger", onclick: async () => {
+    const button = h("button", { type: "button", class: "btn btn-danger", "data-pad-hold": true, onclick: async () => {
       button.disabled = true; clear(error);
       try {
         await this.client.purgeTrash(item.id, { request_id: requestId });

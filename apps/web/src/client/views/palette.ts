@@ -15,7 +15,7 @@ const NOTE_TYPE: Record<string, string> = translated({ paper: "Paper", idea: "Id
 export class CommandPalette {
   private dialog?: HTMLDialogElement;
   private input = h("input", { type: "text", placeholder: t("Search tasks, projects, notes, or type a command…"), autocomplete: "off", spellcheck: "false", "aria-label": t("Command palette") });
-  private list = h("div", { class: "palette-list", role: "listbox" });
+  private list = h("div", { class: "palette-list", role: "listbox", tabindex: "-1" });
   private items: Item[] = [];
   private index = 0;
   private generation = 0;
@@ -23,15 +23,17 @@ export class CommandPalette {
 
   constructor(private client: Client, private navigate: Navigate) {
     this.input.addEventListener("input", () => { this.index = 0; this.renderStatic(); this.search(); });
-    this.input.addEventListener("keydown", event => {
+    const onKey = (event: KeyboardEvent) => {
       if (event.isComposing) return;
       if (event.key === "ArrowDown") { event.preventDefault(); this.move(1); }
       else if (event.key === "ArrowUp") { event.preventDefault(); this.move(-1); }
       else if (event.key === "Enter") { event.preventDefault(); this.run(this.items[this.index]); }
-    });
+    };
+    this.input.addEventListener("keydown", onKey);
+    this.list.addEventListener("keydown", onKey);
   }
 
-  open(): void {
+  open(gamepad = false): void {
     if (this.dialog?.open) { this.input.select(); return; }
     this.input.value = "";
     this.index = 0;
@@ -43,12 +45,17 @@ export class CommandPalette {
     this.dialog.addEventListener("click", event => { if (event.target === this.dialog) this.dialog?.close(); });
     document.body.append(this.dialog);
     this.dialog.showModal();
-    this.input.focus();
+    if (gamepad) this.list.focus(); else this.input.focus();
     this.renderStatic();
     void this.prefetch();
   }
 
   dispose(): void { this.generation++; this.dialog?.close(); }
+
+  gamepad(step?: number): void {
+    if (step) this.move(step);
+    else this.run(this.items[this.index]);
+  }
 
   private commands(): Item[] {
     const go = (section: Section, intent?: string) => () => this.navigate(section, undefined, intent);

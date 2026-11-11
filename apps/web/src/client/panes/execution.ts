@@ -252,7 +252,7 @@ export class ExecutionPane {
 
       clear(this.detail, h("div", { class: "detail" },
         h("div", { class: "detail-crumbs" },
-          h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": t("Back to list"), onclick: () => { this.selected = undefined; markSelected(this.list, undefined); this.showPlaceholder(); } }, icon("back")),
+          h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": t("Back to list"), "data-pad-back": true, onclick: () => { this.selected = undefined; markSelected(this.list, undefined); this.showPlaceholder(); } }, icon("back")),
           task ? h("button", { type: "button", onclick: () => this.navigate("work", task) }, icon("work"), t("View task")) : h("span", {}, job.spec.source?.routine ? t("Routine") : t("Standalone run")),
           h("div", { class: "detail-actions" },
             live && h("button", { type: "button", class: "btn btn-small", disabled: cancelling, onclick: () => this.cancel(job) }, icon("stop"), cancelling ? t("Cancelling…") : t("Cancel run")))),
@@ -337,7 +337,7 @@ export class ExecutionPane {
       } }, icon(routine.status === "active" ? "stop" : "play"), routine.status === "active" ? t("Pause") : t("Enable"));
       clear(this.detail, h("div", { class: "detail" },
         h("div", { class: "detail-crumbs" },
-          h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": t("Back to list"), onclick: () => { this.selected = undefined; markSelected(this.list, undefined); this.showPlaceholder(); } }, icon("back")),
+          h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": t("Back to list"), "data-pad-back": true, onclick: () => { this.selected = undefined; markSelected(this.list, undefined); this.showPlaceholder(); } }, icon("back")),
           h("span", {}, t("Routine")),
           h("div", { class: "detail-actions" }, toggle,
             h("button", { type: "button", class: "btn btn-small", onclick: () => void editRoutine(this.root, this.client, () => { toast(t("Routine saved")); void this.load(); void this.openRoutine(id); }, routine) }, icon("edit"), t("Edit")))),

@@ -1534,3 +1534,18 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 .helper-notice-title { display: flex; gap: 6px; align-items: flex-start; font-size: var(--fs-sm); font-weight: 600; }
 .helper-notice-title .icon { width: 14px; height: 14px; flex: none; margin-top: 2px; color: var(--ochre); }
 .set-row.helper-row { flex-direction: column; align-items: flex-start; gap: 6px; }
+
+/* G1 gamepad and keyboard focus share the visible list focus. */
+[data-pad-row]:focus, .row[data-id]:focus {
+  outline: 3px solid var(--focus);
+  outline-offset: -3px;
+  background: var(--hover);
+}
+[data-pad-row] { scroll-margin-block: 20px; }
+.today-more { flex: none; margin-right: 8px; }
+.pad-hold { display: inline-flex; flex-direction: column; gap: 4px; margin: 8px; color: var(--ink-2); font-size: var(--fs-sm); }
+.pad-hold progress { width: 160px; height: 10px; accent-color: var(--focus); }
+.pad-mappings { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px 20px; }
+.gamepad-settings { padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+.pad-readout { white-space: pre-wrap; overflow-wrap: anywhere; }
+[data-pad-testing] { outline: 2px solid var(--focus); outline-offset: -2px; }

@@ -13,6 +13,7 @@ import { clear, failure, h, icon, loading, openMenu, statusIcon, toast } from ".
 import { ago, dueLabel, jobTitle } from "../format.ts";
 import { JOB_LABELS } from "../labels.ts";
 import type { Navigate } from "../navigation.ts";
+import { taskTurnMenu } from "../turn-menu.ts";
 import { locale, t } from "../i18n.ts";
 import { turnGroup, turnIcon, turnText } from "../turn.ts";
 import { isWorkProposal, proposalCard } from "../proposal-card.ts";
@@ -113,7 +114,7 @@ export class OverviewPane {
     return h("div", { class: "today-rows" }, ...tasks.map(task => {
       const due = dueLabel(task.due);
       const project = projects.find(p => p.id === task.project)?.title;
-      const row = h("button", { type: "button", class: "today-row", onclick: () => this.navigate("work", task.id) },
+      const row = h("button", { type: "button", class: "today-row", "data-pad-row": task.id, onclick: () => this.navigate("work", task.id) },
         turnIcon(turnGroup(task)),
         h("span", { class: "row-main" }, h("span", { class: "row-title" }, task.title),
           (project || task.turn.holder !== "human") && h("span", { class: "row-sub" },
@@ -121,13 +122,15 @@ export class OverviewPane {
             task.turn.holder !== "human" && h("span", { class: "who-chip" }, icon(task.turn.holder === "external" ? "clock" : "bot"), turnText(task)))),
         due && h("span", { class: `due-tag${due.overdue ? " overdue" : due.soon ? " soon" : ""}` }, due.overdue ? t("Overdue · {0}", due.text) : due.text));
       const next = quickDelegateTarget(task);
-      return next ? h("div", { class: "today-row-wrap" }, row, this.delegateActions(task, next)) : row;
+      const more = h("button", { type: "button", class: "icon-btn today-more", "data-pad-action": "more", "aria-label": t("More actions for {0}", task.title),
+        onclick: () => taskTurnMenu(this.client, task, more, () => { this.changed(); void this.load(); }, () => { void this.load(); }) }, icon("more"));
+      return h("div", { class: "today-row-wrap" }, row, next && this.delegateActions(task, next), more);
     }));
   }
 
   /** 一键委派（ADR 0044）：按 Hub 推导的目标派出；小箭头换人，之后这个任务一直交给新的 agent。 */
   private delegateActions(task: WorkTask, next: NonNullable<WorkTask["next_target"]>): HTMLElement {
-    const go = h("button", { type: "button", class: "btn btn-small today-delegate", title: t("Delegate to {0}", nextTargetText(next)), "aria-label": t("Delegate to {0}", next.target) },
+    const go = h("button", { type: "button", class: "btn btn-small today-delegate", "data-pad-action": "delegate", title: t("Delegate to {0}", nextTargetText(next)), "aria-label": t("Delegate to {0}", next.target) },
       icon("play"), h("span", { class: "today-delegate-label" }, t("Delegate")));
     const pick = h("button", { type: "button", class: "btn btn-small today-delegate-pick", title: next.source === "plan" ? t("Set by the plan step") : t("Delegate to someone else"),
       "aria-label": t("Delegate to someone else"), disabled: next.source === "plan" }, icon("down"));
@@ -167,11 +170,11 @@ export class OverviewPane {
     const cards = [
       ...rounds.map(item => attentionCard(item, context, "today")),
       ...(approvals ?? []).filter(isWorkProposal).map(p => proposalCard(p, context)),
-      ...(approvals ?? []).filter(p => !isWorkProposal(p)).map(p => this.needCard("approvals", "ochre",
+      ...(approvals ?? []).filter(p => !isWorkProposal(p)).map(p => this.needCard(p.id, "approvals", "ochre",
         p.operation.op === "exec.privileged" ? p.operation.args.argv.join(" ") : p.operation.op, p.reason, t("Approval"), t("Review"), () => this.navigate("approvals"))),
       ...jobs.map(j => j.status === "waiting_for_human"
-        ? this.needCard("help", "ochre", jobTitle(j, tasks), j.result?.question ?? "", JOB_LABELS[j.status] ?? j.status, t("Answer"), () => this.navigate("execution", j.spec.id))
-        : this.needCard("alert", "red", jobTitle(j, tasks), j.result?.error ?? "", JOB_LABELS[j.status] ?? j.status, t("View"), () => this.navigate("execution", j.spec.id))),
+        ? this.needCard(j.spec.id, "help", "ochre", jobTitle(j, tasks), j.result?.question ?? "", JOB_LABELS[j.status] ?? j.status, t("Answer"), () => this.navigate("execution", j.spec.id))
+        : this.needCard(j.spec.id, "alert", "red", jobTitle(j, tasks), j.result?.error ?? "", JOB_LABELS[j.status] ?? j.status, t("View"), () => this.navigate("execution", j.spec.id))),
     ];
     if (!cards.length) return null;
     return h("section", { class: "today-section" },
@@ -179,14 +182,14 @@ export class OverviewPane {
       h("div", { class: "needs" }, ...cards));
   }
 
-  private needCard(glyph: string, tone: "ochre" | "red", title: string, detail: string, kind: string, action: string, go: () => void): HTMLElement {
-    return h("article", { class: `need need-${tone}` },
+  private needCard(id: string, glyph: string, tone: "ochre" | "red", title: string, detail: string, kind: string, action: string, go: () => void): HTMLElement {
+    return h("article", { class: `need need-${tone}`, "data-pad-row": id, tabindex: "0" },
       h("span", { class: "need-icon" }, icon(glyph)),
       h("div", { class: "need-main" },
         h("p", { class: "need-kind" }, kind),
         h("button", { type: "button", class: "need-title", onclick: go }, title),
         detail && h("p", { class: "need-detail" }, detail)),
-      h("button", { type: "button", class: "btn btn-small need-action", onclick: go }, action));
+      h("button", { type: "button", class: "btn btn-small need-action", "data-pad-action": "primary", onclick: go }, action));
   }
 
   private runs(jobs: Job[], tasks: WorkTask[]): HTMLElement {
@@ -194,7 +197,7 @@ export class OverviewPane {
     const recent = jobs.filter(job => !LIVE.includes(job.status)).sort((a, b) => b.spec.created.localeCompare(a.spec.created));
     const shown = [...live, ...recent].slice(0, 5);
     if (!shown.length) return h("p", { class: "today-empty" }, t("No agent runs yet. Delegate a task and each round shows up here."));
-    return h("div", { class: "today-rows" }, ...shown.map(job => h("button", { type: "button", class: "today-row", onclick: () => this.navigate("execution", job.spec.id) },
+    return h("div", { class: "today-rows" }, ...shown.map(job => h("button", { type: "button", class: "today-row", "data-pad-row": job.spec.id, onclick: () => this.navigate("execution", job.spec.id) },
       statusIcon(job.status),
       h("span", { class: "row-main" }, h("span", { class: "row-title" }, jobTitle(job, tasks)),
         h("span", { class: "row-sub" }, `${job.spec.run.kind === "agent" ? job.spec.run.engine : t("Command")}${t(" · ")}${JOB_LABELS[job.status] ?? job.status}`)),
@@ -209,7 +212,7 @@ export class OverviewPane {
       const done = related.filter(task => task.outcome === "done").length;
       const fill = h("span", { class: "progress-fill" });
       fill.style.width = `${related.length ? Math.round((done / related.length) * 100) : 0}%`;
-      return h("button", { type: "button", class: "today-row project-row", onclick: () => this.navigate("work", project.id) },
+      return h("button", { type: "button", class: "today-row project-row", "data-pad-row": project.id, onclick: () => this.navigate("work", project.id) },
         h("span", { class: "row-main" }, h("span", { class: "row-title" }, project.title),
           h("span", { class: "project-progress" }, h("span", { class: "progress" }, fill), h("span", { class: "ratio" }, related.length ? `${done}/${related.length}` : t("No tasks")))));
     }));
