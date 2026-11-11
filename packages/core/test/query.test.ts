@@ -110,7 +110,8 @@ test("card text is never indexed or exposed, even with private inclusion", async
   await expect(showNote(vault, "Card", { stateDir })).rejects.toMatchObject({ code: "NOTE_NOT_FOUND" });
   expect(await excludedCardPaths(vault, { stateDir })).toEqual(["research/ideas/Card.md"]);
   const db = new Database(join(stateDir, "index.sqlite"));
-  expect(JSON.stringify(db.query("SELECT * FROM notes").all())).not.toContain("4111");
+  // 只查文本列：mtime 这类数字列偶尔会恰好含有 "4111"，与卡号无关。
+  expect(JSON.stringify(db.query("SELECT path, id, title, frontmatter, body, search_text FROM notes").all())).not.toContain("4111");
   expect(JSON.stringify(db.query("SELECT * FROM fulltext").all())).not.toContain("4111");
   db.close();
 });
