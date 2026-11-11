@@ -59,6 +59,8 @@ export const MANIFEST = {
   display: "standalone",
   background_color: "#f6f7f5",
   theme_color: "#1c2220",
+  // 从其他 App 分享链接或文字到 Lumio，进入 Inbox（ADR 0057，I1-5）。支持 Web Share Target 的系统才会出现在分享菜单里。
+  share_target: { action: "/", method: "GET", params: { title: "title", text: "text", url: "url" } },
   icons: [
     { src: "/assets/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
     { src: "/assets/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any maskable" },

@@ -60,6 +60,7 @@ export class CommandPalette {
   private commands(): Item[] {
     const go = (section: Section, intent?: string) => () => this.navigate(section, undefined, intent);
     return [
+      { group: t("Actions"), label: t("Save a link to Inbox"), icon: icon("inbox"), run: go("inbox", "capture") },
       { group: t("Actions"), label: t("New note"), icon: icon("knowledge"), run: go("knowledge", "new") },
       { group: t("Actions"), label: t("New task"), hint: "C", icon: icon("plus"), run: go("work", "new") },
       { group: t("Actions"), label: t("New project"), icon: icon("folder"), run: go("work", "new-project") },
@@ -70,9 +71,10 @@ export class CommandPalette {
       { group: t("Go to"), label: t("Today"), hint: "1", icon: icon("home"), run: go("overview") },
       { group: t("Go to"), label: t("Work"), hint: "2", icon: icon("work"), run: go("work") },
       { group: t("Go to"), label: t("Knowledge"), hint: "3", icon: icon("knowledge"), run: go("knowledge") },
-      { group: t("Go to"), label: t("Execution"), hint: "4", icon: icon("execution"), run: go("execution") },
-      { group: t("Go to"), label: t("Assistant"), hint: "5", icon: icon("assistant"), run: go("assistant") },
-      { group: t("Go to"), label: t("Approvals"), hint: "6", icon: icon("approvals"), run: go("approvals") },
+      { group: t("Go to"), label: t("Inbox"), hint: "4", icon: icon("inbox"), run: go("inbox") },
+      { group: t("Go to"), label: t("Execution"), hint: "5", icon: icon("execution"), run: go("execution") },
+      { group: t("Go to"), label: t("Assistant"), hint: "6", icon: icon("assistant"), run: go("assistant") },
+      { group: t("Go to"), label: t("Approvals"), hint: "7", icon: icon("approvals"), run: go("approvals") },
       { group: t("Go to"), label: t("Settings"), icon: icon("settings"), run: go("settings") },
       { group: t("Go to"), label: t("Recently deleted"), icon: icon("trash"), run: go("trash") },
     ];

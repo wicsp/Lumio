@@ -24,10 +24,10 @@ I1-4 另读 `docs/design/execution.md`，I1-5、I1-7 另读 `docs/design/web.md`
 | 编号 | 内容 | 负责 | 改动范围 |
 |---|---|---|---|
 | I1-1 ✅ | 契约：`cap` 前缀与 `Capture`（输入、渠道、状态 `queued / extracting / summarizing / ready / failed`、实体 ID、`triaged`、错误）；捕获、列表、分拣、重试、重新抽取、深读的请求与结果；`paper` / `source` 的 `status` 增加 `reference`；原文文件 frontmatter（`of`、`url`、`captured`、`extractor`、`lang`、`sha256`、可选 `pdf` 文件 ID）；AI 用途绑定 `knowledge.summary`、`knowledge.embedding`（向量 Profile 只能绑向量用途）；能力 `knowledge.original.show`；搜索结果增加命中位置（`body` / `original`）、阅读状态与入库时间 | Claude 起草（ADR 已批准） | `packages/schema` |
-| I1-2 | Knowledge 与索引：`VAULT_LAYOUT` 增加非实体目录 `files/originals/`；原文文件的命名、写入（只由 Lumio 写）、读取；原文进入单独的全文表并映射回实体；实体模板开头的 AI 笔记嵌入段；`reference` 状态 | 后端（Codex） | `packages/knowledge`、`packages/storage` |
-| I1-3 | Hub 捕获流程：`POST /v2/inbox/captures` 等接口与 `lumio capture <url>`；URL 规范化与去重（含"曾丢弃"提示）；受限抓取（第 7 节的地址检查）；网页正文抽取、arXiv HTML 全文；生成实体与原文；Inbox 处理身份；卡片生成写 AI 笔记（原文放在明确的数据边界内，无工具调用）；深读；失败记录与人工重试；分拣与丢弃（实体、原文、AI 笔记一起进回收站）；`knowledge.original.show` 登记进能力目录 | 后端（Codex） | `apps/hub`、`packages/knowledge`（如需） |
+| I1-2 ✅ | Knowledge 与索引：`VAULT_LAYOUT` 增加非实体目录 `files/originals/`；原文文件的命名、写入（只由 Lumio 写）、读取；原文进入单独的全文表并映射回实体；实体模板开头的 AI 笔记嵌入段；`reference` 状态 | 后端（Codex） | `packages/knowledge`、`packages/storage` |
+| I1-3 ✅ | Hub 捕获流程：`POST /v2/inbox/captures` 等接口与 `lumio capture <url>`；URL 规范化与去重（含"曾丢弃"提示）；受限抓取（第 7 节的地址检查）；网页正文抽取、arXiv HTML 全文；生成实体与原文；Inbox 处理身份；卡片生成写 AI 笔记（原文放在明确的数据边界内，无工具调用）；深读；失败记录与人工重试；分拣与丢弃（实体、原文、AI 笔记一起进回收站）；`knowledge.original.show` 登记进能力目录 | 后端（Codex） | `apps/hub`、`packages/knowledge`（如需） |
 | I1-4 | 重的抽取走执行器：PDF 转 Markdown、字幕或音频下载、本地语音识别作为 command Job 运行登记过的程序，结果经托管文件交回后由 Hub 写入原文；可选改用云端语音识别（语音 Profile）；字幕所需 Cookie 只放在执行器机器上 | 后端（Codex） | `apps/hub`、`apps/runtime`、`packages/execution` |
-| I1-5 | Web：快速捕获（粘贴框、命令面板、PWA 分享目标）；Inbox 视图（处理进度、卡片、"可能相关"前 3 条、分拣按钮、失败原因与重试、手动粘贴正文）；原文阅读页（只读）；"让 AI 细读"；设置页的摘要与向量 Profile（写明内容发给哪个服务） | 前端（Claude） | `packages/api-client`、`apps/web` |
+| I1-5 ✅ | Web：快速捕获（粘贴框、命令面板、PWA 分享目标）；Inbox 视图（处理进度、卡片、"可能相关"前 3 条、分拣按钮、失败原因与重试、手动粘贴正文）；原文阅读页（只读）；"让 AI 细读"；设置页的摘要与向量 Profile（写明内容发给哪个服务） | 前端（Claude） | `packages/api-client`、`apps/web` |
 | I1-6 | 语义检索：按"标题 + 卡片"（笔记按标题与正文）生成向量存入 `index.sqlite`；换模型时整体重算；混合检索（FTS 与向量按 RRF 融合）用于 `knowledge.search`、编辑器相关推荐和 Inbox"可能相关"；私密实体不生成向量；未配置向量用途时退回纯全文检索 | 后端（Codex） | `packages/knowledge`、`packages/storage`、`apps/hub` |
 | I1-7 | 浏览器插件：把当前页面的 URL、标题与正文（人当前看到的内容）送到 Inbox；配对方式沿用 Web 登录 | 前端（Claude） | `apps/chrome-ext` |
 

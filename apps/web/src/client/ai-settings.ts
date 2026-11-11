@@ -6,6 +6,7 @@
 import type { AIConfiguration, AIConnection, AIProfile, AIQuotaView, AIRuntime, NativeSession, NativeConnectionView, NativeConnectionAction } from "@lumio/schema";
 import { DASHSCOPE_BASE_URLS, TYPESAFE_JEV_BASE_URL } from "@lumio/schema";
 import { SpeechSettings } from "./speech-settings.ts";
+import { KnowledgeAISettings } from "./knowledge-ai-settings.ts";
 import { errorText, type Client } from "./api.ts";
 import { clear, failure, h, icon, openDialog, toast } from "./dom.ts";
 import { t } from "./i18n.ts";
@@ -70,14 +71,17 @@ export class AISettings {
   private newConnection = h("button", { type: "button", class: "btn btn-quiet btn-small", onclick: () => this.editConnection() }, icon("plus"), t("Add connection"));
 
   private speech: SpeechSettings;
+  private knowledge: KnowledgeAISettings;
 
   constructor(private client: Client, group: Group) {
     this.speech = new SpeechSettings(client, kind => this.editConnection(undefined, kind), () => void this.load());
+    this.knowledge = new KnowledgeAISettings(client);
     this.element.append(
       group(t("Default assistant model"), t("New chats start with this profile. This preference is saved in this browser."), this.defaultRows),
       group(t("AI profiles"), t("Choose an API or an official Codex session. Profiles share model settings; each conversation keeps its own permissions and history."), this.profileRows, this.newProfile),
       group(t("Connections"), t("Manage API connections, runtime sign-ins, and usage monitoring."), this.connectionRows, this.newConnection),
-      group(t("Voice input"), t("Dictate into text boxes with the mic button. Audio goes through the Hub to the speech service and isn't stored."), this.speech.element));
+      group(t("Voice input"), t("Dictate into text boxes with the mic button. Audio goes through the Hub to the speech service and isn't stored."), this.speech.element),
+      group(t("Inbox cards"), t("When you save a link, AI writes a short card from the original text."), this.knowledge.element));
     for (const rows of [this.defaultRows, this.connectionRows, this.profileRows]) {
       clear(rows, h("p", { class: "set-empty" }, t("Loading…")));
     }
@@ -85,7 +89,7 @@ export class AISettings {
     this.usageTimer = setInterval(() => void this.loadUsage(), 30_000);
   }
 
-  dispose(): void { this.active = false; clearInterval(this.usageTimer); this.speech.dispose(); }
+  dispose(): void { this.active = false; clearInterval(this.usageTimer); this.speech.dispose(); this.knowledge.dispose(); }
 
   private async loadUsage(): Promise<void> {
     const version = ++this.usageVersion;
@@ -117,6 +121,7 @@ export class AISettings {
       this.config = config; this.runtimes = runtimes; this.sessions = sessions;
       this.render();
       this.speech.update(config);
+      this.knowledge.update(config);
       void this.loadUsage();
       await Promise.all(config.connections.filter(c => c.kind === "codex-account").map(async c => {
         try { this.auth.set(c.id, await this.client.nativeConnection(c.id)); } catch { /* Older Hub. */ }

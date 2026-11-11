@@ -16,6 +16,7 @@ import type { Navigate, Pane, Section } from "../navigation.ts";
 import { t } from "../i18n.ts";
 import { SettingsPane } from "../panes/settings-page.ts";
 import { TrashPane } from "../panes/trash.ts";
+import { InboxPane } from "../panes/inbox.ts";
 import { DEFAULT_BINDINGS, GamepadInput } from "../gamepad-input.ts";
 import { padButtonLabel } from "../gamepad-settings.ts";
 import { GamepadNavigation } from "../gamepad-navigation.ts";
@@ -30,9 +31,10 @@ export const SECTIONS: Array<{ key: Exclude<Section, "settings" | "trash">; labe
   { key: "overview", label: "Today", short: "Today", icon: "home", key2: "1" },
   { key: "work", label: "Work", short: "Work", icon: "work", key2: "2" },
   { key: "knowledge", label: "Knowledge", short: "Knowledge", icon: "knowledge", key2: "3" },
-  { key: "execution", label: "Execution", icon: "execution", key2: "4" },
-  { key: "assistant", label: "Assistant", short: "Assistant", icon: "assistant", key2: "5" },
-  { key: "approvals", label: "Approvals", icon: "approvals", key2: "6" },
+  { key: "inbox", label: "Inbox", short: "Inbox", icon: "inbox", key2: "4" },
+  { key: "execution", label: "Execution", icon: "execution", key2: "5" },
+  { key: "assistant", label: "Assistant", short: "Assistant", icon: "assistant", key2: "6" },
+  { key: "approvals", label: "Approvals", icon: "approvals", key2: "7" },
 ];
 
 type PaneKey = Section | "projects";
@@ -284,19 +286,21 @@ export class WorkbenchView {
     else if (section === "execution") pane = new ExecutionPane(target, client, this.session.hub, id, navigate, changed);
     else if (section === "assistant") pane = new AssistantPane(target, client, this.session.hub, navigate, id);
     else if (section === "trash") pane = new TrashPane(target, client, navigate, changed);
+    else if (section === "inbox") pane = new InboxPane(target, client, navigate, changed);
     else pane = new ApprovalsPane(target, client, changed, navigate);
     return { target, pane };
   }
 
   private async refreshCounts(): Promise<void> {
     const client = this.session.client;
-    const [tasks, proposals, jobs, attention] = await Promise.allSettled([client.workTasks(), client.proposals("pending"), client.jobs(), this.session.hub.attention()]);
+    const [tasks, proposals, jobs, attention, inbox] = await Promise.allSettled([client.workTasks(), client.proposals("pending"), client.jobs(), this.session.hub.attention(), client.captures({ untriaged: true, limit: 1 })]);
     const set = (section: Section, value: number | undefined, attention = false) => {
       const el = this.counts.get(section)!;
       el.textContent = value ? String(value) : "";
       el.classList.toggle("attention", attention && !!value);
     };
     set("work", tasks.status === "fulfilled" ? tasks.value.filter(t => turnGroup(t) === "needs" || turnGroup(t) === "todo").length : undefined);
+    set("inbox", inbox.status === "fulfilled" ? inbox.value.total : undefined);
     set("approvals", proposals.status === "fulfilled" ? proposals.value.length : undefined, true);
     const groups = jobs.status === "fulfilled" ? executionGroups(jobs.value,
       tasks.status === "fulfilled" ? tasks.value : undefined,
