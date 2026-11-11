@@ -1,11 +1,12 @@
-import { JobResult, RuntimeAck, RuntimeHeartbeat, RuntimeInfo, RuntimeRegistration, RuntimeSync } from "@lumio/schema";
+import { JobResult, RuntimeAck, RuntimeHeartbeat, RuntimeInfo, RuntimeRegistration, RuntimeSync, type Job } from "@lumio/schema";
 import { Jobs, type RoutineHooks } from "./jobs.ts";
 import type { authorize } from "./authorize.ts";
 import { HubError } from "./errors.ts";
 import type { HubStore, Identity } from "./store.ts";
 
 export async function handleRuntime(request: Request, operation: "runtime.register" | "runtime.sync" | "runtime.ack" | "runtime.results" | "runtimes",
-  identity: Identity, store: HubStore, decide: typeof authorize, now: Date, routines?: RoutineHooks): Promise<Response> {
+  identity: Identity, store: HubStore, decide: typeof authorize, now: Date, routines?: RoutineHooks,
+  onResult?: (job: Job) => void): Promise<Response> {
   const decision = decide(identity.actor, { operation });
   let execution = "applied";
   try {
@@ -35,7 +36,10 @@ export async function handleRuntime(request: Request, operation: "runtime.regist
         || !(requested.git || requested.access || requested.secrets?.length))) {
         throw new HubError("INVALID", { key: "runtime.invalid_job_result", args: [] });
       }
-      jobs.result(identity.actor.id, result.data);
+      store.db.transaction(() => {
+        jobs.result(identity.actor.id, result.data);
+        if (onResult) onResult(jobs.get(result.data.job));
+      })();
       return Response.json(result.data);
     }
     if (!RuntimeHeartbeat.safeParse(body).success) throw new HubError("INVALID", { key: "runtime.invalid_runtime_heartbeat", args: [] });
