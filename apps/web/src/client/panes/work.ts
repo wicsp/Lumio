@@ -313,6 +313,11 @@ export class WorkPane {
     if (id.startsWith("prj_") !== (this.mode === "projects")) { this.navigate("work", id); return; }
     const generation = ++this.detailGeneration;
     this.selected = id; markSelected(this.list, id);
+    // 更新 URL 以触发 workbench 的 readSubject，标记通知为已读
+    if (!quiet && !this.root.hidden) {
+      const hash = `#work/${encodeURIComponent(id)}`;
+      if (location.hash !== hash) history.replaceState(null, "", hash);
+    }
     this.split.classList.add("has-detail");
     if (!quiet) { this.editor?.dispose(); this.editor = undefined; this.clearDock(); clear(this.detail, loading()); }
     try {

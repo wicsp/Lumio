@@ -240,12 +240,18 @@ export class ExecutionPane {
       const cancelling = this.cancellationRequested.has(id) && live;
       const task = job.spec.source?.task;
       // 这一轮还在等你（ADR 0030）：直接在这里回答、验收或标为已查看；旧轮次只显示原来的问题。
+      // 注意：如果有 attention card，它会显示完整的汇报和操作，不需要重复显示 question
       const question = h("div", { class: "markdown" });
       question.innerHTML = renderMarkdown(job.result?.question ?? "");
       const attentionSlot = h("div", { class: "attn-slot" },
         job.result?.question ? h("section", { class: "question" }, h("h3", {}, t("Waiting for you")), question) : null);
+      // 创建 Report section，但如果有 attention card（包含完整汇报）则隐藏以避免重复
+      const reportSection = h("section", { class: "section" }, h("div", { class: "section-head" }, h("h3", {}, t("Report"))),
+        job.result?.report ? report : h("p", { class: "muted" }, live ? t("The report appears here when the run finishes.") : t("This run has no report.")));
       if (task && !live) void attentionFor(this.hub, task).then(item => {
         if (!item || item.job !== job.spec.id || !this.active || generation !== this.detailGeneration) return;
+        // attention card 已包含汇报，隐藏独立的 Report section
+        reportSection.hidden = true;
         clear(attentionSlot, attentionCard(item, { client: this.client, hub: this.hub, navigate: this.navigate,
           changed: () => { this.changed(); void this.load(true); void this.openJob(job.spec.id, true); } }, "job"));
       }).catch(() => { /* 旧 Hub 或网络问题：保留原来的问题显示 */ });
@@ -266,8 +272,7 @@ export class ExecutionPane {
         h("dl", { class: "meta-grid" }, ...meta.map(([k, v]) => h("div", {}, h("dt", {}, k), h("dd", {}, v)))),
         job.spec.run.kind === "command" && h("section", { class: "section" }, h("div", { class: "section-head" }, h("h3", {}, t("Command"))),
           h("pre", { class: "code-block" }, job.spec.run.argv.map(arg => JSON.stringify(arg)).join(" "))),
-        h("section", { class: "section" }, h("div", { class: "section-head" }, h("h3", {}, t("Report"))),
-          job.result?.report ? report : h("p", { class: "muted" }, live ? t("The report appears here when the run finishes.") : t("This run has no report."))),
+        reportSection,
         h("section", { class: "section" }, h("div", { class: "section-head" }, h("h3", {}, t("Files and logs")), h("div", { class: "detail-actions" }, h("label", { class: "check" }, includePrivate, t("Include private files")))), artifacts)));
       void readArtifacts();
     } catch (cause) {
