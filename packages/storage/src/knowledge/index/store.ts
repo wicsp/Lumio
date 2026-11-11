@@ -6,6 +6,7 @@ import { basename, join, resolve } from "node:path";
 import { Citekey, DerivedFrom, Id, textContainsCardNumber, type NoteRef } from "@lumio/schema";
 import { CoreError } from "@lumio/foundation";
 import { parseFrontmatter } from "@lumio/knowledge";
+import { originalBytes, parseOriginal, scanOriginals } from "../originals.ts";
 import { scanVault } from "../vault.ts";
 import { extractKnowledgeLinks, plainText, resolveMarkdownPath } from "@lumio/knowledge";
 
@@ -41,6 +42,14 @@ function initializeOnce(db: Database, root: string): void {
   }).immediate();
 }
 
+const ORIGINALS_TABLES = `
+  CREATE TABLE IF NOT EXISTS original_files (
+    path TEXT UNIQUE NOT NULL, owner TEXT, mtime REAL NOT NULL, size INTEGER NOT NULL, blocked INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS original_owner ON original_files(owner);
+  CREATE VIRTUAL TABLE IF NOT EXISTS originals_fts USING fts5(body, tokenize='trigram');
+`;
+
 function initialize(db: Database, root: string): void {
   db.exec(`
     CREATE TABLE metadata (version INTEGER NOT NULL, vault TEXT NOT NULL, updated_at TEXT NOT NULL);
@@ -51,6 +60,7 @@ function initialize(db: Database, root: string): void {
     CREATE INDEX notes_id ON notes(id);
     CREATE INDEX notes_filename ON notes(filename);
     CREATE VIRTUAL TABLE fulltext USING fts5(title, body, authors, citekey, tags, tokenize='trigram');
+    ${ORIGINALS_TABLES}
     CREATE TABLE links (from_path TEXT NOT NULL, source TEXT NOT NULL, target TEXT NOT NULL, resolved_path TEXT);
     CREATE INDEX links_from ON links(from_path);
     CREATE INDEX links_to ON links(resolved_path);
@@ -111,6 +121,11 @@ async function openStore(path: string, root: string): Promise<Database> {
           }
         }).immediate();
       }
+      // Originals extend the derived index in place so older local clients can still use it.
+      if (!tables.some(table => table.name === "original_files")) {
+        db.transaction(() => db!.exec(ORIGINALS_TABLES)).immediate();
+      }
+      db.exec("INSERT INTO originals_fts(originals_fts) VALUES ('integrity-check')");
       return db;
     }
   } catch (cause) {
@@ -140,17 +155,17 @@ export async function withIndex<T>(root: string, options: IndexOptions, query: (
     const state = options.stateDir ?? process.env.LUMIO_STATE_DIR ?? join(homedir(), ".local", "share", "lumio");
     await mkdir(state, { recursive: true });
     db = await openStore(join(state, "index.sqlite"), resolve(root));
-    const files = await scanVault(root);
+    const [files, originals] = await Promise.all([scanVault(root), scanOriginals(root)]);
     const previous = new Map(db.query<{ path: string; mtime: number; size: number }, []>("SELECT * FROM files").all().map((f) => [f.path, f]));
     const current = new Set(files.map((f) => f.relativePath));
-    const changes: { path: string; mtime: number; size: number; note?: Omit<NoteRow, "mtime" | "size">; authors?: string; tags?: string }[] = [];
+    const changes: { path: string; mtime: number; size: number; note?: Omit<NoteRow, "mtime" | "size">; authors?: string; tags?: string; blocked: boolean }[] = [];
     for (const file of files) {
       const info = await stat(file.path);
       const old = previous.get(file.relativePath);
       if (old?.mtime === info.mtimeMs && old.size === info.size) continue;
       const source = await readFile(file.path);
-      const change: (typeof changes)[number] = { path: file.relativePath, mtime: info.mtimeMs, size: info.size };
-      if (!textContainsCardNumber(source.toString("utf8"))) {
+      const change: (typeof changes)[number] = { path: file.relativePath, mtime: info.mtimeMs, size: info.size, blocked: textContainsCardNumber(source.toString("utf8")) };
+      if (!change.blocked) {
         let fm: Record<string, unknown> = {}, body = source.toString("utf8");
         try { const parsed = (options.parse ?? parseFrontmatter)(source); fm = parsed.data; body = parsed.body.toString("utf8"); }
         catch (cause) { if (!(cause instanceof CoreError) || cause.code !== "INVALID_FRONTMATTER") throw cause; }
@@ -168,12 +183,38 @@ export async function withIndex<T>(root: string, options: IndexOptions, query: (
       }
       changes.push(change);
     }
+    const previousOriginals = new Map(db.query<{ path: string; mtime: number; size: number }, []>(
+      "SELECT path,mtime,size FROM original_files",
+    ).all().map(file => [file.path, file]));
+    const currentOriginals = new Set(originals.map(file => file.relativePath));
+    const originalChanges: { path: string; mtime: number; size: number; blocked: boolean; original?: ReturnType<typeof parseOriginal> }[] = [];
+    for (const file of originals) {
+      try {
+        const info = await stat(file.path);
+        const old = previousOriginals.get(file.relativePath);
+        if (old?.mtime === info.mtimeMs && old.size === info.size) continue;
+        const bytes = await originalBytes(root, file.relativePath);
+        const blocked = textContainsCardNumber(bytes.toString("utf8"));
+        const change: (typeof originalChanges)[number] = { path: file.relativePath, mtime: info.mtimeMs, size: info.size, blocked };
+        if (!blocked) {
+          try { change.original = parseOriginal(bytes); }
+          catch (cause) {
+            if (!(cause instanceof CoreError) || !["INVALID_FRONTMATTER", "NOTE_NOT_FOUND"].includes(cause.code)) throw cause;
+          }
+        }
+        originalChanges.push(change);
+      } catch (cause) {
+        if ((cause as NodeJS.ErrnoException).code !== "ENOENT" && !(cause instanceof CoreError && cause.code === "NOTE_NOT_FOUND")) throw cause;
+        currentOriginals.delete(file.relativePath);
+      }
+    }
     const database = db;
     const removed = [...previous.keys()].filter((path) => !current.has(path));
+    const removedOriginals = [...previousOriginals.keys()].filter(path => !currentOriginals.has(path));
     // 没有变化时不开写事务，免得每次查询都去抢写锁。
     // 有变化时用 IMMEDIATE：一开始就拿写锁（会按 busy_timeout 等待）。默认的延迟事务在 WAL 下
     // 由读升级为写时若别的进程刚写过，会直接报 "database is locked"，不会等待。
-    if (changes.length || removed.length) database.transaction(() => {
+    if (changes.length || removed.length || originalChanges.length || removedOriginals.length) database.transaction(() => {
       const remove = (path: string) => {
         database.query("DELETE FROM fulltext WHERE rowid IN (SELECT rowid FROM notes WHERE path=?)").run(path);
         database.query("DELETE FROM notes WHERE path=?").run(path);
@@ -186,7 +227,7 @@ export async function withIndex<T>(root: string, options: IndexOptions, query: (
       for (const path of removed) remove(path);
       for (const change of changes) {
         remove(change.path);
-        database.query("INSERT INTO files VALUES (?, ?, ?, ?)").run(change.path, change.mtime, change.size, Number(!change.note));
+        database.query("INSERT INTO files VALUES (?, ?, ?, ?)").run(change.path, change.mtime, change.size, Number(change.blocked));
         if (!change.note) continue;
         const n = change.note;
         const result = database.query("INSERT INTO notes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
@@ -219,6 +260,17 @@ export async function withIndex<T>(root: string, options: IndexOptions, query: (
           const path = resolveMarkdownPath(link.from_path, link.target);
           update.run(path ? find.get(path)?.path ?? null : null, link.rowid);
         }
+      }
+      const removeOriginal = (path: string) => {
+        database.query("DELETE FROM originals_fts WHERE rowid=(SELECT rowid FROM original_files WHERE path=?)").run(path);
+        database.query("DELETE FROM original_files WHERE path=?").run(path);
+      };
+      for (const path of removedOriginals) removeOriginal(path);
+      for (const change of originalChanges) {
+        removeOriginal(change.path);
+        const { lastInsertRowid } = database.query("INSERT INTO original_files VALUES (?, ?, ?, ?, ?)")
+          .run(change.path, change.original?.frontmatter.of ?? null, change.mtime, change.size, Number(change.blocked));
+        if (change.original) database.query("INSERT INTO originals_fts(rowid, body) VALUES (?, ?)").run(lastInsertRowid, change.original.body);
       }
       database.query("UPDATE metadata SET updated_at=?").run(new Date().toISOString());
     }).immediate();

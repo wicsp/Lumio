@@ -1,4 +1,5 @@
 import { isAbsolute, sep } from "node:path";
+import { ORIGINALS_DIRECTORY } from "@lumio/schema";
 import { CoreError } from "@lumio/foundation";
 import type { EntityType } from "./fill.ts";
 
@@ -11,7 +12,7 @@ export const EXCALIDRAW_SUFFIX = ".excalidraw.md";
  * 类型目录下可以有任意子文件夹，子文件夹只用于浏览，不影响类型。
  * 不在表中的位置（`research/reports/`、`files/`、根目录等）不会被扫描。
  */
-export const VAULT_LAYOUT = [
+export const VAULT_LAYOUT = Object.assign([
   { dir: "library/papers", type: "paper", private: false },
   { dir: "library/sources", type: "source", private: false },
   { dir: "research/ideas", type: "idea", private: false },
@@ -22,7 +23,7 @@ export const VAULT_LAYOUT = [
   { dir: "create/posts", type: "post", private: false },
   { dir: "ai/notes", type: "ai-note", private: false },
   { dir: "life/assets", type: "asset", private: true },
-] as const satisfies readonly { dir: string; type: EntityType; private: boolean }[];
+] as const satisfies readonly { dir: string; type: EntityType; private: boolean }[], { originals: ORIGINALS_DIRECTORY } as const);
 
 export type LayoutEntry = (typeof VAULT_LAYOUT)[number];
 

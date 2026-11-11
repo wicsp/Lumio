@@ -15,3 +15,5 @@ export * from "./authoring.ts";
 export * from "./editing.ts";
 
 export * from "./trash.ts";
+
+export { isOriginalPath, readOriginalFile, writeOriginal } from "./originals.ts";
