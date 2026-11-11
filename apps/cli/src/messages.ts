@@ -1,6 +1,10 @@
 import { language, renderMessage, type Language } from "@lumio/platform";
 
 export const en = {
+  "capture.usage": "Usage: lumio capture <url> [--json] or lumio original show <ref> [--json]",
+  "capture.none": "Queued capture ${0}",
+  "capture.existing": "Already captured as ${0}",
+  "capture.discarded": "Previously discarded as ${0}. Restore it from Trash if needed.",
   "ai.unknown": "Execution outcome is unknown. Review before continuing.",
   "ai.invalid": "Check the AI profile, connection, and model settings.",
   "ai.unavailable": "AI backend is unavailable.",
@@ -786,6 +790,10 @@ ${String(p0)}${String(p1)}`,
   "Run tailscale serve status to check": "Run tailscale serve status to check",
 };
 export const zh: typeof en = {
+  "capture.usage": "用法：lumio capture <网址> [--json] 或 lumio original show <资料> [--json]",
+  "capture.none": "捕获已排队 ${0}",
+  "capture.existing": "已捕获 ${0}",
+  "capture.discarded": "曾丢弃 ${0}。如需使用，请从回收站恢复。",
   "ai.unknown": "执行结果未知，请核查后继续。",
   "ai.invalid": "请检查 AI Profile、连接和模型设置。",
   "ai.unavailable": "AI 后端不可用。",

@@ -6,6 +6,7 @@ import { SqliteAIStore, SqliteSpeechStore } from "@lumio/storage";
 import { FunAsr, type FunAsrOptions } from "./fun-asr.ts";
 import { SpeechConfiguration } from "./speech-config.ts";
 import { KnowledgeService } from "@lumio/knowledge";
+import type { Inbox } from "./inbox.ts";
 import type { Trash } from "./trash.ts";
 import { stageDispatchOptions, validateTarget } from "./targets.ts";
 import { Notifications } from "./notifications.ts";
@@ -62,6 +63,7 @@ export class BusinessModules {
   readonly resources: Resources;
   aiNotes?: AiNotes;
   trash!: Trash;
+  inbox!: Inbox;
   assistantConfig!: AssistantConfiguration;
   readonly assistantStore: SqliteAssistantStore;
   readonly routineStore: SqliteRoutineStore;

@@ -1,8 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { cp, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AI_NOTE_CAPABILITY_NAMES, AgentInfo, AgentTokenIssued, CAPABILITIES, CliConfig, KnowledgeAiNoteResult, NoteDetail, WorkCommandResult } from "@lumio/schema";
+import { AI_NOTE_CAPABILITY_NAMES, AgentInfo, AgentTokenIssued, CAPABILITIES, Capture, CaptureCreateResult, CliConfig, ORIGINAL_CAPABILITY_NAME, KnowledgeAiNoteResult, NoteDetail, WorkCommandResult } from "@lumio/schema";
 import { CAPABILITY_COMMANDS } from "../../../skills/lumio/commands.ts";
 import { SKILL_PATHS } from "../../../skills/lumio/install.ts";
 import { generateSkill } from "../../../scripts/gen-skill.ts";
@@ -66,6 +67,24 @@ test("every catalog capability has an executable CLI command returning its resul
   await run("execution.job.list", ["job", "list", "--task", task.task.id, "--limit", "5"]);
   // Submit a synthetic command through the human interface to exercise a nonempty Job result.
   const auth = { Authorization: `Bearer ${human}`, "Content-Type": "application/json" };
+  const originalUrl = "https://articles.example/cli-fixture";
+  const originalBody = await readFile(new URL("../../../fixtures/i1-inbox/original.md", import.meta.url), "utf8");
+  const captured = await fetch(url + "/v2/inbox/captures", {
+    method: "POST", headers: auth,
+    body: JSON.stringify({ request_id: randomUUID(), url: originalUrl, title: "CLI original", channel: "extension", content: { format: "markdown", body: originalBody } }),
+  });
+  const captureId = CaptureCreateResult.parse(await captured.json()).capture.id;
+  let entityId: string | undefined;
+  for (let i = 0; i < 100 && !entityId; i++) {
+    const current = Capture.parse(await (await fetch(url + "/v2/inbox/captures/" + captureId, { headers: auth })).json());
+    entityId = current.entity?.id;
+    if (!entityId) await Bun.sleep(15);
+  }
+  expect(entityId).toBeDefined();
+  const duplicate = await cli(["capture", originalUrl + "?utm_medium=fixture", "--json"], human);
+  expect(duplicate.code).toBe(0);
+  expect(CaptureCreateResult.parse(JSON.parse(duplicate.stdout))).toMatchObject({ duplicate: "existing", capture: { id: captureId } });
+  await run(ORIGINAL_CAPABILITY_NAME, ["original", "show", entityId!]);
   // Register a runtime through its own synthetic token.
   const runtimeName = "synthetic-runtime";
   // Local management CLI remains available while the Hub is serving this synthetic database.

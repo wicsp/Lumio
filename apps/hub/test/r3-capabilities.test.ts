@@ -3,7 +3,9 @@ import { cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promi
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Actor, ApiError, AssistantChatResult, AssistantConfigView, AssistantToolCall, CAPABILITIES, WorkAttention,
-  WorkCommandResult, WorkTask, WorkTaskDetail, Job, toolName } from "@lumio/schema";
+  WorkCommandResult, WorkTask, WorkTaskDetail, Job, ORIGINAL_CAPABILITY_NAME, Source, toolName } from "@lumio/schema";
+import { entityDirectory, parseFrontmatter } from "@lumio/knowledge";
+import { writeOriginal } from "@lumio/storage";
 import type { AssistantModel } from "@lumio/assistant";
 import { startHub } from "../src/server.ts";
 import { readConfig } from "../src/config.ts";
@@ -349,7 +351,18 @@ test("catalog read endpoints validate their results, and project writes preserve
   if (update.kind !== "project") throw new Error("project expected");
   const created = await task({ project: project.project.id }); const job = await dispatch(created.id);
   const identity = hub.store.authenticate(`Bearer ${agent}`)!;
+  const vault = join(temp, "vault");
+  const fixture = new URL("../../../fixtures/i1-inbox/", import.meta.url);
+  const sourceBytes = await readFile(new URL("source.md", fixture));
+  const source = Source.parse(parseFrontmatter(sourceBytes).data);
+  await mkdir(join(vault, entityDirectory("source")), { recursive: true });
+  await writeFile(join(vault, entityDirectory("source"), "Synthetic article.md"), sourceBytes);
+  await writeOriginal(vault, {
+    of: source.id, title: source.title, captured: source.created, extractor: "pasted@1",
+    body: await readFile(new URL("original.md", fixture), "utf8"),
+  });
   const args: Record<string, object> = {
+    [ORIGINAL_CAPABILITY_NAME]: { ref: source.id },
     "knowledge.note.search": { query: "index" }, "knowledge.note.show": { ref: "Main" }, "knowledge.note.links": { ref: "Main" },
     "work.task.list": {}, "work.task.show": { task: created.id }, "work.project.list": {}, "work.project.show": { project: project.project.id },
     "execution.target.list": {}, "execution.job.list": {}, "execution.job.show": { job: job.spec.id }, "execution.routine.list": {}, "approval.proposal.list": {}, "work.attention.list": {},

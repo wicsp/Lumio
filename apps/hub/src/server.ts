@@ -31,6 +31,7 @@ import type { FunAsrOptions } from "./fun-asr.ts";
 import { AssistantConfiguration } from "./assistant-config.ts";
 import { configuredModel } from "./assistant-model.ts";
 import { V2_ROUTES, handleV2 } from "./v2.ts";
+import { Inbox, type InboxOptions } from "./inbox.ts";
 import { Trash } from "./trash.ts";
 import { WriteCoordinator } from "./coordinator.ts";
 import type { AssistantModel, AssistantTool } from "@lumio/assistant";
@@ -84,6 +85,7 @@ async function startHubInstance(config: HubConfig, options: {
   assistantHome?: string;
   assistantFetch?: typeof fetch;
   paperFetch?: PaperFetch;
+  inbox?: InboxOptions;
   pushFetch?: typeof fetch;
   quotaFetch?: typeof fetch;
   funAsr?: FunAsrOptions;
@@ -127,7 +129,10 @@ async function startHubInstance(config: HubConfig, options: {
     const watch = vaultWatch;
     if (config.vault) modules.aiNotes = new AiNotes(config, store, modules.resources,
       action => watch.exclusive(action), (path, message) => watch.issue(path, message), options.now ?? (() => new Date()));
-    modules.trash = new Trash(config, store, modules, action => watch.exclusive(action), options.now ?? (() => new Date()), (path, message) => watch.issue(path, message));
+    const now = options.now ?? (() => new Date());
+    const inbox = modules.inbox = new Inbox(config, store, modules.ai, () => modules!.trash,
+      action => watch.exclusive(action), now, (path, message) => watch.issue(path, message), options.inbox);
+    modules.trash = new Trash(config, store, modules, action => watch.exclusive(action), now, (path, message) => watch.issue(path, message), inbox);
     await modules.trash.sweep();
     modules.trash.start();
     const authoring = new KnowledgeAuthoring(config, store, action => watch.exclusive(action), (path, message) => watch.issue(path, message), options.paperFetch);
@@ -191,7 +196,7 @@ async function startHubInstance(config: HubConfig, options: {
             const response=await modules!.native.usage.human(request,identity!);
             store.audit(identity!,"assistant.config","allow",undefined,"applied");status=response.status;return response;
           }
-          if(url.pathname.startsWith("/v2/ai/")||url.pathname.startsWith("/v2/assistant/native-sessions")){const response=await modules!.native.handle(request,identity!);store.audit(identity!,"assistant.config","allow",undefined,"applied");status=response.status;return response;}
+          if((url.pathname.startsWith("/v2/ai/") && url.pathname !== "/v2/ai/knowledge-bindings")||url.pathname.startsWith("/v2/assistant/native-sessions")){const response=await modules!.native.handle(request,identity!);store.audit(identity!,"assistant.config","allow",undefined,"applied");status=response.status;return response;}
           if (!route) throw new HubError("NOT_FOUND", { key: "server.endpoint_not_found", args: [] });
           const knowledgeRoute = KNOWLEDGE_ROUTES.find(item => item.operation === route.operation);
           if (knowledgeRoute) {
@@ -323,8 +328,9 @@ async function startHubInstance(config: HubConfig, options: {
       },
     });
     modules.native.setPort(server.port!);
-  } catch (cause) { modules?.stop(); await modules?.trash?.stop(); await modules?.notifications.stop(); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); throw cause; }
-  return { server, store, tasks: tasks!, routines: routines!, modules: modules!, async stop() { modules?.stop(); await modules?.native.stop(); await server.stop(true); await modules?.speech.drain(); await modules?.trash?.stop(); await modules?.notifications.stop(); await modules?.artifacts.drain(); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); } };
+    modules.inbox.start();
+  } catch (cause) { modules?.stop(); await modules?.inbox?.stop(); await modules?.trash?.stop(); await modules?.notifications.stop(); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); throw cause; }
+  return { server, store, tasks: tasks!, routines: routines!, modules: modules!, async stop() { modules?.stop(); await modules?.native.stop(); await server.stop(true); await modules?.inbox.stop(); await modules?.speech.drain(); await modules?.trash?.stop(); await modules?.notifications.stop(); await modules?.artifacts.drain(); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); } };
 }
 
 /** One Hub or offline migration owns a state directory. OS locks disappear on crashes, without deleting lock files. */

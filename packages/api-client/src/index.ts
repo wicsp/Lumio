@@ -1,4 +1,4 @@
-import { KnowledgeAiNoteCommand, KnowledgeAiNoteResult, ResourceSummary } from "@lumio/schema";
+import { CaptureCreate, CaptureCreateResult, KnowledgeAiNoteCommand, KnowledgeAiNoteResult, KnowledgeOriginal, KnowledgeOriginalShowArgs, ResourceSummary } from "@lumio/schema";
 import {AIConnection,AIConnectionInput,AIProfile,AIProfileInput,AIConfiguration,AIRuntime,NativeConnectionAction,NativeConnectionView,NativeSession,NativeCreate,NativeAction,NativeEventRecord} from "@lumio/schema";
 import { AIQuotaSettings, AIQuotaView, AIQuotaViews, AliyunBillingUpdate } from "@lumio/schema";
 import { KnowledgeGraph, KnowledgeGraphArgs, Id, KnowledgeDocument, KnowledgeUpdateRequest, KnowledgeUpdateResult, KnowledgeRelatedRequest, KnowledgeRelatedResult, KnowledgeReferencesRequest, KnowledgeReferencesResult } from "@lumio/schema";
@@ -75,6 +75,12 @@ export function createClient(options: { url: string; token?: string; language?: 
   }
   const queryParams = (options: QueryOptions): Record<string, string> => options.includePrivate === undefined ? {} : { include_private: String(options.includePrivate) };
   return {
+    capture(input: CaptureCreate) {
+      return request("/v2/inbox/captures", {}, CaptureCreateResult, validate(CaptureCreate, input));
+    },
+    showOriginal(ref: string) {
+      return request("/v2/knowledge/originals", validate(KnowledgeOriginalShowArgs, { ref }), KnowledgeOriginal);
+    },
     aiConfiguration(){return request("/v2/ai/config",{},AIConfiguration);},
     aiUsage() { return request("/v2/ai/usage", {}, AIQuotaViews); },
     saveAliyunBilling(id: string, input: AliyunBillingUpdate) {

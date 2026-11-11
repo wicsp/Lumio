@@ -82,7 +82,8 @@ export async function writeOriginal(
   if (!parsed.success || !body.trim()) throw new CoreError("INVALID_METADATA", { key: "create.could_not_generate_valid_idea_metadata", args: [] });
   const frontmatter = parsed.data;
   const path = replace ?? `${directory}/${aiNoteFileName(title, frontmatter.of)}.md`;
-  const bytes = Buffer.concat([parseFrontmatter("").render(frontmatter), content]);
+  const fields = Object.fromEntries(Object.entries(frontmatter).filter(([, value]) => value !== undefined));
+  const bytes = Buffer.concat([parseFrontmatter("").render(fields), content]);
   if (textContainsCardNumber(bytes.toString("utf8"))) throw new CoreError("INVALID_METADATA", { key: "create.could_not_generate_valid_idea_metadata", args: [] });
   let expectedContent: Buffer | undefined;
   if (replace) {

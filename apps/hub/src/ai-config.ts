@@ -19,6 +19,7 @@ const failure = (problem: string, code: "INVALID" | "NOT_FOUND" = "INVALID") =>
 const MIGRATION = "ai.legacy-migration";
 
 export class AIConfigurationService {
+  knowledgeProfileInUse?: (profile: string, nextEngine?: AIProfile["engine"]) => boolean;
   constructor(
     readonly store: SqliteAIStore,
     private readonly legacy?: ModelConfiguration,
@@ -118,6 +119,7 @@ export class AIConfigurationService {
     const connection = this.store.connection(input.connection);
     const old = id ? this.store.profile(id) : undefined;
     if (id && old?.owner !== owner) throw failure("profile_missing", "NOT_FOUND");
+    if (old && this.knowledgeProfileInUse?.(old.id, input.engine)) throw new HubError("CONFLICT", { key: "ai.profile_in_use", args: [] });
     if (!connection || connection.owner !== owner) throw failure("connection_missing", "NOT_FOUND");
     if (connection.kind === "typesafe-jev") throw failure("jev_chat_unsupported");
     if (connection.kind === "claude-code-subscription") throw failure("engine_mismatch");
@@ -164,7 +166,7 @@ export class AIConfigurationService {
       if (value.revision !== input.expected_revision) throw new HubError("CONFLICT", { key: "ai.conflict", args: [] });
       const inUse = kind === "connection"
         ? this.store.profiles(owner).some(profile => profile.connection === id)
-        : this.store.sessions(owner).some(session => session.profile.id === id && session.view.state !== "closed");
+        : this.knowledgeProfileInUse?.(id) || this.store.sessions(owner).some(session => session.profile.id === id && session.view.state !== "closed");
       if (inUse) throw new HubError("CONFLICT", { key: kind === "connection" ? "ai.connection_in_use" : "ai.profile_in_use", args: [] });
       return value;
     };
