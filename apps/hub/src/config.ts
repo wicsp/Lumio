@@ -3,7 +3,7 @@ import { browserOrigins } from "./web.ts";
 import { isIP } from "node:net";
 import { randomUUID } from "node:crypto";
 import { readFile, mkdir, writeFile, rename, rm } from "node:fs/promises";
-import { CAPTURE_LIMITS, RuntimeName } from "@lumio/schema";
+import { CAPTURE_LIMITS, DECISION_GATE_DEFAULTS, RuntimeName } from "@lumio/schema";
 import { homedir, hostname } from "node:os";
 import { join, resolve } from "node:path";
 import { modelConfiguration } from "./assistant-model.ts";
@@ -37,8 +37,14 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env) {
       || !/^[\p{L}][\p{L} -]{0,39}$/u.test(captureSummaryLanguage)) {
     throw new HubError("INVALID", { key: "inbox.invalid_config", args: [] });
   }
+  const decisionGateTimeoutMs = Number(env.LUMIO_DECISION_GATE_TIMEOUT_MS ?? DECISION_GATE_DEFAULTS.timeout_ms);
+  const decisionGateMinConfidence = Number(env.LUMIO_DECISION_GATE_MIN_CONFIDENCE ?? DECISION_GATE_DEFAULTS.min_confidence);
+  if (!Number.isSafeInteger(decisionGateTimeoutMs) || decisionGateTimeoutMs < 1 || decisionGateTimeoutMs > 2_147_483_647 ||
+      !Number.isFinite(decisionGateMinConfidence) || decisionGateMinConfidence < 0 || decisionGateMinConfidence > 1) {
+    throw new HubError("INVALID", { key: "ai.decision_gate_config", args: [] });
+  }
   return {
-    captureCardInputTokens, captureSummaryLanguage,
+    captureCardInputTokens, captureSummaryLanguage, decisionGateTimeoutMs, decisionGateMinConfidence,
     assistantModel: env.LUMIO_ASSISTANT_MANAGED === "1" ? undefined : modelConfiguration(env),
     assistantHome: env.HOME ?? (env === process.env ? homedir() : stateDirectory(env)),
     webOrigins: browserOrigins(env.LUMIO_WEB_ORIGINS),
