@@ -10,6 +10,18 @@ export const SPEECH_CONNECTION_KINDS = ["dashscope"] as const;
 export const AIConnectionKind = z.enum(["codex-account", "openai-compatible", "deepseek", "doubao", "typesafe-jev", "claude-code-subscription", "dashscope"]);
 export const AIConnection = z.strictObject({ id: idOf("aic"), owner: idOf("act"), name: z.string().trim().min(1).max(100), kind: AIConnectionKind,
     host: z.union([z.literal("hub"), RuntimeName]), base_url: z.string().url().optional(), api_key_set: z.boolean(), revision: Revision, created: Timestamp, updated: Timestamp });
+export function supportsAliyunBilling(connection: Pick<AIConnection, "kind" | "host" | "base_url">): boolean {
+  if (connection.host !== "hub" || !connection.base_url) return false;
+  const base = connection.base_url.replace(/\/+$/, "");
+  if (connection.kind === "dashscope") return Object.values(DASHSCOPE_BASE_URLS).some(url => base === url);
+  if (connection.kind !== "openai-compatible") return false;
+  const url = URL.parse(base);
+  if (!url || url.protocol !== "https:" || url.port || url.username || url.password ||
+      url.search || url.hash || url.pathname !== "/compatible-mode/v1") return false;
+  return ["dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com",
+    "cn-hongkong.dashscope.aliyuncs.com"].includes(url.hostname) ||
+    /^[a-z0-9-]+\.(cn-beijing|ap-southeast-1|us-east-1|eu-central-1|ap-northeast-1|cn-hongkong)\.maas\.aliyuncs\.com$/.test(url.hostname);
+}
 export const AIConnectionInput = z.strictObject({ name: z.string().trim().min(1).max(100), kind: AIConnectionKind, host: z.union([z.literal("hub"), RuntimeName]), base_url: z.string().url().optional(), api_key: z.string().min(1).max(8192).optional(), clear_api_key: z.boolean().optional() })
     .refine(v => !(v.api_key && v.clear_api_key), "Conflicting credential changes")
     .refine(v => v.kind !== "typesafe-jev" || v.base_url === TYPESAFE_JEV_BASE_URL, { path: ["base_url"], message: "Use the official TypeSafe API address" })

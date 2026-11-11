@@ -2,8 +2,10 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AIConnection, AIQuotaView, AIQuotaViews, ClaudeQuotaBindings, ClaudeQuotaSample, NativeRuntimeCommand, NativeRuntimeMessage, NotificationEvent, RuntimeRegistration } from "@lumio/schema";
+import { AIConnection, AIConfigurationDelete, AIQuotaView, AIQuotaViews, AliyunBillingUpdate, ClaudeQuotaBindings, ClaudeQuotaSample, NativeRuntimeCommand, NativeRuntimeMessage, NotificationEvent, RuntimeRegistration } from "@lumio/schema";
 import balanceFixture from "../../../fixtures/ai-usage/deepseek.json";
+import aliyunFixture from "../../../fixtures/ai-usage/aliyun.json";
+import { aliyunBalanceUrl } from "../src/aliyun-billing.ts";
 import { readConfig } from "../src/config.ts";
 import { startHub } from "../src/server.ts";
 
@@ -46,6 +48,105 @@ const parseView = async (response: Response) => {
   expect(response.headers.get("cache-control")).toBe("no-store");
   return AIQuotaView.parse(await response.json());
 };
+
+const aliyunApi = { name: "Synthetic Alibaba Cloud", kind: "openai-compatible", host: "hub",
+  base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1", api_key: "${secret:synthetic-dashscope}" };
+const aliyunCredentials = { site: "china", access_key_id: "fixture+id", access_key_secret: "fixture-secret" } as const;
+
+test("Alibaba Cloud signs the canonical BSS RPC request and sends no secret in the URL", () => {
+  const url = new URL(aliyunBalanceUrl(aliyunCredentials, new Date("2026-11-10T01:00:00.234Z"), "00000000-0000-4000-8000-000000000000"));
+  expect(url.origin).toBe("https://business.aliyuncs.com");
+  expect(url.searchParams.get("Action")).toBe("QueryAccountBalance");
+  expect(url.searchParams.get("Signature")).toBe("VMyrx7Jjgf9YQ/ia9WCa3FSgfI8=");
+  expect(url.href).not.toContain(aliyunCredentials.access_key_secret);
+});
+
+test("Alibaba Cloud billing is private, manual, and clears revoked readings", async () => {
+  let calls = 0;
+  let mode: "ready" | "transient" | "revoked" = "ready";
+  const f = await fixture((async (input, options) => {
+    calls++;
+    const url = new URL(String(input));
+    expect(url.origin).toBe("https://business.ap-southeast-1.aliyuncs.com");
+    expect(url.searchParams.get("AccessKeyId")).toBe(aliyunCredentials.access_key_id);
+    expect(options?.redirect).toBe("error");
+    expect(url.href).not.toContain(aliyunApi.api_key);
+    if (mode === "transient") throw new DOMException("fixture timeout", "TimeoutError");
+    if (mode === "revoked") return Response.json({ Success: false, Code: "NoPermission", Message: aliyunCredentials.access_key_secret }, { status: 400 });
+    return Response.json(aliyunFixture);
+  }) as typeof fetch);
+  try {
+    const connection = await f.connection(aliyunApi);
+    const other = await f.connection({ ...aliyunApi, base_url: "https://fixture.example.test/compatible-mode/v1" });
+    const billing = path(connection.id, "aliyun-billing"), refresh = path(connection.id, "refresh");
+    const read = async () => AIQuotaViews.parse(await (await f.request("/v2/ai/usage")).json()).find(view => view.connection === connection.id);
+    expect(await read()).toMatchObject({ aliyun_billing_configured: false, status: "credentials" });
+    const credentials = AliyunBillingUpdate.parse({ ...aliyunCredentials, site: "international" });
+    expect((await f.request(billing, "PUT", credentials, f.outsider.token)).status).toBe(404);
+    expect((await f.request(billing, "PUT", credentials, f.agent.token)).status).toBe(403);
+    expect((await f.request(path(other.id, "aliyun-billing"), "PUT", credentials)).status).toBe(400);
+    const configured = await parseView(await f.request(billing, "PUT", credentials));
+    expect(configured).toMatchObject({ aliyun_billing_configured: true, status: "waiting" });
+    expect(JSON.stringify(configured)).not.toContain(aliyunCredentials.access_key_secret);
+    expect(JSON.stringify(configured)).not.toContain(aliyunCredentials.access_key_id);
+    expect((await f.request(path(connection.id, "settings"), "PUT", { monitor: true, thresholds: {} })).status).toBe(400);
+    expect(calls).toBe(0);
+    const first = await parseView(await f.request(refresh, "POST"));
+    expect(first.status).toBe("ready");
+    expect(first.snapshot).toMatchObject({ source: "aliyun-billing", currency: "JPY", cash_balance: "9007199254740993.01", available_amount: "-23.40" });
+    await f.restart();
+    expect(await read()).toEqual(first);
+    mode = "transient";
+    expect(await parseView(await f.request(refresh, "POST"))).toMatchObject({ status: "error", snapshot: first.snapshot });
+    mode = "revoked";
+    const revoked = await parseView(await f.request(refresh, "POST"));
+    expect(revoked.status).toBe("credentials");
+    expect(revoked.snapshot).toBeUndefined();
+    expect(JSON.stringify(revoked)).not.toContain(aliyunCredentials.access_key_secret);
+    const cleared = await parseView(await f.request(billing, "PUT", AliyunBillingUpdate.parse({ clear: true })));
+    expect(cleared.aliyun_billing_configured).toBe(false);
+    expect(cleared.snapshot).toBeUndefined();
+    expect(calls).toBe(3);
+  } finally { await f.close(); }
+});
+
+test("Alibaba Cloud rotation rejects late results and changing the endpoint or deleting clears the binding", async () => {
+  const held = Promise.withResolvers<void>();
+  const started = Promise.withResolvers<void>();
+  const f = await fixture((async input => {
+    if (new URL(String(input)).searchParams.get("AccessKeyId") === aliyunCredentials.access_key_id) {
+      started.resolve();
+      await held.promise;
+      return Response.json({ ...aliyunFixture, Data: { ...aliyunFixture.Data, AvailableCashAmount: "123.00" } });
+    }
+    return Response.json(aliyunFixture);
+  }) as typeof fetch);
+  try {
+    const connection = await f.connection(aliyunApi);
+    const billing = path(connection.id, "aliyun-billing"), refresh = path(connection.id, "refresh");
+    await parseView(await f.request(billing, "PUT", aliyunCredentials));
+    const pending = f.request(refresh, "POST");
+    await started.promise;
+    await parseView(await f.request(billing, "PUT", { ...aliyunCredentials, access_key_id: "fixture-new-id" }));
+    const current = await parseView(await f.request(refresh, "POST"));
+    expect(current.snapshot).toMatchObject({ cash_balance: aliyunFixture.Data.AvailableCashAmount });
+    held.resolve();
+    expect(await parseView(await pending)).toEqual(current);
+    const url = `/v2/ai/connections/${connection.id}`;
+    const edit = await f.request(url, "PUT", { ...aliyunApi, base_url: "https://fixture.example.test/v1" });
+    expect(edit.status).toBe(200);
+    expect((await f.request(billing, "PUT", aliyunCredentials)).status).toBe(400);
+    const editedBack = AIConnection.parse(await (await f.request(url, "PUT", aliyunApi)).json());
+    const missing = await parseView(await f.request(refresh, "POST"));
+    expect(missing.aliyun_billing_configured).toBe(false);
+    expect(missing.snapshot).toBeUndefined();
+    await parseView(await f.request(billing, "PUT", aliyunCredentials));
+    expect((await f.request(url, "DELETE", AIConfigurationDelete.parse({
+      request_id: crypto.randomUUID(), expected_revision: editedBack.revision,
+    }))).status).toBe(200);
+    expect(f.hub.store.db.query("SELECT 1 FROM ai_aliyun_billing WHERE connection=?").get(connection.id)).toBeNull();
+  } finally { held.resolve(); await f.close(); }
+});
 
 test("DeepSeek queries only the official fixed endpoint, merges concurrent refreshes, and invalidates on credential changes", async () => {
   let calls = 0;

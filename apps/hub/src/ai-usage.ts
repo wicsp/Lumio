@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 import {
-  AIQuotaSettings, AIQuotaSnapshot, AIQuotaView, ClaudeQuotaBindings, ClaudeQuotaSample,
+  AIQuotaSettings, AIQuotaSnapshot, AIQuotaView, AliyunBillingUpdate, ClaudeQuotaBindings, ClaudeQuotaSample, supportsAliyunBilling,
   type AIConnection, type AIQuotaStatus, type ClaudeBackgroundResult, type CodexQuotaResult, type NativeAccountBinding,
   type NotificationEvent,
 } from "@lumio/schema";
 import type { SqliteAIStore, StoredAIQuota } from "@lumio/storage";
 import { HubError } from "./errors.ts";
 import type { HubStore, Identity } from "./store.ts";
+import { aliyunBalanceResult, aliyunBalanceUrl } from "./aliyun-billing.ts";
 
 const BALANCE_URL = "https://api.deepseek.com/user/balance";
 const POLL = 15 * 60_000;
@@ -62,7 +63,7 @@ function lowItems(snapshot: AIQuotaSnapshot, settings: AIQuotaSettings, now: num
       const threshold = settings.thresholds[balance.currency];
       if (threshold !== undefined && decimalUnits(balance.total) < decimalUnits(threshold)) low.set(balance.currency, "");
     }
-  } else {
+  } else if ("windows" in snapshot) {
     const threshold = settings.thresholds.remaining_percent;
     for (const window of snapshot.windows) {
       if (window.resets_at && Date.parse(window.resets_at) <= now) continue;
@@ -108,8 +109,10 @@ export class AIUsage {
     return connection;
   }
 
-  private status(connection: AIConnection, stored: StoredAIQuota): AIQuotaStatus {
-    if (connection.kind === "deepseek") {
+  private status(connection: AIConnection, stored: StoredAIQuota, aliyunConfigured?: boolean): AIQuotaStatus {
+    if (aliyunConfigured !== undefined) {
+      if (!aliyunConfigured) return "credentials";
+    } else if (connection.kind === "deepseek") {
       if (!officialDeepSeek(connection)) return "unsupported";
       if (!connection.api_key_set) return "credentials";
     } else if (connection.kind === "codex-account") {
@@ -135,7 +138,7 @@ export class AIUsage {
     const now = this.now().getTime();
     const age = now - Date.parse(snapshot.sampled_at);
     if (age > (snapshot.source === "claude-code" && !snapshot.collection ? CLAUDE_FRESH : 2 * POLL) ||
-        (snapshot.source !== "deepseek" && snapshot.windows.some(window => window.resets_at && Date.parse(window.resets_at) <= now)))
+        ("windows" in snapshot && snapshot.windows.some(window => window.resets_at && Date.parse(window.resets_at) <= now)))
       return "stale";
     return "ready";
   }
@@ -146,9 +149,11 @@ export class AIUsage {
     const matching = connection.kind === "claude-code-subscription" ? stored.binding === runtime?.actor
       : connection.kind === "codex-account" ? !stored.binding || (runtime && JSON.parse(stored.binding)[0] === runtime.actor) : true;
     const snapshot = matching ? stored.snapshot : undefined;
-    const status = this.status(connection, matching ? stored : { settings: stored.settings, generation: stored.generation });
+    const aliyunConfigured = supportsAliyunBilling(connection) ? !!this.store.aliyunBillingGeneration(connection.id) : undefined;
+    const status = this.status(connection, matching ? stored : { settings: stored.settings, generation: stored.generation }, aliyunConfigured);
     return AIQuotaView.parse({
       connection: connection.id, status, snapshot, settings: stored.settings,
+      aliyun_billing_configured: aliyunConfigured,
       attention: !!snapshot && status === "ready" && ((snapshot.source === "deepseek" && !snapshot.available) ||
         lowItems(snapshot, stored.settings, this.now().getTime()).size > 0),
       claude_issue: matching ? stored.claudeIssue : undefined,
@@ -165,7 +170,8 @@ export class AIUsage {
     const alerted = new Map(Object.entries(oldAlerts));
     const low = lowItems(snapshot, stored.settings, now);
     const observed = snapshot.source === "deepseek" ? snapshot.balances.map(balance => balance.currency) :
-      snapshot.windows.filter(window => window.used_percent !== undefined && (!window.resets_at || Date.parse(window.resets_at) > now)).map(window => window.id);
+      "windows" in snapshot ? snapshot.windows.filter(window => window.used_percent !== undefined &&
+        (!window.resets_at || Date.parse(window.resets_at) > now)).map(window => window.id) : [];
     const fresh = now - Date.parse(snapshot.sampled_at) <= (snapshot.source === "claude-code" && !snapshot.collection ? CLAUDE_FRESH : 2 * POLL);
     for (const id of fresh ? observed : []) {
       const marker = low.get(id);
@@ -228,6 +234,32 @@ export class AIUsage {
     }).immediate();
   }
 
+  private async collectAliyun(connection: AIConnection, generation: string): Promise<void> {
+    const credentials = this.store.aliyunBilling(connection.id);
+    if (credentials?.generation !== generation || this.signal.aborted) return;
+    let result: ReturnType<typeof aliyunBalanceResult> = { status: "error" };
+    try {
+      const response = await this.fetcher(aliyunBalanceUrl(credentials, this.now()), {
+        redirect: "error", signal: AbortSignal.any([this.signal, AbortSignal.timeout(8000)]),
+      });
+      if (response.status === 401 || response.status === 403) {
+        void response.body?.cancel().catch(() => {});
+        result = { status: "credentials" };
+      } else {
+        const parsed = aliyunBalanceResult(await limitedJson(response.body), this.now());
+        if (response.ok || parsed.status === "credentials") result = parsed;
+      }
+    } catch { /* Only normalized states cross the public API. */ }
+    if (this.signal.aborted) return;
+    this.store.db.transaction(() => {
+      const active = this.store.connection(connection.id);
+      if (!active || active.base_url !== connection.base_url || this.store.aliyunBillingGeneration(connection.id) !== generation) return;
+      const stored = this.store.quota(connection.id);
+      if (result.status === "ready") this.success(active, stored, result.snapshot);
+      else this.failed(active, result.status === "credentials" ? { settings: stored.settings } : stored, result.status);
+    }).immediate();
+  }
+
   private async collect(connection: AIConnection) {
     if (this.signal.aborted) return;
     if (connection.kind === "claude-code-subscription") return this.collectClaude(connection);
@@ -272,10 +304,12 @@ export class AIUsage {
   }
 
   private refresh(connection: AIConnection): Promise<void> {
-    const pending = this.inflight.get(connection.id);
+    const generation = supportsAliyunBilling(connection) ? this.store.aliyunBillingGeneration(connection.id) : undefined;
+    const key = generation ? `${connection.id}:${generation}` : connection.id;
+    const pending = this.inflight.get(key);
     if (pending) return pending;
-    const next = this.collect(connection).finally(() => this.inflight.delete(connection.id));
-    this.inflight.set(connection.id, next);
+    const next = (generation ? this.collectAliyun(connection, generation) : this.collect(connection)).finally(() => this.inflight.delete(key));
+    this.inflight.set(key, next);
     return next;
   }
 
@@ -285,7 +319,7 @@ export class AIUsage {
     this.nextTick = now + 15_000;
     for (const connection of this.store.quotaConnections()) {
       const quota = this.store.quota(connection.id);
-      if (!quota.settings.monitor || (quota.next ?? 0) > now ||
+      if (!quota.settings.monitor || (quota.next ?? 0) > now || supportsAliyunBilling(connection) ||
           (connection.kind === "claude-code-subscription" && (quota.settings.claude_mode !== "background" || quota.claudeIssue === "account_changed"))) continue;
       void this.refresh(connection).catch(() => {});
     }
@@ -300,11 +334,16 @@ export class AIUsage {
     const headers = { "Cache-Control": "no-store" };
     if (path === "/v2/ai/usage" && request.method === "GET")
       return Response.json(this.store.connections(owner).map(connection => this.view(connection)), { headers });
-    const match = /^\/v2\/ai\/connections\/(aic_[0-9A-HJKMNP-TV-Z]{26})\/usage\/(refresh|settings|bind)$/.exec(path);
+    const match = /^\/v2\/ai\/connections\/(aic_[0-9A-HJKMNP-TV-Z]{26})\/usage\/(refresh|settings|bind|aliyun-billing)$/.exec(path);
     if (!match) throw error("NOT_FOUND", "ai.connection_missing");
     const connection = this.owned(owner, match[1]!);
     const action = match[2];
-    if (action === "refresh" && request.method === "POST" && (["deepseek", "codex-account"].includes(connection.kind) ||
+    if (action === "aliyun-billing" && request.method === "PUT") {
+      const update = AliyunBillingUpdate.safeParse(await limitedJson(request.body).catch(() => null));
+      const active = this.owned(owner, connection.id);
+      if (!update.success || !supportsAliyunBilling(active)) throw error("INVALID");
+      this.store.setAliyunBilling(active.id, "clear" in update.data ? undefined : { ...update.data, generation: randomUUID() });
+    } else if (action === "refresh" && request.method === "POST" && (supportsAliyunBilling(connection) || ["deepseek", "codex-account"].includes(connection.kind) ||
         (connection.kind === "claude-code-subscription" && this.store.quota(connection.id).settings.claude_mode === "background"))) {
       await this.refresh(connection);
     } else if (action === "settings" && request.method === "PUT") {

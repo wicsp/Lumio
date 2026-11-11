@@ -1,6 +1,6 @@
 import { KnowledgeAiNoteCommand, KnowledgeAiNoteResult, ResourceSummary } from "@lumio/schema";
 import {AIConnection,AIConnectionInput,AIProfile,AIProfileInput,AIConfiguration,AIRuntime,NativeConnectionAction,NativeConnectionView,NativeSession,NativeCreate,NativeAction,NativeEventRecord} from "@lumio/schema";
-import { AIQuotaSettings, AIQuotaView, AIQuotaViews } from "@lumio/schema";
+import { AIQuotaSettings, AIQuotaView, AIQuotaViews, AliyunBillingUpdate } from "@lumio/schema";
 import { KnowledgeGraph, KnowledgeGraphArgs, Id, KnowledgeDocument, KnowledgeUpdateRequest, KnowledgeUpdateResult, KnowledgeRelatedRequest, KnowledgeRelatedResult, KnowledgeReferencesRequest, KnowledgeReferencesResult } from "@lumio/schema";
 import { KnowledgeTemplateRequest, KnowledgeTemplateResult, PaperResolveRequest, PaperResolveResult, KnowledgeCreateRequest, KnowledgeCreateResult } from "@lumio/schema";
 import { ExecutionTarget, ExecutionTargetListArgs } from "@lumio/schema";
@@ -77,6 +77,9 @@ export function createClient(options: { url: string; token?: string; language?: 
   return {
     aiConfiguration(){return request("/v2/ai/config",{},AIConfiguration);},
     aiUsage() { return request("/v2/ai/usage", {}, AIQuotaViews); },
+    saveAliyunBilling(id: string, input: AliyunBillingUpdate) {
+      return request(`/v2/ai/connections/${validate(idOf("aic"), id)}/usage/aliyun-billing`, {}, AIQuotaView, validate(AliyunBillingUpdate, input), "PUT");
+    },
     refreshAIUsage(id: string) {
       return request(`/v2/ai/connections/${validate(idOf("aic"), id)}/usage/refresh`, {}, AIQuotaView, undefined, "POST");
     },

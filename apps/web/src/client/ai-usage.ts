@@ -1,6 +1,6 @@
-import { AIQuotaSettings, type AIConnection, type AIQuotaView, type AIQuotaWindow } from "@lumio/schema";
+import { AIQuotaSettings, AliyunBillingUpdate, type AIConnection, type AIQuotaView, type AIQuotaWindow } from "@lumio/schema";
 import { errorText, type Client } from "./api.ts";
-import { clear, failure, h, openDialog, toast } from "./dom.ts";
+import { clear, confirmDialog, failure, h, openDialog, toast } from "./dom.ts";
 import { t, translated } from "./i18n.ts";
 import { formatTime } from "./commands.ts";
 
@@ -21,7 +21,7 @@ const STATUS = translated({
 });
 
 export function amount(currency: string, value: string): string {
-  return currency === "CNY" ? `¥${value}` : `$${value}`;
+  return currency === "USD" ? `$${value}` : `¥${value}`;
 }
 
 function windowLabel(window: AIQuotaWindow): string {
@@ -51,12 +51,15 @@ export function windowRow(window: AIQuotaWindow): HTMLElement {
 
 export function usageSummary(usage: AIQuotaView): string {
   const snapshot = usage.snapshot;
-  const label = usage.attention ? t("Needs attention") : t(usage.claude_issue ? CLAUDE_ISSUE[usage.claude_issue] : STATUS[usage.status]);
+  const statusLabel = usage.aliyun_billing_configured !== undefined && usage.status === "credentials"
+    ? "Read-only RAM credentials required" : STATUS[usage.status];
+  const label = usage.attention ? t("Needs attention") : t(usage.claude_issue ? CLAUDE_ISSUE[usage.claude_issue] : statusLabel);
   if (!snapshot) return label;
   const status = usage.status === "ready" ? label : `${label} · ${formatTime(snapshot.sampled_at)}`;
   if (snapshot.source === "deepseek") {
     return [...snapshot.balances.map(balance => amount(balance.currency, balance.total)), status].join(" · ");
   }
+  if (snapshot.source === "aliyun-billing") return [`${amount(snapshot.currency, snapshot.cash_balance)} ${snapshot.currency}`, status].join(" · ");
   const windows = snapshot.windows.filter(window => window.used_percent !== undefined)
     .slice(0, 2).map(window => `${windowLabel(window)} ${t("Remaining {0}%", percentage(window.used_percent!))}`);
   return [...windows, status].join(" · ");
@@ -81,6 +84,24 @@ export function usageDetails(connection: AIConnection, usage: AIQuotaView, clien
     };
     return button;
   };
+  if (usage.aliyun_billing_configured !== undefined) {
+    const configured = usage.aliyun_billing_configured;
+    details.append(h("strong", {}, t("Alibaba Cloud account balance")),
+      h("p", { class: "field-hint" }, t("Connections billed to the same Alibaba Cloud account share this balance.")));
+    if (snapshot?.source === "aliyun-billing") {
+      const { currency, cash_balance, available_amount } = snapshot;
+      details.append(h("div", { class: "ai-quota-window" },
+        h("span", {}, t("Cash balance {0}", `${amount(currency, cash_balance)} ${currency}`)),
+        h("span", {}, t("Available amount {0}", `${amount(currency, available_amount)} ${currency}`))),
+        h("p", { class: "field-hint" }, t("Last successful reading {0}", formatTime(snapshot.sampled_at))));
+    }
+    if (configured) actions.append(action("Refresh balance", () => client.refreshAIUsage(connection.id)));
+    actions.append(h("button", { type: "button", class: "btn btn-small",
+      onclick: () => aliyunBillingDialog(connection, client, updated, configured),
+    }, t(configured ? "Change billing credentials" : "Set up balance lookup")));
+    details.append(actions, message);
+    return details;
+  }
   if (background || (!isClaude && usage.status !== "unsupported")) actions.append(action("Refresh usage", () => client.refreshAIUsage(connection.id)));
   if (usage.status !== "unsupported" || isClaude) actions.append(h("button", { type: "button", class: "btn btn-small",
     onclick: () => settingsDialog(connection, usage, client, updated) }, t("Monitoring settings")));
@@ -122,12 +143,52 @@ export function usageDetails(connection: AIConnection, usage: AIQuotaView, clien
       h("strong", {}, `${amount(balance.currency, balance.total)} ${balance.currency}`),
       h("span", {}, t("Topped up {0} · Granted {1}", amount(balance.currency, balance.topped_up), amount(balance.currency, balance.granted)))));
     if (!snapshot.available) details.append(h("p", { class: "field-hint" }, t("DeepSeek reports insufficient balance for API calls.")));
-  } else if (snapshot) {
+  } else if (snapshot && "windows" in snapshot) {
     details.append(...snapshot.windows.map(windowRow));
   }
   if (snapshot) details.append(h("p", { class: "field-hint" }, t(snapshot.source === "claude-code" && !snapshot.collection ? "Last session sample {0}" : "Last successful reading {0}", formatTime(snapshot.sampled_at))));
   details.append(actions, message);
   return details;
+}
+
+function aliyunBillingDialog(connection: AIConnection, client: Client, updated: (usage: AIQuotaView) => void, configured: boolean): void {
+  const site = h("select", {},
+    h("option", { value: "china" }, t("Alibaba Cloud China site")),
+    h("option", { value: "international" }, t("Alibaba Cloud international site")));
+  const keyId = h("input", { type: "password", autocomplete: "off", required: true, maxlength: 256 });
+  const keySecret = h("input", { type: "password", autocomplete: "off", required: true, maxlength: 256 });
+  const field = (label: string, control: HTMLElement) =>
+    h("label", { class: "field" }, h("span", { class: "field-label" }, t(label)), control);
+  const message = h("div", { role: "status" });
+  const form = h("form", { class: "form-stack", autocomplete: "off" },
+    h("p", { class: "field-hint" }, t("Use a RAM AccessKey with only the QueryAccountBalance permission for the account that pays for this connection.")),
+    field("Billing site", site), field("AccessKey ID", keyId), field("AccessKey Secret", keySecret), message);
+  const save = h("button", { type: "button", class: "btn btn-primary", onclick: () => form.requestSubmit() }, t("Save"));
+  const remove = h("button", { type: "button", class: "btn btn-small", onclick: async () => {
+    if (await confirmDialog({ title: t("Remove billing credentials?"), message: t("The saved balance for this connection will be cleared.") }))
+      await submit({ clear: true });
+  } }, t("Remove billing credentials"));
+  const dialog = openDialog(t("Alibaba Cloud account balance"), form, configured ? [remove, save] : [save]);
+  dialog.addEventListener("close", () => { keyId.value = keySecret.value = ""; });
+  async function submit(input: AliyunBillingUpdate) {
+    save.disabled = remove.disabled = true;
+    clear(message);
+    try {
+      const result = await client.saveAliyunBilling(connection.id, input);
+      dialog.close();
+      updated(result);
+    } catch (cause) { clear(message, failure(errorText(cause))); }
+    finally { save.disabled = remove.disabled = false; }
+  }
+  form.onsubmit = event => {
+    event.preventDefault();
+    if (save.disabled) return;
+    const input = AliyunBillingUpdate.safeParse({
+      site: site.value, access_key_id: keyId.value.trim(), access_key_secret: keySecret.value.trim(),
+    });
+    if (input.success) void submit(input.data);
+    else clear(message, failure(t("Enter a valid AccessKey ID and Secret.")));
+  };
 }
 
 function settingsDialog(connection: AIConnection, usage: AIQuotaView, client: Client, updated: (usage: AIQuotaView) => void): void {

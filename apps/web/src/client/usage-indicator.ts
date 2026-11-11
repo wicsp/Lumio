@@ -31,7 +31,7 @@ const SEVERITY: Record<UsageLevel, number> = { ok: 0, issue: 1, low: 2, empty: 3
 const remainingOf = (window: AIQuotaWindow) => Math.max(0, Math.round(100 - window.used_percent!));
 
 export function usageGlance(connection: AIConnection, usage: AIQuotaView): UsageGlance | undefined {
-  if (!usage.settings.monitor) return undefined;
+  if (!usage.settings.monitor || usage.aliyun_billing_configured !== undefined) return undefined;
   const base = { connection: connection.id, name: connection.name };
   const snapshot = usage.snapshot;
   if (!snapshot || BROKEN.has(usage.status) || usage.claude_issue) return { ...base, level: "issue", bars: [], value: "—" };
@@ -40,6 +40,7 @@ export function usageGlance(connection: AIConnection, usage: AIQuotaView): Usage
     const level: UsageLevel = !snapshot.available ? "empty" : usage.attention ? "low" : "ok";
     return { ...base, level, bars: [], value: balance ? amount(balance.currency, balance.total) : "—" };
   }
+  if (!("windows" in snapshot)) return undefined;
   const windows = snapshot.windows.filter(window => window.used_percent !== undefined)
     .sort((a, b) => (a.minutes ?? Infinity) - (b.minutes ?? Infinity));
   if (!windows.length) return { ...base, level: "issue", bars: [], value: "—" };
@@ -189,7 +190,7 @@ export class UsageIndicator {
         h("strong", {}, `${amount(balance.currency, balance.total)} ${balance.currency}`),
         h("span", { class: "set-sub" }, t("Topped up {0} · Granted {1}", amount(balance.currency, balance.topped_up), amount(balance.currency, balance.granted))))));
       if (!snapshot.available) body.push(h("p", { class: "field-hint" }, t("DeepSeek reports insufficient balance for API calls.")));
-    } else if (snapshot) {
+    } else if (snapshot && "windows" in snapshot) {
       body.push(...[...snapshot.windows].sort((a, b) => (a.minutes ?? Infinity) - (b.minutes ?? Infinity)).map(windowRow));
     }
     const actions = h("div", { class: "button-row" });

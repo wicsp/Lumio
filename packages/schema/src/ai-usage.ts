@@ -14,6 +14,17 @@ export const AIQuotaWindow = z.strictObject({
 const QuotaWindows = z.array(AIQuotaWindow).min(1).max(64)
   .refine(windows => new Set(windows.map(window => window.id)).size === windows.length);
 export const AIQuotaStatus = z.enum(["waiting", "unsupported", "credentials", "offline", "error", "stale", "ready"]);
+const AccessKeyField = z.string().min(1).max(256).regex(/^[!-~]+$/);
+export const AliyunBillingCredentials = z.strictObject({
+  site: z.enum(["china", "international"]),
+  access_key_id: AccessKeyField,
+  access_key_secret: AccessKeyField,
+});
+export const AliyunBillingUpdate = z.union([AliyunBillingCredentials, z.strictObject({ clear: z.literal(true) })]);
+export const AliyunBalanceSnapshot = z.strictObject({
+  source: z.literal("aliyun-billing"), sampled_at: Timestamp, currency: z.enum(["CNY", "USD", "JPY"]),
+  cash_balance: AIDecimal, available_amount: AIDecimal,
+});
 export const AIQuotaSnapshot = z.discriminatedUnion("source", [
   z.strictObject({
     source: z.literal("deepseek"), sampled_at: Timestamp, available: z.boolean(),
@@ -23,6 +34,7 @@ export const AIQuotaSnapshot = z.discriminatedUnion("source", [
   }),
   z.strictObject({ source: z.literal("codex"), sampled_at: Timestamp, windows: QuotaWindows }),
   z.strictObject({ source: z.literal("claude-code"), sampled_at: Timestamp, windows: QuotaWindows, collection: z.literal("background").optional() }),
+  AliyunBalanceSnapshot,
 ]);
 export const AIQuotaSettings = z.strictObject({
   monitor: z.boolean(),
@@ -52,6 +64,7 @@ export const AIQuotaView = z.strictObject({
   settings: AIQuotaSettings,
   snapshot: AIQuotaSnapshot.optional(),
   attention: z.boolean(),
+  aliyun_billing_configured: z.boolean().optional(),
   claude_binding: ClaudeQuotaBinding.optional(),
   claude_issue: ClaudeQuotaIssue.optional(),
 });
@@ -62,6 +75,8 @@ export type AIQuotaStatus = z.infer<typeof AIQuotaStatus>;
 export type AIQuotaSnapshot = z.infer<typeof AIQuotaSnapshot>;
 export type AIQuotaSettings = z.infer<typeof AIQuotaSettings>;
 export type AIQuotaView = z.infer<typeof AIQuotaView>;
+export type AliyunBillingCredentials = z.infer<typeof AliyunBillingCredentials>;
+export type AliyunBillingUpdate = z.infer<typeof AliyunBillingUpdate>;
 export type ClaudeQuotaBinding = z.infer<typeof ClaudeQuotaBinding>;
 export type ClaudeQuotaSample = z.infer<typeof ClaudeQuotaSample>;
 export type ClaudeBackgroundResult = z.infer<typeof ClaudeBackgroundResult>;
