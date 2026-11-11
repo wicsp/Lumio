@@ -1,5 +1,7 @@
 import type { Database } from "bun:sqlite";
-import { AIConnection, AIProfile, NativeSession, NativeEventData, AIQuotaSettings, AIQuotaSnapshot, AIQuotaStatus, type ClaudeQuotaIssue } from "@lumio/schema";
+import { AIConnection, AIProfile, NativeSession, NativeEventData, AIQuotaSettings, AIQuotaSnapshot, AIQuotaStatus, supportsAliyunBilling, type AliyunBillingCredentials, type ClaudeQuotaIssue } from "@lumio/schema";
+
+type StoredAliyunBilling = AliyunBillingCredentials & { generation: string };
 
 export interface StoredAIQuota {
   settings: AIQuotaSettings;
@@ -19,6 +21,15 @@ export class SqliteAIStore {
     db.exec(`
  CREATE TABLE IF NOT EXISTS ai_connections(id TEXT PRIMARY KEY,owner TEXT NOT NULL,record TEXT NOT NULL CHECK(json_valid(record)),secret TEXT);
  CREATE TABLE IF NOT EXISTS ai_quota(connection TEXT PRIMARY KEY REFERENCES ai_connections(id) ON DELETE CASCADE,record TEXT NOT NULL CHECK(json_valid(record)));
+ CREATE TABLE IF NOT EXISTS ai_aliyun_billing(
+   connection TEXT PRIMARY KEY REFERENCES ai_connections(id) ON DELETE CASCADE,
+   generation TEXT NOT NULL,site TEXT NOT NULL,access_key_id TEXT NOT NULL,access_key_secret TEXT NOT NULL
+ );
+ CREATE TRIGGER IF NOT EXISTS ai_aliyun_billing_endpoint_changed AFTER UPDATE ON ai_connections
+ WHEN json_extract(OLD.record,'$.base_url') IS NOT json_extract(NEW.record,'$.base_url')
+ BEGIN
+   UPDATE ai_aliyun_billing SET generation=lower(hex(randomblob(16))) WHERE connection=NEW.id;
+ END;
  CREATE TRIGGER IF NOT EXISTS ai_quota_source_changed AFTER UPDATE ON ai_connections
  WHEN OLD.secret IS NOT NEW.secret OR json_extract(OLD.record,'$.base_url') IS NOT json_extract(NEW.record,'$.base_url')
    OR json_extract(OLD.record,'$.host') IS NOT json_extract(NEW.record,'$.host')
@@ -60,11 +71,12 @@ export class SqliteAIStore {
   }
   putConnection(v: AIConnection, secret?: string) {
     AIConnection.parse(v);
-    this.db
-      .query(
+    this.db.transaction(() => {
+      this.db.query(
         "INSERT INTO ai_connections VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET record=excluded.record,secret=excluded.secret",
-      )
-      .run(v.id, v.owner, JSON.stringify(v), secret ?? null);
+      ).run(v.id, v.owner, JSON.stringify(v), secret ?? null);
+      if (!supportsAliyunBilling(v)) this.db.query("DELETE FROM ai_aliyun_billing WHERE connection=?").run(v.id);
+    }).immediate();
   }
   deleteConnection(id: string) {
     this.db.query("DELETE FROM ai_connections WHERE id=?").run(id);
@@ -83,6 +95,26 @@ export class SqliteAIStore {
   putQuota(id: string, value: StoredAIQuota): void {
     this.db.query("INSERT INTO ai_quota VALUES(?,?) ON CONFLICT(connection) DO UPDATE SET record=excluded.record")
       .run(id, JSON.stringify(value));
+  }
+  aliyunBillingGeneration(id: string): string | undefined {
+    return this.db.query<{ generation: string }, [string]>("SELECT generation FROM ai_aliyun_billing WHERE connection=?").get(id)?.generation;
+  }
+  aliyunBilling(id: string): StoredAliyunBilling | undefined {
+    return this.db.query<StoredAliyunBilling, [string]>(
+      "SELECT generation,site,access_key_id,access_key_secret FROM ai_aliyun_billing WHERE connection=?",
+    ).get(id) ?? undefined;
+  }
+  setAliyunBilling(id: string, credentials?: StoredAliyunBilling): void {
+    this.db.transaction(() => {
+      if (credentials) {
+        this.db.query(`INSERT INTO ai_aliyun_billing VALUES(?,?,?,?,?) ON CONFLICT(connection) DO UPDATE SET
+          generation=excluded.generation,site=excluded.site,access_key_id=excluded.access_key_id,access_key_secret=excluded.access_key_secret`)
+          .run(id, credentials.generation, credentials.site, credentials.access_key_id, credentials.access_key_secret);
+      } else {
+        this.db.query("DELETE FROM ai_aliyun_billing WHERE connection=?").run(id);
+      }
+      this.db.query("DELETE FROM ai_quota WHERE connection=?").run(id);
+    }).immediate();
   }
   quotaConnections(): AIConnection[] {
     return this.db.query<{ record: string }, []>("SELECT ai_connections.record FROM ai_quota JOIN ai_connections ON ai_connections.id=ai_quota.connection")

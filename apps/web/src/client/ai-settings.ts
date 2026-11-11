@@ -150,7 +150,7 @@ export class AISettings {
       const usage = this.usage.get(connection.id);
       const row = this.item(["codex-account", "claude-code-subscription"].includes(connection.kind) ? "device" : "globe", connection.name,
         connectionSummary(connection, this.auth.get(connection.id), this.legacyChatUses(connection), usage), () => this.editConnection(connection));
-      const details = usage && ["deepseek", "codex-account", "claude-code-subscription"].includes(connection.kind)
+      const details = usage && (usage.aliyun_billing_configured !== undefined || ["deepseek", "codex-account", "claude-code-subscription"].includes(connection.kind))
         ? usageDetails(connection, usage, this.client, this.updateUsage) : undefined;
       if (details && expanded.has(connection.id)) details.setAttribute("open", "");
       return h("div", { class: "ai-connection-row" }, row, details);

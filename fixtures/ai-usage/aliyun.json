@@ -1,0 +1,11 @@
+{
+  "Success": true,
+  "Code": "200",
+  "RequestId": "fixture-request",
+  "Data": {
+    "Currency": "JPY",
+    "AvailableCashAmount": "9007199254740993.01",
+    "AvailableAmount": "-23.40",
+    "CreditAmount": "0.00"
+  }
+}
