@@ -30,7 +30,8 @@ I1-4 另读 `docs/design/execution.md`，I1-5、I1-7 另读 `docs/design/web.md`
 | I1-4 | 没有字幕的视频：只对认识的视频平台（YouTube、B 站等，列表写在 Hub）派 command Job，在执行器上下载音频并本地转写；或交回音频由 Hub 调用云端语音识别（语音 Profile），由人选择。执行器用所在机器的代理设置；Cookie 只放在执行器机器上。PDF 转 Markdown 的执行器路径等需要时再加 | 后端（Codex） | `apps/hub`、`apps/runtime`、`packages/execution` |
 | I1-5 ✅ | Web：快速捕获（粘贴框、命令面板、PWA 分享目标）；Inbox 视图（处理进度、卡片、"可能相关"前 3 条、分拣按钮、失败原因与重试、手动粘贴正文）；原文阅读页（只读）；"让 AI 细读"；设置页的摘要与向量 Profile（写明内容发给哪个服务） | 前端（Claude） | `packages/api-client`、`apps/web` |
 | I1-6 | 语义检索：按"标题 + 卡片"（笔记按标题与正文）生成向量存入 `index.sqlite`；换模型时整体重算；混合检索（FTS 与向量按 RRF 融合）用于 `knowledge.search`、编辑器相关推荐和 Inbox"可能相关"；私密实体不生成向量；未配置向量用途时退回纯全文检索 | 后端（Codex） | `packages/knowledge`、`packages/storage`、`apps/hub` |
-| I1-7 | 浏览器插件（主路径）：直接连 Hub，把当前页面的 URL、标题与正文送到 Inbox；视频页面取出页面已有的字幕；打开的 PDF 直接送文件。配对方式沿用 Web 登录 | 前端（Claude） | `apps/chrome-ext` |
+| I1-7 ✅ | 浏览器插件（主路径）：直接连 Hub，把当前页面的 URL、标题与正文送到 Inbox；视频页面取出页面已有的字幕；打开的 PDF 直接送文件。配对方式沿用 Web 登录 | 前端（Claude） | `apps/chrome-ext` |
+| I1-7a | Hub 配合插件：① 浏览器来源检查放行 `chrome-extension://` 与 `moz-extension://` 来源（身份仍只认令牌；插件来源的请求现在被 403 拒绝）；② Hub 没有公网地址时也能生成客户端配对码，`hub_url` 返回本机地址，供同一台机器上的插件使用；③ 插件送来 HTML 时原文的 `extractor` 记为 `page-html@1`，而不是 `pasted@1` | 后端（Codex） | `apps/hub` |
 
 依赖：I1-2、I1-3 依赖 I1-1；I1-3a、I1-4、I1-5、I1-6、I1-7 依赖 I1-3。先做 I1-3a 与 I1-7，I1-4 等真需要转写时再做。I1-3 做完即可日常使用（网页与 arXiv）。
 

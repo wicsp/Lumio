@@ -1,0 +1,5 @@
+{
+  "description": { "message": "把正在看的页面存进 Lumio 的 Inbox。" },
+  "actionTitle": { "message": "存到 Lumio" },
+  "saveLink": { "message": "把链接存到 Lumio" }
+}

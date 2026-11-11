@@ -7,6 +7,7 @@ import type { RuntimeInfo } from "@lumio/schema";
 import { errorText, type Session } from "../api.ts";
 import { clear, h, icon } from "../dom.ts";
 import { ago } from "../format.ts";
+import { formatTime } from "../commands.ts";
 import { helperState, installCommandBlock } from "../privileged-helper.ts";
 import { lang, setLang, t, type Lang } from "../i18n.ts";
 import { onTheme, setTheme, themeChoice, type ThemeChoice } from "../theme.ts";
@@ -113,7 +114,7 @@ export class SettingsPane {
         return { element: page(
           this.group(t("Keyboard shortcuts"), undefined, h("div", { class: "set-rows" },
             this.row(t("Command menu"), h("span", { class: "set-value" }, h("kbd", {}, "⌘K"))),
-            this.row(t("Switch sections"), h("span", { class: "set-value" }, h("kbd", {}, "1"), "–", h("kbd", {}, "6"))))),
+            this.row(t("Switch sections"), h("span", { class: "set-value" }, h("kbd", {}, "1"), "–", h("kbd", {}, "7"))))),
           gamepad && this.group(t("Gamepad"), undefined, gamepad.element)), dispose: () => gamepad?.dispose() };
       }
       case "notifications": {
@@ -131,7 +132,8 @@ export class SettingsPane {
         clear(runtimeRows, h("p", { class: "set-empty" }, t("Loading…")));
         void this.loadHub(hubRows);
         void this.loadRuntimes(runtimeRows);
-        return { element: page(this.group(t("Hub"), undefined, hubRows), this.group(t("Runtimes"), t("Machines that run agents for this Hub."), runtimeRows)) };
+        return { element: page(this.group(t("Hub"), undefined, hubRows), this.group(t("Runtimes"), t("Machines that run agents for this Hub."), runtimeRows),
+          this.group(t("Browser extension"), t("Save the page you're reading to the Inbox with one click."), this.extensionPairing())) };
       }
       case "agents": {
         const agents = new AgentsSettings(this.session.client);
@@ -161,6 +163,28 @@ export class SettingsPane {
       (title || action) && h("div", { class: "set-group-head" }, title && h("h3", { class: "set-group-title" }, title), action),
       h("div", { class: "set-card" }, body),
       hint && h("p", { class: "set-hint" }, hint));
+  }
+
+  /** 给浏览器插件生成一次性配对码：插件设置页填 Hub 地址和配对码，换取自己的 human 令牌（ADR 0057）。 */
+  private extensionPairing(): HTMLElement {
+    const result = h("div", { class: "set-pairing", role: "status" });
+    const button = h("button", { type: "button", class: "btn btn-small" }, t("Create pairing code"));
+    button.addEventListener("click", () => void (async () => {
+      button.disabled = true; clear(result);
+      try {
+        const invite = await this.session.client.clientInvite(`browser@${new Date().toISOString().slice(0, 10)}`);
+        clear(result,
+          this.row(t("Hub address"), h("span", { class: "set-value mono" }, invite.hub_url)),
+          this.row(t("Pairing code"), h("span", { class: "set-value mono set-code" }, invite.code)),
+          h("p", { class: "field-hint" }, t("Enter both in the extension's settings. The code works once, until {0}.", formatTime(invite.expires))));
+      } catch (error) {
+        clear(result, h("p", { class: "field-hint inbox-error" }, errorText(error)));
+      } finally { button.disabled = false; }
+    })());
+    return h("div", { class: "set-rows" },
+      h("div", { class: "set-row" }, h("span", { class: "set-label" }, t("Pair a browser"),
+        h("span", { class: "set-sub" }, t("Install the Lumio extension from apps/chrome-ext, then create a code here."))), button),
+      result);
   }
 
   private row(label: string, value: Node): HTMLElement {
