@@ -212,12 +212,14 @@ export class WorkPane {
       // 被阻塞（ADR 0039）：叠加在轮到谁之上；悬停列出还没完成的前置。
       isBlocked(task) && h("span", { class: "who-chip is-blocked", title: t("Waiting on: {0}", blockingTitles(task, new Map(this.tasks.map(item => [item.id, item]))).join(t(", "))) },
         icon("link"), t("Waiting on {0}", task.blocked_by!.length))].filter(Boolean) as HTMLElement[];
-    const row = h("div", { class: `row t-${group}`, "data-id": task.id, role: "button", tabindex: "0",
+    const row = h("div", { class: `row t-${group}`, "data-id": task.id, "data-pad-menu": true,
+      "data-pad-delegate": task.outcome === "open" && task.turn.reason !== "working" && task.turn.holder !== "nobody" && !isBlocked(task), role: "button", tabindex: "0",
       onclick: () => void this.open(task.id), onkeydown: (event: Event) => { if ((event as KeyboardEvent).key === "Enter" && event.target === event.currentTarget) void this.open(task.id); } },
       statusBtn,
       h("span", { class: "row-main" }, h("span", { class: "row-title" }, task.title), sub.length ? h("span", { class: "row-sub" }, ...sub) : null),
       h("span", { class: "row-meta" },
         due && task.outcome === "open" && h("span", { class: `due${due.overdue ? " overdue" : due.soon ? " soon" : ""}`, title: t("Due") }, due.text)));
+    row.addEventListener("lumio-task-menu", () => this.quickTurn(task, row, [{ label: t("Delete"), run: () => void this.deleteWork(task) }]));
     return deletableRow(row, task.title, () => void this.deleteWork(task));
   }
 
@@ -226,11 +228,14 @@ export class WorkPane {
     const done = related.filter(t => t.outcome === "done").length;
     const fill = h("span", { class: "progress-fill" });
     fill.style.width = `${related.length ? Math.round((done / related.length) * 100) : 0}%`;
-    const row = h("div", { class: `row ${project.status}`, "data-id": project.id, role: "button", tabindex: "0", onclick: () => void this.open(project.id),
+    const row = h("div", { class: `row ${project.status}`, "data-id": project.id, "data-pad-menu": true, role: "button", tabindex: "0", onclick: () => void this.open(project.id),
       onkeydown: (event: Event) => { if ((event as KeyboardEvent).key === "Enter") void this.open(project.id); } },
       statusIcon(project.status),
       h("span", { class: "row-main" }, h("span", { class: "row-title" }, project.title), project.goal && h("span", { class: "row-sub" }, project.goal)),
       h("span", { class: "row-meta" }, related.length ? h("span", { class: "progress", title: t("{0} of {1} done", done, related.length) }, fill) : null, related.length ? `${done}/${related.length}` : t("No tasks")));
+    row.addEventListener("lumio-task-menu", () => {
+      openMenu(row, [{ value: "delete", label: t("Delete"), icon: icon("trash") }], () => void this.deleteWork(project));
+    });
     return deletableRow(row, project.title, () => void this.deleteWork(project));
   }
 
@@ -281,12 +286,12 @@ export class WorkPane {
     });
   }
 
-  private quickTurn(task: WorkTask, anchor: HTMLElement): void {
+  private quickTurn(task: WorkTask, anchor: HTMLElement, extra?: { label: string; run(): void }[]): void {
     taskTurnMenu(this.client, task, anchor, async () => {
       this.changed();
       await this.load();
       if (this.selected === task.id && !this.editor?.dirty) void this.open(task.id, true);
-    }, () => { void this.load(); });
+    }, () => { void this.load(); }, extra);
   }
 
   // ───────────── 详情 ─────────────

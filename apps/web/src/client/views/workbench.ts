@@ -4,7 +4,7 @@ import { drafts } from "../drafts.ts";
 import { executionGroups } from "../execution-groups.ts";
 import { turnGroup } from "../turn.ts";
 import type { Session } from "../api.ts";
-import { h, icon, typing } from "../dom.ts";
+import { h, icon, toast, typing } from "../dom.ts";
 import { OverviewPane } from "../panes/overview.ts";
 import { KnowledgePane } from "../panes/knowledge.ts";
 import { WorkPane } from "../panes/work.ts";
@@ -16,7 +16,8 @@ import type { Navigate, Pane, Section } from "../navigation.ts";
 import { t } from "../i18n.ts";
 import { SettingsPane } from "../panes/settings-page.ts";
 import { TrashPane } from "../panes/trash.ts";
-import { GamepadInput } from "../gamepad-input.ts";
+import { DEFAULT_BINDINGS, GamepadInput } from "../gamepad-input.ts";
+import { padButtonLabel } from "../gamepad-settings.ts";
 import { GamepadNavigation } from "../gamepad-navigation.ts";
 import { UsageIndicator } from "../usage-indicator.ts";
 
@@ -39,6 +40,8 @@ type MountedPane = { target: HTMLElement; pane: Pane };
 export class WorkbenchView {
   private gamepad: GamepadInput;
   private padNavigation: GamepadNavigation;
+  private unsubscribePadStatus: () => void;
+  private toastReturn?: { section: Section; id?: string };
   private main = h("main", { class: "main", id: "content", tabindex: "-1" });
   private nav = new Map<Section, HTMLButtonElement>();
   private counts = new Map<Section, HTMLElement>();
@@ -58,6 +61,7 @@ export class WorkbenchView {
     const generation=++this.routeGeneration, route=this.readRoute();
     if (!(await this.beforeLeave())) { if(generation===this.routeGeneration) history.pushState(null, "", this.currentHash || "#overview"); return; }
     if(generation!==this.routeGeneration)return;
+    this.toastReturn = undefined;
     this.show(route.section, route.id);
   };
   private readonly onKey = (event: KeyboardEvent) => {
@@ -106,22 +110,38 @@ export class WorkbenchView {
     this.padNavigation = new GamepadNavigation({
       pane: () => this.current?.target,
       back: () => { if (this.section === "settings") this.leaveSettings(); else void this.go("overview"); },
+      backLabel: () => this.section === "overview" ? undefined : t("Back"),
+      returnFromToast: () => {
+        if (!this.toastReturn) return false;
+        const route = this.toastReturn;
+        void this.go(route.section, route.id);
+        return true;
+      },
       section: step => {
-        const index = SECTIONS.findIndex(s => s.key === this.section);
-        const next = SECTIONS[(index + step + SECTIONS.length) % SECTIONS.length]!;
-        void this.go(next.key);
+        const next = this.adjacentSection(step);
+        if (next) void this.go(next.key);
+      },
+      sectionLabel: step => {
+        const next = this.adjacentSection(step);
+        return next && t(next.label);
+      },
+      buttonLabel: command => {
+        const pad = this.gamepad?.activePad;
+        const button = (this.gamepad?.mapping ?? DEFAULT_BINDINGS)[command];
+        return !pad || button < pad.buttons.length ? padButtonLabel(button, pad) : undefined;
       },
       delegate: id => this.current?.pane.intent?.(`delegate:${id}`),
       palette: () => this.palette.open(true),
       paletteAction: step => this.palette.gamepad(step),
     });
-    this.gamepad = new GamepadInput(input => {
-      const test = this.current?.target.querySelector<HTMLElement>("[data-pad-testing]");
-      if (test && test.getClientRects().length) {
-        if ("command" in input && input.phase === "press" && input.command === "back") test.removeAttribute("data-pad-testing");
-        return;
+    this.padNavigation.mount();
+    this.gamepad = new GamepadInput(input => this.padNavigation.handle(input));
+    const warned = new Set<string>();
+    this.unsubscribePadStatus = this.gamepad.subscribe(({ pad }) => {
+      if (pad && pad.mapping !== "standard" && !warned.has(pad.id)) {
+        warned.add(pad.id);
+        toast(t("This controller’s buttons may be mismatched. You can remap them in Settings → General → Gamepad."));
       }
-      this.padNavigation.handle(input);
     });
     const nav = h("nav", { class: "nav", "aria-label": t("Main navigation") });
     for (const s of SECTIONS) {
@@ -179,6 +199,11 @@ export class WorkbenchView {
     this.countTimer = setInterval(() => { if (document.visibilityState === "visible") void this.refreshCounts(); }, 60_000);
   }
 
+  private adjacentSection(step: number): typeof SECTIONS[number] | undefined {
+    const index = SECTIONS.findIndex(section => section.key === this.section);
+    return index < 0 ? SECTIONS[step > 0 ? 0 : SECTIONS.length - 1] : SECTIONS[index + step];
+  }
+
   private readRoute(): { section: Section; id?: string } {
     const [section, raw] = location.hash.slice(1).split(/\/(.*)/s);
     const known: Section = section === "settings" || section === "trash" ? section : SECTIONS.find(s => s.key === section)?.key ?? "overview";
@@ -192,6 +217,7 @@ export class WorkbenchView {
     if (section === this.section && section !== "settings" && !intent && (!id || (section === "work" && id === this.workMode))) return;
     if (!(await this.beforeLeave()) || generation !== this.routeGeneration) return;
     const hash = `#${section}${id ? `/${encodeURIComponent(id)}` : ""}`;
+    this.toastReturn = intent === "from-dispatch-toast" ? this.readRoute() : undefined;
     if (location.hash !== hash) history.pushState(null, "", hash);
     this.show(section, id, intent);
   }
@@ -235,7 +261,7 @@ export class WorkbenchView {
       if (id || section === "settings") mounted.pane.open?.(id ?? "");
     }
     this.current = mounted;
-    this.padNavigation.reset();
+    this.padNavigation.routeChanged(!!id && section !== "settings");
     if (intent) mounted.pane.intent?.(intent);
   }
 
@@ -304,8 +330,9 @@ export class WorkbenchView {
   }
 
   dispose(): void {
+    this.unsubscribePadStatus();
     this.gamepad.dispose();
-    this.padNavigation.reset();
+    this.padNavigation.dispose();
     this.disposeReferenceLinks();
     this.disposeResourceLinks();
     this.routeGeneration++;

@@ -1,9 +1,9 @@
-export const BUTTONS = ["A / ✕", "B / ○", "X / □", "Y / △", "LB / L1", "RB / R1", "LT / L2", "RT / R2",
-  "View / Share", "Menu / Options", "L3", "R3", "↑", "↓", "←", "→"] as const;
+export const BUTTONS = ["A", "B", "X", "Y", "LB", "RB", "LT", "RT",
+  "View", "Menu", "L3", "R3", "↑", "↓", "←", "→", "Guide"] as const;
 
 export const DEFAULT_BINDINGS = {
   up: 12, down: 13, left: 14, right: 15, activate: 0, back: 1, delegate: 2, more: 3,
-  previous: 4, next: 5, palette: 9, talk: 7,
+  previous: 4, next: 5, palette: 9, talk: 7, view: 8,
 };
 
 export type PadCommand = keyof typeof DEFAULT_BINDINGS;
@@ -12,15 +12,20 @@ export const PAD_COMMANDS = Object.keys(DEFAULT_BINDINGS) as PadCommand[];
 export const HOLD_MS = 1000;
 
 const STORAGE_KEY = "lumio.web.gamepad";
-const REPEAT_DELAY = 350;
-const REPEAT_MS = 110;
+const REPEAT_DELAY = 400;
+const REPEAT_MS = 100;
 const DEAD_ZONE = 0.24;
 const DIRECTIONS = ["up", "down", "left", "right"] as const;
 
 export function loadBindings(storage: Pick<Storage, "getItem">): PadBindings {
   try {
     const saved: Partial<PadBindings> | null = JSON.parse(storage.getItem(STORAGE_KEY) ?? "null");
-    if (saved && PAD_COMMANDS.every(command => Number.isInteger(saved[command]) && saved[command]! >= 0 && saved[command]! < BUTTONS.length)
+    if (saved && typeof saved === "object" && saved.view === undefined) {
+      // Keep custom bindings saved before View was added.
+      const used = Object.values(saved);
+      saved.view = !used.includes(DEFAULT_BINDINGS.view) ? DEFAULT_BINDINGS.view : BUTTONS.findIndex((_, index) => !used.includes(index));
+    }
+    if (saved && PAD_COMMANDS.every(command => validButton(saved[command]))
       && new Set(PAD_COMMANDS.map(command => saved[command])).size === PAD_COMMANDS.length) {
       return Object.fromEntries(PAD_COMMANDS.map(command => [command, saved[command]])) as PadBindings;
     }
@@ -33,8 +38,12 @@ export function saveBindings(storage: Pick<Storage, "setItem">, bindings: PadBin
   catch { return false; }
 }
 
+function validButton(index: number | undefined): boolean {
+  return index !== undefined && Number.isSafeInteger(index) && index >= 0;
+}
+
 export function remap(bindings: PadBindings, command: PadCommand, button: number): PadBindings {
-  if (!Number.isInteger(button) || button < 0 || button >= BUTTONS.length) return bindings;
+  if (!validButton(button)) return bindings;
   const occupied = PAD_COMMANDS.find(key => bindings[key] === button);
   const next = { ...bindings };
   if (occupied) next[occupied] = bindings[command];
@@ -50,14 +59,14 @@ export type PadSample = Pick<Gamepad, "index" | "id" | "mapping" | "timestamp"> 
 export type PadInput = {
   command: PadCommand;
   phase: "press" | "release" | "hold" | "repeat";
-} | { phase: "scroll"; x: number; y: number } | { phase: "reset" };
+} | { phase: "scroll"; x: number; y: number } | { phase: "reset" } | { phase: "activity" };
 
 type Controls = { pad: PadSample; stick?: PadCommand };
 type Press = { started: number; repeatAt: number; held: boolean };
 
 function direction(axes: readonly number[]): PadCommand | undefined {
   const [x = 0, y = 0] = axes;
-  if (Math.max(Math.abs(x), Math.abs(y)) < 0.55) return;
+  if (Math.max(Math.abs(x), Math.abs(y)) < 0.5) return;
   return Math.abs(x) > Math.abs(y) ? (x < 0 ? "left" : "right") : (y < 0 ? "up" : "down");
 }
 
@@ -87,7 +96,7 @@ export class PadInputState {
 
   update(pads: readonly PadSample[], now: number, bindings: PadBindings, baseline = false): PadInput[] {
     const events: PadInput[] = [];
-    const controls = pads.filter(pad => pad.mapping === "standard").map(pad => ({ pad, stick: direction(pad.axes) }));
+    const controls = pads.map(pad => ({ pad, stick: direction(pad.axes) }));
     const previous = this.previous;
     this.previous = new Map(controls.map(entry => [entry.pad.index, entry]));
     const oldControls = (pad: PadSample) => {
@@ -99,10 +108,10 @@ export class PadInputState {
       const old = oldControls(pad);
       return pad.buttons.some((down, index) => down && !old?.pad.buttons[index])
         || (stick && stick !== old?.stick)
-        || (Math.max(Math.abs(pad.axes[2] ?? 0), Math.abs(pad.axes[3] ?? 0)) >= 0.55
-          && Math.max(Math.abs(old?.pad.axes[2] ?? 0), Math.abs(old?.pad.axes[3] ?? 0)) < 0.55);
+        || pad.axes.some((value, index) => index >= 2 && Math.abs(value) > DEAD_ZONE
+          && Math.abs(old?.pad.axes[index] ?? 0) <= DEAD_ZONE);
     }).sort((a, b) => b.pad.timestamp - a.pad.timestamp);
-    const next = (baseline ? last : touched[0] ?? last) ?? controls[0];
+    const next = (baseline ? last : touched[0] ?? last) ?? controls.find(({ pad }) => pad.mapping === "standard") ?? controls[0];
     if (!next || next !== last) {
       if (this.active) events.push({ phase: "reset" });
       this.presses.clear();
@@ -135,6 +144,7 @@ export class PadInputState {
     }
     const x = scrollAxis(next.pad.axes[2]) * elapsed;
     const y = scrollAxis(next.pad.axes[3]) * elapsed;
+    if (touched.includes(next) && !events.some(event => event.phase === "press")) events.push({ phase: "activity" });
     if (x || y) events.push({ phase: "scroll", x, y });
     return events;
   }
@@ -164,6 +174,7 @@ export class GamepadInput {
   }
 
   get mapping(): PadBindings { return this.bindings; }
+  get activePad(): PadSample | undefined { return this.state.active; }
 
   configure(bindings: PadBindings): boolean {
     this.bindings = bindings;

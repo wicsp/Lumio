@@ -118,7 +118,8 @@ export class AssistantPane {
     void this.loadProfiles();
     this.showWelcome();
     void this.loadConversations();
-    this.text.focus();
+    // Shoulder navigation keeps controller focus on the module.
+    if (!document.body.hasAttribute("data-gamepad-mode")) this.text.focus();
     if (initial) this.open(initial);
   }
 

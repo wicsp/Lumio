@@ -35,10 +35,10 @@ describe("G1 controller input", () => {
     expect(state.update([pad(0, [13, 2])], 0, DEFAULT_BINDINGS)).toEqual([
       { command: "down", phase: "press" }, { command: "delegate", phase: "press" },
     ]);
-    expect(state.update([pad(0, [13, 2])], 349, DEFAULT_BINDINGS)).toEqual([]);
-    expect(state.update([pad(0, [13, 2])], 350, DEFAULT_BINDINGS)).toEqual([{ command: "down", phase: "repeat" }]);
-    expect(state.update([pad(0, [13, 2])], 400, DEFAULT_BINDINGS)).toEqual([]);
-    expect(state.update([pad(0, [13, 2])], 460, DEFAULT_BINDINGS)).toEqual([{ command: "down", phase: "repeat" }]);
+    expect(state.update([pad(0, [13, 2])], 399, DEFAULT_BINDINGS)).toEqual([]);
+    expect(state.update([pad(0, [13, 2])], 400, DEFAULT_BINDINGS)).toEqual([{ command: "down", phase: "repeat" }]);
+    expect(state.update([pad(0, [13, 2])], 450, DEFAULT_BINDINGS)).toEqual([]);
+    expect(state.update([pad(0, [13, 2])], 500, DEFAULT_BINDINGS)).toEqual([{ command: "down", phase: "repeat" }]);
   });
 
   test("sticks ignore drift, choose the dominant direction, and cap frame-time scroll jumps", () => {
@@ -46,6 +46,7 @@ describe("G1 controller input", () => {
     expect(state.update([pad(0, [], [0.2, -0.2, 0.23, -0.23])], 0, DEFAULT_BINDINGS)).toEqual([]);
     expect(state.update([pad(0, [], [0.4, -0.9, 0, 0])], 10, DEFAULT_BINDINGS)).toEqual([{ command: "up", phase: "press" }]);
     const result = state.update([pad(0, [], [0.4, -0.9, 1, -1])], 10_000, DEFAULT_BINDINGS);
+    expect(result).toContainEqual({ phase: "activity" });
     expect(result).toContainEqual({ phase: "scroll", x: 40, y: -40 });
   });
 
@@ -73,11 +74,32 @@ describe("G1 controller input", () => {
     expect(state.update([pad(0, [0])], 2202, DEFAULT_BINDINGS)).toEqual([{ command: "activate", phase: "press" }]);
   });
 
-  test("unmapped controllers cannot issue commands with guessed button indices", () => {
+  test("raw controllers can use default and remapped indices, including buttons beyond the Xbox layout", () => {
     const state = new PadInputState();
-    const unknown: PadSample = { ...pad(0, [0, 13]), mapping: "" };
-    expect(state.update([unknown], 0, DEFAULT_BINDINGS)).toEqual([]);
-    expect(state.active).toBeUndefined();
+    const raw: PadSample = { ...pad(0, [13]), mapping: "" };
+    expect(state.update([raw], 0, DEFAULT_BINDINGS)).toEqual([{ command: "down", phase: "press" }]);
+    expect(state.active?.mapping).toBe("");
+    const bindings = remap(DEFAULT_BINDINGS, "view", 18);
+    const buttons = Array.from({ length: 19 }, (_, index) => index === 18);
+    expect(state.update([{ ...raw, buttons }], 1, bindings)).toEqual([
+      { command: "down", phase: "release" }, { command: "view", phase: "press" },
+    ]);
+    expect(loadBindings({ getItem: () => JSON.stringify(bindings) })).toEqual(bindings);
+  });
+
+  test("unbound buttons and other stick axes still report controller activity", () => {
+    const state = new PadInputState();
+    expect(state.update([pad(0, [16])], 0, DEFAULT_BINDINGS)).toEqual([{ phase: "activity" }]);
+    expect(state.update([pad(0, [16], [0, 0, 0, 0, 0.6])], 1, DEFAULT_BINDINGS)).toEqual([{ phase: "activity" }]);
+    expect(state.update([pad(0, [16], [0, 0, 0, 0, 0.6])], 2, DEFAULT_BINDINGS)).toEqual([]);
+  });
+
+  test("adding View preserves existing remaps, including a binding that occupies the default View button", () => {
+    const { view: _view, ...saved } = DEFAULT_BINDINGS;
+    saved.activate = 8;
+    const bindings = loadBindings({ getItem: () => JSON.stringify(saved) });
+    expect(bindings).toMatchObject(saved);
+    expect(bindings.view).toBe(0);
   });
 
   test("remapping swaps the occupied key and persists through reload", () => {
@@ -94,7 +116,7 @@ describe("G1 controller input", () => {
 
   test("malformed, duplicated, partial, and denied storage degrade to usable defaults", () => {
     for (const value of ["null", "{}", "[]", "invalid", JSON.stringify({ ...DEFAULT_BINDINGS, up: 0 }),
-      JSON.stringify({ ...DEFAULT_BINDINGS, up: 99 }), JSON.stringify({ ...DEFAULT_BINDINGS, up: "12" })]) {
+      JSON.stringify({ ...DEFAULT_BINDINGS, up: -1 }), JSON.stringify({ ...DEFAULT_BINDINGS, up: "12" })]) {
       expect(loadBindings({ getItem: () => value })).toEqual(DEFAULT_BINDINGS);
     }
     expect(loadBindings({ getItem: () => { throw new Error("denied"); } })).toEqual(DEFAULT_BINDINGS);

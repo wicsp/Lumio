@@ -5,10 +5,14 @@ import { t } from "./i18n.ts";
 import { TURN_ACTION_DONE, TURN_ACTION_ICONS, TURN_ACTION_LABELS, turnActionCommand, turnActions, type TurnAction } from "./turn.ts";
 
 /** Today and Work use the same revision-aware task decisions and confirmations. */
-export function taskTurnMenu(client: Client, task: WorkTask, anchor: HTMLElement, changed: () => void | Promise<void>, failed: () => void): void {
-  openMenu(anchor, turnActions(task).map(action => ({
+export function taskTurnMenu(client: Client, task: WorkTask, anchor: HTMLElement, changed: () => void | Promise<void>,
+  failed: () => void, extra: { label: string; run(): void }[] = []): void {
+  const choices = turnActions(task).map(action => ({
     value: action, label: TURN_ACTION_LABELS[action], icon: icon(TURN_ACTION_ICONS[action]),
-  })), async value => {
+  }));
+  openMenu(anchor, [...choices, ...extra.map(({ label }, index) => ({ value: String(index), label }))], async value => {
+    const actionIndex = Number(value);
+    if (Number.isInteger(actionIndex)) { extra[actionIndex]?.run(); return; }
     const action = value as TurnAction;
     let note: string | undefined;
     if (action === "external") {

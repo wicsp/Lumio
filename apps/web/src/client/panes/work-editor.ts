@@ -109,7 +109,7 @@ export class WorkEditor {
         isTask && (this.delegateButton = h("button", { type: "button", class: "btn btn-primary btn-small", "data-pad-action": "delegate", onclick: () => void this.dispatch() }, icon("play"), t("Delegate")))));
 
     const attention = h("div", { class: "attn-slot" });
-    const detail = h("div", { class: "detail" }, crumbs, h("div", { class: "detail-head" }, this.title, this.updated), attention, this.note, this.props,
+    const detail = h("div", { class: "detail" }, crumbs, h("div", { class: "detail-head", "data-pad-row": rec.id + ":detail", tabindex: "-1" }, this.title, this.updated), attention, this.note, this.props,
       h("div", { class: "divider" }), this.bodyHost, this.saveStatus);
     root.append(detail);
     this.renderMeta();
@@ -294,6 +294,9 @@ export class WorkEditor {
     const r = this.record, button = this.delegateButton;
     if (!button || r.type !== "task") return;
     const blocked = isBlocked(r);
+    const available = r.outcome === "open" && r.turn.reason !== "working" && r.turn.holder !== "nobody" && !blocked;
+    if (available) button.setAttribute("data-pad-action", "delegate");
+    else button.removeAttribute("data-pad-action");
     button.disabled = blocked;
     button.title = blocked ? t("Prerequisites not done: {0}", blockingTitles(r, this.byId).join(t(", "))) : "";
   }
@@ -664,9 +667,11 @@ export class WorkEditor {
         if (previousTarget && previousTarget !== target.value) requestId = newRequestId();
         previousTarget = target.value; pending = true; submit.disabled = true;
         try {
-          await this.client.workCommand(dispatchCommand(task, target.value, requestId));
+          const result = await this.client.workCommand(dispatchCommand(task, target.value, requestId));
           dialog.close();
-          toast(t("Dispatched to {0}", target.value));
+          toast(t("Dispatched to {0}", target.value), "ok", result.kind === "job" ? {
+            label: t("View run"), run: () => this.hooks.navigate("execution", result.job.spec.id, "from-dispatch-toast"),
+          } : undefined);
           if (this.active) { this.hooks.changed(); this.hooks.reload(); }
         } catch (cause) {
           clear(error, failure(t("{0} Check the runs to see whether it was dispatched.", errorText(cause))));

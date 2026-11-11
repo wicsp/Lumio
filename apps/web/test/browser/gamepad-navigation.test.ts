@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { GamepadNavigation } from "../../src/client/gamepad-navigation.ts";
-import { DEFAULT_BINDINGS, PadInputState } from "../../src/client/gamepad-input.ts";
+import { BUTTONS, DEFAULT_BINDINGS, PadInputState, type PadCommand } from "../../src/client/gamepad-input.ts";
 import { nextListItem } from "../../src/client/list-keys.ts";
 
 const ROWS = "[data-pad-row], .row[data-id]";
+const ITEMS = ROWS + ', .split.has-detail [data-pad-action="primary"], .split.has-detail [data-pad-action="delegate"], .split.has-detail [data-pad-action="reject"]';
 const PRIMARY = '[data-pad-action="primary"]';
 
 // A narrow DOM surface for the real controller dispatcher. Full rendering is
@@ -23,16 +24,29 @@ class ElementStub extends EventTarget {
   scrolls = 0;
   clicks = 0;
   value = 0;
+  bounds = { left: 0, right: 100, top: 0, bottom: 30 };
+  get parentElement() { return this.parent; }
+  getBoundingClientRect() { return this.bounds; }
   constructor(readonly tagName: string) { super(); }
   getClientRects(): object[] { return this.visible && this.isConnected ? [{}] : []; }
   setAttribute(key: string, value: string): void { this.attributes.set(key, value); }
+  removeAttribute(key: string): void { this.attributes.delete(key); }
   hasAttribute(key: string): boolean { return this.attributes.has(key); }
   getAttribute(key: string): string | null { return this.attributes.get(key) ?? null; }
   querySelectorAll(selector: string): ElementStub[] { return this.queries.get(selector) ?? []; }
   querySelector(selector: string): ElementStub | undefined { return this.querySelectorAll(selector)[0]; }
-  append(...children: unknown[]): void { this.children.push(...children); }
+  append(...children: unknown[]): void {
+    this.children.push(...children);
+    for (const child of children) if (child instanceof ElementStub) child.parent = this;
+  }
+  replaceChildren(): void { this.children = []; }
+  close(): void { dialogs = []; doc.activeElement = body; }
   after(child: unknown): void { this.children.push(child); }
-  remove(): void { this.isConnected = false; }
+  remove(): void {
+    this.isConnected = false;
+    if (this.parent) this.parent.children = this.parent.children.filter(child => child !== this);
+    this.parent = undefined;
+  }
   focus(): void { doc.activeElement = this; }
   blur(): void { doc.activeElement = body; }
   click(): void { if (!this.disabled) { this.clicks++; this.dispatchEvent(new Event("click")); } }
@@ -44,6 +58,8 @@ class ElementStub extends EventTarget {
     return this.parent?.closest(selector);
   }
   matches(selector: string): boolean {
+    if (selector === "dialog") return this.tagName === "DIALOG";
+    if (selector === "[data-pad-region], .bar, .list-pane, .detail-pane") return !!this.dataset.padRegion;
     if (selector === ":disabled") return this.disabled;
     if (selector === ".is-busy, [inert]") return this.className === "is-busy" || this.hasAttribute("inert");
     if (selector === ROWS) return !!this.dataset.padRow || !!this.dataset.id;
@@ -60,6 +76,7 @@ let doc: {
   createElement(tag: string): ElementStub;
 };
 let dialogs: ElementStub[];
+let toastButtons: ElementStub[];
 let pane: ElementStub;
 let row: ElementStub;
 let button: ElementStub;
@@ -78,12 +95,13 @@ beforeEach(() => {
   row.parent = pane;
   button = new ElementStub("BUTTON");
   button.parent = row;
-  pane.queries.set(ROWS, [row]);
+  pane.queries.set(ITEMS, [row]);
   row.queries.set(PRIMARY, [button]);
   dialogs = [];
+  toastButtons = [];
   doc = {
     activeElement: body, body, visibilityState: "visible", hasFocus: () => true,
-    querySelectorAll: selector => selector === "dialog[open]" ? dialogs : [],
+    querySelectorAll: selector => selector === "dialog[open]" ? dialogs : selector.startsWith(".toast-action") ? toastButtons : [],
     querySelector: () => undefined,
     createElement: tag => new ElementStub(tag.toUpperCase()),
   };
@@ -107,12 +125,16 @@ beforeEach(() => {
   navigation = new GamepadNavigation({
     pane: () => pane as unknown as HTMLElement, back: () => { returned++; },
     section: step => { moduleSteps.push(step); }, palette: () => { palette++; },
+    backLabel: () => "Back",
+    sectionLabel: step => step < 0 ? "Previous" : "Next",
+    buttonLabel: command => BUTTONS[DEFAULT_BINDINGS[command]],
+    returnFromToast: () => false,
     paletteAction() {}, delegate() {},
   });
 });
-afterEach(() => { navigation.reset(); restore(); });
+afterEach(() => { navigation.leave(); restore(); });
 
-const press = (command: "activate" | "back" | "down" | "next" | "previous" | "palette") =>
+const press = (command: PadCommand) =>
   navigation.handle({ command, phase: "press" });
 
 test("D-pad focus scrolls with the row, and A invokes its existing primary button", () => {
@@ -153,7 +175,7 @@ test("a protected target replaced, disabled, or moved out of focus during a hold
     () => { doc.activeElement = body; },
     () => { row.className = "is-busy"; },
   ]) {
-    navigation.reset();
+    navigation.leave();
     button.isConnected = button.visible = true;
     button.disabled = false;
     row.className = "";
@@ -205,10 +227,133 @@ test("a silent rerender restores focus by stable identity, never by list positio
   const replacement = new ElementStub("ARTICLE");
   replacement.dataset.padRow = row.dataset.padRow!;
   replacement.queries.set(PRIMARY, [button]);
-  pane.queries.set(ROWS, [replacement]);
+  pane.queries.set(ITEMS, [replacement]);
   press("activate");
   expect(button.clicks).toBe(1);
   replacement.dataset.padRow = "different-decision";
   press("activate");
   expect(button.clicks).toBe(1);
+});
+
+function hints(): ElementStub[] {
+  const bar = body.children.find(node => node instanceof ElementStub && node.className === "pad-hints") as ElementStub | undefined;
+  return (bar?.children ?? []) as ElementStub[];
+}
+
+test("controller mode hides on pointer input and restores the last row on new controller activity", () => {
+  press("down");
+  expect(body.hasAttribute("data-gamepad-mode")).toBe(true);
+  expect(row.hasAttribute("data-pad-focus")).toBe(true);
+  navigation.leave(true);
+  expect(row.hasAttribute("data-pad-focus")).toBe(false);
+  expect(body.hasAttribute("data-gamepad-mode")).toBe(false);
+  expect(hints()).toHaveLength(0);
+  expect(doc.activeElement).toBe(body);
+  navigation.handle({ phase: "activity" });
+  expect(doc.activeElement).toBe(row);
+  expect(row.hasAttribute("data-pad-focus")).toBe(true);
+});
+
+test("View clicks the current toast action once, and disappears when there is no action", () => {
+  const old = new ElementStub("BUTTON");
+  const newest = new ElementStub("BUTTON");
+  newest.textContent = "Undo";
+  newest.addEventListener("click", () => { toastButtons = []; });
+  toastButtons = [old, newest];
+  press("down");
+  expect(hints().length).toBeLessThanOrEqual(5);
+  expect(hints().some(hint => hint.children.includes("Undo"))).toBe(true);
+  press("view");
+  press("view");
+  expect(newest.clicks).toBe(1);
+  expect(old.clicks).toBe(0);
+  expect(hints().some(hint => hint.children.includes("Undo"))).toBe(false);
+});
+
+test("X prefers the current card’s rejection, leaving its primary approval untouched", () => {
+  const reject = new ElementStub("BUTTON");
+  reject.parent = row;
+  reject.textContent = "Refuse";
+  row.queries.set('[data-pad-action="reject"]', [reject]);
+  press("down");
+  expect(hints().some(hint => hint.children.includes("Refuse"))).toBe(true);
+  press("delegate");
+  expect(reject.clicks).toBe(1);
+  expect(button.clicks).toBe(0);
+});
+
+test("directional navigation moves within a region, crosses to a neighboring region, and stops at the far edge", () => {
+  const left = new ElementStub("SECTION");
+  left.dataset.padRegion = "list";
+  left.parent = pane;
+  row.parent = left;
+  const below = new ElementStub("ARTICLE");
+  below.dataset.padRow = "second";
+  below.bounds = { left: 0, right: 100, top: 40, bottom: 70 };
+  below.parent = left;
+  const detail = new ElementStub("SECTION");
+  detail.dataset.padRegion = "detail";
+  detail.parent = pane;
+  const next = new ElementStub("ARTICLE");
+  next.dataset.padRow = "detail-item";
+  next.bounds = { left: 140, right: 240, top: 40, bottom: 70 };
+  next.parent = detail;
+  pane.queries.set(ITEMS, [row, below, next]);
+  press("down");
+  expect(doc.activeElement).toBe(row);
+  press("down");
+  expect(doc.activeElement).toBe(below);
+  press("right");
+  expect(doc.activeElement).toBe(next);
+  press("right");
+  expect(doc.activeElement).toBe(next);
+  press("left");
+  expect(doc.activeElement).toBe(below);
+});
+
+test("an open dialog locks navigation and Back restores the previous card", () => {
+  press("down");
+  const dialog = new ElementStub("DIALOG");
+  const close = new ElementStub("BUTTON");
+  close.parent = dialog;
+  dialog.queries.set("button, summary", [close]);
+  dialogs = [dialog];
+  close.focus();
+  press("down");
+  expect(doc.activeElement).toBe(close);
+  press("next");
+  expect(moduleSteps).toEqual([]);
+  press("back");
+  expect(doc.activeElement).toBe(row);
+  expect(row.hasAttribute("data-pad-focus")).toBe(true);
+});
+
+test("when the remembered row disappears, re-entry lands on its nearest list item before acting", () => {
+  const before = new ElementStub("ARTICLE");
+  before.dataset.padRow = "before";
+  before.bounds = { left: 0, right: 100, top: -40, bottom: -10 };
+  const after = new ElementStub("ARTICLE");
+  after.dataset.padRow = "after";
+  after.bounds = { left: 0, right: 100, top: 40, bottom: 70 };
+  after.queries.set(PRIMARY, [button]);
+  pane.queries.set(ITEMS, [before, row, after]);
+  press("down");
+  press("down");
+  expect(doc.activeElement).toBe(row);
+  navigation.leave(true);
+  pane.queries.set(ITEMS, [before, after]);
+  press("activate");
+  expect(doc.activeElement).toBe(after);
+  expect(button.clicks).toBe(0);
+  press("activate");
+  expect(button.clicks).toBe(1);
+});
+
+test("a stick held through a pointer takeover waits for new controller activity", () => {
+  navigation.handle({ phase: "activity" });
+  navigation.leave(true);
+  navigation.handle({ phase: "scroll", x: 0, y: 8 });
+  expect(body.hasAttribute("data-gamepad-mode")).toBe(false);
+  navigation.handle({ phase: "activity" });
+  expect(body.hasAttribute("data-gamepad-mode")).toBe(true);
 });
