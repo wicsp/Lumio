@@ -1615,7 +1615,7 @@ button.inbox-title:hover { text-decoration: underline; }
 .inbox-related-row .icon { width: 12px; height: 12px; flex: none; }
 .inbox-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .inbox-actions:empty { display: none; }
-.inbox-actions .row-delete { opacity: 1; }
+.inbox-actions .row-delete { opacity: 1; pointer-events: auto; }
 .inbox-original { max-height: 65vh; overflow-y: auto; }
 .pill .icon.spin { animation: spin .9s linear infinite; }
 @media (max-width: 720px) {

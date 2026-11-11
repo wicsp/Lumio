@@ -151,7 +151,10 @@ export class InboxPane {
       const result = await this.client.capture(request);
       if (!this.active) return true;
       if (result.duplicate === "existing") toast(t("Already saved. It's in the list."), "ok", result.capture.entity?.id ? { label: t("Open"), run: () => this.openEntity(result.capture) } : undefined);
-      else if (result.duplicate === "discarded") toast(t("You discarded this before. Restore it from Recently deleted if you want it back."), "ok", { label: t("Open Recently deleted"), run: () => this.navigate("trash") });
+      else if (result.duplicate === "discarded") {
+        if (result.capture.entity?.id) toast(t("You discarded this before. Restore it from Recently deleted if you want it back."), "ok", { label: t("Open Recently deleted"), run: () => this.navigate("trash") });
+        else toast(t("You discarded this before."), "ok");
+      }
       this.upsert(result.capture, true);
       this.changed();
       return true;
@@ -293,8 +296,12 @@ export class InboxPane {
       try {
         const updated = await this.client.captureCommand(capture.id, { request_id: newRequestId("inbox"), expected_revision: capture.revision, action });
         if (!this.active) return;
-        if (done) toast(done, "ok", action.op === "triage" && action.triage === "discard" ? { label: t("Open Recently deleted"), run: () => this.navigate("trash") } : undefined);
+        if (action.op === "triage" && action.triage === "discard") {
+          if (updated.entity?.id) toast(t("Moved to Recently deleted"), "ok", { label: t("Open Recently deleted"), run: () => this.navigate("trash") });
+          else toast(t("Discarded"), "ok");
+        } else if (done) toast(done, "ok");
         this.upsert(updated);
+        if (action.op === "triage" && this.untriaged) void this.load(true);
         this.changed();
       } catch (cause) {
         if (!this.active) return;
@@ -331,7 +338,7 @@ export class InboxPane {
     if (!capture.triage && (capture.state === "ready" || capture.state === "failed")) {
       bar.append(h("span", { class: "bar-spacer" }),
         h("button", { type: "button", class: "icon-btn row-delete", title: t("Discard"), "aria-label": t("Discard"), "data-pad-action": "discard",
-          onclick: command({ op: "triage", triage: "discard" }, t("Moved to Recently deleted")) }, icon("trash")));
+          onclick: command({ op: "triage", triage: "discard" }) }, icon("trash")));
     }
     return bar;
   }
