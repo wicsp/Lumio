@@ -29,8 +29,11 @@ export function isPublicAddress(address: string): boolean {
     : family === 6 && global6.check(address, "ipv6") && !blocked6.check(address, "ipv6");
 }
 
+const bareHost = (host: string) => host.replace(/^\[|\]$/g, "").replace(/\.$/, "").toLowerCase();
+const defaultPort = (url: URL) => url.protocol === "https:" ? 443 : 80;
+
 export function validateCaptureUrl(url: URL): string {
-  const hostname = url.hostname.replace(/^\[|\]$/g, "").replace(/\.$/, "");
+  const hostname = bareHost(url.hostname);
   if (!["http:", "https:"].includes(url.protocol) || url.username || url.password ||
       !hostname || /^(?:localhost|.*\.(?:localhost|local|internal|home\.arpa))$/i.test(hostname) ||
       (!isIP(hostname) && !hostname.includes(".")) || (isIP(hostname) && !isPublicAddress(hostname))) {
@@ -42,13 +45,60 @@ export function validateCaptureUrl(url: URL): string {
 interface FetchResponse {
   status: number;
   header(name: string): string | undefined;
-  body: AsyncIterable<Uint8Array>;
+  body: AsyncIterable<Uint8Array> | Iterable<Uint8Array>;
   close(): void;
 }
 export interface CaptureNetwork {
   lookup(hostname: string): Promise<readonly string[]>;
   request(url: URL, address: string, signal: AbortSignal): Promise<FetchResponse>;
+  requestThroughProxy?(url: URL, signal: AbortSignal): Promise<FetchResponse> | undefined;
   timeoutMs?: number;
+}
+
+const captureHeaders = {
+  "User-Agent": "Lumio/capture", Accept: "text/html,application/xhtml+xml,application/atom+xml,application/json,application/x-bibtex,text/plain",
+  "Accept-Encoding": "identity",
+};
+
+function matchesNoProxy(url: URL, list: string): boolean {
+  const host = bareHost(url.hostname);
+  const family = isIP(host);
+  const port = Number(url.port || defaultPort(url));
+  return list.split(/[,\s]+/).some(entry => {
+    if (entry === "*") return true;
+    if (!entry) return false;
+    const cidr = /^(.+)\/(\d+)$/.exec(entry);
+    if (cidr) {
+      const subnet = bareHost(cidr[1]!);
+      const prefix = Number(cidr[2]);
+      if (!family || isIP(subnet) !== family || prefix > (family === 4 ? 32 : 128)) return false;
+      const type = family === 4 ? "ipv4" : "ipv6";
+      const block = new BlockList();
+      block.addSubnet(subnet, prefix, type);
+      return block.check(host, type);
+    }
+    const match = isIP(entry) ? [entry, entry] : /^(\[[^\]]+\]|[^:]+)(?::(\d+))?$/.exec(entry);
+    if (!match || (match[2] && Number(match[2]) !== port)) return false;
+    const domain = bareHost(match[1]!.replace(/^\*?\./, ""));
+    if (family === 6 && isIP(domain) === 6) return host === bareHost(new URL(`http://[${domain}]`).hostname);
+    return host === domain || (!family && host.endsWith("." + domain));
+  });
+}
+
+async function proxyRequest(url: URL, proxy: string, signal: AbortSignal): Promise<FetchResponse> {
+  const endpoint = new URL(proxy);
+  if (endpoint.protocol !== "http:" && endpoint.protocol !== "https:") throw new CaptureFailure("fetch_failed");
+  const response = await fetch(url, {
+    // Route selection already applied NO_PROXY. A direct fallback here would skip DNS checks.
+    proxy: { url: endpoint, respectNoProxy: false }, redirect: "manual", credentials: "omit",
+    decompress: false, keepalive: false, signal, headers: captureHeaders,
+  });
+  return {
+    status: response.status,
+    header: name => response.headers.get(name) ?? undefined,
+    body: response.body ?? [],
+    close: () => { void response.body?.cancel().catch(() => {}); },
+  };
 }
 
 const publicNetwork: CaptureNetwork = {
@@ -58,12 +108,9 @@ const publicNetwork: CaptureNetwork = {
       const hostname = url.hostname.replace(/^\[|\]$/g, "");
       const request = (url.protocol === "https:" ? httpsGet : httpGet)({
         // Connect to the exact checked address. Retain the original HTTP host and TLS name.
-        hostname: address, port: url.port || (url.protocol === "https:" ? 443 : 80),
+        hostname: address, port: url.port || defaultPort(url),
         path: url.pathname + url.search, servername: isIP(hostname) ? undefined : hostname.replace(/\.$/, ""),
-        agent: false, signal, headers: {
-          Host: url.host, "User-Agent": "Lumio/capture", Accept: "text/html,application/xhtml+xml,application/atom+xml,application/json,application/x-bibtex,text/plain",
-          "Accept-Encoding": "identity",
-        },
+        agent: false, signal, headers: { ...captureHeaders, Host: url.host },
       }, response => resolve({
         status: response.statusCode ?? 0,
         header: name => {
@@ -78,8 +125,26 @@ const publicNetwork: CaptureNetwork = {
   },
 };
 
+export function captureNetwork(env: NodeJS.ProcessEnv = process.env): CaptureNetwork {
+  return {
+    ...publicNetwork,
+    requestThroughProxy(url, signal) {
+      const proxy = (url.protocol === "https:" ? env.HTTPS_PROXY : env.HTTP_PROXY)?.trim();
+      if (proxy && !matchesNoProxy(url, env.NO_PROXY ?? "")) return proxyRequest(url, proxy, signal);
+    },
+  };
+}
+
+async function requestDirect(url: URL, host: string, signal: AbortSignal, network: CaptureNetwork): Promise<FetchResponse> {
+  const addresses = isIP(host) ? [host] : await network.lookup(host);
+  signal.throwIfAborted();
+  if (!addresses.length) throw new CaptureFailure("fetch_failed");
+  if (addresses.some(address => !isPublicAddress(address))) throw new CaptureFailure("blocked");
+  return network.request(url, addresses.find(address => isIP(address) === 4) ?? addresses[0]!, signal);
+}
+
 export async function fetchCapture(
-  initial: string, stopping: AbortSignal, network = publicNetwork,
+  initial: string, stopping: AbortSignal, network = captureNetwork(),
   accepted: (type: string) => boolean = type => /^(?:text\/html|application\/xhtml\+xml|text\/plain)(?:;|$)/i.test(type),
   redirectAllowed: (url: URL) => boolean = () => true,
 ): Promise<{ url: string; body: string; type: string }> {
@@ -92,11 +157,7 @@ export async function fetchCapture(
         signal.throwIfAborted();
         const host = validateCaptureUrl(url);
         if (!redirectAllowed(url)) throw new CaptureFailure("blocked");
-        const addresses = isIP(host) ? [host] : await network.lookup(host);
-        signal.throwIfAborted();
-        if (!addresses.length) throw new CaptureFailure("fetch_failed");
-        if (addresses.some(address => !isPublicAddress(address))) throw new CaptureFailure("blocked");
-        const response = await network.request(url, addresses.find(address => isIP(address) === 4) ?? addresses[0]!, signal);
+        const response = await (network.requestThroughProxy?.(url, signal) ?? requestDirect(url, host, signal, network));
         try {
           const location = response.header("location");
           if ([301, 302, 303, 307, 308].includes(response.status) && location) {

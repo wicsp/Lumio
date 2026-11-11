@@ -7,3 +7,26 @@
 从指定提交的独立源码目录用仓库固定的 Bun 构建。安装新程序后重启 Hub。仅 Web 更新可保留 Runtime 进程；Runtime 有改动时，等在途工作结束后再重启。核对 `/health` 的版本、页面资源和 Runtime 在线状态。
 
 对外发布时，人类在日常实例上验收后，从 `main` 上已验收的提交推送正式 `v*` 标签。Release workflow 校验提交属于主线，重跑全量检查并创建 GitHub Release。带预发布后缀的版本标为预发布，不成为 Latest。
+
+## macsp 上给 Hub 抓取配置代理（I1-3a）
+
+在运行 Hub 的 macsp 用户下，编辑 `~/Library/LaunchAgents/io.lumio.hub.plist`，把下面的键加入已有的 `EnvironmentVariables` 字典。将示例地址换成 macsp 上受信任的 HTTP 或 HTTPS 代理监听地址。`HTTPS_PROXY` 用于 HTTPS 网址，`HTTP_PROXY` 用于 HTTP 网址，两者可以指向同一个 `http://` 代理。`NO_PROXY` 可选，填逗号分隔的直连目标。
+
+```xml
+<key>HTTPS_PROXY</key><string>http://127.0.0.1:7890</string>
+<key>HTTP_PROXY</key><string>http://127.0.0.1:7890</string>
+<key>NO_PROXY</key><string>localhost,127.0.0.1</string>
+```
+
+在 `~/.config/lumio/hub.env` 同步写入同名的 `KEY="值"` 项，以便日后 `lumio hub setup` 重建 plist 时保留。两个文件都保持 `0600`。等待活跃工作结束后，校验并重新加载 LaunchAgent，使服务读到新环境。
+
+```sh
+hub_plist="$HOME/Library/LaunchAgents/io.lumio.hub.plist"
+hub_domain="gui/$(id -u)"
+plutil -lint "$hub_plist" &&
+  launchctl bootout "$hub_domain" "$hub_plist" &&
+  launchctl bootstrap "$hub_domain" "$hub_plist"
+curl --noproxy '*' -fsS http://127.0.0.1:7420/health
+```
+
+通过代理抓取时，由代理解析域名，Hub 每跳检查网址，仍会拒绝写在网址里的内网 IP、`localhost` 和 `.local` 等。命中 `NO_PROXY` 或该协议未配置代理时，Hub 解析域名、检查所有返回地址并连接通过检查的地址。macOS 系统代理和终端里的临时 `export` 不会替 LaunchAgent 配置这些值。

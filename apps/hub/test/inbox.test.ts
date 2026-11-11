@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
+import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { createServer } from "node:http";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { parseFrontmatter } from "@lumio/knowledge";
@@ -10,7 +12,7 @@ import {
   type AssistantModelRequest, type CaptureCommand,
 } from "@lumio/schema";
 import { readConfig } from "../src/config.ts";
-import { fetchCapture, isPublicAddress, type CaptureNetwork } from "../src/inbox-fetch.ts";
+import { captureNetwork, fetchCapture, isPublicAddress, type CaptureNetwork } from "../src/inbox-fetch.ts";
 import { startHub } from "../src/server.ts";
 
 const captures = "/v2/inbox/captures";
@@ -251,4 +253,79 @@ test("public fetch limits DNS time, address ranges and both declared and streame
     async () => response("", 200, { "content-type": "text/html", "content-length": "10485761" }),
     async () => ({ ...response(""), body: (async function* () { yield new Uint8Array(10_485_761); })() }),
   ]) await expect(fetchCapture(article, signal, { lookup, request })).rejects.toMatchObject({ code: "too_large" });
+});
+
+test("capture delegates public hostnames to a configured proxy and checks each redirect", async () => {
+  const html = await readFixture("article.html");
+  const requests: string[] = [], lookups: string[] = [], tunnels: string[] = [];
+  const proxy = createServer((request, result) => {
+    const url = new URL(request.url!);
+    requests.push(url.href);
+    expect(request.headers.cookie).toBeUndefined();
+    expect(request.headers["accept-encoding"]).toBe("identity");
+    if (url.pathname === "/start") {
+      result.writeHead(302, { Location: "http://next.example/article", "Set-Cookie": "synthetic=secret" }).end();
+    } else if (url.pathname === "/internal") {
+      result.writeHead(302, { Location: "http://169.254.169.254/" }).end();
+    } else if (url.pathname === "/bypass") {
+      result.writeHead(302, { Location: "http://sub.direct.example:8080/article" }).end();
+    } else {
+      result.writeHead(200, { "Content-Type": "text/html" }).end(html);
+    }
+  });
+  proxy.on("connect", (request, socket) => {
+    tunnels.push(request.url!);
+    socket.end("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n");
+  });
+  proxy.listen(0, "127.0.0.1");
+  await once(proxy, "listening");
+  try {
+    const address = proxy.address();
+    if (!address || typeof address === "string") throw new Error("Expected a TCP proxy");
+    const endpoint = `http://127.0.0.1:${address.port}`;
+    const env = { HTTP_PROXY: endpoint, HTTPS_PROXY: endpoint, NO_PROXY: ".DIRECT.example:8080" };
+    const network = {
+      ...captureNetwork(env),
+      async lookup(host: string) { lookups.push(host); return ["198.18.0.3"]; },
+      async request() { throw new Error("Unexpected direct connection"); },
+    };
+    const signal = new AbortController().signal;
+    const fetchUrl = (url: string) => fetchCapture(url, signal, network);
+
+    await expect(fetchUrl("http://proxy-target.example/start")).resolves.toMatchObject({
+      url: "http://next.example/article", body: html,
+    });
+    await expect(fetchUrl("https://tls.example/article")).rejects.toMatchObject({ code: "fetch_failed" });
+    expect(tunnels).toEqual(["tls.example:443"]);
+    for (const url of ["http://127.0.0.1/", "http://device.local/", "https://localhost/", "http://proxy-target.example/internal"]) {
+      await expect(fetchUrl(url)).rejects.toMatchObject({ code: "blocked" });
+    }
+    expect(lookups).toEqual([]);
+
+    await expect(fetchUrl("http://proxy-target.example/bypass")).rejects.toMatchObject({ code: "blocked" });
+    await expect(fetchUrl("http://sub.direct.example/article")).resolves.toMatchObject({ body: html });
+    expect(lookups).toEqual(["sub.direct.example"]);
+    expect(requests).toEqual([
+      "http://proxy-target.example/start", "http://next.example/article", "http://proxy-target.example/internal",
+      "http://proxy-target.example/bypass", "http://sub.direct.example/article",
+    ]);
+
+    env.NO_PROXY = "*";
+    const direct = {
+      ...network,
+      async lookup() { return ["2606:4700::1111", "93.184.216.34"]; },
+      async request(url: URL, address: string) {
+        expect(url.href).toBe(article);
+        expect(address).toBe("93.184.216.34");
+        return response(html);
+      },
+    };
+    await expect(fetchCapture(article, signal, direct)).resolves.toMatchObject({ body: html });
+    expect(tunnels).toHaveLength(1);
+  } finally {
+    const closed = once(proxy, "close");
+    proxy.close();
+    proxy.closeAllConnections();
+    await closed;
+  }
 });
