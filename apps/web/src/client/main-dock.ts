@@ -26,7 +26,7 @@ const HISTORY = 40;
 const WORKBENCH_TOOL_NAMES = new Set<string>(WORKBENCH_TOOLS.map(name => toolName(name)));
 
 export interface DockHost {
-  /** 当前页面：分区、路由里的对象 ID、页面里选中的文字。 */
+  /** 当前页面：分区、正在查看的对象、页面里选中的文字。 */
   focus(): FocusInput;
   navigate: Navigate;
   /** 跳转与高亮；人正在操作时跳转返回 deferred。 */
@@ -171,7 +171,7 @@ export class MainDock {
       return;
     }
     if (!input?.id && !input?.selection) { clear(this.chip); return; }
-    const label = input.id ? await this.title(input.id) ?? input.id : t("Selected text");
+    const label = input.label ?? (input.id ? await this.title(input.id) ?? input.id : t("Selected text"));
     if (this.disposed) return;
     const pinned = this.mode === "pinned";
     const target = input.id && EXPLORABLE.test(input.id) ? input.id : undefined;
@@ -218,7 +218,7 @@ export class MainDock {
     await this.start();
     if (!this.conversation) return;
     const input = this.focusInput();
-    const focus = input && buildFocus({ ...input, ...(input.id ? { label: this.titles.get(input.id) } : {}) });
+    const focus = input && buildFocus({ ...input, ...(input.id ? { label: input.label ?? this.titles.get(input.id) } : {}) });
     const request: AssistantChatRequest = { request_id: newRequestId("chat"), conversation: this.conversation, message,
       ...(this.profile ? { profile: this.profile } : {}), ...(focus ? { focus } : {}) };
     this.text.value = ""; this.text.dispatchEvent(new Event("input"));

@@ -1,8 +1,11 @@
 /** 模块之间共用的导航类型（单独成文件，避免视图与模块互相引用）。 */
+import type { ResourceRef } from "@lumio/schema";
 export type Section = "overview" | "inbox" | "knowledge" | "work" | "execution" | "assistant" | "approvals" | "settings" | "trash";
 export type Navigate = (section: Section, id?: string, intent?: string) => void;
 
 export interface Pane {
+  /** 当前已加载的主对象；由模块内导航更新，不依赖工作台 URL。 */
+  readonly focus?: ResourceRef;
   canLeave?(): boolean;
   beforeLeave?(): Promise<boolean>;
   dispose?(): void;
