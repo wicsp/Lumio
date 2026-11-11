@@ -27,8 +27,9 @@ type Source = { event: string; created: string; owners: string[] } & (
   | { kind: "proposal"; proposal: string; task?: string }
   | { kind: "capture"; entity?: string }
   | { kind: "watchdog"; findings: WatchdogFinding[] }
+  | { kind: "exploration"; exploration: string; target: string; status: "found" | "nothing" | "stopped"; note?: string; summary?: string }
 );
-type Details = Pick<Notice, "title" | "subject" | "summary" | "findings"> & {
+type Details = Pick<Notice, "title" | "subject" | "summary" | "findings" | "ai_note"> & {
   status: Status;
   task?: WorkTaskDetail;
   path: string;
@@ -124,6 +125,12 @@ export class Notices {
       owners: this.humans(), created: this.now().toISOString() });
   }
 
+  /** 提前探索结束（ADR 0059 第 5 节，A1-9）。有发现才交给闸门定级别，其余静默记录。 */
+  exploration(input: { owner: string; exploration: string; target: string; status: "found" | "nothing" | "stopped"; note?: string; summary?: string; created: string }): void {
+    const { owner, created, ...rest } = input;
+    this.enqueue({ kind: "exploration", event: "exploration:" + input.exploration, owners: [owner], created, ...rest });
+  }
+
   /** No pre-read comment or new notice can be published while a main turn reads Work. */
   async duringChat<T>(chat: () => Promise<T>): Promise<T> {
     this.activeChats++;
@@ -176,6 +183,14 @@ export class Notices {
         return { title: excerpt(entity.title, 120) ?? msg("notices.capture"), status: "ready", required: false,
           subject: ref("knowledge", entity.id), path: "#inbox" };
       }
+      case "exploration": {
+        const target = await this.modules.resources.resolve(source.target, identity);
+        if (target.status !== "visible") return;
+        return { title: msg("notices.exploration") + " · " + (excerpt(target.title, 100) ?? source.target), status: source.status, required: false,
+          summary: excerpt(source.summary, 600), ai_note: source.note,
+          subject: source.note ? ref("knowledge", source.note) : ref(target.id.startsWith("idea_") ? "knowledge" : "work", target.id),
+          path: source.note ? "#knowledge/" + source.note : "#overview" };
+      }
       case "watchdog": {
         const findings = [];
         for (const finding of source.findings) {
@@ -192,6 +207,8 @@ export class Notices {
 
   private grade(owner: string, source: Source, details: Details): Promise<Grade> {
     if (details.required) return Promise.resolve({ level: "important", graded: { by: "rule" } });
+    // 探索没有发现或用完预算：记一句即可，不打扰人（ADR 0059 第 5 节）。
+    if (source.kind === "exploration" && source.status !== "found") return Promise.resolve({ level: "silent", graded: { by: "rule" } });
     const due = details.task?.task.due;
     return this.modules.decisionGate.gradeNotice(owner, {
       source: "hub", visibility: "public", event_kind: source.kind,
@@ -230,7 +247,7 @@ export class Notices {
           const grade = grades[index]!;
           const notice = Notice.parse({
             id: newId("ntc", this.now(), randomBytes), owner, source: source.kind, event: source.event, ...grade,
-            subject: details.subject, title: details.title, summary: details.summary, comment,
+            subject: details.subject, title: details.title, summary: details.summary, comment, ai_note: details.ai_note,
             findings: details.findings, created: source.created,
           });
           this.hub.db.query("INSERT INTO workbench_notices(id,owner,event,level,created,record) VALUES(?,?,?,?,?,?)")
