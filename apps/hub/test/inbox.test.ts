@@ -156,6 +156,22 @@ test("captures without a model, deduplicates, searches the original, then genera
   } finally { await f.close(); }
 });
 
+test("extension HTML is saved as a page-html original without fetching the page", async () => {
+  const f = await fixture();
+  try {
+    const { capture } = await f.create(article, {
+      channel: "extension",
+      content: { format: "html", body: await readFixture("article.html") },
+    });
+    const ready = await f.wait(capture.id);
+    expect(ready.state).toBe("ready");
+    const original = await f.original(ready.entity!.id!);
+    expect(original.frontmatter.extractor).toBe("page-html@1");
+    expect(original.body).toContain("xenolithmarker");
+    expect(f.requests).toEqual([]);
+  } finally { await f.close(); }
+});
+
 test("arXiv aliases share one paper and HTML original; triage, reextract, discard and restore preserve ownership", async () => {
   const f = await fixture();
   try {

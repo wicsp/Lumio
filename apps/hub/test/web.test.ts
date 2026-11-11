@@ -46,3 +46,24 @@ test("Hub without Web options returns 404 at root; malformed origins fail config
   try { expect((await fetch(`http://127.0.0.1:${hub.server.port}/`)).status).toBe(404); } finally { await hub.stop(); }
   for (const origin of ["null", "file:///tmp", "https://user:secret@synthetic", "https://synthetic/path"]) expect(() => readConfig({ LUMIO_WEB_ORIGINS: origin })).toThrow("INVALID");
 });
+test("browser extension origins pass with an allowed Host and still require a valid token", async () => {
+  const state = await mkdtemp(join(tmpdir(), "lumio-web-extension-")); roots.push(state);
+  const hub = await startHub({ ...readConfig({ LUMIO_STATE_DIR: state }), port: 0 }, { log() {} });
+  const endpoint = new URL("/v2/work/tasks", hub.server.url);
+  try {
+    const actor = hub.store.createActor("extension-user", "human");
+    const token = hub.store.createToken("extension-user", actor.name);
+    for (const Origin of ["chrome-extension://abcdefghijklmnopabcdefghijklmnop", "moz-extension://12345678-1234-4321-abcd-123456789abc"]) {
+      const unauthorized = await fetch(endpoint, { headers: { Origin } });
+      expect(unauthorized.status).toBe(401);
+      expect(ApiError.parse(await unauthorized.json()).error.code).toBe("UNAUTHENTICATED");
+      const headers = { Origin, Authorization: `Bearer ${token}` };
+      const authorized = await fetch(endpoint, { headers });
+      expect(authorized.status).toBe(200);
+      WorkTask.array().parse(await authorized.json());
+      const wrongHost = await fetch(endpoint, { headers: { ...headers, Host: "evil.synthetic" } });
+      expect(wrongHost.status).toBe(403);
+      expect(ApiError.parse(await wrongHost.json()).error.code).toBe("FORBIDDEN");
+    }
+  } finally { await hub.stop(); }
+});

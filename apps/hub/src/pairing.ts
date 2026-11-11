@@ -27,12 +27,13 @@ export function signingKey(publicKey: string): HubSigningKey {
 export class Pairing {
   private failures: number[] = [];
   private blockedUntil = 0;
-  constructor(private store: HubStore, private config: Pick<HubConfig, "publicUrl">, private now: () => Date = () => new Date(), private hubVersion = version) {
+  constructor(private store: HubStore, private config: Pick<HubConfig, "publicUrl">, private localUrl: () => string,
+    private now: () => Date = () => new Date(), private hubVersion = version) {
     store.db.exec(`CREATE TABLE IF NOT EXISTS pairing_codes (hash TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL,
       actor TEXT NOT NULL REFERENCES actors(id), expires TEXT NOT NULL, used INTEGER NOT NULL DEFAULT 0);`);
   }
   invite(kind: "runtime" | "client", name: string, identity: Identity) {
-    const url = this.config.publicUrl;
+    const url = this.config.publicUrl ?? (kind === "client" ? this.localUrl() : undefined);
     if (!url) throw new HubError("INVALID", { key: "pairing.hub_has_no_public_url_for_other_machines_single_machine_lumio_hub_se", args: [] });
     return this.store.db.transaction(() => {
       let actor = identity.actor;

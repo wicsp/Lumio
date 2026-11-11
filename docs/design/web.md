@@ -9,7 +9,7 @@
   Hub 为每次 HTML 响应生成样式 nonce，允许编辑器动态样式，不放宽脚本 CSP。公式使用随包提供的 KaTeX，输出原生 MathML，不加载远程渲染资源（W1-0）。
 - **类型隔离**：浏览器端与服务端是两个独立的 TypeScript 程序，根 typecheck 同时检查两者。
 - **访问路径**（ADR 0027）：网页由 Hub 在自己的地址上提供（单机 `http://127.0.0.1:7420`；服务器模式为 Hub 的对外地址），浏览器与 Hub 同源，直接调用 `/v1`、`/v2`。
-  Hub 为页面与资源设置限制性 CSP；浏览器请求（带 `Origin` 或 `Sec-Fetch-Site`）的 Origin/Host 必须是本机监听地址、`LUMIO_PUBLIC_URL` 或 `LUMIO_WEB_ORIGINS` 列出的来源。
+  Hub 为页面与资源设置限制性 CSP；浏览器请求（带 `Origin` 或 `Sec-Fetch-Site`）的 Host 和所带 Origin 必须对应本机监听地址、`LUMIO_PUBLIC_URL` 或 `LUMIO_WEB_ORIGINS`。插件的 `chrome-extension://` 和 `moz-extension://` Origin 也允许，仍校验 Host 并按令牌鉴权（I1-7a）。
 - **会话**：先用 `lumio login-code --name web` 配对。身份验证后，默认以 sessionStorage 保留当前标签页登录，刷新自动恢复；勾选「记住这台设备」时使用 localStorage，关闭重开仍可恢复。仅保存凭据，按网页所在的 Hub 来源隔离。恢复前验证 human 身份。同源脚本可读，受现有 CSP 与安全渲染保护；不等同 HttpOnly 或钥匙串隔离。验证遇到 401/403 或登出时清除对应凭据，任何 401 或登出中止请求、清空模块；临时断线保留凭据并允许重试。存储受限时降级并提示，除恢复副本外不缓存业务数据，不直接访问 vault。
 - **数据规则**：私有内容须显式开启；知识的新建与编辑规则见 [knowledge.md](knowledge.md)；任务与项目的结构化字段与描述分开提交并带 revision，内容编辑可自动保存；评论与委派是独立的显式操作；
   执行结果中的文件下载要校验大小与 SHA；助手会话可查看已保存状态，不重放；高权限审批必须展示完整 argv、job、runtime 与理由，由人显式接受或拒绝。
