@@ -1,6 +1,6 @@
 import { Capture, CaptureCommand, CaptureList, CaptureListArgs, KnowledgeAIBinding, KnowledgeAIBindingUpdate, CaptureCreate, CaptureCreateResult, KnowledgeAiNoteCommand, KnowledgeAiNoteResult, KnowledgeOriginal, KnowledgeOriginalShowArgs, ResourceSummary } from "@lumio/schema";
 import {AIConnection,AIConnectionInput,AIProfile,AIProfileInput,AIConfiguration,AIRuntime,NativeConnectionAction,NativeConnectionView,NativeSession,NativeCreate,NativeAction,NativeEventRecord} from "@lumio/schema";
-import { AssistantMain, AssistantMainEnsure } from "@lumio/schema";
+import { AssistantMain, AssistantMainEnsure, Exploration, ExplorationCommand, ExplorationList, ExplorationListArgs, NoticeCommand, NoticeCommandResult, NoticeList, NoticeListArgs } from "@lumio/schema";
 import { AIQuotaSettings, AIQuotaView, AIQuotaViews, AliyunBillingUpdate } from "@lumio/schema";
 import { KnowledgeGraph, KnowledgeGraphArgs, Id, KnowledgeDocument, KnowledgeUpdateRequest, KnowledgeUpdateResult, KnowledgeRelatedRequest, KnowledgeRelatedResult, KnowledgeReferencesRequest, KnowledgeReferencesResult } from "@lumio/schema";
 import { KnowledgeTemplateRequest, KnowledgeTemplateResult, PaperResolveRequest, PaperResolveResult, KnowledgeCreateRequest, KnowledgeCreateResult } from "@lumio/schema";
@@ -206,6 +206,18 @@ export function createClient(options: { url: string; token?: string; language?: 
     },
     memories() { return request("/v2/assistant/memories", {}, AssistantMemory.array()); },
     memoryCommand(input: AssistantMemoryCommandRequest) { return request("/v2/assistant/memory-commands", {}, AssistantMemoryCommandResult, validate(AssistantMemoryCommandRequest, input)); },
+    /** 提醒（ADR 0059 第 4 节，A1-7）：默认不含静默级别。 */
+    notices(args: Partial<NoticeListArgs> = {}) {
+      const value = validate(NoticeListArgs, args);
+      return request("/v2/notices", { ...(value.unread === undefined ? {} : { unread: String(value.unread) }), ...(value.level ? { level: value.level } : {}), limit: String(value.limit) }, NoticeList);
+    },
+    readNotices(request_id: string, notices: string[]) { return request("/v2/notices/commands", {}, NoticeCommandResult, validate(NoticeCommand, { request_id, op: "read", notices })); },
+    /** 提前探索（ADR 0059 第 5 节，A1-9）。 */
+    explorations(args: Partial<ExplorationListArgs> = {}) {
+      const value = validate(ExplorationListArgs, args);
+      return request("/v2/explorations", { ...(value.active === undefined ? {} : { active: String(value.active) }), limit: String(value.limit) }, ExplorationList);
+    },
+    explorationCommand(input: ExplorationCommand) { return request("/v2/explorations/commands", {}, Exploration, validate(ExplorationCommand, input)); },
     /** 主对话（ADR 0059，A1-3）：幂等，没有时由 Hub 创建。 */
     assistantMain(request_id: string) { return request("/v2/assistant/main", {}, AssistantMain, validate(AssistantMainEnsure, { request_id })); },
     assistantChat(input: AssistantChatRequest) { return request("/v2/assistant/chat", {}, AssistantChatResult, validate(AssistantChatRequest, input)); },

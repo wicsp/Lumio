@@ -1669,3 +1669,7 @@ button.inbox-title:hover { text-decoration: underline; }
   .dock { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; height: min(70dvh, 560px); border-left: 0; border-top: 1px solid var(--line); border-radius: var(--r-lg) var(--r-lg) 0 0; box-shadow: var(--shadow-dialog); padding-bottom: env(safe-area-inset-bottom); }
   .dock-launcher { bottom: calc(68px + env(safe-area-inset-bottom)); }
 }
+.chip-state { display: inline-flex; align-items: center; gap: 4px; }
+.chip-state .icon { width: 11px; height: 11px; }
+.has-unread { position: relative; }
+.has-unread::after { content: ""; position: absolute; top: 50%; left: 3px; width: 7px; height: 7px; margin-top: -3.5px; border-radius: 50%; background: var(--blue); pointer-events: none; }

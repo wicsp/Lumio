@@ -3,7 +3,9 @@
  * 然后是 agent 在做的和在等外部的（ADR 0032）；旁边是 agent 动态与项目进度。
  * 各区块独立加载失败；不在这里放统计大字。
  */
-import type { Job, Proposal, WorkAttention, WorkProject, WorkTask } from "@lumio/schema";
+import type { Job, Notice, Proposal, WorkAttention, WorkProject, WorkTask } from "@lumio/schema";
+import { openResource } from "../resources.ts";
+import { noticePreview, noticeTitle } from "../workbench-assist.ts";
 import { errorText, type Client, type HubExtras } from "../api.ts";
 import { executionGroups } from "../execution-groups.ts";
 import { attentionCard } from "../attention-card.ts";
@@ -55,7 +57,8 @@ export class OverviewPane {
 
   private async load(): Promise<void> {
     const generation = ++this.generation;
-    const [tasks, projects, jobs, approvals, attention] = await Promise.allSettled([this.client.workTasks(), this.client.workProjects(), this.client.jobs(), this.client.proposals("pending"), this.hub.attention()]);
+    const [tasks, projects, jobs, approvals, attention, notices] = await Promise.allSettled([this.client.workTasks(), this.client.workProjects(), this.client.jobs(), this.client.proposals("pending"), this.hub.attention(),
+      this.client.notices({ unread: true, limit: 30 })]);
     if (!this.active || generation !== this.generation) return;
     const taskData = tasks.status === "fulfilled" ? tasks.value : undefined;
     const projectData = projects.status === "fulfilled" ? projects.value : [];
@@ -90,6 +93,7 @@ export class OverviewPane {
       h("div", { class: "today-grid" },
         h("div", { class: "today-col" },
           this.needsYou(approvalData, attentionJobs, approvals.status === "rejected" ? approvals.reason : undefined, taskData ?? [], attentionData ?? []),
+          notices.status === "fulfilled" ? this.pending(pendingNotices(notices.value.notices)) : null,
           focus.length || tasks.status === "rejected" ? this.section("due", t("Due today"), focus.length, () => this.navigate("work", "tasks"),
             tasks.status === "rejected" ? failure(errorText(tasks.reason)) : this.taskList(focus, projectData, "")) : null,
           tasks.status === "fulfilled" ? this.section("todo", focus.length ? t("Your other to-dos") : t("Your to-dos"), next.length, () => this.navigate("work", "tasks"), this.taskList(next.slice(0, 6), projectData, focus.length ? t("Nothing else on your list.") : t("Your to-do list is clear."))) : null,
@@ -100,6 +104,25 @@ export class OverviewPane {
             jobs.status === "rejected" ? failure(errorText(jobs.reason)) : this.runs(jobData ?? [], taskData ?? [])),
           this.section("projects", t("Projects"), projectData.filter(p => p.status !== "done").length, () => this.navigate("work", "projects"),
             projects.status === "rejected" ? failure(errorText(projects.reason)) : this.projects(projectData, taskData ?? [])))));
+  }
+
+  /** 待处理（ADR 0059 第 4 节）：后台预读与提醒里还没看的；点开对象即标为已读。 */
+  private pending(notices: Notice[]): HTMLElement | null {
+    if (!notices.length) return null;
+    const read = async (ids: string[]) => {
+      try { await this.client.readNotices(newRequestId("notice"), ids); this.changed(); void this.load(); }
+      catch (cause) { toast(errorText(cause), "error"); }
+    };
+    const rows = h("div", { class: "today-rows" }, ...notices.map(notice => h("button", { type: "button", class: "today-row notice-row", "data-pad-row": notice.id,
+      onclick: () => { void read([notice.id]); if (notice.subject) void openResource(this.client, this.navigate, notice.subject.id); } },
+      icon(notice.source === "watchdog" ? "alert" : notice.source === "exploration" ? "knowledge" : "bell"),
+      h("span", { class: "row-main" }, h("span", { class: "row-title" }, noticeTitle(notice)),
+        notice.summary && h("span", { class: "row-sub" }, noticePreview(notice.summary))),
+      h("span", { class: "row-time" }, ago(notice.created)))));
+    const all = h("button", { type: "button", class: "text-btn", onclick: () => void read(notices.map(notice => notice.id)) }, t("Mark all read"));
+    return h("section", { class: "today-section", "data-pad-region": "pending" },
+      h("header", { class: "today-section-head" }, h("h2", {}, t("To look at")), h("span", { class: "count" }, notices.length), all),
+      h("div", { class: "today-card" }, rows));
   }
 
   private section(region: string, title: string, count: number, all: (() => void) | undefined, body: Node | null): HTMLElement {
@@ -241,3 +264,8 @@ function byFocus(a: WorkTask, b: WorkTask): number {
   return b.updated.localeCompare(a.updated);
 }
 const byDue = byFocus;
+
+/** 规则判为重要的（需要你回答、验收、处理失败、待批准）已经在「需要你处理」里，这里不重复。 */
+export function pendingNotices(notices: readonly Notice[]): Notice[] {
+  return notices.filter(notice => !notice.read && notice.level !== "silent" && !(notice.level === "important" && notice.graded.by === "rule"));
+}

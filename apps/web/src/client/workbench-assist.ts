@@ -8,6 +8,8 @@ import {
 } from "@lumio/schema";
 import type { Section } from "./navigation.ts";
 import { defaultAssistantProfile } from "./assistant-profile.ts";
+import { t } from "./i18n.ts";
+import type { Notice } from "@lumio/schema";
 
 const ID = /^([a-z]+)_[0-9A-HJKMNP-TV-Z]{26}$/;
 
@@ -101,4 +103,19 @@ export function mainProfile(config: AIConfiguration, storage?: Pick<Storage, "ge
     config.connections.some(connection => connection.id === profile.connection && connection.host === "hub" && !!connection.base_url));
   const saved = defaultAssistantProfile(usable, storage);
   return saved || usable[0]?.id;
+}
+
+const NOTICE_SOURCE: Record<Notice["source"], string> = {
+  turn: "Run result", proposal: "Approval", capture: "New source", watchdog: "Watchdog report", exploration: "Exploration",
+};
+
+/** 提醒的标题：来源说明按界面语言显示（Hub 在后台生成提醒，没有请求语言），巡检报告只显示来源。 */
+export function noticeTitle(notice: Pick<Notice, "source" | "title">): string {
+  const source = t(NOTICE_SOURCE[notice.source]);
+  return notice.source === "watchdog" ? source : t("{0} · {1}", source, notice.title);
+}
+
+/** 一行预览里的摘要：去掉 Markdown 记号，合并空白。 */
+export function noticePreview(summary: string, max = 140): string {
+  return summary.replace(/[*_`#>]+/g, "").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\s+/g, " ").trim().slice(0, max);
 }
