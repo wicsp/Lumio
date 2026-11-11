@@ -25,6 +25,7 @@ export class GamepadSettings {
   constructor(private input: GamepadInput) {
     this.element.append(this.status,
       h("p", { class: "muted" }, t("Connect a controller and press a button. Left stick moves focus. Right stick scrolls. Hold a dangerous action for one second. Hold RT to talk when voice input is on.")),
+      h("p", { class: "muted" }, t("On Xbox controllers, View is the small button with overlapping squares to the left of the Xbox button.")),
       h("div", { class: "button-row" }, this.test, h("button", { type: "button", class: "btn btn-small", onclick: () => {
         this.configure({ ...DEFAULT_BINDINGS });
       } }, t("Restore defaults"))), this.readout, this.mappings);
@@ -49,7 +50,7 @@ export class GamepadSettings {
       ? t("Gamepad API unavailable. Try HTTPS or a supported browser.")
       : !status.pad ? t("Waiting for a controller. Press a button to connect.")
       : status.pad.mapping === "standard" ? t("Connected: {0}", status.pad.id)
-      : t("This controller’s buttons may be mismatched. You can remap them in Settings → General → Gamepad.");
+      : t("This controller’s buttons may be mismatched. You can remap them in Settings → Keyboard & gamepad.");
     if (message !== this.status.textContent) this.status.textContent = message;
     if (this.testing && !this.element.hasAttribute("data-pad-testing")) {
       this.testing = false;

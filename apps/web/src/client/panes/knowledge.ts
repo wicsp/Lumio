@@ -255,7 +255,7 @@ export class KnowledgePane {
     const ai = note.note.type === "ai-note";
     const model = ai && typeof fm.model === "string" ? fm.model : "";
     clear(this.detail, h("article", { class: "reader" },
-      h("div", { class: "detail-crumbs" }, h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": t("Back to list"), "data-pad-back": true, onclick: async () => { if (!(await this.beforeLeave())) return; this.clearWriter(); this.selected = undefined; markSelected(this.results, undefined); this.showPlaceholder(); } }, icon("back")),
+      h("div", { class: "detail-crumbs", tabindex: "-1", "data-pad-selection": this.selected ?? note.note.id ?? note.note.path }, h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": t("Back to list"), "data-pad-back": true, onclick: async () => { if (!(await this.beforeLeave())) return; this.clearWriter(); this.selected = undefined; markSelected(this.results, undefined); this.showPlaceholder(); } }, icon("back")),
         note.note.id && h("div", { class: "detail-actions" },
           h("button", { type: "button", class: "icon-btn", title: t("Copy ID"), "aria-label": t("Copy ID"), onclick: () => void this.copyId(note.note.id!) }, icon("link")))),
       h("h1", { class: "reader-title" }, note.note.title),

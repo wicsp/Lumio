@@ -2,7 +2,7 @@
  * 设置页的二级菜单（ADR 0028）：桌面左侧分类、右侧内容；窄屏先列出分类，点进去再看内容。
  * 地址是 `#settings/<分类>`；没有分类时桌面显示「通用」，窄屏显示分类列表。
  */
-export type SettingsSection = "general" | "notifications" | "ai" | "devices" | "agents" | "data" | "about";
+export type SettingsSection = "general" | "controls" | "notifications" | "ai" | "devices" | "agents" | "data" | "about";
 
 export interface SettingsSectionInfo {
   key: SettingsSection;
@@ -13,7 +13,8 @@ export interface SettingsSectionInfo {
 
 /** 文案是英文原文，显示时再用 t() 翻译。 */
 export const SETTINGS_SECTIONS: readonly SettingsSectionInfo[] = [
-  { key: "general", label: "General", hint: "Appearance, language and shortcuts", icon: "user" },
+  { key: "general", label: "General", hint: "Appearance and language", icon: "user" },
+  { key: "controls", label: "Keyboard & gamepad", hint: "Shortcuts, gamepad testing and button mapping", icon: "settings" },
   { key: "notifications", label: "Notifications", hint: "When Lumio may notify you", icon: "bell" },
   { key: "ai", label: "AI models", hint: "Profiles, connections and the assistant model", icon: "assistant" },
   { key: "devices", label: "Hub & runtimes", hint: "This Hub and the machines that run agents", icon: "device" },

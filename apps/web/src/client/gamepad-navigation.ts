@@ -38,6 +38,7 @@ interface Action { command: PadCommand; label: string; run(): void }
 export class GamepadNavigation {
   private active = false;
   private cursors = new WeakMap<HTMLElement, Cursor>();
+  private selectionAtExit = new WeakMap<HTMLElement, string | undefined>();
   private listOrigin?: Cursor;
   private pendingDetail?: HTMLElement;
   private needsFocus = false;
@@ -75,6 +76,11 @@ export class GamepadNavigation {
 
   leave(pointer = false): void {
     if (!this.active) return;
+    const pane = this.view.pane();
+    if (pane) {
+      const selected = this.selectedItem(this.items(pane, false));
+      this.selectionAtExit.set(pane, selected && this.key(selected));
+    }
     this.active = false;
     this.pendingDetail = undefined;
     this.needsFocus = false;
@@ -130,8 +136,10 @@ export class GamepadNavigation {
     const items = scope ? this.items(scope, !!overlay.dialog) : [];
     const saved = scope ? this.cursors.get(scope) : undefined;
     const old = this.restore(items, saved, false);
-    const restoring = entering && !overlay.menu && !typing && !!saved;
-    const current = restoring ? old : this.current(items, saved);
+    const resuming = entering && !overlay.menu && !overlay.dialog && !typing && scope;
+    const selected = resuming ? this.selectedItem(items) : undefined;
+    const changedSelection = resuming && selected && this.key(selected) !== this.selectionAtExit.get(resuming);
+    const current = changedSelection ? selected : resuming && saved ? old : this.current(items, saved);
     let picked = current;
     if (!typing && !overlay.menu && scope && (entering || !current)) {
       picked = current ?? this.restore(items, saved, true);
@@ -161,11 +169,12 @@ export class GamepadNavigation {
       this.cancelHold();
       if (command === "back") { this.refresh(); return; }
     }
+    const focusOnly = changedSelection || (picked && picked !== current);
     if (direction) {
-      if (!(entering && old && !overlay.dialog && !overlay.menu) && !(picked && picked !== current)) {
+      if (!(resuming && old) && !focusOnly) {
         this.moveDirection(direction, scope, items, picked, overlay);
       }
-    } else if (phase === "press" && !(picked && picked !== current && (command === "activate" || command === "delegate" || command === "more"))) {
+    } else if (phase === "press" && !(focusOnly && (command === "activate" || command === "delegate" || command === "more"))) {
       this.actions(overlay, picked).find(action => action.command === command)?.run();
     }
     this.refresh();
@@ -262,8 +271,12 @@ export class GamepadNavigation {
 
   private items(scope: HTMLElement, dialog: boolean): HTMLElement[] {
     if (dialog) return visibleItems(scope, "button, summary");
-    return visibleItems(scope, ROWS + ", " + DETAIL_ACTIONS)
+    const rows = visibleItems(scope, ROWS + ", " + DETAIL_ACTIONS)
       .filter(item => !item.parentElement?.closest(ROWS));
+    // A note opened from a link, or on a narrow screen, can be absent from the visible list.
+    const detail = visibleItems(scope, "[data-pad-selection]")[0];
+    if (detail && !rows.some(row => row.dataset.id === detail.dataset.padSelection)) rows.push(detail);
+    return rows;
   }
 
   private region(item: HTMLElement, scope: HTMLElement): HTMLElement {
@@ -276,7 +289,11 @@ export class GamepadNavigation {
     return region.dataset.padRegion ?? region.className;
   }
 
-  private key(item: HTMLElement): string | undefined { return item.dataset.padRow ?? item.dataset.id ?? item.dataset.padAction; }
+  private key(item: HTMLElement): string | undefined { return item.dataset.padRow ?? item.dataset.id ?? item.dataset.padSelection ?? item.dataset.padAction; }
+
+  private selectedItem(items: HTMLElement[]): HTMLElement | undefined {
+    return items.find(item => item.dataset.padSelection || (item.dataset.id && item.matches(".row.is-selected")));
+  }
 
   private focusedItem(items: HTMLElement[]): HTMLElement | undefined {
     return items.find(item => item === document.activeElement || item.contains(document.activeElement));
@@ -329,7 +346,7 @@ export class GamepadNavigation {
 
   private exitInput(input: HTMLElement | null, scope: HTMLElement | undefined, items: HTMLElement[], saved?: Cursor): void {
     input?.blur();
-    const row = input?.closest<HTMLElement>(ROWS) ?? this.restore(items, saved, true);
+    const row = input?.closest<HTMLElement>(ROWS) ?? this.selectedItem(items) ?? this.restore(items, saved, true);
     if (row && scope) this.focus(scope, row);
   }
 
