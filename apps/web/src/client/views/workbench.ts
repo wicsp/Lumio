@@ -22,6 +22,9 @@ import { padButtonLabel } from "../gamepad-settings.ts";
 import { GamepadNavigation } from "../gamepad-navigation.ts";
 import { SpeechService, setSpeechService } from "../speech-input.ts";
 import { UsageIndicator } from "../usage-indicator.ts";
+import { MainDock } from "../main-dock.ts";
+import { canNavigateNow, navigateRoute, type FocusInput } from "../workbench-assist.ts";
+import type { WorkbenchAction } from "@lumio/schema";
 
 /** 记住侧栏是否收起（只影响本设备）。 */
 const SIDEBAR_KEY = "lumio.web.sidebar-collapsed";
@@ -61,6 +64,11 @@ export class WorkbenchView {
   private disposeReferenceLinks: () => void;
   private disposeResourceLinks: () => void;
   private countTimer: ReturnType<typeof setInterval>;
+  /** 主对话面板（ADR 0060，A1-5）。 */
+  private dock: MainDock;
+  /** 人最近一次在页面上输入、滚动、点击或按键的时间；助手替人跳转前要先空闲一会儿。 */
+  private lastActivity = 0;
+  private readonly onActivity = () => { this.lastActivity = Date.now(); };
 
   private routeGeneration = 0;
   private readonly onRoute = async () => {
@@ -173,6 +181,16 @@ export class WorkbenchView {
       nav,
       h("div", { class: "sidebar-foot" }, this.usage.element, this.account));
     const shell = h("div", { class: "shell" }, sidebar, this.main);
+    this.dock = new MainDock(session.client, {
+      focus: () => this.focusInput(),
+      navigate: (section, id, intent) => void this.go(section, id, intent),
+      apply: action => this.applyAction(action),
+      clearHighlights: () => this.clearHighlights(),
+      layout: open => shell.classList.toggle("dock-open", open),
+    });
+    shell.append(this.dock.element);
+    for (const type of ["input", "keydown", "pointerdown", "wheel"]) this.main.addEventListener(type, this.onActivity, { passive: true });
+    this.main.addEventListener("scroll", this.onActivity, { capture: true, passive: true });
     const collapse = (collapsed: boolean, focus = false) => {
       shell.classList.toggle("sidebar-collapsed", collapsed);
       toggle.setAttribute("aria-expanded", String(!collapsed));
@@ -192,7 +210,7 @@ export class WorkbenchView {
     logo.addEventListener("click", () => { if (shell.classList.contains("sidebar-collapsed")) collapse(false, true); });
     root.append(
       h("a", { class: "skip-link", href: "#content", onclick: (event: Event) => { event.preventDefault(); this.main.focus(); } }, t("Skip to content")),
-      shell);
+      shell, this.dock.launcher);
     window.addEventListener("hashchange", this.onRoute);
     window.addEventListener("keydown", this.onKey);
     window.addEventListener("beforeunload", this.onUnload);
@@ -268,6 +286,8 @@ export class WorkbenchView {
       if (id || section === "settings") mounted.pane.open?.(id ?? "");
     }
     this.current = mounted;
+    this.clearHighlights();
+    this.dock?.pageChanged();
     this.padNavigation.routeChanged(!!id && section !== "settings");
     if (intent) mounted.pane.intent?.(intent);
   }
@@ -289,6 +309,48 @@ export class WorkbenchView {
     else if (section === "inbox") pane = new InboxPane(target, client, navigate, changed);
     else pane = new ApprovalsPane(target, client, changed, navigate);
     return { target, pane };
+  }
+
+  /** 焦点快照的来源：当前分区、路由里的对象 ID、主区域里选中的文字。 */
+  private focusInput(): FocusInput {
+    const { section, id } = this.parseHash(this.currentHash || "#overview");
+    const selection = window.getSelection();
+    const anchor = selection?.anchorNode;
+    const selected = selection && !selection.isCollapsed && anchor && this.main.contains(anchor) ? selection.toString() : undefined;
+    return { section, ...(id ? { id } : {}), ...(selected ? { selection: selected } : {}) };
+  }
+
+  /** 助手的跳转与高亮（ADR 0060 第 2、3 节）。人正在操作页面时不跳转，交给面板显示「带我过去」。 */
+  private applyAction(action: Extract<WorkbenchAction, { action: "navigate" | "highlight" }>): "applied" | "deferred" {
+    if (action.action === "navigate") {
+      const active = document.activeElement;
+      const editing = !!document.querySelector("dialog[open]") || (!!active && this.main.contains(active) &&
+        (active.matches("input, textarea, select") || (active as HTMLElement).isContentEditable));
+      const attentive = document.visibilityState === "visible" && document.hasFocus();
+      if (!canNavigateNow({ now: Date.now(), lastActivity: this.lastActivity, editing, attentive })) return "deferred";
+      const [section, id] = navigateRoute(action);
+      void this.go(section, id);
+      return "applied";
+    }
+    this.clearHighlights();
+    const target = this.current?.target;
+    let first: HTMLElement | undefined;
+    for (const ref of action.refs) {
+      for (const element of target?.querySelectorAll<HTMLElement>(`[data-id="${CSS.escape(ref.id)}"]`) ?? []) {
+        element.classList.add("assist-highlight");
+        if (action.note) element.dataset.assistNote = action.note;
+        first ??= element;
+      }
+    }
+    first?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    return "applied";
+  }
+
+  private clearHighlights(): void {
+    for (const element of this.main.querySelectorAll<HTMLElement>(".assist-highlight")) {
+      element.classList.remove("assist-highlight");
+      delete element.dataset.assistNote;
+    }
   }
 
   private async refreshCounts(): Promise<void> {
@@ -364,6 +426,8 @@ export class WorkbenchView {
   }
 
   dispose(): void {
+    this.dock.dispose();
+    this.dock.launcher.remove();
     setSpeechService(undefined);
     this.unsubscribePadStatus();
     this.gamepad.dispose();

@@ -1,5 +1,6 @@
 import { Capture, CaptureCommand, CaptureList, CaptureListArgs, KnowledgeAIBinding, KnowledgeAIBindingUpdate, CaptureCreate, CaptureCreateResult, KnowledgeAiNoteCommand, KnowledgeAiNoteResult, KnowledgeOriginal, KnowledgeOriginalShowArgs, ResourceSummary } from "@lumio/schema";
 import {AIConnection,AIConnectionInput,AIProfile,AIProfileInput,AIConfiguration,AIRuntime,NativeConnectionAction,NativeConnectionView,NativeSession,NativeCreate,NativeAction,NativeEventRecord} from "@lumio/schema";
+import { AssistantMain, AssistantMainEnsure } from "@lumio/schema";
 import { AIQuotaSettings, AIQuotaView, AIQuotaViews, AliyunBillingUpdate } from "@lumio/schema";
 import { KnowledgeGraph, KnowledgeGraphArgs, Id, KnowledgeDocument, KnowledgeUpdateRequest, KnowledgeUpdateResult, KnowledgeRelatedRequest, KnowledgeRelatedResult, KnowledgeReferencesRequest, KnowledgeReferencesResult } from "@lumio/schema";
 import { KnowledgeTemplateRequest, KnowledgeTemplateResult, PaperResolveRequest, PaperResolveResult, KnowledgeCreateRequest, KnowledgeCreateResult } from "@lumio/schema";
@@ -205,6 +206,8 @@ export function createClient(options: { url: string; token?: string; language?: 
     },
     memories() { return request("/v2/assistant/memories", {}, AssistantMemory.array()); },
     memoryCommand(input: AssistantMemoryCommandRequest) { return request("/v2/assistant/memory-commands", {}, AssistantMemoryCommandResult, validate(AssistantMemoryCommandRequest, input)); },
+    /** 主对话（ADR 0059，A1-3）：幂等，没有时由 Hub 创建。 */
+    assistantMain(request_id: string) { return request("/v2/assistant/main", {}, AssistantMain, validate(AssistantMainEnsure, { request_id })); },
     assistantChat(input: AssistantChatRequest) { return request("/v2/assistant/chat", {}, AssistantChatResult, validate(AssistantChatRequest, input)); },
     conversations() { return request("/v2/assistant/conversations", {}, AssistantConversation.array()); },
     conversation(id: string) { return request(`/v2/assistant/conversations/${validate(idOf("conv"), id)}`, {}, AssistantConversationDetail); },
