@@ -13,12 +13,13 @@ import type { Inbox } from "./inbox.ts";
 import type { Trash } from "./trash.ts";
 import { stageDispatchOptions, validateTarget } from "./targets.ts";
 import { Notifications } from "./notifications.ts";
+import { Notices } from "./notices.ts";
 import { WorkCommands } from "./work-commands.ts";
 import { text as msg } from "./messages.ts";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { CoreError, newId } from "@lumio/foundation";
-import { parseAssignee, type WorkCommandResult, type AgentRun, type WorkTask } from "@lumio/schema";
+import { parseAssignee, RESPONSE_REASONS, type Job, type WorkCommandResult, type AgentRun, type WorkTask } from "@lumio/schema";
 import { mergeStageGrant, PlanDispatchUnavailable, WorkService } from "@lumio/work";
 import type { AssistantContext, AssistantModel, AssistantTool } from "@lumio/assistant";
 import { AssistantMainConversations } from "./assistant-main.ts";
@@ -62,6 +63,7 @@ export class BusinessModules {
   readonly funAsr: FunAsr;
   readonly knowledge?: KnowledgeService;
   readonly notifications: Notifications;
+  readonly notices: Notices;
   readonly workStore: SqliteWorkStore;
   readonly work: WorkService;
   readonly workCommands: WorkCommands;
@@ -112,6 +114,7 @@ export class BusinessModules {
       const operation = proposal.operation;
       const taskId = operation.op === "work.command" ? ("task" in operation.args.operation.args ? operation.args.operation.args.task : undefined) : operation.op === "task.dispatch" ? operation.args.task : undefined;
       notifications.proposal(proposal, taskId ? this.workStore.task(taskId)?.title : undefined);
+      this.notices.proposal(proposal, taskId);
     };
     this.work = new WorkService(this.workStore, { text: msg, now, id, localRuntime: config.localRuntime, systemActor: store.workActor().id, job: id => jobs.get(id),
       auditPlan: (change, plan, checkpoint) => {
@@ -157,6 +160,7 @@ export class BusinessModules {
         store.audit({ actor, label: "decision-gate" }, "decision.gate", "allow", undefined, JSON.stringify(usage));
       },
     });
+    this.notices = new Notices(store, this, now, this.signal);
     this.funAsr = new FunAsr(options.funAsr, this.signal);
     // Work's live database projects are public; the knowledge vault is never consulted.
     this.speech = new SpeechConfiguration(new SqliteSpeechStore(store.db), this.ai.store, this.funAsr,
@@ -165,7 +169,7 @@ export class BusinessModules {
     const assistantContext: AssistantContext = {
       text: msg, now, id, toolActor: store.assistantActor(),
       resolveModel: (profile, owner) => this.ai.model(owner, profile),
-      workbench: new AssistantWorkbenchAnchors(this, store, this.assistantMain),
+      workbench: new AssistantWorkbenchAnchors(this, store, this.assistantMain, this.notices),
       native: {
         validate: (conversation, request) => this.native.validate(conversation, request),
         run: this.native.run,
@@ -180,6 +184,7 @@ export class BusinessModules {
       try { this.reconcile(); } catch { /* Persisted pending results remain for the next pass. */ }
       try { this.native.usage.tick(); } catch { /* The next tick can retry quota collection. */ }
       void this.notifications.drain().catch(() => {});
+      void this.notices.drain().catch(() => { /* Pending sources are retained for the next pass. */ });
       void this.assistant.drainWorkbenchSummaries(this.signal).catch(() => { /* The durable queue retains the source range. */ });
     }, 1000);
   }
@@ -245,9 +250,27 @@ export class BusinessModules {
   reconcile(): void {
     const jobs = new Jobs(this.store);
     for (const execution of this.workStore.executions().filter((value) => !value.applied)) {
-      try { this.work.applyResult(jobs.get(execution.job)); }
+      try {
+        const job = jobs.get(execution.job);
+        if (!job.result) {
+          this.work.applyResult(job);
+          continue;
+        }
+        this.store.db.transaction(() => {
+          const before = this.workStore.turns(execution.task).length;
+          this.work.applyResult(job);
+          const required = this.workStore.turns(execution.task).slice(before).some(change =>
+            change.to.holder === "human" && (RESPONSE_REASONS as readonly string[]).includes(change.to.reason));
+          this.notices.round(job, execution.task, required);
+        })();
+      }
       catch (cause) { if (!(cause instanceof HubError && cause.code === "NOT_FOUND") && !(cause instanceof CoreError)) throw cause; }
     }
+  }
+  runtimeRound(job: Job): void {
+    const task = job.spec.source?.task;
+    if (task && this.workStore.executions(task).some(execution => execution.job === job.spec.id)) return;
+    this.notices.round(job);
   }
   stop(): void { clearInterval(this.timer); this.stopped.abort(); this.store.proposalCreated = undefined; }
 }

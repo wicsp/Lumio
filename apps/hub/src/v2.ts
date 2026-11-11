@@ -1,5 +1,5 @@
 import { text as msg } from "./messages.ts";
-import { Id, KnowledgeAiNoteCommand, KnowledgeAiNoteResult, ResourceSummary, KnowledgeGraph, KnowledgeGraphArgs, AgentInfo, AgentTokenRequest, AgentRevokeRequest, AssistantChatRequest, WorkCommandRequest, ExecutionRoutineCommandRequest, RequestId, AssistantToolCall, capability, ExecutionRoutine, PlanTemplate, WorkCommandResult, type AssistantEvent, KnowledgeDeleteRequest, AssistantConversationDeleteRequest, TrashListArgs, TrashPurgeRequest, TrashRestoreRequest } from "@lumio/schema";
+import { Id, KnowledgeAiNoteCommand, KnowledgeAiNoteResult, ResourceSummary, KnowledgeGraph, KnowledgeGraphArgs, AgentInfo, AgentTokenRequest, AgentRevokeRequest, AssistantChatRequest, WorkCommandRequest, ExecutionRoutineCommandRequest, RequestId, AssistantToolCall, capability, ExecutionRoutine, PlanTemplate, WorkCommandResult, AssistantEvent, KnowledgeDeleteRequest, AssistantConversationDeleteRequest, TrashListArgs, TrashPurgeRequest, TrashRestoreRequest } from "@lumio/schema";
 import { AssistantConversation, AssistantMain, AssistantMainEnsure } from "@lumio/schema";
 import { newId } from "@lumio/foundation";
 import { randomBytes } from "node:crypto";
@@ -10,12 +10,14 @@ import { HubError } from "./errors.ts";
 import type { HubStore, Identity } from "./store.ts";
 import type { authorize } from "./authorize.ts";
 import { INBOX_ROUTES } from "./inbox.ts";
+import { NOTICE_ROUTES } from "./notices.ts";
 import { ORIGINAL_CAPABILITY_NAME } from "@lumio/schema";
 import { handleArtifacts } from "./artifacts.ts";
 import { isTaskProposalCapability } from "./capabilities.ts";
 
 export const V2_ROUTES = [
   ...INBOX_ROUTES,
+  ...NOTICE_ROUTES,
   { operation: "show", method: "GET", pattern: /^\/v2\/knowledge\/originals$/, path: "/v2/knowledge/originals" },
   { operation: "resource.read", method: "GET", pattern: /^\/v2\/resources\/([^/]+)$/, path: "/v2/resources/<id>" },
   { operation: "knowledge.ai-note", method: "POST", pattern: /^\/v2\/knowledge\/ai-note-commands$/, path: "/v2/knowledge/ai-note-commands" },
@@ -82,6 +84,11 @@ export async function handleV2(request: Request, server: Pick<Bun.Server<undefin
   try {
     if (decision.result !== "allow") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: decision.result === "deny" ? decision.reason : msg("v2.approval_required") });
     const url = new URL(request.url), id = route.pattern.exec(url.pathname)?.[1];
+    if (route.operation === "notices.read" || route.operation === "notices.command") {
+      const response = await modules.notices.handle(request, route.operation, identity);
+      audited = true;
+      return response;
+    }
     if (route.operation === "inbox.create" || route.operation === "inbox.read" ||
         route.operation === "inbox.command" || route.operation === "inbox.bindings") {
       return await modules.inbox.handle(request, route.operation, id, identity);
@@ -297,27 +304,47 @@ export async function handleV2(request: Request, server: Pick<Bun.Server<undefin
     server.timeout(request, 0);
     await modules.assistantConfig.refresh();
     const signal = AbortSignal.any([...(native ? [] : [request.signal]), modules.signal, AbortSignal.timeout(native ? 1800000 : 120000)]);
+    const chat = (event?: (value: AssistantEvent) => void) => {
+      const run = () => modules.assistant.chat(parsed.data, owner, { signal, event });
+      return main ? modules.notices.duringChat(run) : run();
+    };
     if (request.headers.get("accept")?.includes("application/x-ndjson")) {
       const progress = request.headers.get("X-Lumio-Assistant-Progress") === "1";
       const encoder = new TextEncoder();
       const stream = new ReadableStream<Uint8Array>({ start(controller) {
         let terminal = false;
-        const event = (value: AssistantEvent) => {
+        let final: Extract<AssistantEvent, { type: "result" | "error" }> | undefined;
+        const send = (value: AssistantEvent) => {
           if (!progress && (value.type === "model_waiting" || value.type === "reasoning")) return;
           terminal ||= value.type === "result" || value.type === "error";
           controller.enqueue(encoder.encode(`${JSON.stringify(value)}\n`));
         };
-        void modules.assistant.chat(parsed.data, identity.actor.id, { signal, event })
-          .then((result) => {
-            if (!terminal) event(result.turn.status === "done" ? { type: "result", turn: result.turn.id, messages: result.messages }
-              : { type: "error", turn: result.turn.id, error: result.turn.error ?? msg("v2.this_round_is_running_or_its_outcome_is_unknown_inspect_the_conversa") });
+        const event = (value: AssistantEvent) => {
+          // Existing NDJSON clients require the result or error to be the last frame.
+          if (main && (value.type === "result" || value.type === "error")) final = value;
+          else send(value);
+        };
+        void chat(event)
+          .then(async (result) => {
+            if (final && !signal.aborted) {
+              await modules.notices.drain().catch(() => {});
+              if (!signal.aborted) modules.notices.announce(owner, notice =>
+                send(AssistantEvent.parse({ type: "notice", turn: result.turn.id, notice })));
+            }
+            if (!terminal) send(final ?? (result.turn.status === "done" ? { type: "result", turn: result.turn.id, messages: result.messages }
+              : { type: "error", turn: result.turn.id, error: result.turn.error ?? msg("v2.this_round_is_running_or_its_outcome_is_unknown_inspect_the_conversa") }));
           })
-          .catch(() => { /* The client can inspect the persisted turn after reconnecting. */ })
+          .catch(() => {
+            if (final && !terminal) try { send(final); } catch { /* client disconnected */ }
+            // The client can inspect the persisted turn after reconnecting.
+          })
           .finally(() => { try { controller.close(); } catch { /* client disconnected */ } });
       } });
       return new Response(stream, { headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store" } });
     }
-    return Response.json(await modules.assistant.chat(parsed.data, identity.actor.id, { signal }));
+    const result = await chat();
+    if (main) void modules.notices.drain().catch(() => {});
+    return Response.json(result);
   } catch (cause) {
     const error = moduleError(cause);
     execution = error?.code ?? (cause instanceof HubError ? cause.code : "INTERNAL");

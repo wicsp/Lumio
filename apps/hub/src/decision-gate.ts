@@ -11,7 +11,12 @@ const NOTICE_STATES = [
 const PROGRESS_ERRORS = ["authorization", "timeout", "command", "model", "network", "validation", "other"] as const;
 
 type Provenance = { source: "hub" | "external"; visibility: "public" | "private" };
-type NoticeSummary = { status: typeof NOTICE_STATES[number]; count?: number };
+type NoticeSummary = {
+  status: typeof NOTICE_STATES[number];
+  count?: number;
+  dependent_tasks?: number;
+  days_until_due?: number;
+};
 type ProgressSummary = {
   tool_calls: number;
   files_changed: number;
@@ -39,8 +44,10 @@ const onlyKeys = (value: Record<string, unknown>, keys: readonly string[]) =>
   Object.keys(value).every(key => keys.includes(key));
 
 function validNoticeSummary(value: unknown): value is NoticeSummary {
-  return isRecord(value) && onlyKeys(value, ["status", "count"]) &&
-    NOTICE_STATES.some(status => status === value.status) && (value.count === undefined || isCount(value.count));
+  return isRecord(value) && onlyKeys(value, ["status", "count", "dependent_tasks", "days_until_due"]) &&
+    NOTICE_STATES.some(status => status === value.status) && (value.count === undefined || isCount(value.count)) &&
+    (value.dependent_tasks === undefined || isCount(value.dependent_tasks)) &&
+    (value.days_until_due === undefined || Number.isSafeInteger(value.days_until_due));
 }
 
 function validProgressSummary(value: unknown): value is ProgressSummary {
@@ -78,7 +85,8 @@ export function buildDecisionGateRequest(kind: "notice" | "progress", value: unk
     state: {
       event_kind: event.data,
       ...(title === undefined ? {} : { subject_title: title }),
-      structured_summary: { status: summary.status, count: summary.count },
+      structured_summary: { status: summary.status, count: summary.count,
+        dependent_tasks: summary.dependent_tasks, days_until_due: summary.days_until_due },
     },
     questions: NOTICE_QUESTION,
   };

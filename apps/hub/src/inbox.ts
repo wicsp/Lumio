@@ -48,7 +48,8 @@ export class Inbox {
 
   constructor(private readonly config: HubConfig, private readonly hub: HubStore, private readonly ai: AIConfigurationService,
     private readonly trash: () => Trash, private readonly exclusive: <T>(action: () => Promise<T>) => Promise<T>,
-    private readonly now: () => Date, private readonly issue: (path: string, message: string) => void, private readonly options: InboxOptions = {}) {
+    private readonly now: () => Date, private readonly issue: (path: string, message: string) => void, private readonly options: InboxOptions = {},
+    private readonly onReady?: (capture: Capture) => void) {
     this.state = new InboxStore(hub.db);
     ai.knowledgeProfileInUse = (profile, nextEngine) => this.state.profileInUse(profile, nextEngine);
     this.files = new InboxFiles(config, issue);
@@ -270,11 +271,14 @@ export class Inbox {
         value.ownsEntity ??= plan.entityBytes !== undefined;
         value.plan = undefined;
         value.summary = "card";
-        this.update(value, {
-          state: "ready", entity: plan.entity, title: plan.entity.title, original: plan.original, error: undefined,
-          card: configured ? "pending" : capture.ai_note ? capture.card : "none",
-        });
-        this.hub.audit(this.hub.recoveryIdentity(capture.owner), "inbox.extract", "allow", undefined, `ready:${capture.id}`);
+        this.hub.db.transaction(() => {
+          const ready = this.update(value, {
+            state: "ready", entity: plan.entity, title: plan.entity.title, original: plan.original, error: undefined,
+            card: configured ? "pending" : capture.ai_note ? capture.card : "none",
+          });
+          this.hub.audit(this.hub.recoveryIdentity(capture.owner), "inbox.extract", "allow", undefined, `ready:${capture.id}`);
+          this.onReady?.(ready);
+        })();
       });
     } catch (cause) {
       const error = cause instanceof CaptureFailure ? cause.description() : this.error("extract_failed");
