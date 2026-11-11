@@ -61,7 +61,7 @@ import { CheckResult, LinksResult, NoteDetail, ResourceSummary, SearchResult } f
 import { KnowledgeTemplateRequest, KnowledgeTemplateResult, PaperResolveRequest, PaperResolveResult, KnowledgeCreateRequest, KnowledgeCreateResult } from "./knowledge-authoring.ts";
 
 import { KnowledgeGraphArgs, KnowledgeGraph, KnowledgeGraphEdge } from "./knowledge-graph.ts";
-import { Capture, CaptureCommand, CaptureCreate, CaptureCreateResult, CaptureList, KnowledgeAIBinding, KnowledgeAIBindingUpdate, OriginalFrontmatter } from "./inbox.ts";
+import { Capture, CaptureCommand, CaptureCreate, CaptureCreateResult, CaptureList, CaptureProxySettings, CaptureProxyUpdate, KnowledgeAIBinding, KnowledgeAIBindingUpdate, OriginalFrontmatter } from "./inbox.ts";
 import { AssistantMain, AssistantMainEnsure, DecisionGateBinding, DecisionGateBindingUpdate, Exploration, ExplorationCommand, ExplorationList, FocusSnapshot, Notice, NoticeCommand, NoticeCommandResult, NoticeList, WorkbenchAction } from "./workbench.ts";
 import { SpeechClientMessage, SpeechServerMessage, SpeechVocabulary, SpeechVocabularyUpdate, SpeechBinding, SpeechBindingUpdate } from "./speech.ts";
 
@@ -209,6 +209,8 @@ export const CONTRACTS = {
   capture: Capture,
   "capture-list": CaptureList,
   "capture-command": CaptureCommand,
+  "capture-proxy-settings": CaptureProxySettings,
+  "capture-proxy-update": CaptureProxyUpdate,
   "original-frontmatter": OriginalFrontmatter,
   "knowledge-ai-binding": KnowledgeAIBinding,
   "knowledge-ai-binding-update": KnowledgeAIBindingUpdate,

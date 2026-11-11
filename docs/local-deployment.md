@@ -8,7 +8,13 @@
 
 对外发布时，人类在日常实例上验收后，从 `main` 上已验收的提交推送正式 `v*` 标签。Release workflow 校验提交属于主线，重跑全量检查并创建 GitHub Release。带预发布后缀的版本标为预发布，不成为 Latest。
 
-## macsp 上给 Hub 抓取配置代理（I1-3a）
+## 在 Web 设置资料抓取代理（I1-3b）
+
+打开「设置 → Hub 与执行器 → 资料抓取代理」，选择「使用自定义代理」，填入 Hub 所在机器可访问的地址，例如 macsp 本地代理的 `http://127.0.0.1:7890`。HTTP 和 HTTPS 网址都使用这个代理。`NO_PROXY` 可选，用逗号分隔直连目标。保存后可立即重试抓取。选择「跟随 Hub 服务环境」可恢复下文的部署配置。
+
+Web 设置保存在 Hub 状态目录的私有 `capture-proxy.json` 中，随安装配置备份。代理凭据可能包含在该文件中，保持文件权限为 `0600`。
+
+## macsp 上用服务环境设置抓取代理（I1-3a）
 
 在运行 Hub 的 macsp 用户下，编辑 `~/Library/LaunchAgents/io.lumio.hub.plist`，把下面的键加入已有的 `EnvironmentVariables` 字典。将示例地址换成 macsp 上受信任的 HTTP 或 HTTPS 代理监听地址。`HTTPS_PROXY` 用于 HTTPS 网址，`HTTP_PROXY` 用于 HTTP 网址，两者可以指向同一个 `http://` 代理。`NO_PROXY` 可选，填逗号分隔的直连目标。
 

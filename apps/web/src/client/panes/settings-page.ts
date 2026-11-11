@@ -14,6 +14,7 @@ import { onTheme, setTheme, themeChoice, type ThemeChoice } from "../theme.ts";
 import { LANGS, THEMES } from "../settings.ts";
 import { AISettings } from "../ai-settings.ts";
 import { AgentsSettings } from "../agents-settings.ts";
+import { captureProxySettings } from "../capture-proxy-settings.ts";
 import type { GamepadInput } from "../gamepad-input.ts";
 import { GamepadSettings } from "../gamepad-settings.ts";
 import { NotificationSettings } from "../notification-settings.ts";
@@ -61,6 +62,10 @@ export class SettingsPane {
     for (const [section, item] of this.navItems) item.setAttribute("aria-current", section === picked || (!picked && section === key) ? "page" : "false");
     this.title.textContent = picked ? t(SETTINGS_SECTIONS.find(s => s.key === picked)!.label) : t("Settings");
     if (key === this.shown) return;
+    if (this.shown === "devices") {
+      this.built.get("devices")?.dispose?.();
+      this.built.delete("devices");
+    }
     this.shown = key;
     let built = this.built.get(key);
     if (!built) { built = this.build(key); this.built.set(key, built); }
@@ -132,8 +137,12 @@ export class SettingsPane {
         clear(runtimeRows, h("p", { class: "set-empty" }, t("Loading…")));
         void this.loadHub(hubRows);
         void this.loadRuntimes(runtimeRows);
-        return { element: page(this.group(t("Hub"), undefined, hubRows), this.group(t("Runtimes"), t("Machines that run agents for this Hub."), runtimeRows),
-          this.group(t("Browser extension"), t("Save the page you're reading to the Inbox with one click."), this.extensionPairing())) };
+        const proxy = captureProxySettings(this.session.client);
+        return { element: page(this.group(t("Hub"), undefined, hubRows),
+          this.group(t("Capture proxy"), t("Use an HTTP or HTTPS proxy reachable from the Hub to fetch Inbox links."), proxy.element),
+          this.group(t("Runtimes"), t("Machines that run agents for this Hub."), runtimeRows),
+          this.group(t("Browser extension"), t("Save the page you're reading to the Inbox with one click."), this.extensionPairing())),
+          dispose: proxy.dispose };
       }
       case "agents": {
         const agents = new AgentsSettings(this.session.client);

@@ -1,4 +1,4 @@
-import { Capture, CaptureCommand, CaptureList, CaptureListArgs, KnowledgeAIBinding, KnowledgeAIBindingUpdate, CaptureCreate, CaptureCreateResult, KnowledgeAiNoteCommand, KnowledgeAiNoteResult, KnowledgeOriginal, KnowledgeOriginalShowArgs, ResourceSummary } from "@lumio/schema";
+import { Capture, CaptureCommand, CaptureList, CaptureListArgs, CaptureProxySettings, CaptureProxyUpdate, KnowledgeAIBinding, KnowledgeAIBindingUpdate, CaptureCreate, CaptureCreateResult, KnowledgeAiNoteCommand, KnowledgeAiNoteResult, KnowledgeOriginal, KnowledgeOriginalShowArgs, ResourceSummary } from "@lumio/schema";
 import {AIConnection,AIConnectionInput,AIProfile,AIProfileInput,AIConfiguration,AIRuntime,NativeConnectionAction,NativeConnectionView,NativeSession,NativeCreate,NativeAction,NativeEventRecord} from "@lumio/schema";
 import { AssistantMain, AssistantMainEnsure, Exploration, ExplorationCommand, ExplorationList, ExplorationListArgs, NoticeCommand, NoticeCommandResult, NoticeList, NoticeListArgs } from "@lumio/schema";
 import { AIQuotaSettings, AIQuotaView, AIQuotaViews, AliyunBillingUpdate } from "@lumio/schema";
@@ -88,6 +88,12 @@ export function createClient(options: { url: string; token?: string; language?: 
     },
     captureCommand(id: string, input: CaptureCommand) {
       return request(`/v2/inbox/captures/${validate(idOf("cap"), id)}/commands`, {}, Capture, validate(CaptureCommand, input));
+    },
+    captureProxySettings() {
+      return request("/v2/inbox/proxy-settings", {}, CaptureProxySettings);
+    },
+    saveCaptureProxySettings(input: CaptureProxyUpdate) {
+      return request("/v2/inbox/proxy-settings", {}, CaptureProxySettings, validate(CaptureProxyUpdate, input), "PUT");
     },
     knowledgeBindings() {
       return request("/v2/ai/knowledge-bindings", {}, KnowledgeAIBinding.array());
