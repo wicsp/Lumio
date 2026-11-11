@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Database } from "bun:sqlite";
-import { AssistantConversation, AssistantMessage, AssistantTurn, AssistantToolCall, AssistantMemory, AssistantMemoryCommandResult, AssistantModelRequest, TrashItem, Timestamp, idOf } from "@lumio/schema";
-import { AssistantError, type AssistantStore } from "@lumio/assistant";
+import { AssistantConversation, AssistantMessage, AssistantTurn, AssistantToolCall, AssistantMemory, AssistantMemoryCommandResult, AssistantModelRequest, ResourceRef, TrashItem, Timestamp, idOf } from "@lumio/schema";
+import { AssistantError, type AssistantFragment, type AssistantFragmentSource, type AssistantStore } from "@lumio/assistant";
 import { StorageError } from "./errors.ts";
 
 const conversationAnchors = `
@@ -10,6 +10,22 @@ const conversationAnchors = `
   UNION ALL SELECT id FROM assistant_turns WHERE conversation=$id
   UNION ALL SELECT id FROM assistant_calls WHERE turn IN (SELECT id FROM assistant_turns WHERE conversation=$id)
 `;
+
+interface FragmentRow {
+  conversation: string;
+  first_message: string;
+  last_message: string;
+  anchors: string;
+  attempts: number;
+  summary: string | null;
+}
+
+function fragmentFromRow(row: FragmentRow): AssistantFragment {
+  return {
+    conversation: row.conversation, firstMessage: row.first_message, lastMessage: row.last_message,
+    anchors: ResourceRef.array().parse(JSON.parse(row.anchors)), attempts: row.attempts, summary: row.summary ?? undefined,
+  };
+}
 
 /** Typed Assistant persistence; indexed ownership and lifecycle fields are committed with validated records. */
 export class SqliteAssistantStore implements AssistantStore {
@@ -30,6 +46,35 @@ export class SqliteAssistantStore implements AssistantStore {
       CREATE TABLE IF NOT EXISTS assistant_messages(id TEXT PRIMARY KEY,conversation TEXT NOT NULL REFERENCES assistant_conversations(id),
         turn TEXT REFERENCES assistant_turns(id),record TEXT NOT NULL CHECK(json_valid(record)));
       CREATE INDEX IF NOT EXISTS assistant_messages_conversation ON assistant_messages(conversation);
+      CREATE TABLE IF NOT EXISTS assistant_message_anchors(
+        message TEXT NOT NULL REFERENCES assistant_messages(id) ON DELETE CASCADE,
+        position INTEGER NOT NULL CHECK(position>=0),
+        resource TEXT NOT NULL CHECK(json_valid(resource)),
+        PRIMARY KEY(message,position)
+      );
+      CREATE TABLE IF NOT EXISTS assistant_fragments(
+        conversation TEXT NOT NULL REFERENCES assistant_conversations(id) ON DELETE CASCADE,
+        first_message TEXT NOT NULL REFERENCES assistant_messages(id) ON DELETE CASCADE,
+        last_message TEXT NOT NULL REFERENCES assistant_messages(id) ON DELETE CASCADE,
+        anchors TEXT NOT NULL CHECK(json_valid(anchors)),
+        retry_at TEXT NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        summary TEXT,
+        PRIMARY KEY(first_message,last_message)
+      );
+      CREATE INDEX IF NOT EXISTS assistant_fragments_conversation ON assistant_fragments(conversation);
+      CREATE INDEX IF NOT EXISTS assistant_fragments_pending ON assistant_fragments(retry_at) WHERE summary IS NULL;
+      CREATE TABLE IF NOT EXISTS assistant_fragment_requests(
+        first_message TEXT NOT NULL,
+        last_message TEXT NOT NULL,
+        attempt INTEGER NOT NULL,
+        request TEXT NOT NULL CHECK(json_valid(request)),
+        created TEXT NOT NULL,
+        tool_actor TEXT NOT NULL,
+        PRIMARY KEY(first_message,last_message,attempt),
+        FOREIGN KEY(first_message,last_message) REFERENCES assistant_fragments(first_message,last_message) ON DELETE CASCADE
+      );
+      INSERT OR IGNORE INTO platform_migrations(name,applied) VALUES('assistant-4',strftime('%Y-%m-%dT%H:%M:%fZ','now'));
       CREATE TABLE IF NOT EXISTS assistant_requests(owner TEXT NOT NULL,request TEXT NOT NULL,input TEXT NOT NULL,
         turn TEXT NOT NULL REFERENCES assistant_turns(id),PRIMARY KEY(owner,request));
       CREATE TABLE IF NOT EXISTS assistant_memories(id TEXT PRIMARY KEY,owner TEXT NOT NULL,record TEXT NOT NULL CHECK(json_valid(record)));
@@ -113,6 +158,84 @@ export class SqliteAssistantStore implements AssistantStore {
   putMessage(input: AssistantMessage): void {
     const value = AssistantMessage.parse(input);
     this.db.query("INSERT INTO assistant_messages(id,conversation,turn,record) VALUES(?,?,?,?)").run(value.id, value.conversation, value.turn ?? null, JSON.stringify(value));
+  }
+  messageAnchors(conversation: string): ReadonlyMap<string, readonly ResourceRef[]> {
+    const result = new Map<string, ResourceRef[]>();
+    const rows = this.db.query<{ message: string; resource: string }, [string]>(`
+      SELECT anchor.message,anchor.resource FROM assistant_messages AS message
+      JOIN assistant_message_anchors AS anchor ON anchor.message=message.id
+      WHERE message.conversation=? ORDER BY message.rowid,anchor.position
+    `).all(conversation);
+    for (const row of rows) {
+      const refs = result.get(row.message) ?? [];
+      refs.push(ResourceRef.parse(JSON.parse(row.resource)));
+      result.set(row.message, refs);
+    }
+    return result;
+  }
+  putMessageAnchors(message: string, anchors: readonly ResourceRef[]): void {
+    if (!anchors.length) return;
+    this.db.transaction(() => {
+      const query = this.db.query("INSERT INTO assistant_message_anchors(message,position,resource) VALUES(?,?,?)");
+      anchors.forEach((ref, index) => query.run(message, index, JSON.stringify(ResourceRef.parse(ref))));
+    })();
+  }
+  enqueueFragment(source: AssistantFragmentSource, now: string): void {
+    this.db.query(`
+      INSERT INTO assistant_fragments(conversation,first_message,last_message,anchors,retry_at)
+      SELECT conversation,?,?,?,? FROM assistant_messages AS first
+      WHERE first.id=? AND first.conversation=?
+        AND EXISTS (SELECT 1 FROM assistant_messages AS last WHERE last.id=? AND last.conversation=first.conversation AND last.rowid>=first.rowid)
+      ON CONFLICT(first_message,last_message) DO NOTHING
+    `).run(source.firstMessage, source.lastMessage, JSON.stringify(ResourceRef.array().parse(source.anchors)), Timestamp.parse(now),
+      source.firstMessage, source.conversation, source.lastMessage);
+  }
+  recentFragments(conversation: string, anchors: readonly ResourceRef[]): AssistantFragment[] {
+    if (!anchors.length) return [];
+    return this.db.query<FragmentRow, [string, string]>(`
+      SELECT fragment.* FROM assistant_fragments AS fragment
+      JOIN assistant_messages AS last ON last.id=fragment.last_message
+      WHERE fragment.conversation=? AND fragment.summary IS NOT NULL
+        AND EXISTS (SELECT 1 FROM json_each(fragment.anchors) WHERE json_extract(value,'$.id') IN (SELECT value FROM json_each(?)))
+      ORDER BY last.rowid DESC LIMIT 24
+    `).all(conversation, JSON.stringify(anchors.map(ref => ref.id))).map(fragmentFromRow);
+  }
+  nextFragment(now: string): AssistantFragment | undefined {
+    const row = this.db.query<FragmentRow, [string]>(`
+      SELECT fragment.* FROM assistant_fragments AS fragment
+      WHERE fragment.summary IS NULL AND fragment.retry_at<=?
+        AND NOT EXISTS (SELECT 1 FROM assistant_trash WHERE id=fragment.conversation)
+      ORDER BY fragment.retry_at,fragment.rowid LIMIT 1
+    `).get(Timestamp.parse(now));
+    return row ? fragmentFromRow(row) : undefined;
+  }
+  deferFragment(fragment: AssistantFragment, retryAt: string): void {
+    this.db.query(`
+      UPDATE assistant_fragments SET retry_at=?
+      WHERE first_message=? AND last_message=? AND attempts=? AND summary IS NULL AND retry_at<?
+    `).run(Timestamp.parse(retryAt), fragment.firstMessage, fragment.lastMessage, fragment.attempts, retryAt);
+  }
+  startFragment(fragment: AssistantFragment, request: AssistantModelRequest, actor: string, now: string, retryAt: string): boolean {
+    return this.db.transaction(() => {
+      const result = this.db.query(`
+        UPDATE assistant_fragments SET attempts=attempts+1,retry_at=?
+        WHERE first_message=? AND last_message=? AND attempts=? AND summary IS NULL AND retry_at<=?
+          AND NOT EXISTS (SELECT 1 FROM assistant_trash WHERE id=assistant_fragments.conversation)
+      `).run(Timestamp.parse(retryAt), fragment.firstMessage, fragment.lastMessage, fragment.attempts, Timestamp.parse(now));
+      if (!result.changes) return false;
+      this.db.query(`
+        INSERT INTO assistant_fragment_requests(first_message,last_message,attempt,request,created,tool_actor)
+        VALUES(?,?,?,?,?,?)
+      `).run(fragment.firstMessage, fragment.lastMessage, fragment.attempts + 1, JSON.stringify(AssistantModelRequest.parse(request)), now, idOf("act").parse(actor));
+      return true;
+    })();
+  }
+  finishFragment(fragment: AssistantFragment, summary: string): void {
+    this.db.query(`
+      UPDATE assistant_fragments SET summary=?
+      WHERE first_message=? AND last_message=? AND attempts=? AND summary IS NULL
+        AND NOT EXISTS (SELECT 1 FROM assistant_trash WHERE id=assistant_fragments.conversation)
+    `).run(summary, fragment.firstMessage, fragment.lastMessage, fragment.attempts + 1);
   }
   turn(id: string): AssistantTurn | undefined {
     const row = this.db.query<{ record: string }, [string]>("SELECT record FROM assistant_turns WHERE id=?").get(id);
