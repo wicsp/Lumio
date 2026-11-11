@@ -41,6 +41,21 @@
 依赖：A1-2、A1-3、A1-4、A1-6 依赖 A1-1；A1-3 依赖 A1-2；A1-5 依赖 A1-3、A1-4；A1-7 依赖 A1-3、A1-6；A1-8、A1-9 依赖 A1-7；A1-10 依赖 A1-3、A1-4；A1-11 依赖 A1-6。
 A1-2、A1-3、A1-5 做完即可日常试用（不含后台提醒）；A1-7 做完后提醒可用。
 
+## A1-1 契约交接
+
+契约在 `packages/schema/src/workbench.ts`（2026-11-11 起草，待人类批准），HTTP 路径写在文件头注释里，全部只授予 human：
+
+- 新前缀 `ntc_`（提醒）、`xpl_`（提前探索）。锚点关联不进契约。
+- 主对话：`POST /v2/assistant/main`（`AssistantMainEnsure` → `AssistantMain`，幂等，没有时创建）。
+- `AssistantChatRequest.focus`：`FocusSnapshot`（分区、主对象、选中对象、选中文字）；`FOCUS_LIMITS` 整包 8 KiB、选中文字 512 字素簇、选中对象 20 个。
+  分区枚举 `WORKBENCH_SECTIONS` 不含设置与回收站。非主对话带 `focus` 返回 INVALID。
+- `WorkbenchAction`：`navigate`（分区 + 可选目标 ID，**不接受任意路由**）、`highlight`、`show`（`refs` / `search` / `dependency_graph` 三种面板）、`clear`。
+  工具名 `WORKBENCH_TOOLS`，不登记进 `CAPABILITIES`（测试保证）。
+- `AssistantEvent` 新增 `ui`（带工具调用 ID）、`topic`（锚点 1–8 个）、`notice`。三类只出现在主对话的聊天流里；旧客户端不打开主对话，不会收到。
+- `Notice`：来源、去重键 `event`、级别（`important` / `digest` / `silent`）、`graded`（`rule` / `gate` 带模型与置信度 / `fallback` 带原因）、对象、摘要、评论 ID、AI 笔记 ID、已读时间；只有 Watchdog 提醒带 `findings`。列表与已读命令。
+- `Exploration`：只能指向想法、任务、项目；状态 `queued / running / found / nothing / stopped / cancelled / failed`；预算与用量；`start`（同一对象已有进行中的探索时幂等返回）与带版本的 `cancel`。`EXPLORATION_DEFAULTS` 为默认预算。
+- `DecisionGateBinding`：直接绑定 `typesafe-jev` 连接（不经 Profile），模型必须固定版本（`jev-x.y.z`），缺省 `jev-1.14.0`；`DECISION_GATE_DEFAULTS` 含总时限 3 秒、最低置信度 0.8。Hub 校验连接类型与所有者。
+
 ## 实施与审阅
 
 - 按切片开 PR，每个 PR 只动表中列出的范围（AGENTS.md 第 3 条；A1-1 是契约，A1-2 与 storage 的连带修改除外）。

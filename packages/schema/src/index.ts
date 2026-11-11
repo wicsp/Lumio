@@ -62,6 +62,7 @@ import { KnowledgeTemplateRequest, KnowledgeTemplateResult, PaperResolveRequest,
 
 import { KnowledgeGraphArgs, KnowledgeGraph, KnowledgeGraphEdge } from "./knowledge-graph.ts";
 import { Capture, CaptureCommand, CaptureCreate, CaptureCreateResult, CaptureList, KnowledgeAIBinding, KnowledgeAIBindingUpdate, OriginalFrontmatter } from "./inbox.ts";
+import { AssistantMain, AssistantMainEnsure, DecisionGateBinding, DecisionGateBindingUpdate, Exploration, ExplorationCommand, ExplorationList, FocusSnapshot, Notice, NoticeCommand, NoticeCommandResult, NoticeList, WorkbenchAction } from "./workbench.ts";
 import { SpeechClientMessage, SpeechServerMessage, SpeechVocabulary, SpeechVocabularyUpdate, SpeechBinding, SpeechBindingUpdate } from "./speech.ts";
 
 export const CONTRACTS = {
@@ -211,6 +212,20 @@ export const CONTRACTS = {
   "original-frontmatter": OriginalFrontmatter,
   "knowledge-ai-binding": KnowledgeAIBinding,
   "knowledge-ai-binding-update": KnowledgeAIBindingUpdate,
+  // 单入口助手与共用工作台（ADR 0059、0060、0061，A1-1）
+  "assistant-main-ensure": AssistantMainEnsure,
+  "assistant-main": AssistantMain,
+  "focus-snapshot": FocusSnapshot,
+  "workbench-action": WorkbenchAction,
+  notice: Notice,
+  "notice-list": NoticeList,
+  "notice-command": NoticeCommand,
+  "notice-command-result": NoticeCommandResult,
+  exploration: Exploration,
+  "exploration-list": ExplorationList,
+  "exploration-command": ExplorationCommand,
+  "decision-gate-binding": DecisionGateBinding,
+  "decision-gate-binding-update": DecisionGateBindingUpdate,
 } as const;
 
 export * from "./knowledge-authoring.ts";
@@ -223,3 +238,4 @@ export * from "./ai.ts";
 export * from "./ai-usage.ts";
 export * from "./speech.ts";
 export * from "./inbox.ts";
+export * from "./workbench.ts";

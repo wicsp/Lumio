@@ -3,6 +3,7 @@ import { z } from "zod";
 import { CapabilityChange, CapabilityName } from "./capabilities.ts";
 import { RequestId, Revision, Timestamp, idOf } from "./common.ts";
 import { ResourceRef } from "./work.ts";
+import { FocusSnapshot, Notice, WorkbenchAction } from "./workbench.ts";
 
 /**
  * Assistant 模块契约 v2（ADR 0025 第 1、3、7 节，R0-1）。
@@ -179,6 +180,7 @@ export const AssistantChatRequest = z.strictObject({
   profile: idOf("aip").optional(),
   effort: z.string().min(1).max(32).optional(),
   model: z.string().min(1).optional().describe("指定模型；缺省由应用决定"),
+  focus: FocusSnapshot.optional().describe("人此刻在看什么；只接受主对话（ADR 0060 第 1 节）"),
 });
 
 /** 完整对话：对话对象、消息、轮次。 */
@@ -250,6 +252,10 @@ export const AssistantEvent = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("tool"), turn: idOf("turn"), tool: AssistantToolCall }),
   z.strictObject({ type: z.literal("result"), turn: idOf("turn"), messages: z.array(AssistantMessage) }),
   z.strictObject({ type: z.literal("error"), turn: idOf("turn"), error: z.string() }),
+  // A1-1：以下三类只出现在主对话的聊天流里（ADR 0059、0060）
+  z.strictObject({ type: z.literal("ui"), turn: idOf("turn"), tool: idOf("tool"), action: WorkbenchAction }),
+  z.strictObject({ type: z.literal("topic"), turn: idOf("turn"), anchors: z.array(ResourceRef).min(1).max(8) }),
+  z.strictObject({ type: z.literal("notice"), turn: idOf("turn"), notice: Notice }),
 ]);
 
 export type AssistantMemoryCommand = z.infer<typeof AssistantMemoryCommand>;
