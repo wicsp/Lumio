@@ -85,6 +85,7 @@ const ICONS: Record<string, string> = {
   alert: "M12 8v5M12 16.5v.5M10.3 4.2 2.8 17.5A2 2 0 0 0 4.5 20.5h15a2 2 0 0 0 1.7-3L13.7 4.2a2 2 0 0 0-3.4 0z",
   send: "M12 19V5M6 11l6-6 6 6",
   stop: "M7 7h10v10H7z",
+  mic: "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5 11a7 7 0 0 0 14 0M12 18v3M9 21h6",
   pause: "M9 6v12M15 6v12",
   bell: "M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 20.5h4",
   flag: "M5 21V4M5 4h11l-2 4 2 4H5",
@@ -249,6 +250,10 @@ export interface PromptOptions {
   multiline?: boolean;
 }
 
+/** 多行输入对话框旁的语音按钮（S1-4）；由 speech-input 注册，避免 dom.ts 反向依赖语音模块。 */
+let promptSpeech: ((field: HTMLTextAreaElement) => HTMLElement) | undefined;
+export function setPromptSpeech(factory: typeof promptSpeech): void { promptSpeech = factory; }
+
 /** Resolves to the trimmed text, or undefined when cancelled or left empty. */
 export function promptDialog(options: PromptOptions): Promise<string | undefined> {
   return new Promise(resolve => {
@@ -264,7 +269,8 @@ export function promptDialog(options: PromptOptions): Promise<string | undefined
       input.addEventListener("keydown", event => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); form.requestSubmit(); } });
     const form = h("form", { id, class: "form-stack confirm-body" },
       options.message ? h("p", {}, options.message) : null,
-      options.label ? field(options.label, input) : input);
+      options.label ? field(options.label, input) : input,
+      input instanceof HTMLTextAreaElement && promptSpeech ? h("div", { class: "prompt-speech" }, promptSpeech(input)) : null);
     form.addEventListener("submit", event => {
       event.preventDefault();
       const text = input.value.trim();

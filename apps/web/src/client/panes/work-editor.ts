@@ -12,6 +12,7 @@ import { attentionCard, attentionFor } from "../attention-card.ts";
 import { answerCommand, commentCommand, dispatchCommand, engineTargets, formatTime, newRequestId, workPatchCommand } from "../commands.ts";
 import { nextTargetText } from "../delegate.ts";
 import { autosize, clear, confirmDialog, failure, field, h, icon, openDialog, openMenu, promptDialog, select, statusIcon, toast, type MenuItem } from "../dom.ts";
+import { speechButton } from "../speech-input.ts";
 import { ago, dateInputValue, dueLabel, isoFromDateInput } from "../format.ts";
 import { PROJECT_LABELS } from "../labels.ts";
 import { checkpointCommand, openPlanEditor, planProgress, stageLabel } from "../plan.ts";
@@ -749,7 +750,7 @@ export class WorkEditor {
     // 评论并交给 agent 继续：评论与委派在同一事务（ADR 0030）；继续的是计划当前步骤或上一轮的 agent。
     const next = continueTarget(input);
     const onward = next ? h("button", { type: "button", class: "btn btn-small", title: t("Post the comment and delegate the next round in one step") }, icon("play"), t("Comment and continue with {0}", next)) : null;
-    const form = h("form", { class: "composer" }, text, h("div", { class: "composer-foot" }, h("span", { class: "hint" }, t("⌘↵ to post · Markdown supported")), onward, submit));
+    const form = h("form", { class: "composer" }, text, h("div", { class: "composer-foot" }, h("span", { class: "hint" }, t("⌘↵ to post · Markdown supported")), speechButton(text), onward, submit));
     text.addEventListener("keydown", event => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); form.requestSubmit(); } });
     let requestId = newRequestId(), previous = "";
     onward?.addEventListener("click", async () => {

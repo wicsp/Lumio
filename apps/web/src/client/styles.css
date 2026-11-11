@@ -1559,3 +1559,18 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 .gamepad-settings { padding: 16px; display: flex; flex-direction: column; gap: 16px; }
 .pad-readout { white-space: pre-wrap; overflow-wrap: anywhere; }
 [data-pad-testing] { outline: 2px solid var(--focus); outline-offset: -2px; }
+
+/* S1-4 语音输入：麦克风按钮与录音状态（计时与临时文字）。 */
+.speech-input { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.speech-input[hidden] { display: none; }
+.composer-foot .speech-input { margin-left: auto; }
+.composer-foot .speech-input + .btn { margin-left: 0; }
+.speech-live { min-width: 0; max-width: min(42ch, 50vw); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.speech-btn.is-recording { color: var(--red); background: var(--red-wash); }
+.speech-btn.is-finishing { opacity: .6; }
+.prompt-speech { display: flex; justify-content: flex-end; }
+.speech-settings textarea { min-height: 120px; width: 100%; font-family: var(--mono, ui-monospace, monospace); }
+.attn-composer-foot .speech-input { margin-left: auto; }
+.attn-composer-foot .speech-input + .btn { margin-left: 0; }
+.speech-settings > .set-form-wrap:first-child { border-top: 0; }
+.speech-actions { display: flex; align-items: center; gap: 10px; }

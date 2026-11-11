@@ -3,6 +3,7 @@ import { HOLD_MS, type PadCommand, type PadInput } from "./gamepad-input.ts";
 import { adjacentFocus, type PadDirection } from "./gamepad-focus.ts";
 import { focusListItem, nextListItem, visibleItems } from "./list-keys.ts";
 import { t } from "./i18n.ts";
+import { speechService } from "./speech-input.ts";
 
 const ROWS = "[data-pad-row], .row[data-id]";
 const DETAIL_ACTIONS = '.split.has-detail [data-pad-action="primary"], .split.has-detail [data-pad-action="delegate"], .split.has-detail [data-pad-action="reject"]';
@@ -332,7 +333,13 @@ export class GamepadNavigation {
     if (row && scope) this.focus(scope, row);
   }
 
-  private inputActions(): Action[] { return [{ command: "back", label: t("Leave input"), run() {} }]; }
+  private inputActions(): Action[] {
+    const actions: Action[] = [{ command: "back", label: t("Leave input"), run() {} }];
+    // G1-4：输入框旁有可用的麦克风时提示 RT。
+    const field = document.activeElement;
+    if (field?.closest("form, .composer, .attn-composer, .form-stack")?.querySelector(".speech-input:not([hidden])")) actions.push({ command: "talk", label: t("Hold to talk"), run() {} });
+    return actions;
+  }
 
   private actions({ menu, dialog }: Overlay, row: HTMLElement | undefined): Action[] {
     const actions: Action[] = [];
@@ -360,6 +367,7 @@ export class GamepadNavigation {
       });
     }
     if (dialog || menu) return actions;
+    if (speechService()?.ready) add("talk", t("Hold to talk"), () => {});
 
     const toast = Array.from(document.querySelectorAll<HTMLElement>(".toast-action:not(.leaving) .toast-btn")).at(-1);
     button("view", toast);
