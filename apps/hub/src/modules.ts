@@ -1,6 +1,8 @@
 import { Resources } from "./resources.ts";
 import type { AiNotes } from "./ai-notes.ts";
 import {AIConfigurationService} from "./ai-config.ts";
+import { DecisionGate } from "./decision-gate.ts";
+import type { JevFetch } from "./jev.ts";
 import {NativeAssistant} from "./native-assistant.ts";
 import { SqliteAIStore, SqliteSpeechStore } from "@lumio/storage";
 import { FunAsr, type FunAsrOptions } from "./fun-asr.ts";
@@ -50,6 +52,7 @@ function roundPermissions(sandbox: "os" | "none", permissions: AgentRun["permiss
 /** Composition only: domain rules belong to their modules; adapters share one transaction-capable database. */
 export class BusinessModules {
   readonly ai:AIConfigurationService;
+  readonly decisionGate: DecisionGate;
   readonly native:NativeAssistant;
   readonly speech: SpeechConfiguration;
   readonly funAsr: FunAsr;
@@ -73,7 +76,7 @@ export class BusinessModules {
   private readonly timer: ReturnType<typeof setInterval>;
   readonly signal = this.stopped.signal;
   constructor(private readonly config: HubConfig, private readonly store: HubStore, options: {
-    authorize?: typeof authorize; now?: () => Date; assistantModel?: AssistantModel; assistantTools?: AssistantTool[]; pushFetch?: typeof fetch; quotaFetch?: typeof fetch; funAsr?: FunAsrOptions;
+    authorize?: typeof authorize; now?: () => Date; assistantModel?: AssistantModel; assistantTools?: AssistantTool[]; pushFetch?: typeof fetch; quotaFetch?: typeof fetch; jevFetch?: JevFetch; funAsr?: FunAsrOptions;
   } = {}) {
     const now = options.now ?? (() => new Date());
     if (config.vault) this.knowledge = new KnowledgeService(new FileKnowledgeRepository(config.vault, { stateDir: config.stateDir }));
@@ -136,6 +139,16 @@ export class BusinessModules {
     this.ai=new AIConfigurationService(new SqliteAIStore(store.db),config.assistantModel);
     this.ai.migrateLegacy(store.actors().filter(actor => actor.role === "human").map(actor => actor.id));
     this.ai.store.installConversationPurge();
+    this.decisionGate = new DecisionGate(this.ai.decisionGate, {
+      signal: this.signal,
+      timeoutMs: config.decisionGateTimeoutMs,
+      minConfidence: config.decisionGateMinConfidence,
+      fetch: options.jevFetch,
+      meter: usage => {
+        const actor = store.decisionGateActor();
+        store.audit({ actor, label: "decision-gate" }, "decision.gate", "allow", undefined, JSON.stringify(usage));
+      },
+    });
     this.funAsr = new FunAsr(options.funAsr, this.signal);
     // Work's live database projects are public; the knowledge vault is never consulted.
     this.speech = new SpeechConfiguration(new SqliteSpeechStore(store.db), this.ai.store, this.funAsr,

@@ -695,6 +695,12 @@ export class NativeAssistant {
     if (identity.actor.role !== "human") throw problem("native.forbidden", "FORBIDDEN");
     const path = new URL(request.url).pathname,
       owner = identity.actor.id;
+    if (path === "/v2/ai/decision-binding" && (request.method === "GET" || request.method === "PUT")) {
+      const gate = this.modules.ai.decisionGate;
+      const binding = request.method === "GET" ? gate.binding(owner) :
+        gate.update(owner, await request.json().catch(() => undefined));
+      return Response.json(binding, { headers: { "Cache-Control": "no-store" } });
+    }
     if (path === "/v2/ai/config" && request.method === "GET")
       return Response.json(AIConfiguration.parse(this.modules.ai.list(owner)));
     if (path === "/v2/ai/runtimes" && request.method === "GET")

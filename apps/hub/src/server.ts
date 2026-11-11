@@ -28,6 +28,7 @@ import { BusinessModules } from "./modules.ts";
 import { SPEECH_PATH, BINDINGS_PATH, VOCABULARY_PATH } from "./speech-config.ts";
 import { SpeechSessions, type SpeechSocketData } from "./speech.ts";
 import type { FunAsrOptions } from "./fun-asr.ts";
+import type { JevFetch } from "./jev.ts";
 import { AssistantConfiguration } from "./assistant-config.ts";
 import { configuredModel } from "./assistant-model.ts";
 import { V2_ROUTES, handleV2 } from "./v2.ts";
@@ -88,6 +89,7 @@ async function startHubInstance(config: HubConfig, options: {
   inbox?: InboxOptions;
   pushFetch?: typeof fetch;
   quotaFetch?: typeof fetch;
+  jevFetch?: JevFetch;
   funAsr?: FunAsrOptions;
   assistantModel?: AssistantModel;
   assistantTools?: AssistantTool[];
