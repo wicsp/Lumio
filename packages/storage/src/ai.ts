@@ -66,6 +66,10 @@ export class SqliteAIStore {
       )
       .run(v.id, v.owner, JSON.stringify(v), secret ?? null);
   }
+  deleteConnection(id: string) {
+    this.db.query("DELETE FROM ai_connections WHERE id=?").run(id);
+  }
+
   secret(id: string) {
     return (
       this.db.query<{ secret: string | null }, [string]>("SELECT secret FROM ai_connections WHERE id=?").get(id)
@@ -100,6 +104,10 @@ export class SqliteAIStore {
       .query("INSERT INTO ai_profiles VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET record=excluded.record")
       .run(v.id, v.owner, JSON.stringify(v));
   }
+  deleteProfile(id: string) {
+    this.db.query("DELETE FROM ai_profiles WHERE id=?").run(id);
+  }
+
   sessions(owner?: string) {
     const r = owner
       ? this.db.query<{ record: string }, [string]>("SELECT record FROM native_sessions WHERE owner=?").all(owner)

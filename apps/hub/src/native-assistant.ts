@@ -30,8 +30,10 @@ import type { AIConfigurationService } from "./ai-config.ts";
 import { assistantToolDescription, isAiNoteCapability, type Capabilities } from "./capabilities.ts";
 import { AIUsage } from "./ai-usage.ts";
 import type { Notifications } from "./notifications.ts";
+import type { SpeechConfiguration } from "./speech-config.ts";
 interface NativeModules {
   ai: AIConfigurationService;
+  speech: SpeechConfiguration;
   assistant: AssistantService;
   assistantStore: SqliteAssistantStore;
   capabilities: Capabilities;
@@ -528,6 +530,10 @@ export class NativeAssistant {
     this.checkAccount(s);
     if (!this.online(s.runtime)) throw problem("native.runtime_offline", "CONFLICT");
     this.ai.db.transaction(() => {
+      const current = this.modules.ai.get(owner, profile.id);
+      if (current.profile.revision !== profile.revision || current.connection.revision !== connection.revision) {
+        throw problem("ai.conflict", "CONFLICT");
+      }
       this.modules.assistantStore.putConversation(
         AssistantConversation.parse({
           id: conversation,
@@ -712,11 +718,22 @@ export class NativeAssistant {
       return Response.json(view, { headers: { "Cache-Control": "no-store" } });
     }
     const connection = /^\/v2\/ai\/connections(?:\/(aic_[0-9A-HJKMNP-TV-Z]{26}))?$/.exec(path);
-    if (connection && ["POST", "PUT"].includes(request.method))
-      return Response.json(this.modules.ai.connection(owner, await request.json(), connection[1]));
+    if (connection && ["POST", "PUT"].includes(request.method)) {
+      const body: unknown = await request.json();
+      return this.modules.speech.configurationWrite(async () => Response.json(this.modules.ai.connection(owner, body, connection[1])));
+    }
     const profile = /^\/v2\/ai\/profiles(?:\/(aip_[0-9A-HJKMNP-TV-Z]{26}))?$/.exec(path);
-    if (profile && ["POST", "PUT"].includes(request.method))
-      return Response.json(this.modules.ai.profile(owner, await request.json(), profile[1]));
+    if (profile && ["POST", "PUT"].includes(request.method)) {
+      const body: unknown = await request.json();
+      return this.modules.speech.configurationWrite(async () => Response.json(this.modules.ai.profile(owner, body, profile[1])));
+    }
+    const deleted = connection?.[1] ?? profile?.[1];
+    if (request.method === "DELETE" && deleted) {
+      const body: unknown = await request.json().catch(() => undefined);
+      return this.modules.speech.configurationWrite(async () => Response.json(await this.modules.ai.remove(
+        owner, connection ? "connection" : "profile", deleted, body, value => this.modules.speech.cleanConnection(value),
+      )));
+    }
     if (path === "/v2/assistant/native-sessions") {
       if (request.method === "POST") return Response.json(await this.create(owner, await request.json()));
       if (request.method === "GET")

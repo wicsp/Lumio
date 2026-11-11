@@ -15,7 +15,7 @@
 
 ## 统一 AI 配置与原生 Assistant（ADR 0041、0042、0047）
 
-> 删除配置的契约扩展见 [ADR 0043](../adr/0043-ai-configuration-deletion.md)（Proposed，待批准；现行接口仍只有创建和修改）。
+> 删除配置的契约扩展见 [ADR 0043](../adr/0043-ai-configuration-deletion.md)（Accepted，S1-3）。human 可删除自己拥有的 Connection 和 Profile。仍被 Profile 引用的 Connection 或仍被未关闭的原生会话引用的 Profile 会拒绝删除。
 
 - Connection 负责来源/设备与私有凭据，Profile 负责引擎/模型/原生思考档位，用途绑定负责权限；共用 Profile 不共用工具与沙箱。API 连接当前在 Hub，Codex 连接在指定 Runtime。旧 API 设置保留兼容。
 - TypeSafe Jev Connection 使用固定的官方 System One API 地址，由 Hub 保存私有 API 密钥。现阶段支持连接管理，保存和读取不调用推理，且不能用于聊天 Profile（ADR 0046）。
@@ -33,5 +33,6 @@
 - 语音识别与合成是统一 AI 配置的新用途 `speech.asr`、`speech.tts`，沿用 Connection / Profile / 用途绑定；默认云端 API，本地模型以后作为 Runtime 上的可选连接。
 - 首个服务商为阿里云百炼 Fun-ASR（连接类型 `dashscope`，只接受官方区域地址，默认北京）；语音 Profile 的引擎为 `speech`，只能与语音连接配对，不能用于聊天（S1-2）。
 - 不保存原始音频与中间结果；日志只记元数据。只有 human 可用，语音不进入能力目录。热词只来自人维护的词表与非私密项目名；需要时同步为服务商保存的词表，设置页注明。
+- `GET/PUT /v2/speech/vocabulary` 管理热词表及同步状态，`GET/PUT /v2/speech/bindings` 管理语音用途绑定。Fun-ASR 使用北京固定域名，热词权重为 4。连接删除前先清理远端词表，删除语音 Profile 时解除对应绑定（S1-3，ADR 0043）。
 - 识别结果只填入输入框，与键盘输入等价，由人确认后发送；语音不能代替任何确认。
 - 语音合成采用 ASR → LLM → TTS 串联，只朗读口语摘要，可打断；不采用端到端实时语音模型。

@@ -5,6 +5,8 @@ import {
   AIProfile,
   AIProfileInput,
   AIConfiguration,
+  AIConfigurationDelete,
+  AIConfigurationDeleted,
   type AIModel,
 } from "@lumio/schema";
 import { newId } from "@lumio/foundation";
@@ -143,6 +145,43 @@ export class AIConfigurationService {
     });
     this.store.putProfile(result);
     return result;
+  }
+
+  async remove(owner: string, kind: "connection" | "profile", id: string, raw: unknown,
+    cleanConnection: (connection: AIConnection) => Promise<void>): Promise<AIConfigurationDeleted> {
+    const input = AIConfigurationDelete.parse(raw);
+    const scope = `ai-delete:${owner}:${id}`;
+    const fingerprint = JSON.stringify(input);
+    const replay = () => {
+      const receipt = this.store.receipt(scope, input.request_id, fingerprint);
+      if (!receipt) return undefined;
+      if (!receipt.matches) throw new HubError("CONFLICT", { key: "ai.conflict", args: [] });
+      return AIConfigurationDeleted.parse(receipt.result);
+    };
+    const owned = () => {
+      const value = kind === "connection" ? this.store.connection(id) : this.store.profile(id);
+      if (!value || value.owner !== owner) throw failure(kind + "_missing", "NOT_FOUND");
+      if (value.revision !== input.expected_revision) throw new HubError("CONFLICT", { key: "ai.conflict", args: [] });
+      const inUse = kind === "connection"
+        ? this.store.profiles(owner).some(profile => profile.connection === id)
+        : this.store.sessions(owner).some(session => session.profile.id === id && session.view.state !== "closed");
+      if (inUse) throw new HubError("CONFLICT", { key: kind === "connection" ? "ai.connection_in_use" : "ai.profile_in_use", args: [] });
+      return value;
+    };
+    const prior = replay();
+    if (prior) return prior;
+    const value = owned();
+    if ("kind" in value) await cleanConnection(value);
+    return this.store.db.transaction(() => {
+      const prior = replay();
+      if (prior) return prior;
+      owned();
+      if (kind === "connection") this.store.deleteConnection(id);
+      else this.store.deleteProfile(id);
+      const result = AIConfigurationDeleted.parse({ id, deleted: true });
+      this.store.putReceipt(scope, input.request_id, fingerprint, result);
+      return result;
+    }).immediate();
   }
 
   get(owner: string, id: string) {
