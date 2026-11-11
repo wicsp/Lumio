@@ -221,3 +221,108 @@ test("budget omits oversized history as whole turns and the summary worker reche
     db.close();
   }
 });
+
+test("an unchanged page focus preserves an explicitly switched topic across service restarts", async () => {
+  const db = new Database(":memory:");
+  const requests: AssistantModelRequest[] = [];
+  const model: AssistantModel = { async complete(input) {
+    requests.push(input);
+    return { content: "Synthetic reply", tool_calls: [] };
+  } };
+  try {
+    const f = scenario(db, model);
+    await f.chat("这个怎么做", taskRef);
+    const switched = await f.chat(`Discuss lumio:${paperRef.id}`, taskRef);
+    expect(f.events.filter(event => event.type === "topic").at(-1)).toEqual({ type: "topic", turn: switched.turn.id, anchors: [paperRef] });
+
+    const restartedStore = new SqliteAssistantStore(db);
+    const restarted = new AssistantService(restartedStore, model, [], f.context);
+    const events: AssistantEvent[] = [];
+    const chat = (request_id: string, message: string, focus: Partial<FocusSnapshot>) =>
+      restarted.chat({ conversation: main, request_id, message, focus }, owner, { event: event => events.push(event) });
+    const followUp = await chat("synthetic-workbench-follow-up", "那第三段呢", { primary: taskRef });
+    expect(restartedStore.messageAnchors(main).get(followUp.messages[0]!.id)).toEqual([paperRef]);
+    expect(workbenchData(requests.at(-1)!).focus).toEqual({ primary: taskRef, selected: [] });
+    expect(workbenchData(requests.at(-1)!).anchors[0].ref).toEqual(paperRef);
+    expect(events.some(event => event.type === "topic")).toBe(false);
+
+    await chat("synthetic-workbench-label-update", "这个如何继续", {
+      primary: { ...taskRef, label: "Client-only label", revision: "new revision" }, section: "work", selection_text: "Newly highlighted text",
+    });
+    expect(workbenchData(requests.at(-1)!).anchors[0].ref).toEqual(paperRef);
+    expect(workbenchData(requests.at(-1)!).focus).toMatchObject({ section: "work", selection_text: "Newly highlighted text" });
+    expect(requests.at(-1)!.messages[0]!.content).not.toContain("Client-only label");
+
+    await chat("synthetic-workbench-open-paper", "这个如何继续", { primary: paperRef });
+    const moved = await chat("synthetic-workbench-open-task", "这个如何继续", { primary: taskRef });
+    expect(restartedStore.messageAnchors(main).get(moved.messages[0]!.id)).toEqual([taskRef]);
+    expect(events.filter(event => event.type === "topic")).toEqual([{ type: "topic", turn: moved.turn.id, anchors: [taskRef] }]);
+
+    const selected = await chat("synthetic-workbench-select-paper", "这个如何继续", { primary: taskRef, selected: [paperRef] });
+    expect(restartedStore.messageAnchors(main).get(selected.messages[0]!.id)).toEqual([paperRef]);
+    await chat("synthetic-workbench-explicit-task", taskRef.id, { primary: taskRef, selected: [paperRef] });
+    const duplicateSelection = await chat("synthetic-workbench-duplicate-selection", "这个如何继续", { primary: taskRef, selected: [paperRef, paperRef] });
+    expect(restartedStore.messageAnchors(main).get(duplicateSelection.messages[0]!.id)).toEqual([taskRef]);
+  } finally {
+    db.close();
+  }
+});
+
+test("a fragment has three paid summary attempts across restarts and then keeps full-turn recall", async () => {
+  const db = new Database(":memory:");
+  let clock = Date.parse(task.created);
+  let paidCalls = 0;
+  const foreground: AssistantModelRequest[] = [];
+  const model: AssistantModel = { async complete(input) {
+    if (input.messages[0]!.content.startsWith("Summarize this past Lumio discussion")) {
+      paidCalls++;
+      if (paidCalls === 1) throw new Error("synthetic provider failure");
+      if (paidCalls === 2) return { content: null, tool_calls: [] } as unknown as Awaited<ReturnType<AssistantModel["complete"]>>;
+      return { content: "   ", tool_calls: [] };
+    }
+    foreground.push(input);
+    if (input.messages.at(-1)!.content === "Read once") {
+      return { content: "", tool_calls: [{ id: "fixture-read", name: "fixture_read", args: {} }] };
+    }
+    return { content: "Synthetic reply", tool_calls: [] };
+  } };
+  const tools: AssistantTool[] = [{
+    spec: { name: "fixture_read", description: "Read synthetic data", input_schema: {} },
+    effect: "read",
+    async execute() { return { content: "complete fixture result" }; },
+  }];
+  try {
+    const f = scenario(db, model, tools);
+    f.context.now = () => new Date(clock);
+    const first = await f.chat("Read once", taskRef);
+    for (let index = 0; index < 4; index++) await f.chat(`Paper discussion ${index}`, paperRef);
+
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const worker = new AssistantService(new SqliteAssistantStore(db), model, [], f.context);
+      const drain = worker.drainWorkbenchSummaries();
+      if (attempt <= 2) await expect(drain).rejects.toThrow();
+      else await drain;
+      expect(paidCalls).toBe(attempt);
+      clock += 600_000;
+    }
+
+    const restartedStore = new SqliteAssistantStore(db);
+    const restarted = new AssistantService(restartedStore, model, tools, f.context);
+    const firstMessage = first.messages[0]!.id, lastMessage = first.messages.at(-1)!.id;
+    restartedStore.enqueueFragment({ conversation: main, firstMessage, lastMessage, anchors: [taskRef] }, f.context.now().toISOString());
+    expect(restartedStore.nextFragment(f.context.now().toISOString())).toBeUndefined();
+    await restarted.drainWorkbenchSummaries();
+    expect(paidCalls).toBe(3);
+    expect(db.query("SELECT attempts,summary FROM assistant_fragments WHERE first_message=? AND last_message=?").get(firstMessage, lastMessage))
+      .toEqual({ attempts: 3, summary: null });
+    expect(db.query("SELECT attempt FROM assistant_fragment_requests WHERE first_message=? AND last_message=? ORDER BY attempt").all(firstMessage, lastMessage))
+      .toEqual([{ attempt: 1 }, { attempt: 2 }, { attempt: 3 }]);
+
+    const recalled = await restarted.chat({ conversation: main, request_id: "synthetic-after-cap", message: "Back to the task", focus: { primary: taskRef } }, owner);
+    expect(recalled.turn.status).toBe("done");
+    expect(workbenchData(foreground.at(-1)!).summaries).toEqual([]);
+    expect(containsToolPair(foreground.at(-1)!.messages, "complete fixture result")).toBe(true);
+  } finally {
+    db.close();
+  }
+});
