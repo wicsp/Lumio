@@ -6,6 +6,7 @@ import {
 import type { AssistantMainConversations } from "./assistant-main.ts";
 import type { SqliteAssistantStore, SqliteRoutineStore, SqliteWorkStore } from "@lumio/storage";
 import type { Capabilities } from "./capabilities.ts";
+import type { Notices } from "./notices.ts";
 import type { ConversationSource, Resources } from "./resources.ts";
 import type { HubStore, Identity } from "./store.ts";
 
@@ -85,7 +86,8 @@ function recentComments(comments: WorkComment[], roles: ReadonlyMap<string, Acto
 export class AssistantWorkbenchAnchors implements AssistantWorkbenchContext {
   readonly instructions = "When a discussion reaches a conclusion, suggest recording it as an AI note or a task description update. Use the existing tools and approval rules when the user wants it recorded. Do not save unfinished discussion as knowledge or memory.";
 
-  constructor(private readonly modules: Modules, private readonly hub: HubStore, private readonly main: AssistantMainConversations) {}
+  constructor(private readonly modules: Modules, private readonly hub: HubStore, private readonly main: AssistantMainConversations,
+    private readonly notices: Notices) {}
 
   isMain(conversation: AssistantConversation): boolean {
     return !conversation.native_session && this.main.isMain(conversation.owner, conversation.id);
@@ -100,6 +102,11 @@ export class AssistantWorkbenchAnchors implements AssistantWorkbenchContext {
     if (!this.main.isMain(scope.owner, scope.conversation)) return;
     const source = this.modules.resources.conversationSource(scope.owner, scope.turn);
     if (source?.conversation === scope.conversation) return source;
+  }
+
+  async pendingNotices(owner: string, actor: string, signal: AbortSignal, scope: AssistantWorkbenchScope) {
+    signal.throwIfAborted();
+    return owner === scope.owner && this.identity(actor) && this.source(scope) ? this.notices.forModel(owner) : [];
   }
 
   private async neighbors(ids: ResourceContent["neighbors"], identity: Identity, source: ConversationSource, signal: AbortSignal) {

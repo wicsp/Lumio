@@ -133,7 +133,8 @@ async function startHubInstance(config: HubConfig, options: {
       action => watch.exclusive(action), (path, message) => watch.issue(path, message), options.now ?? (() => new Date()));
     const now = options.now ?? (() => new Date());
     const inbox = modules.inbox = new Inbox(config, store, modules.ai, () => modules!.trash,
-      action => watch.exclusive(action), now, (path, message) => watch.issue(path, message), options.inbox);
+      action => watch.exclusive(action), now, (path, message) => watch.issue(path, message), options.inbox,
+      capture => modules!.notices.capture(capture));
     modules.trash = new Trash(config, store, modules, action => watch.exclusive(action), now, (path, message) => watch.issue(path, message), inbox);
     await modules.trash.sweep();
     modules.trash.start();
@@ -231,7 +232,8 @@ async function startHubInstance(config: HubConfig, options: {
             status = response.status; return response;
           }
           if (route.operation === "runtime.register" || route.operation === "runtime.sync" || route.operation === "runtime.ack" || route.operation === "runtime.results" || route.operation === "runtimes") {
-            const response = await handleRuntime(request, route.operation, identity!, store, decide, (options.now ?? (() => new Date()))(), hooks);
+            const response = await handleRuntime(request, route.operation, identity!, store, decide, (options.now ?? (() => new Date()))(), hooks,
+              job => modules!.runtimeRound(job));
             status = response.status;
             // 结果到了就尽快写回笔记（失败的留给定时任务重试）。
             if (route.operation === "runtime.results" && response.status === 200) {
@@ -331,8 +333,8 @@ async function startHubInstance(config: HubConfig, options: {
     });
     modules.native.setPort(server.port!);
     modules.inbox.start();
-  } catch (cause) { modules?.stop(); await modules?.inbox?.stop(); await modules?.trash?.stop(); await modules?.notifications.stop(); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); throw cause; }
-  return { server, store, tasks: tasks!, routines: routines!, modules: modules!, async stop() { modules?.stop(); await modules?.native.stop(); await server.stop(true); await modules?.inbox.stop(); await modules?.speech.drain(); await modules?.trash?.stop(); await modules?.notifications.stop(); await modules?.artifacts.drain(); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); } };
+  } catch (cause) { modules?.stop(); await modules?.inbox?.stop(); await modules?.trash?.stop(); await modules?.notices.stop(); await modules?.notifications.stop(); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); throw cause; }
+  return { server, store, tasks: tasks!, routines: routines!, modules: modules!, async stop() { modules?.stop(); await modules?.native.stop(); await server.stop(true); await modules?.inbox.stop(); await modules?.speech.drain(); await modules?.trash?.stop(); await modules?.notices.stop(); await modules?.notifications.stop(); await modules?.artifacts.drain(); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); } };
 }
 
 /** One Hub or offline migration owns a state directory. OS locks disappear on crashes, without deleting lock files. */

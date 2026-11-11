@@ -12,6 +12,11 @@ export interface NotificationChannel {
   send(event: NotificationEvent): Promise<void>;
 }
 type DeviceRow = { id: string; owner: string; subscription: string; device: string; origin: string | null };
+const WorkbenchPush = NotificationEvent.omit({ kind: true });
+type WorkbenchPush = Omit<NotificationEvent, "kind">;
+type PushEvent = NotificationEvent | WorkbenchPush;
+const subscribed = (device: PushDevice, event: PushEvent) =>
+  "kind" in event ? device.events.includes(event.kind) : device.events.length > 0;
 // Classify known names instead of echoing a caller-controlled User-Agent into a response.
 function deviceLabel(userAgent: string): string {
   for (const [pattern, label] of [[/iPhone/i, "iPhone"], [/iPad/i, "iPad"], [/Android/i, "Android"], [/Firefox\//i, "Firefox"], [/Edg\//i, "Edge"], [/Chrome\//i, "Chrome"], [/Safari\//i, "Safari"]] as const) {
@@ -81,16 +86,18 @@ export class WebPushChannel implements NotificationChannel {
     this.row(owner, id);
     this.store.db.query("DELETE FROM notification_push_devices WHERE id=? AND owner=?").run(id, owner);
   }
-  private async deliver(row: DeviceRow, event: NotificationEvent, test = false): Promise<boolean> {
+  private async deliver(row: DeviceRow, event: PushEvent, test = false): Promise<boolean> {
     // A device can be removed or changed while earlier network requests are in flight.
     const current = this.rows(event.owner).find(value => value.id === row.id);
-    if (!current || current.subscription !== row.subscription || (!test && !PushDevice.parse(JSON.parse(current.device)).events.includes(event.kind))) return false;
+    if (!current || current.subscription !== row.subscription || (!test && !subscribed(PushDevice.parse(JSON.parse(current.device)), event))) return false;
     let error: string | undefined;
     try {
       const subscription = PushSubscriptionInput.parse(JSON.parse(row.subscription));
       const subject = pushSubject(this.options.subject, row.origin ?? undefined);
       if (!subject) throw new Error("HTTPS VAPID subject required");
-      const body = encryptPush(Buffer.from(JSON.stringify({ title: event.title, kind: event.kind, path: event.path })), subscription.keys);
+      const body = encryptPush(Buffer.from(JSON.stringify({
+        title: event.title, kind: "kind" in event ? event.kind : undefined, path: event.path,
+      })), subscription.keys);
       const response = await (this.options.fetch ?? globalThis.fetch)(subscription.endpoint, {
         method: "POST", redirect: "error", signal: AbortSignal.any([AbortSignal.timeout(10_000), ...(this.options.signal ? [this.options.signal] : [])]),
         headers: { Authorization: this.vapid.authorization(subscription.endpoint, this.now(), subject),
@@ -113,9 +120,9 @@ export class WebPushChannel implements NotificationChannel {
     }
     return !error;
   }
-  async send(event: NotificationEvent): Promise<void> {
+  async send(event: PushEvent): Promise<void> {
     for (const row of this.rows(event.owner)) {
-      if (PushDevice.parse(JSON.parse(row.device)).events.includes(event.kind)) await this.deliver(row, event);
+      if (subscribed(PushDevice.parse(JSON.parse(row.device)), event)) await this.deliver(row, event);
     }
   }
   async test(owner: string): Promise<PushTestResult> {
@@ -140,7 +147,13 @@ export class Notifications {
   }
   /** Called inside the business transaction: rollback also rolls back the notification. */
   notify(input: NotificationEvent): void {
-    const event = NotificationEvent.parse(input);
+    this.enqueue(NotificationEvent.parse(input));
+  }
+  /** Graded workbench reminders share the outbox and use the service worker's generic body. */
+  notifyWorkbench(input: WorkbenchPush): void {
+    this.enqueue(WorkbenchPush.parse(input));
+  }
+  private enqueue(event: PushEvent): void {
     this.store.db.query("INSERT OR IGNORE INTO notification_events(id,event) VALUES(?,?)").run(event.id, JSON.stringify(event));
   }
   private broadcast(source: string, kind: NotificationEvent["kind"], title: string, path: string, created: string): void {
@@ -169,8 +182,13 @@ export class Notifications {
       if (!row) return;
       // Claim before I/O: at most one attempt even after restart or an ambiguous network failure.
       this.store.db.query("UPDATE notification_events SET claimed=1 WHERE id=?").run(row.id);
-      const event = NotificationEvent.parse(JSON.parse(row.event));
-      await Promise.allSettled(this.channels.map(channel => Promise.resolve().then(() => channel.send(event))));
+      const data = JSON.parse(row.event);
+      if ("kind" in data) {
+        const event = NotificationEvent.parse(data);
+        await Promise.allSettled(this.channels.map(channel => Promise.resolve().then(() => channel.send(event))));
+      } else {
+        await this.push.send(WorkbenchPush.parse(data));
+      }
     }
   }
   async stop(): Promise<void> { this.stopped = true; await this.running; }
