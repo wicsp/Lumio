@@ -18,14 +18,14 @@
 
 | 编号 | 内容 | 负责 | 改动范围 |
 |---|---|---|---|
-| S1-1 | 预研：① 实测 2–3 家流式 ASR（中英混说、技术词、热词效果、首字与定稿延迟、价格），用人录的 20 句测试集；② 验证 Bun 的 WebSocket 能否与 Hub 现有路由、Origin 校验、CSP（`connect-src`）配合；③ 确认 Safari / iOS PWA 上 AudioWorklet 采集 16 kHz 的可行做法（重采样位置）。结果写入 `docs/reviews/S1-1-speech-spike.md`，给出首个服务商的建议 | 后端（Codex） | 只写报告与一次性脚本，不进产品代码 |
-| S1-2 | 契约：`speech.ts`（`start` / `end` / `cancel` / `ready` / `partial` / `final` / `error`，上限常量）；`AIConnectionKind` 增加 S1-1 选定的服务商；用途增加 `speech.asr`、`speech.tts`；热词表对象与读写接口；`schema:export` | Claude 起草，人类批准 | `packages/schema` |
-| S1-3 | Hub：`/v2/speech/transcribe` WebSocket；首条消息认证、只允许 human；服务商适配器（流式转发，不落盘）；上限与空闲断开；热词表存储与接口（不从私密实体取词）；只记元数据的日志；中英错误文案 | 后端（Codex） | `apps/hub`、`packages/storage` |
+| S1-1 ✅ | 预研（[报告](../reviews/S1-1-speech-spike.md)，PR #164；人类选定 Fun-ASR、北京区域）：① 实测 2–3 家流式 ASR（中英混说、技术词、热词效果、首字与定稿延迟、价格），用人录的 20 句测试集；② 验证 Bun 的 WebSocket 能否与 Hub 现有路由、Origin 校验、CSP（`connect-src`）配合；③ 确认 Safari / iOS PWA 上 AudioWorklet 采集 16 kHz 的可行做法（重采样位置）。结果写入 `docs/reviews/S1-1-speech-spike.md`，给出首个服务商的建议 | 后端（Codex） | 只写报告与一次性脚本，不进产品代码 |
+| S1-2 | 契约：`speech.ts`（`start` / `end` / `cancel` / `ready` / `partial` / `final` / `error`，`SPEECH_LIMITS`）；`AIConnectionKind` 增加 `dashscope`（官方区域地址 `DASHSCOPE_BASE_URLS`）；Profile 引擎增加 `speech`；语音用途绑定 `SpeechBinding`（`speech.asr` / `speech.tts`）；热词表 `SpeechVocabulary` 与同步状态；Hub 连带：语音 Profile 只能配 `dashscope`、不能用于聊天 | Claude 起草，人类批准 | `packages/schema` |
+| S1-3 | Hub：`/v2/speech/transcribe` WebSocket（按 S1-1 报告，在 `browserAllowed` 之后、HTTP 认证之前 `server.upgrade`）；首条消息认证、只允许 human；Fun-ASR 适配器（`finish-task` 后等 `task-finished` 定稿；流式转发，不落盘）；上限与空闲断开；热词表存储、读写接口与同步到 Fun-ASR 词表（权重 4；不从私密实体取词；删除连接时删除服务商词表）；语音用途绑定读写；只记元数据的日志；中英错误文案 | 后端（Codex） | `apps/hub`、`packages/storage` |
 | S1-4 | Web：麦克风按钮（按住说话 / 点按开关两种）与键盘快捷键；AudioWorklet 采集与分帧；临时结果在输入框内以浅色显示，定稿后变为普通文本；非安全上下文时隐藏入口并说明原因；设置页语音 Profile（写明音频去向）与热词表编辑 | 前端（Claude） | `packages/api-client`、`apps/web` |
 | S1-5 | 准确率：松手后整段再识别一次作为定稿（服务商支持时）；可选的 LLM 纠错与"提到的知识条目"建议，作为附加建议展示，人选择后才写入 | 待定 | 依 S1-4 试用结果再细化 |
 | S1-6 | 语音合成：口语摘要、逐句流式合成与播放、按说话键打断；协议另行细化后再开工 | 待定 | 依 ADR 0055 第 7 节 |
 
-S1-2 依赖 S1-1（服务商选定）；S1-3 依赖 S1-2；S1-4 依赖 S1-3。手柄的"按住说话"见 [G1-0](G1-0-gamepad.md) 的 G1-4。
+S1-2 依赖 S1-1（已完成）；S1-3 依赖 S1-2；S1-4 依赖 S1-3。手柄的"按住说话"见 [G1-0](G1-0-gamepad.md) 的 G1-4。
 
 ## S1-3 验收要点
 
@@ -43,3 +43,7 @@ S1-2 依赖 S1-1（服务商选定）；S1-3 依赖 S1-2；S1-4 依赖 S1-3。�
 - 识别文本插入到光标位置，不覆盖已有内容；定稿后不自动发送。
 - 第一次使用时浏览器请求麦克风权限；拒绝后给出如何在浏览器设置中重新允许的说明。
 - 没有配置语音 Profile 时不显示入口，设置页给出配置引导。
+
+## 不做
+
+- 固定写法替换表（例如把识别结果改成 `codex@macsp`）：人不会口述执行器全名，而是说"用笔记本上的 Codex"，由 AI 解析成执行目标（人类决定，2026-11-11）。

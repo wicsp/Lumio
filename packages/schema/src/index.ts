@@ -61,6 +61,7 @@ import { CheckResult, LinksResult, NoteDetail, ResourceSummary, SearchResult } f
 import { KnowledgeTemplateRequest, KnowledgeTemplateResult, PaperResolveRequest, PaperResolveResult, KnowledgeCreateRequest, KnowledgeCreateResult } from "./knowledge-authoring.ts";
 
 import { KnowledgeGraphArgs, KnowledgeGraph, KnowledgeGraphEdge } from "./knowledge-graph.ts";
+import { SpeechClientMessage, SpeechServerMessage, SpeechVocabulary, SpeechVocabularyUpdate, SpeechBinding, SpeechBindingUpdate } from "./speech.ts";
 
 export const CONTRACTS = {
   "ai-connection": AIConnection, "ai-connection-input": AIConnectionInput, "ai-profile": AIProfile, "ai-profile-input": AIProfileInput, "ai-usage-binding": AIUsageBinding, "ai-configuration": AIConfiguration, "ai-model": AIModel, "ai-runtime": AIRuntime,
@@ -192,6 +193,13 @@ export const CONTRACTS = {
   "trash-restore-result": TrashRestoreResult,
   "trash-purge-request": TrashPurgeRequest,
   "trash-purge-result": TrashPurgeResult,
+  // 语音输入（ADR 0055，S1-2）
+  "speech-client-message": SpeechClientMessage,
+  "speech-server-message": SpeechServerMessage,
+  "speech-vocabulary": SpeechVocabulary,
+  "speech-vocabulary-update": SpeechVocabularyUpdate,
+  "speech-binding": SpeechBinding,
+  "speech-binding-update": SpeechBindingUpdate,
 } as const;
 
 export * from "./knowledge-authoring.ts";
@@ -202,3 +210,4 @@ export * from "./trash.ts";
 
 export * from "./ai.ts";
 export * from "./ai-usage.ts";
+export * from "./speech.ts";

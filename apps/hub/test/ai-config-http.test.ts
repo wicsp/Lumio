@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AIConfiguration, AIConnection, AIConnectionInput, AIProfileInput, ApiError, TYPESAFE_JEV_BASE_URL } from "@lumio/schema";
+import { AIConfiguration, AIConnection, AIConnectionInput, AIProfile, AIProfileInput, ApiError, DASHSCOPE_BASE_URLS, TYPESAFE_JEV_BASE_URL } from "@lumio/schema";
 import { HubStore } from "../src/store.ts";
 import { readConfig } from "../src/config.ts";
 import { startHub } from "../src/server.ts";
@@ -199,6 +199,33 @@ test("AI configuration HTTP errors name the problem in either language without e
     const unavailable = await f.request("/v2/ai/profiles", profile, "en", otherToken);
     expect(unavailable.status).toBe(404);
     expect(ApiError.parse(await unavailable.json()).error.reason).toBe("ai-connection-missing");
+  } finally {
+    await f.close();
+  }
+});
+
+test("speech profiles only pair with DashScope connections and cannot back chat (ADR 0055)", async () => {
+  const f = await fixture();
+  try {
+    const bad = await f.request("/v2/ai/connections", { name: "Fake DashScope", kind: "dashscope", host: "hub", base_url: "https://fixture.example.test", api_key: "${secret:synthetic-dashscope}" });
+    expect(bad.status).toBe(400);
+    expect(ApiError.parse(await bad.json()).error.reason).toBe("ai-address");
+    const created = await f.request("/v2/ai/connections", AIConnectionInput.parse({ name: "Synthetic DashScope", kind: "dashscope", host: "hub", base_url: DASHSCOPE_BASE_URLS.beijing, api_key: "${secret:synthetic-dashscope}" }));
+    expect(created.status).toBe(200);
+    const speech = AIConnection.parse(await created.json());
+    const chat = f.hub.modules.ai.list(f.owner.id).connections.find(connection => connection.kind === "deepseek")!;
+    for (const input of [
+      { name: "Chat on speech", connection: speech.id, engine: "lumio", model: "fun-asr-realtime" },
+      { name: "Speech on chat", connection: chat.id, engine: "speech", model: "fun-asr-realtime" },
+    ]) {
+      const response = await f.request("/v2/ai/profiles", AIProfileInput.parse(input));
+      expect(response.status).toBe(400);
+      expect(ApiError.parse(await response.json()).error.reason).toBe("ai-engine-mismatch");
+    }
+    const ok = await f.request("/v2/ai/profiles", AIProfileInput.parse({ name: "Fun-ASR", connection: speech.id, engine: "speech", model: "fun-asr-realtime" }));
+    expect(ok.status).toBe(200);
+    const profile = AIProfile.parse(await ok.json());
+    expect(() => f.hub.modules.ai.get(f.owner.id, profile.id)).toThrow();
   } finally {
     await f.close();
   }
