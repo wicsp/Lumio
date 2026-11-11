@@ -1,0 +1,5 @@
+{
+  "description": { "message": "Save the page you're reading to your Lumio Inbox." },
+  "actionTitle": { "message": "Save to Lumio" },
+  "saveLink": { "message": "Save link to Lumio" }
+}

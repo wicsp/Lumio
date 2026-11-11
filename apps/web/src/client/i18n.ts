@@ -39,6 +39,13 @@ export const ZH: Record<string, string> = {
   "To look at": "待处理",
   "Couldn't show that on the page.": "没能在页面上展示。",
   // Inbox（I1-5）
+  "Browser extension": "浏览器插件",
+  "Save the page you're reading to the Inbox with one click.": "一键把正在看的页面存进 Inbox。",
+  "Create pairing code": "生成配对码",
+  "Hub address": "Hub 地址",
+  "Enter both in the extension's settings. The code works once, until {0}.": "把这两项填进插件的设置页。配对码只能用一次，{0} 前有效。",
+  "Pair a browser": "连接浏览器",
+  "Install the Lumio extension from apps/chrome-ext, then create a code here.": "先安装 apps/chrome-ext 里的 Lumio 插件，再在这里生成配对码。",
   "To sort": "待分拣",
   "Archive": "存档",
   "Link or text to save": "要保存的链接或文字",

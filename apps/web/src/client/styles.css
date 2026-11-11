@@ -1673,3 +1673,6 @@ button.inbox-title:hover { text-decoration: underline; }
 .chip-state .icon { width: 11px; height: 11px; }
 .has-unread { position: relative; }
 .has-unread::after { content: ""; position: absolute; top: 50%; left: 3px; width: 7px; height: 7px; margin-top: -3.5px; border-radius: 50%; background: var(--blue); pointer-events: none; }
+.set-pairing:empty { display: none; }
+.set-pairing .field-hint { padding: 0 14px 12px; margin: 0; }
+.set-code { font-size: var(--fs-md, 15px); font-weight: 600; letter-spacing: .08em; }
