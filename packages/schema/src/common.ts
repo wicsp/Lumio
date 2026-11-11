@@ -35,6 +35,9 @@ export const ID_PREFIXES = {
   "ai-note": "ain",
   // ADR 0057（I1-1）：Inbox 的捕获记录
   capture: "cap",
+  // ADR 0059（A1-1）：提醒与提前探索
+  notice: "ntc",
+  exploration: "xpl",
 } as const;
 
 const ULID = "[0-9A-HJKMNP-TV-Z]{26}";
