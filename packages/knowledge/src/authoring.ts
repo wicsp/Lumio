@@ -1,4 +1,5 @@
 import { AiNote, KnowledgeAiNoteCreateArgs, KnowledgeCreateRequest, KnowledgeCreateResult, KnowledgeTemplateRequest, KnowledgeTemplateResult, type NoteRef } from "@lumio/schema";
+import { posix } from "node:path";
 import { CoreError } from "@lumio/foundation";
 import { entityDirectory } from "./layout.ts";
 import { fillMetadata, type FillContext } from "./fill.ts";
@@ -79,8 +80,22 @@ export function aiNoteFileName(title: string, id: string): string {
     .replace(/\s+/g, " ")
     .trim()
     .replace(/^[.\s]+/, "");
-  const short = [...safe].slice(0, 60).join("").trim();
+  const titleBytes = 255 - Buffer.byteLength(id) - " .md".length;
+  let short = "";
+  for (const char of [...safe].slice(0, 60)) {
+    if (Buffer.byteLength(short + char) > titleBytes) break;
+    short += char;
+  }
+  short = short.trim();
   return short ? `${short} ${id}` : id;
+}
+
+/** A standalone Markdown link renders as an AI note card in existing clients. */
+export function capturedNoteBody(body: string, entityPath: string, aiNotePath: string, label: string): string {
+  const relative = posix.relative(posix.dirname(entityPath), aiNotePath);
+  const target = relative.split("/").map(part => encodeURIComponent(part)
+    .replaceAll("(", "%28").replaceAll(")", "%29")).join("/");
+  return `[${label}](${target})\n\n${body.trimStart()}`;
 }
 
 /** The current run or message is appended once without changing an explicit source order. */

@@ -1,7 +1,8 @@
 import type { Database } from "bun:sqlite";
-import { CheckResult, KnowledgeGraph, LinksResult, NoteDetail, SearchResult, type Link, type NoteRef } from "@lumio/schema";
+import { CheckResult, KnowledgeGraph, KnowledgeOriginal, LinksResult, NoteDetail, ReadingStatus, SearchResult, Timestamp, type Link, type NoteRef } from "@lumio/schema";
 import { CoreError } from "@lumio/foundation";
 import { extractCitations, resolveMarkdownPath } from "@lumio/knowledge";
+import { readOriginalFile } from "../originals.ts";
 import { noteRef, snippet, withIndex, readIndex, type IndexOptions, type NoteRow } from "./store.ts";
 
 export interface QueryOptions extends IndexOptions { includePrivate?: boolean }
@@ -29,12 +30,49 @@ export async function searchNotes(root: string, query: string, options: SearchOp
       query: fts ? `"${query.replaceAll('"', '""')}"` : `%${query.replace(/[\\%_]/g, "\\$&")}%`,
       private: Number(options.includePrivate ?? false), type: options.type ?? null,
     };
-    const total = db.query<{ total: number }, typeof params>(`SELECT count(*) AS total FROM ${from} WHERE ${filter} AND ${match}`).get(params)!.total;
-    const rows = db.query<NoteRow, typeof params & { limit: number }>(
-      `SELECT n.* FROM ${from} WHERE ${filter} AND ${match} ORDER BY ${fts ? "bm25(fulltext)," : ""} n.mtime DESC, n.path LIMIT $limit`,
+    const bodyHits = `SELECT n.rowid AS id, ${fts ? "bm25(fulltext)" : "0"} AS rank
+      FROM ${from} WHERE ${filter} AND ${match}`;
+    const originals = !query ? "SELECT NULL AS id, NULL AS body, NULL AS rank WHERE 0" : `
+      SELECT n.rowid AS id, o.body, ${fts ? "bm25(originals_fts)" : "0"} AS rank
+      FROM originals_fts o JOIN original_files f ON f.rowid=o.rowid JOIN notes n ON n.id=f.owner
+      WHERE ${filter} AND n.private=0 AND
+        ((n.type='paper' AND f.owner GLOB 'pap_*') OR (n.type='source' AND f.owner GLOB 'src_*'))
+        AND (SELECT count(*) FROM notes WHERE id=n.id)=1
+        AND ${fts ? "originals_fts MATCH $query" : "o.body LIKE $query ESCAPE '\\'"}`;
+    const cte = `WITH body_hits AS MATERIALIZED (${bodyHits}), original_hits AS MATERIALIZED (${originals}),
+      hits AS (
+        SELECT id, NULL AS original, rank, 0 AS priority FROM body_hits
+        UNION ALL
+        SELECT id, body, min(rank), 1 FROM original_hits
+        WHERE id NOT IN (SELECT id FROM body_hits) GROUP BY id
+      )`;
+    const total = db.query<{ total: number }, typeof params>(`${cte} SELECT count(*) AS total FROM hits`).get(params)!.total;
+    const rows = db.query<NoteRow & { original: string | null }, typeof params & { limit: number }>(
+      `${cte} SELECT n.*, h.original FROM hits h JOIN notes n ON n.rowid=h.id
+       ORDER BY h.priority, h.rank, n.mtime DESC, n.path LIMIT $limit`,
     ).all({ ...params, limit });
-    return SearchResult.parse({ query, total, hits: rows.map((row) => ({ note: noteRef(row), snippet: snippet(row.search_text, query) })) });
+    return SearchResult.parse({ query, total, hits: rows.map(row => {
+      const fm = JSON.parse(row.frontmatter);
+      const created = Timestamp.safeParse(fm.created).data;
+      const status = row.type === "paper" || row.type === "source" ? ReadingStatus.safeParse(fm.status ?? "to-read").data : undefined;
+      return { note: noteRef(row), snippet: snippet(row.original ?? row.search_text, query),
+        ...(query ? { matched_in: row.original === null ? "body" : "original" } : {}), status, created };
+    }) });
   });
+}
+
+export async function showOriginal(root: string, reference: string, options: IndexOptions = {}) {
+  const { note, path } = await withIndex(root, options, db => {
+    const row = resolveReference(db, reference);
+    if ((row.type === "paper" && row.id?.startsWith("pap_")) || (row.type === "source" && row.id?.startsWith("src_"))) {
+      const paths = db.query<{ path: string }, [string]>("SELECT path FROM original_files WHERE owner=? LIMIT 2").all(row.id!);
+      if (paths.length === 1) return { note: noteRef(row), path: paths[0]!.path };
+    }
+    throw new CoreError("NOTE_NOT_FOUND", { key: "query.note_not_found_candidates_none", args: [] });
+  });
+  const original = await readOriginalFile(root, path);
+  if (original.frontmatter.of !== note.id) throw new CoreError("NOTE_NOT_FOUND", { key: "query.note_not_found_candidates_none", args: [] });
+  return KnowledgeOriginal.parse({ note, path, ...original });
 }
 
 export async function noteById(root: string, id: string, options: QueryOptions = {}): Promise<NoteRef | undefined> {
@@ -129,7 +167,7 @@ export async function countKnowledgeReferences(root: string, targets: readonly s
 
 /** Paths only: raw sensitive text is never stored or returned. */
 export async function excludedCardPaths(root: string, options: QueryOptions = {}): Promise<string[]> {
-  return withIndex(root, options, (db) => db.query<{ path: string }, []>("SELECT path FROM files WHERE blocked=1 ORDER BY path").all().map((f) => f.path));
+  return withIndex(root, options, (db) => db.query<{ path: string }, []>("SELECT path FROM files WHERE blocked=1 UNION ALL SELECT path FROM original_files WHERE blocked=1 ORDER BY path").all().map((f) => f.path));
 }
 
 /** Whole graph comes from one consistent index snapshot, never a per-note query loop. */

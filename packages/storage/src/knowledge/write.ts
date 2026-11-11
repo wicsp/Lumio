@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { link, open, readFile, rename, stat, unlink } from "node:fs/promises";
-import { dirname, basename, join } from "node:path";
+import { dirname, join } from "node:path";
 import { CoreError } from "@lumio/foundation";
 
 export interface WriteOptions {
@@ -38,7 +38,7 @@ export async function writeFileAtomic(path: string, content: Uint8Array, options
     } catch (cause) {
       if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause;
     }
-    temp = join(dirname(path), `.${basename(path)}.${randomUUID()}.tmp`);
+    temp = join(dirname(path), `.lumio-${randomUUID()}.tmp`);
     const handle = await open(temp, "wx", mode);
     try { await handle.writeFile(content); }
     finally { await handle.close(); }
