@@ -33,6 +33,8 @@ export const ID_PREFIXES = {
   push_device: "pdev",
   // ADR 0051（K4-1）：AI 笔记。键与实体 type 同名（知识实体按 type 取前缀）
   "ai-note": "ain",
+  // ADR 0057（I1-1）：Inbox 的捕获记录
+  capture: "cap",
 } as const;
 
 const ULID = "[0-9A-HJKMNP-TV-Z]{26}";

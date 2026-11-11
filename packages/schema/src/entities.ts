@@ -11,6 +11,11 @@ export const Citekey = z
   .string()
   .regex(CITEKEY_PATTERN, "citekey 必须是 姓_年份_缩写，例如 He_2020_LightGCN");
 
+/** 阅读状态（`paper` 与 `source`）。`reference`：不打算读，留作资料（ADR 0057 第 2 节）。 */
+export const READING_STATUSES = ["to-read", "reading", "read", "reference"] as const;
+export const ReadingStatus = z.enum(READING_STATUSES);
+export type ReadingStatus = z.infer<typeof ReadingStatus>;
+
 /** 论文笔记，文件位于 `library/papers/<citekey>.md`（ADR 0012）。 */
 export const Paper = Base.extend({
   type: z.literal("paper"),
@@ -22,7 +27,7 @@ export const Paper = Base.extend({
   arxiv: optional(z.string()),
   doi: optional(z.string()),
   url: optional(z.url()),
-  status: withDefault(z.enum(["to-read", "reading", "read"]), "to-read"),
+  status: withDefault(ReadingStatus, "to-read"),
 });
 
 /** 想法 / 灵感，可以链接论文和其他想法，最后被串进报告。 */
@@ -110,7 +115,7 @@ export const Source = Base.extend({
   url: optional(z.url()),
   author: optional(z.string()),
   site: optional(z.string()).describe("来源站点或平台名"),
-  status: withDefault(z.enum(["to-read", "reading", "read"]), "to-read"),
+  status: withDefault(ReadingStatus, "to-read"),
 });
 
 const URL_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/;
