@@ -151,6 +151,10 @@ pi 的 skill 验收说明：pi 的回答完全正确（推荐了 `[[渲染格式
 
 （阶段表 2026-11-06 从 `DESIGN.md` 第 8 节移到这里，ADR 0036。）
 
+## 单入口助手
+
+[A1-0](A1-0-single-assistant-workbench.md)：主对话与锚点式上下文、共用工作台的展示动作、Jev 判断闸门、后台预读与分级提醒、Watchdog、提前探索、原生 Codex 接入，以及对话授权的前置工作（ADR 0059、0060、0061）。
+
 ## 原生 Assistant
 
 [M1-0](M1-0-native-assistant.md)：统一 AI Profile 与原生 Codex Assistant，已合入主线，日常实例使用 7420（ADR 0041/0042/0047）。
