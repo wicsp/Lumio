@@ -1,5 +1,5 @@
 import { AIQuotaSnapshot, AIQuotaSettings, AIQuotaView, AIQuotaViews, ClaudeQuotaBindings, ClaudeQuotaSample, ClaudeBackgroundResult } from "./ai-usage.ts";
-import {AIConnection,AIConnectionInput,AIProfile,AIProfileInput,AIUsageBinding,AIConfiguration,AIModel,AIRuntime,NativeAccountBinding,NativeConnectionAction,NativeConnectionView,NativeSession,NativeRuntimeView,NativeApproval,NativeAction,NativeCreate,NativeEventData,NativeEventRecord,NativeRuntimeCommand,NativeRuntimeMessage,NativeMCPRequest,NativeMCPResult} from "./ai.ts";
+import {AIConnection,AIConnectionInput,AIProfile,AIProfileInput,AIUsageBinding,AIConfiguration,AIConfigurationDelete,AIConfigurationDeleted,AIModel,AIRuntime,NativeAccountBinding,NativeConnectionAction,NativeConnectionView,NativeSession,NativeRuntimeView,NativeApproval,NativeAction,NativeCreate,NativeEventData,NativeEventRecord,NativeRuntimeCommand,NativeRuntimeMessage,NativeMCPRequest,NativeMCPResult} from "./ai.ts";
 import { KnowledgeDocument, KnowledgeUpdateRequest, KnowledgeUpdateResult, KnowledgeContext, KnowledgeRelatedRequest, KnowledgeRelatedResult, KnowledgeReferencesRequest, KnowledgeReferencesResult } from "./knowledge-editing.ts";
 /**
  * @lumio/schema —— Lumio 的契约，唯一事实来源（ADR 0003）。
@@ -64,7 +64,7 @@ import { KnowledgeGraphArgs, KnowledgeGraph, KnowledgeGraphEdge } from "./knowle
 import { SpeechClientMessage, SpeechServerMessage, SpeechVocabulary, SpeechVocabularyUpdate, SpeechBinding, SpeechBindingUpdate } from "./speech.ts";
 
 export const CONTRACTS = {
-  "ai-connection": AIConnection, "ai-connection-input": AIConnectionInput, "ai-profile": AIProfile, "ai-profile-input": AIProfileInput, "ai-usage-binding": AIUsageBinding, "ai-configuration": AIConfiguration, "ai-model": AIModel, "ai-runtime": AIRuntime,
+  "ai-connection": AIConnection, "ai-connection-input": AIConnectionInput, "ai-profile": AIProfile, "ai-profile-input": AIProfileInput, "ai-usage-binding": AIUsageBinding, "ai-configuration": AIConfiguration, "ai-configuration-delete": AIConfigurationDelete, "ai-configuration-deleted": AIConfigurationDeleted, "ai-model": AIModel, "ai-runtime": AIRuntime,
   "ai-quota-snapshot": AIQuotaSnapshot, "ai-quota-settings": AIQuotaSettings, "ai-quota-view": AIQuotaView, "ai-quota-views": AIQuotaViews,
   "claude-quota-bindings": ClaudeQuotaBindings, "claude-quota-sample": ClaudeQuotaSample, "claude-background-result": ClaudeBackgroundResult,
   "native-account-binding": NativeAccountBinding, "native-connection-action": NativeConnectionAction, "native-connection-view": NativeConnectionView,

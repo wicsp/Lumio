@@ -2,7 +2,9 @@ import { Resources } from "./resources.ts";
 import type { AiNotes } from "./ai-notes.ts";
 import {AIConfigurationService} from "./ai-config.ts";
 import {NativeAssistant} from "./native-assistant.ts";
-import {SqliteAIStore} from "@lumio/storage";
+import { SqliteAIStore, SqliteSpeechStore } from "@lumio/storage";
+import { FunAsr, type FunAsrOptions } from "./fun-asr.ts";
+import { SpeechConfiguration } from "./speech-config.ts";
 import { KnowledgeService } from "@lumio/knowledge";
 import type { Trash } from "./trash.ts";
 import { stageDispatchOptions, validateTarget } from "./targets.ts";
@@ -48,6 +50,8 @@ function roundPermissions(sandbox: "os" | "none", permissions: AgentRun["permiss
 export class BusinessModules {
   readonly ai:AIConfigurationService;
   readonly native:NativeAssistant;
+  readonly speech: SpeechConfiguration;
+  readonly funAsr: FunAsr;
   readonly knowledge?: KnowledgeService;
   readonly notifications: Notifications;
   readonly workStore: SqliteWorkStore;
@@ -67,7 +71,7 @@ export class BusinessModules {
   private readonly timer: ReturnType<typeof setInterval>;
   readonly signal = this.stopped.signal;
   constructor(private readonly config: HubConfig, private readonly store: HubStore, options: {
-    authorize?: typeof authorize; now?: () => Date; assistantModel?: AssistantModel; assistantTools?: AssistantTool[]; pushFetch?: typeof fetch; quotaFetch?: typeof fetch;
+    authorize?: typeof authorize; now?: () => Date; assistantModel?: AssistantModel; assistantTools?: AssistantTool[]; pushFetch?: typeof fetch; quotaFetch?: typeof fetch; funAsr?: FunAsrOptions;
   } = {}) {
     const now = options.now ?? (() => new Date());
     if (config.vault) this.knowledge = new KnowledgeService(new FileKnowledgeRepository(config.vault, { stateDir: config.stateDir }));
@@ -130,6 +134,10 @@ export class BusinessModules {
     this.ai=new AIConfigurationService(new SqliteAIStore(store.db),config.assistantModel);
     this.ai.migrateLegacy(store.actors().filter(actor => actor.role === "human").map(actor => actor.id));
     this.ai.store.installConversationPurge();
+    this.funAsr = new FunAsr(options.funAsr, this.signal);
+    // Work's live database projects are public; the knowledge vault is never consulted.
+    this.speech = new SpeechConfiguration(new SqliteSpeechStore(store.db), this.ai.store, this.funAsr,
+      () => this.work.projects().map(project => project.title), now);
     this.native=new NativeAssistant(this.ai.store,this,store,config,{ fetch: options.quotaFetch, now });
     this.assistant = new AssistantService(this.assistantStore, options.assistantModel ?? configuredModel(config.assistantModel),
       [...this.capabilities.tools(), ...(options.assistantTools ?? [])], { text: msg, now, id, toolActor: store.assistantActor(),resolveModel:(profile,owner)=>this.ai.model(owner,profile),native:{validate:(c,r)=>this.native.validate(c,r),run:this.native.run,cancel:c=>this.native.cancelConversation(c)} });

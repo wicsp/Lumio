@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AIConfiguration, AIConnection, AIConnectionInput, AIProfile, AIProfileInput, ApiError, DASHSCOPE_BASE_URLS, TYPESAFE_JEV_BASE_URL } from "@lumio/schema";
+import { AIConfiguration, AIConfigurationDelete, AIConfigurationDeleted, AIConnection, AIConnectionInput, AIProfile, AIProfileInput, ApiError, DASHSCOPE_BASE_URLS, TYPESAFE_JEV_BASE_URL } from "@lumio/schema";
 import { HubStore } from "../src/store.ts";
 import { readConfig } from "../src/config.ts";
 import { startHub } from "../src/server.ts";
@@ -33,7 +33,7 @@ async function fixture() {
     throw cause;
   }
   return {
-    hub,
+    get hub() { return hub; },
     logs,
     owner,
     async request(path: string, body?: unknown, language = "en", bearer = token, method = body === undefined ? "GET" : "POST") {
@@ -48,12 +48,35 @@ async function fixture() {
       });
     },
     agentToken,
+    async restart() {
+      await hub.stop();
+      hub = await startHub(config, { log: line => logs.push(line) });
+    },
     async close() {
       await hub.stop();
       await rm(dir, { recursive: true, force: true });
     },
   };
 }
+
+test("deleting legacy configuration leaves a replayable receipt and does not reimport on restart", async () => {
+  const f = await fixture();
+  try {
+    const config = AIConfiguration.parse(await (await f.request("/v2/ai/config")).json());
+    const profile = config.profiles[0]!;
+    const connection = config.connections[0]!;
+    const remove = (path: string, body: AIConfigurationDelete) => f.request(path, body, "en", undefined, "DELETE");
+    const profileRequest = AIConfigurationDelete.parse({ request_id: crypto.randomUUID(), expected_revision: profile.revision });
+    const connectionRequest = AIConfigurationDelete.parse({ request_id: crypto.randomUUID(), expected_revision: connection.revision });
+    const path = "/v2/ai/connections/" + connection.id;
+    expect(AIConfigurationDeleted.parse(await (await remove("/v2/ai/profiles/" + profile.id, profileRequest)).json()).id).toBe(profile.id);
+    expect(AIConfigurationDeleted.parse(await (await remove(path, connectionRequest)).json()).id).toBe(connection.id);
+    await f.restart();
+    expect(AIConfiguration.parse(await (await f.request("/v2/ai/config")).json())).toEqual({ connections: [], profiles: [] });
+    expect(AIConfigurationDeleted.parse(await (await remove(path, connectionRequest)).json()).id).toBe(connection.id);
+    expect(JSON.stringify(f.hub.store.db.query("SELECT * FROM ai_receipts").all())).not.toContain("SYNTHETIC_PRIVATE_KEY");
+  } finally { await f.close(); }
+});
 
 test("Hub migrates legacy settings before requests, while concurrent config GETs stay read-only", async () => {
   const f = await fixture();

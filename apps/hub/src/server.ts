@@ -2,7 +2,7 @@ import { AiNotes } from "./ai-notes.ts";
 import { KNOWLEDGE_ROUTES, KnowledgeAuthoring, type PaperFetch } from "./knowledge-authoring.ts";
 import { migrateTaskModel } from "@lumio/storage";
 import { withLanguage, errorMessage, text as msg } from "./messages.ts";
-import { language } from "@lumio/platform";
+import { language, type Language } from "@lumio/platform";
 import { browserAllowed, browserDenied, webResponse, webFileResponse, type HubWeb } from "./web.ts";
 import { Pairing, handlePairing } from "./pairing.ts";
 import { Privileged, handlePrivileged } from "./privileged.ts";
@@ -25,6 +25,9 @@ import { TaskRounds, type TaskOptions } from "./tasks.ts";
 import { Routines, type RoutineOptions } from "./routines.ts";
 import type { RoutineHooks } from "./jobs.ts";
 import { BusinessModules } from "./modules.ts";
+import { SPEECH_PATH, BINDINGS_PATH, VOCABULARY_PATH } from "./speech-config.ts";
+import { SpeechSessions, type SpeechSocketData } from "./speech.ts";
+import type { FunAsrOptions } from "./fun-asr.ts";
 import { AssistantConfiguration } from "./assistant-config.ts";
 import { configuredModel } from "./assistant-model.ts";
 import { V2_ROUTES, handleV2 } from "./v2.ts";
@@ -83,6 +86,7 @@ async function startHubInstance(config: HubConfig, options: {
   paperFetch?: PaperFetch;
   pushFetch?: typeof fetch;
   quotaFetch?: typeof fetch;
+  funAsr?: FunAsrOptions;
   assistantModel?: AssistantModel;
   assistantTools?: AssistantTool[];
 } = {}) {
@@ -96,7 +100,7 @@ async function startHubInstance(config: HubConfig, options: {
   const warning = networkWarning(config);
   if (warning) log(warning);
   const decide = options.authorize ?? authorize;
-  let server: Bun.Server<undefined>;
+  let server: Bun.Server<SpeechSocketData>;
   let vaultWatch: Awaited<ReturnType<typeof startVaultWatch>> | undefined;
   let tasks: TaskRounds | undefined;
   let routines: Routines | undefined;
@@ -135,7 +139,8 @@ async function startHubInstance(config: HubConfig, options: {
       await watch.exclusive(() => tasks!.start());
       await watch.exclusive(() => routines!.start());
     }
-    const handle = async (request: Request, server: Bun.Server<undefined>): Promise<Response> => {
+    const speech = new SpeechSessions(modules.speech, modules.funAsr, store, options.now ?? (() => new Date()), log);
+    const handle = async (request: Request, server: Bun.Server<SpeechSocketData>, lang: Language): Promise<Response | undefined> => {
         const start = performance.now();
         const time = new Date().toISOString();
         const url = new URL(request.url);
@@ -144,7 +149,8 @@ async function startHubInstance(config: HubConfig, options: {
         // Logging uses route templates, so references (or secrets in a URL) cannot leak.
         const v2 = V2_ROUTES.find((route) => request.method === route.method && route.pattern.test(url.pathname));
         const route = v2 ?? ROUTES.find((route) => request.method === ("method" in route ? route.method : "GET") && route.pattern.test(url.pathname));
-        const path = route?.operation.startsWith("knowledge.") ? `/v2/knowledge/${route.operation.split(".")[1]}` : v2 ? v2.path : route && (PAIRING_OPERATIONS as readonly string[]).includes(route.operation) ? `/pairing/${route.operation}` : route?.operation === "runtime.privileged.status" ? "/v1/runtime/privileged/<id>" : route?.operation === "runtime.privileged.report" ? "/v1/runtime/privileged" : route?.operation === "job.submit" || route?.operation === "jobs" ? "/v1/jobs" : route?.operation === "job.show" ? "/v1/jobs/<id>" : route?.operation === "job.cancel" ? "/v1/jobs/<id>/cancel" : route?.operation === "runtime.ack" ? "/v1/runtime/ack" : route?.operation === "runtime.results" ? "/v1/runtime/results" : route?.operation === "runtime.register" ? "/v1/runtime/register" : route?.operation === "runtime.sync" ? "/v1/runtime/sync" : route?.operation === "runtimes" ? "/v1/runtimes" : route?.operation === "routines" ? "/v1/routines" : route?.operation === "status" ? "/v1/status" : route?.operation === "health" ? "/health" : route?.operation === "search" ? "/v1/search"
+        const speechPath = [SPEECH_PATH, VOCABULARY_PATH, BINDINGS_PATH].includes(url.pathname);
+        const path = speechPath ? url.pathname : route?.operation.startsWith("knowledge.") ? `/v2/knowledge/${route.operation.split(".")[1]}` : v2 ? v2.path : route && (PAIRING_OPERATIONS as readonly string[]).includes(route.operation) ? `/pairing/${route.operation}` : route?.operation === "runtime.privileged.status" ? "/v1/runtime/privileged/<id>" : route?.operation === "runtime.privileged.report" ? "/v1/runtime/privileged" : route?.operation === "job.submit" || route?.operation === "jobs" ? "/v1/jobs" : route?.operation === "job.show" ? "/v1/jobs/<id>" : route?.operation === "job.cancel" ? "/v1/jobs/<id>/cancel" : route?.operation === "runtime.ack" ? "/v1/runtime/ack" : route?.operation === "runtime.results" ? "/v1/runtime/results" : route?.operation === "runtime.register" ? "/v1/runtime/register" : route?.operation === "runtime.sync" ? "/v1/runtime/sync" : route?.operation === "runtimes" ? "/v1/runtimes" : route?.operation === "routines" ? "/v1/routines" : route?.operation === "status" ? "/v1/status" : route?.operation === "health" ? "/health" : route?.operation === "search" ? "/v1/search"
           : route?.operation === "check" ? "/v1/check" : route?.operation === "show" ? "/v1/notes/<reference>" : route?.operation === "links" ? "/v1/notes/<reference>/links" : route?.operation === "operations" ? "/v1/operations"
             : route?.operation === "actors" ? "/v1/actors" : route?.operation === "proposals" ? "/v1/proposals"
               : route?.operation === "proposal.accept" ? "/v1/proposals/<id>/accept" : route?.operation === "proposal.reject" ? "/v1/proposals/<id>/reject" : "<unmatched>";
@@ -155,6 +161,13 @@ async function startHubInstance(config: HubConfig, options: {
         }
         try {
           if (!browserAllowed(request, config, server.port!)) { status = 403; return browserDenied(); }
+          if (url.pathname === SPEECH_PATH && request.method === "GET" && request.headers.get("upgrade")?.toLowerCase() === "websocket") {
+            if (!server.upgrade(request, { data: { lang } })) {
+              throw new HubError("INVALID", { key: "speech.upgrade_failed", args: [] });
+            }
+            status = 101;
+            return undefined;
+          }
           const file = options.web?.files.get(url.pathname);
           if (file && ["GET", "HEAD"].includes(request.method)) {
             status = 200;
@@ -166,6 +179,11 @@ async function startHubInstance(config: HubConfig, options: {
           if (route?.operation !== "health" && route?.operation !== "runtime.join" && route?.operation !== "client.join") {
             identity = store.authenticate(request.headers.get("authorization"), (options.now ?? (() => new Date()))());
             if (!identity) throw new HubError("UNAUTHENTICATED", { key: "server.a_valid_bearer_token_is_required", args: [] });
+          }
+          if (speechPath) {
+            const response = await modules!.speech.handle(request, identity!);
+            status = response.status;
+            return response;
           }
           if(url.pathname.startsWith("/v2/runtime/native")){const response=await modules!.native.channel(request,identity!);status=response.status;return response;}
           if(url.pathname==="/v2/runtime/claude-usage"){const response=await modules!.native.usage.claude(request,identity!);status=response.status;return response;}
@@ -296,12 +314,17 @@ async function startHubInstance(config: HubConfig, options: {
             method: request.method, path, status, duration_ms: performance.now() - start, client_ip: clientIp }));
         }
     };
-    server = Bun.serve({ hostname: config.hostname, port: config.port,
-      async fetch(request, server) {return webResponse(await withLanguage(language({LUMIO_LANG:request.headers.get("Accept-Language")??undefined}),()=>handle(request,server)),options.web?.csp);},
+    server = Bun.serve<SpeechSocketData>({ hostname: config.hostname, port: config.port,
+      websocket: speech.handlers(),
+      async fetch(request, server) {
+        const lang = language({ LUMIO_LANG: request.headers.get("Accept-Language") ?? undefined });
+        const response = await withLanguage(lang, () => handle(request, server, lang));
+        return response && webResponse(response, options.web?.csp);
+      },
     });
     modules.native.setPort(server.port!);
   } catch (cause) { modules?.stop(); await modules?.trash?.stop(); await modules?.notifications.stop(); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); throw cause; }
-  return { server, store, tasks: tasks!, routines: routines!, modules: modules!, async stop() { modules?.stop(); await modules?.native.stop(); await server.stop(true); await modules?.trash?.stop(); await modules?.notifications.stop(); await modules?.artifacts.drain(); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); } };
+  return { server, store, tasks: tasks!, routines: routines!, modules: modules!, async stop() { modules?.stop(); await modules?.native.stop(); await server.stop(true); await modules?.speech.drain(); await modules?.trash?.stop(); await modules?.notifications.stop(); await modules?.artifacts.drain(); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); } };
 }
 
 /** One Hub or offline migration owns a state directory. OS locks disappear on crashes, without deleting lock files. */

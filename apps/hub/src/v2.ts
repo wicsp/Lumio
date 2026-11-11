@@ -64,7 +64,7 @@ async function json(request: Request): Promise<unknown> {
 export function moduleError(cause: unknown): HubError | undefined {
   if (cause instanceof WorkError || cause instanceof AssistantError) return new HubError(cause.code, cause.params, { reason: cause.reason });
 }
-export async function handleV2(request: Request, server: Bun.Server<undefined>, route: V2Route, identity: Identity, store: HubStore,
+export async function handleV2(request: Request, server: Pick<Bun.Server<undefined>, "timeout">, route: V2Route, identity: Identity, store: HubStore,
   modules: BusinessModules, decide: typeof authorize, now = new Date()): Promise<Response> {
   let decision = decide(identity.actor, { operation: route.operation,
     includePrivate: ["resource.read", "execution.read", "knowledge.graph"].includes(route.operation) && new URL(request.url).searchParams.get("include_private") === "true" });
