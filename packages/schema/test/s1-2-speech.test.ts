@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
 import { z } from "zod";
 import {
-  AIConnectionInput, AIProfile, CONTRACTS, DASHSCOPE_BASE_URLS, SPEECH_LIMITS, SPEECH_PROTOCOL,
+  AIConnectionInput, AIProfile, CONTRACTS, SpeechTerm, DASHSCOPE_BASE_URLS, SPEECH_LIMITS, SPEECH_PROTOCOL,
   SpeechBinding, SpeechBindingUpdate, SpeechClientMessage, SpeechServerMessage, SpeechVocabulary, SpeechVocabularyUpdate,
 } from "../src/index.ts";
 
@@ -71,4 +71,15 @@ test("speech contracts are exported as JSON Schema", () => {
   for (const name of ["speech-client-message", "speech-server-message", "speech-vocabulary", "speech-vocabulary-update", "speech-binding", "speech-binding-update"] as const) {
     expect(() => z.toJSONSchema(CONTRACTS[name], { target: "draft-2020-12", io: "input" })).not.toThrow();
   }
+});
+
+test("term length follows the Fun-ASR vocabulary rules", () => {
+  expect(SpeechTerm.safeParse("青岚计划").success).toBe(true);
+  expect(SpeechTerm.safeParse("中".repeat(15)).success).toBe(true);
+  expect(SpeechTerm.safeParse("中".repeat(16)).success).toBe(false);
+  expect(SpeechTerm.safeParse("Lumio 青岚计划 with a very long English tail").success).toBe(false);
+  expect(SpeechTerm.safeParse("one two three four five six seven").success).toBe(true);
+  expect(SpeechTerm.safeParse("one two three four five six seven eight").success).toBe(false);
+  expect(SpeechTerm.safeParse("vaswani2017attention").success).toBe(true);
+  expect(SpeechTerm.safeParse("x".repeat(41)).success).toBe(false);
 });

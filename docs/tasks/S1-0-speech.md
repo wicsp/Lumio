@@ -19,7 +19,7 @@
 | 编号 | 内容 | 负责 | 改动范围 |
 |---|---|---|---|
 | S1-1 ✅ | 预研（[报告](../reviews/S1-1-speech-spike.md)，PR #164；人类选定 Fun-ASR、北京区域）：① 实测 2–3 家流式 ASR（中英混说、技术词、热词效果、首字与定稿延迟、价格），用人录的 20 句测试集；② 验证 Bun 的 WebSocket 能否与 Hub 现有路由、Origin 校验、CSP（`connect-src`）配合；③ 确认 Safari / iOS PWA 上 AudioWorklet 采集 16 kHz 的可行做法（重采样位置）。结果写入 `docs/reviews/S1-1-speech-spike.md`，给出首个服务商的建议 | 后端（Codex） | 只写报告与一次性脚本，不进产品代码 |
-| S1-2 | 契约：`speech.ts`（`start` / `end` / `cancel` / `ready` / `partial` / `final` / `error`，`SPEECH_LIMITS`）；`AIConnectionKind` 增加 `dashscope`（官方区域地址 `DASHSCOPE_BASE_URLS`）；Profile 引擎增加 `speech`；语音用途绑定 `SpeechBinding`（`speech.asr` / `speech.tts`）；热词表 `SpeechVocabulary` 与同步状态；Hub 连带：语音 Profile 只能配 `dashscope`、不能用于聊天 | Claude 起草，人类批准 | `packages/schema` |
+| S1-2 ✅ | 契约：`speech.ts`（`start` / `end` / `cancel` / `ready` / `partial` / `final` / `error`，`SPEECH_LIMITS`）；`AIConnectionKind` 增加 `dashscope`（官方区域地址 `DASHSCOPE_BASE_URLS`）；Profile 引擎增加 `speech`；语音用途绑定 `SpeechBinding`（`speech.asr` / `speech.tts`）；热词表 `SpeechVocabulary` 与同步状态（单个热词按 Fun-ASR 规则：非 ASCII ≤ 15 字符、纯 ASCII ≤ 7 个单词，`SPEECH_TERM_LIMITS`）；Hub 连带：语音 Profile 只能配 `dashscope`、不能用于聊天 | Claude 起草，人类批准 | `packages/schema` |
 | S1-3 | Hub：`/v2/speech/transcribe` WebSocket（按 S1-1 报告，在 `browserAllowed` 之后、HTTP 认证之前 `server.upgrade`）；首条消息认证、只允许 human；Fun-ASR 适配器（`finish-task` 后等 `task-finished` 定稿；流式转发，不落盘）；上限与空闲断开；热词表存储、读写接口与同步到 Fun-ASR 词表（权重 4；不从私密实体取词；删除连接时删除服务商词表）；语音用途绑定读写；只记元数据的日志；中英错误文案 | 后端（Codex） | `apps/hub`、`packages/storage` |
 | S1-4 | Web：麦克风按钮（按住说话 / 点按开关两种）与键盘快捷键；AudioWorklet 采集与分帧；临时结果在输入框内以浅色显示，定稿后变为普通文本；非安全上下文时隐藏入口并说明原因；设置页语音 Profile（写明音频去向）与热词表编辑 | 前端（Claude） | `packages/api-client`、`apps/web` |
 | S1-5 | 准确率：松手后整段再识别一次作为定稿（服务商支持时）；可选的 LLM 纠错与"提到的知识条目"建议，作为附加建议展示，人选择后才写入 | 待定 | 依 S1-4 试用结果再细化 |

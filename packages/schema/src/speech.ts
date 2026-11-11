@@ -95,8 +95,23 @@ export const SpeechServerMessage = z.discriminatedUnion("type", [SpeechReady, Sp
 
 // ---- 热词表 ----
 
+/** 单个热词的长度上限（ADR 0055 第 3 节，按首个服务商 Fun-ASR 的词表规则）。 */
+export const SPEECH_TERM_LIMITS = {
+  /** 含非 ASCII 字符（如中文）时的最多字符数。 */
+  max_non_ascii_chars: 15,
+  /** 纯 ASCII 时最多几个以空格分隔的单词。 */
+  max_ascii_words: 7,
+  /** 任何情况下的最多字符数。 */
+  max_chars: 40,
+} as const;
+
 /** 一个热词：人维护的词条（项目名、执行器名、术语、citekey 等）。 */
-export const SpeechTerm = z.string().trim().min(1).max(40).refine(value => !/[\r\n\t]/.test(value), "热词不能含换行或制表符");
+export const SpeechTerm = z.string().trim().min(1).max(SPEECH_TERM_LIMITS.max_chars)
+  .refine(value => !/[\r\n\t]/.test(value), "热词不能含换行或制表符")
+  .refine(value => /^[\x20-\x7e]*$/.test(value) || [...value].length <= SPEECH_TERM_LIMITS.max_non_ascii_chars,
+    `含中文等非 ASCII 字符的热词最多 ${SPEECH_TERM_LIMITS.max_non_ascii_chars} 个字符`)
+  .refine(value => !/^[\x20-\x7e]*$/.test(value) || value.split(/ +/).length <= SPEECH_TERM_LIMITS.max_ascii_words,
+    `英文热词最多 ${SPEECH_TERM_LIMITS.max_ascii_words} 个单词`);
 
 /** 热词表与服务商同步的状态。Fun-ASR 需要先在服务商建词表，请求只带词表 ID（ADR 0055 第 3 节修订）。 */
 export const SpeechVocabularySync = z.strictObject({
