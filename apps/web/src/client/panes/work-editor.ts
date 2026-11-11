@@ -101,15 +101,15 @@ export class WorkEditor {
     const project = rec.type === "task" && rec.project ? projects.find(p => p.id === rec.project) : undefined;
     this.showAdvanced = rec.type === "task" && !!(rec.workdir || rec.model || rec.timeout_minutes || project?.workdir);
     const crumbs = h("div", { class: "detail-crumbs" },
-      h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": t("Back to list"), onclick: () => hooks.back() }, icon("back")),
+      h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": t("Back to list"), "data-pad-back": true, onclick: () => hooks.back() }, icon("back")),
       isTask ? (project ? h("button", { type: "button", onclick: () => hooks.openProject(project.id) }, icon("folder"), project.title) : h("span", {}, t("No project"))) : h("span", {}, t("Projects")),
       h("div", { class: "detail-actions" },
         h("button", { type: "button", class: "icon-btn", title: t("Copy ID"), "aria-label": t("Copy ID"), onclick: () => void navigator.clipboard?.writeText(this.record.id).then(() => toast(t("ID copied"))) }, icon("link")),
         rec.type === "task" && !rec.plan && this.planButton(rec),
-        isTask && (this.delegateButton = h("button", { type: "button", class: "btn btn-primary btn-small", onclick: () => void this.dispatch() }, icon("play"), t("Delegate")))));
+        isTask && (this.delegateButton = h("button", { type: "button", class: "btn btn-primary btn-small", "data-pad-action": "delegate", onclick: () => void this.dispatch() }, icon("play"), t("Delegate")))));
 
     const attention = h("div", { class: "attn-slot" });
-    const detail = h("div", { class: "detail" }, crumbs, h("div", { class: "detail-head" }, this.title, this.updated), attention, this.note, this.props,
+    const detail = h("div", { class: "detail" }, crumbs, h("div", { class: "detail-head", "data-pad-row": rec.id + ":detail", tabindex: "-1" }, this.title, this.updated), attention, this.note, this.props,
       h("div", { class: "divider" }), this.bodyHost, this.saveStatus);
     root.append(detail);
     this.renderMeta();
@@ -294,6 +294,9 @@ export class WorkEditor {
     const r = this.record, button = this.delegateButton;
     if (!button || r.type !== "task") return;
     const blocked = isBlocked(r);
+    const available = r.outcome === "open" && r.turn.reason !== "working" && r.turn.holder !== "nobody" && !blocked;
+    if (available) button.setAttribute("data-pad-action", "delegate");
+    else button.removeAttribute("data-pad-action");
     button.disabled = blocked;
     button.title = blocked ? t("Prerequisites not done: {0}", blockingTitles(r, this.byId).join(t(", "))) : "";
   }
@@ -664,9 +667,11 @@ export class WorkEditor {
         if (previousTarget && previousTarget !== target.value) requestId = newRequestId();
         previousTarget = target.value; pending = true; submit.disabled = true;
         try {
-          await this.client.workCommand(dispatchCommand(task, target.value, requestId));
+          const result = await this.client.workCommand(dispatchCommand(task, target.value, requestId));
           dialog.close();
-          toast(t("Dispatched to {0}", target.value));
+          toast(t("Dispatched to {0}", target.value), "ok", result.kind === "job" ? {
+            label: t("View run"), run: () => this.hooks.navigate("execution", result.job.spec.id, "from-dispatch-toast"),
+          } : undefined);
           if (this.active) { this.hooks.changed(); this.hooks.reload(); }
         } catch (cause) {
           clear(error, failure(t("{0} Check the runs to see whether it was dispatched.", errorText(cause))));

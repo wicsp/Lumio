@@ -39,7 +39,7 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
   // 有交接计划时，继续的一定是计划里这一阶段的 agent，不让人改。
   const planned = item.stage !== undefined;
   let target = planned ? undefined : item.agent;
-  const card = h("article", { class: `attn attn-${kind.tone}`, "data-task": item.task, "data-round": String(item.round) });
+  const card = h("article", { class: `attn attn-${kind.tone}`, "data-pad-row": `round:${item.task}:${item.round}:${item.stage ?? ""}`, tabindex: "0", "data-task": item.task, "data-round": String(item.round) });
   const status = h("div", { role: "status", class: "attn-status" });
   const error = h("div", { role: "alert" });
   const actions = h("div", { class: "attn-actions" });
@@ -73,7 +73,7 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
         openMenu(chip, targets.map(x => ({ value: x.target, label: x.label, selected: x.target === target, icon: icon("bot") })), value => { target = value; renderChip(); });
       } catch (cause) { clear(error, failure(errorText(cause))); }
     });
-    const submit = h("button", { type: "submit", class: "btn btn-primary btn-small" }, icon("send"), button);
+    const submit = h("button", { type: "submit", class: "btn btn-primary btn-small", "data-pad-action": "primary" }, icon("send"), button);
     const form = h("form", { class: "attn-composer" }, text, h("div", { class: "attn-composer-foot" }, chip, submit));
     let requestId = newRequestId(), previous = "";
     text.addEventListener("keydown", event => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); form.requestSubmit(); } });
@@ -110,13 +110,13 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
       return done;
     });
     const end = stage === "end";
-    const go = h("button", { type: "button", class: "btn btn-primary btn-small" }, icon("play"), t("Continue"));
+    const go = h("button", { type: "button", class: "btn btn-primary btn-small", "data-pad-action": "primary" }, icon("play"), t("Continue"));
     go.addEventListener("click", () => decide("continue", t("Continuing with the next step.")));
-    const finish = h("button", { type: "button", class: `btn btn-small${end ? " btn-primary" : ""}` }, icon("check"), t("Mark done"));
+    const finish = h("button", { type: "button", class: `btn btn-small${end ? " btn-primary" : ""}`, "data-pad-action": end ? "primary" : "finish" }, icon("check"), t("Mark done"));
     finish.addEventListener("click", () => decide("finish", t("Task marked done.")));
-    const hold = h("button", { type: "button", class: "btn btn-quiet btn-small" }, icon("pause"), t("Put on hold"));
+    const hold = h("button", { type: "button", class: "btn btn-quiet btn-small", "data-pad-action": "hold" }, icon("pause"), t("Put on hold"));
     hold.addEventListener("click", () => decide("hold", t("Put on hold.")));
-    const back = h("button", { type: "button", class: "btn btn-small" }, icon("undo"), t("Send back…"));
+    const back = h("button", { type: "button", class: "btn btn-small", "data-pad-action": "reject" }, icon("undo"), t("Send back…"));
     back.addEventListener("click", () => void (async () => {
       try {
         const task = await currentTask();
@@ -125,7 +125,7 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
         const to = select("back-to", stages.map(value => [value.id, t("{0} ({1})", value.id, value.agent)] as [string, string]), stages.at(-2)?.id ?? stages[0]!.id);
         const text = autosize(h("textarea", { rows: "2", placeholder: t("What should change?"), "aria-label": t("What should change?") }));
         textDraft(text, `checkpoint:${item.task}:${stage}`);
-        const send = h("button", { type: "submit", class: "btn btn-primary btn-small" }, icon("undo"), t("Send back"));
+        const send = h("button", { type: "submit", class: "btn btn-primary btn-small", "data-pad-action": "primary" }, icon("undo"), t("Send back"));
         const form = h("form", { class: "attn-composer" }, text, h("div", { class: "attn-composer-foot" }, h("label", { class: "attn-back" }, t("Back to"), to), send));
         form.addEventListener("submit", event => {
           event.preventDefault();
@@ -152,19 +152,19 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
     else if (item.summary) body = h("p", { class: "attn-summary" }, item.summary);
     if (item.kind === "review" && (item.prompt || item.stage === "end")) checkpoint(item.stage!);
     else if (item.kind === "review") {
-      const done = h("button", { type: "button", class: "btn btn-primary btn-small" }, icon("check"), t("Mark done"));
+      const done = h("button", { type: "button", class: "btn btn-primary btn-small", "data-pad-action": "primary" }, icon("check"), t("Mark done"));
       done.addEventListener("click", () => void run(async () => {
         await ctx.client.workCommand(finishCommand(await currentTask(), "done"));
         return t("Task marked done.");
       }));
-      const feedback = h("button", { type: "button", class: "btn btn-small" }, icon("edit"), t("Add feedback and continue"));
+      const feedback = h("button", { type: "button", class: "btn btn-small", "data-pad-action": "reject" }, icon("edit"), t("Add feedback and continue"));
       feedback.addEventListener("click", () => {
         const next = composer(t("Send and continue"), true, t("What should change in the next round?"));
         actions.replaceWith(next.form); next.focus();
       });
       actions.append(done, feedback, seen);
     } else {
-      const retry = h("button", { type: "button", class: "btn btn-small" }, icon("refresh"), t("Retry"));
+      const retry = h("button", { type: "button", class: "btn btn-small", "data-pad-action": "primary" }, icon("refresh"), t("Retry"));
       retry.addEventListener("click", () => {
         const next = composer(t("Retry"), false, t("Optional: anything to change this time?"));
         actions.replaceWith(next.form); next.focus();
@@ -178,8 +178,11 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
     const items = permissionItems(requested);
     const boxes = items.map(value => ({ value, box: h("input", { type: "checkbox", checked: true, name: `grant-${value}` }) }));
     const scope = select("grant-scope", [["next_round", t("Only the next round")], ["task", planned ? t("This step, from now on") : t("This task, from now on")]], "next_round");
-    const approve = h("button", { type: "submit", class: "btn btn-primary btn-small" }, icon("check"), t("Approve and continue"));
-    const refuse = h("button", { type: "button", class: "btn btn-small" }, icon("close"), t("Refuse…"));
+    const approve = h("button", { type: "submit", class: "btn btn-primary btn-small", "data-pad-action": "primary", "data-pad-hold": requested.access === "full" }, icon("check"), t("Approve and continue"));
+    for (const { box } of boxes) box.addEventListener("change", () => {
+      approve.toggleAttribute("data-pad-hold", boxes.some(({ value, box }) => value === "full" && box.checked));
+    });
+    const refuse = h("button", { type: "button", class: "btn btn-small", "data-pad-action": "reject" }, icon("close"), t("Refuse…"));
     const form = h("form", { class: "attn-composer attn-grant" },
       h("p", { class: "attn-grant-title" }, t("{0} is asking for:", item.agent ?? t("The agent"))),
       h("ul", { class: "attn-grant-items" }, ...boxes.map(({ value, box }) => h("li", {}, h("label", { class: "check-field" }, box, h("span", {}, permissionItemLabel(value)))))),
@@ -229,9 +232,9 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
       h("span", { class: "attn-icon" }, icon(kind.glyph)),
       h("div", { class: "attn-heading" },
         label,
-        where === "today" ? h("button", { type: "button", class: "attn-title", onclick: () => ctx.navigate("work", item.task) }, item.title) : null,
+        where === "today" ? h("button", { type: "button", class: "attn-title", "data-pad-action": "detail", onclick: () => ctx.navigate("work", item.task) }, item.title) : null,
         h("p", { class: "attn-meta", title: formatTime(item.since) }, meta)),
-      where !== "job" ? h("button", { type: "button", class: "text-btn attn-report", onclick: () => ctx.navigate("execution", item.job) }, t("View run")) : null),
+      where !== "job" ? h("button", { type: "button", class: "text-btn attn-report", "data-pad-action": "detail", onclick: () => ctx.navigate("execution", item.job) }, t("View run")) : null),
     ...[body as Node | null, item.kind === "question" ? null : actions, status, error].filter((node): node is Node => node !== null));
   return card;
 }

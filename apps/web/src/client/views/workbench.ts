@@ -4,7 +4,7 @@ import { drafts } from "../drafts.ts";
 import { executionGroups } from "../execution-groups.ts";
 import { turnGroup } from "../turn.ts";
 import type { Session } from "../api.ts";
-import { h, icon, typing } from "../dom.ts";
+import { h, icon, toast, typing } from "../dom.ts";
 import { OverviewPane } from "../panes/overview.ts";
 import { KnowledgePane } from "../panes/knowledge.ts";
 import { WorkPane } from "../panes/work.ts";
@@ -16,6 +16,9 @@ import type { Navigate, Pane, Section } from "../navigation.ts";
 import { t } from "../i18n.ts";
 import { SettingsPane } from "../panes/settings-page.ts";
 import { TrashPane } from "../panes/trash.ts";
+import { DEFAULT_BINDINGS, GamepadInput } from "../gamepad-input.ts";
+import { padButtonLabel } from "../gamepad-settings.ts";
+import { GamepadNavigation } from "../gamepad-navigation.ts";
 import { UsageIndicator } from "../usage-indicator.ts";
 
 /** 记住侧栏是否收起（只影响本设备）。 */
@@ -35,6 +38,10 @@ type PaneKey = Section | "projects";
 type MountedPane = { target: HTMLElement; pane: Pane };
 
 export class WorkbenchView {
+  private gamepad: GamepadInput;
+  private padNavigation: GamepadNavigation;
+  private unsubscribePadStatus: () => void;
+  private toastReturn?: { section: Section; id?: string };
   private main = h("main", { class: "main", id: "content", tabindex: "-1" });
   private nav = new Map<Section, HTMLButtonElement>();
   private counts = new Map<Section, HTMLElement>();
@@ -54,15 +61,22 @@ export class WorkbenchView {
     const generation=++this.routeGeneration, route=this.readRoute();
     if (!(await this.beforeLeave())) { if(generation===this.routeGeneration) history.pushState(null, "", this.currentHash || "#overview"); return; }
     if(generation!==this.routeGeneration)return;
+    this.toastReturn = undefined;
     this.show(route.section, route.id);
   };
   private readonly onKey = (event: KeyboardEvent) => {
+    if (event.defaultPrevented) return;
     const mod = event.metaKey || event.ctrlKey;
     if (mod && event.key.toLowerCase() === "k") { event.preventDefault(); this.palette.open(); return; }
     if (typing(event) || mod || event.altKey || document.querySelector("dialog[open]")) return;
     const section = SECTIONS.find(s => s.key2 === event.key);
     if (section) { event.preventDefault(); this.go(section.key); return; }
     if (event.key === "c") { event.preventDefault(); this.go("work", undefined, "new"); return; }
+    if (this.section === "overview" && ["j", "k", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
+      const step = ["k", "ArrowUp", "ArrowLeft"].includes(event.key) ? -1 : 1;
+      if (this.padNavigation.move(step)) event.preventDefault();
+      return;
+    }
     if (event.key === "/") {
       const search = this.current?.target.querySelector<HTMLInputElement>("input[type=search]");
       if (search && search.offsetParent !== null) { event.preventDefault(); search.focus(); search.select(); }
@@ -93,6 +107,42 @@ export class WorkbenchView {
     this.disposeReferenceLinks = referenceLinks(this.main, session.client, ref => this.go("knowledge",ref));
     this.disposeResourceLinks = resourceLinks(this.main, session.client, (section, id, intent) => void this.go(section, id, intent));
     this.palette = new CommandPalette(session.client, (section, id, intent) => this.go(section, id, intent));
+    this.padNavigation = new GamepadNavigation({
+      pane: () => this.current?.target,
+      back: () => { if (this.section === "settings") this.leaveSettings(); else void this.go("overview"); },
+      backLabel: () => this.section === "overview" ? undefined : t("Back"),
+      returnFromToast: () => {
+        if (!this.toastReturn) return false;
+        const route = this.toastReturn;
+        void this.go(route.section, route.id);
+        return true;
+      },
+      section: step => {
+        const next = this.adjacentSection(step);
+        if (next) void this.go(next.key);
+      },
+      sectionLabel: step => {
+        const next = this.adjacentSection(step);
+        return next && t(next.label);
+      },
+      buttonLabel: command => {
+        const pad = this.gamepad?.activePad;
+        const button = (this.gamepad?.mapping ?? DEFAULT_BINDINGS)[command];
+        return !pad || button < pad.buttons.length ? padButtonLabel(button, pad) : undefined;
+      },
+      delegate: id => this.current?.pane.intent?.(`delegate:${id}`),
+      palette: () => this.palette.open(true),
+      paletteAction: step => this.palette.gamepad(step),
+    });
+    this.padNavigation.mount();
+    this.gamepad = new GamepadInput(input => this.padNavigation.handle(input));
+    const warned = new Set<string>();
+    this.unsubscribePadStatus = this.gamepad.subscribe(({ pad }) => {
+      if (pad && pad.mapping !== "standard" && !warned.has(pad.id)) {
+        warned.add(pad.id);
+        toast(t("This controller’s buttons may be mismatched. You can remap them in Settings → General → Gamepad."));
+      }
+    });
     const nav = h("nav", { class: "nav", "aria-label": t("Main navigation") });
     for (const s of SECTIONS) {
       if (s.key === "execution") nav.append(h("p", { class: "nav-group-label" }, t("Automation")));
@@ -149,6 +199,11 @@ export class WorkbenchView {
     this.countTimer = setInterval(() => { if (document.visibilityState === "visible") void this.refreshCounts(); }, 60_000);
   }
 
+  private adjacentSection(step: number): typeof SECTIONS[number] | undefined {
+    const index = SECTIONS.findIndex(section => section.key === this.section);
+    return index < 0 ? SECTIONS[step > 0 ? 0 : SECTIONS.length - 1] : SECTIONS[index + step];
+  }
+
   private readRoute(): { section: Section; id?: string } {
     const [section, raw] = location.hash.slice(1).split(/\/(.*)/s);
     const known: Section = section === "settings" || section === "trash" ? section : SECTIONS.find(s => s.key === section)?.key ?? "overview";
@@ -162,6 +217,7 @@ export class WorkbenchView {
     if (section === this.section && section !== "settings" && !intent && (!id || (section === "work" && id === this.workMode))) return;
     if (!(await this.beforeLeave()) || generation !== this.routeGeneration) return;
     const hash = `#${section}${id ? `/${encodeURIComponent(id)}` : ""}`;
+    this.toastReturn = intent === "from-dispatch-toast" ? this.readRoute() : undefined;
     if (location.hash !== hash) history.pushState(null, "", hash);
     this.show(section, id, intent);
   }
@@ -205,6 +261,7 @@ export class WorkbenchView {
       if (id || section === "settings") mounted.pane.open?.(id ?? "");
     }
     this.current = mounted;
+    this.padNavigation.routeChanged(!!id && section !== "settings");
     if (intent) mounted.pane.intent?.(intent);
   }
 
@@ -216,7 +273,7 @@ export class WorkbenchView {
     const changed = () => void this.refreshCounts();
     let pane: Pane;
     if (section === "overview") pane = new OverviewPane(target, client, this.session.hub, navigate, this.name, changed);
-    else if (section === "settings") pane = new SettingsPane(target, this.session, this.name, () => void this.signOut(), () => this.leaveSettings(), sub => void this.go("settings", sub), id);
+    else if (section === "settings") pane = new SettingsPane(target, this.session, this.name, () => void this.signOut(), () => this.leaveSettings(), sub => void this.go("settings", sub), id, this.gamepad);
     else if (section === "knowledge") pane = new KnowledgePane(target, client, id);
     else if (section === "work") pane = new WorkPane(target, client, this.session.hub, this.workMode, id, navigate, changed);
     else if (section === "execution") pane = new ExecutionPane(target, client, this.session.hub, id, navigate, changed);
@@ -273,6 +330,9 @@ export class WorkbenchView {
   }
 
   dispose(): void {
+    this.unsubscribePadStatus();
+    this.gamepad.dispose();
+    this.padNavigation.dispose();
     this.disposeReferenceLinks();
     this.disposeResourceLinks();
     this.routeGeneration++;

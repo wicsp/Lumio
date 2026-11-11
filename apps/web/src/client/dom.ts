@@ -75,6 +75,7 @@ const ICONS: Record<string, string> = {
   approvals: "M12 3l8 3.5V12c0 4.4-3.4 7.7-8 9-4.6-1.3-8-4.6-8-9V6.5zM8.5 12l2.5 2.5 4.5-4.5",
   refresh: "M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7",
   logout: "M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10",
+  more: "M5 12h.01M12 12h.01M19 12h.01",
   plus: "M12 5v14M5 12h14",
   close: "M6 6l12 12M18 6 6 18",
   check: "M5 12.5l4.5 4.5L19 7.5",
@@ -228,7 +229,7 @@ export interface ConfirmOptions {
 export function confirmDialog(options: ConfirmOptions): Promise<boolean> {
   return new Promise(resolve => {
     let ok = false;
-    const button = h("button", { type: "button", class: `btn ${options.danger ? "btn-danger" : "btn-primary"}`, onclick: () => { ok = true; dialog.close(); } },
+    const button = h("button", { type: "button", class: `btn ${options.danger ? "btn-danger" : "btn-primary"}`, "data-pad-hold": options.danger, onclick: () => { ok = true; dialog.close(); } },
       options.confirm ?? t("Confirm"));
     const dialog = openDialog(options.title, h("div", { class: "confirm-body" }, options.message ? h("p", {}, options.message) : null), [button],
       { narrow: true, cancelLabel: t("Cancel") });
@@ -362,7 +363,11 @@ export function debounce<T extends unknown[]>(fn: (...args: T) => void, ms = 220
 }
 
 /** 键盘快捷键是否应忽略（正在输入时）。 */
+export function isTypingControl(target: HTMLElement | null): boolean {
+  return !!target && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+}
+
 export const typing = (event: KeyboardEvent) => {
   const target = event.target as HTMLElement | null;
-  return !!target && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+  return isTypingControl(target);
 };

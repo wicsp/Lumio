@@ -51,6 +51,14 @@ export function proposalBody(proposal: WorkProposal): HTMLElement | null {
     risky ? h("p", { class: "proposal-warn" }, icon("alert"), t("This plan runs commands or grants extra access. Check every step before approving.")) : null);
 }
 
+/** Permission-bearing plan proposals require a deliberate gamepad hold. */
+export function riskyProposal(proposal: WorkProposal): boolean {
+  const op = proposal.operation.args.operation;
+  if (op.op === "work.task.dispatch" || !op.args.plan) return false;
+  return op.args.plan.stages.some(stage => stage.kind === "agent"
+    && (stage.access === "full" || !!stage.hooks));
+}
+
 export interface ProposalContext { client: Client; navigate: Navigate; changed(): void }
 
 /** 今日与审批页共用的卡片。 */
@@ -59,14 +67,14 @@ export function proposalCard(proposal: WorkProposal, ctx: ProposalContext): HTML
   // 计划模板提议没有任务（ADR 0049 第 6 节）：标题不是跳转按钮。
   const task = "task" in args ? args.task : undefined;
   const heading = task
-    ? h("button", { type: "button", class: "attn-title", onclick: () => ctx.navigate("work", task) }, proposal.reason)
+    ? h("button", { type: "button", class: "attn-title", "data-pad-action": "detail", onclick: () => ctx.navigate("work", task) }, proposal.reason)
     : h("p", { class: "attn-title" }, proposal.reason);
   void Promise.all([actorName(ctx.client, proposal.author), task ? ctx.client.workTask(task).then(detail => detail.task.title, () => proposal.reason) : Promise.resolve("")])
     .then(([author, title]) => { heading.textContent = proposalTitle(proposal, author, title); });
-  const card = h("article", { class: `attn ${proposal.status === "pending" ? "attn-ochre" : "attn-done-state"}` });
+  const card = h("article", { tabindex: "0", "data-pad-row": proposal.id, class: `attn ${proposal.status === "pending" ? "attn-ochre" : "attn-done-state"}` });
   const error = h("div", { role: "alert" });
-  const approve = h("button", { type: "button", class: "btn btn-primary btn-small" }, icon("check"), t("Approve"));
-  const reject = h("button", { type: "button", class: "btn btn-small" }, icon("close"), t("Reject"));
+  const approve = h("button", { type: "button", class: "btn btn-primary btn-small", "data-pad-action": "primary", "data-pad-hold": riskyProposal(proposal) }, icon("check"), t("Approve"));
+  const reject = h("button", { type: "button", class: "btn btn-small", "data-pad-action": "reject" }, icon("close"), t("Reject"));
   let busy = false;
   const decide = async (yes: boolean) => {
     if (busy) return;

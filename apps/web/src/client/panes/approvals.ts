@@ -82,7 +82,7 @@ export class ApprovalsPane {
     if (isWorkProposal(proposal)) {
       clear(this.detail, h("div", { class: "detail" },
         h("div", { class: "detail-crumbs" },
-          h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": t("Back to list"), onclick: () => { this.selected = undefined; markSelected(this.list, undefined); this.showPlaceholder(); } }, icon("back")),
+          h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": t("Back to list"), "data-pad-back": true, onclick: () => { this.selected = undefined; markSelected(this.list, undefined); this.showPlaceholder(); } }, icon("back")),
           h("span", {}, title(proposal)),
           h("span", { class: `pill ${proposal.status === "pending" ? "pill-ochre" : proposal.status === "accepted" ? "pill-green" : ""}` }, STATUS[proposal.status])),
         proposalCard(proposal, { client: this.client, navigate: this.navigate, changed: () => { this.changed(); void this.load(); } })));
@@ -90,8 +90,8 @@ export class ApprovalsPane {
     }
     const note = h("div", { role: "alert" });
     const context = h("div", {});
-    const reject = h("button", { type: "button", class: "btn" }, icon("close"), t("Reject"));
-    const accept = h("button", { type: "button", class: "btn btn-danger" }, icon("check"), t("Accept and allow"));
+    const reject = h("button", { type: "button", class: "btn", "data-pad-action": "reject" }, icon("close"), t("Reject"));
+    const accept = h("button", { type: "button", class: "btn btn-danger", "data-pad-action": "primary", "data-pad-hold": op.op === "exec.privileged" }, icon("check"), t("Accept and allow"));
     let allowAccept = op.op !== "exec.privileged", pending = false;
     const buttons = () => { reject.disabled = pending; accept.disabled = pending || !allowAccept; };
     const decide = async (yes: boolean) => {
@@ -116,7 +116,7 @@ export class ApprovalsPane {
 
     clear(this.detail, h("div", { class: "detail" },
       h("div", { class: "detail-crumbs" },
-        h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": t("Back to list"), onclick: () => { this.selected = undefined; markSelected(this.list, undefined); this.showPlaceholder(); } }, icon("back")),
+        h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": t("Back to list"), "data-pad-back": true, onclick: () => { this.selected = undefined; markSelected(this.list, undefined); this.showPlaceholder(); } }, icon("back")),
         h("span", {}, op.op === "exec.privileged" ? t("Run a command as administrator") : op.op),
         h("span", { class: `pill ${proposal.status === "pending" ? "pill-ochre" : proposal.status === "accepted" ? "pill-green" : ""}` }, STATUS[proposal.status])),
       h("div", { class: "detail-head" }, h("h2", { class: "inline-title" }, proposal.reason)),

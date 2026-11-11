@@ -1534,3 +1534,28 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 .helper-notice-title { display: flex; gap: 6px; align-items: flex-start; font-size: var(--fs-sm); font-weight: 600; }
 .helper-notice-title .icon { width: 14px; height: 14px; flex: none; margin-top: 2px; color: var(--ochre); }
 .set-row.helper-row { flex-direction: column; align-items: flex-start; gap: 6px; }
+
+/* G1 controller focus is independent of native mouse and keyboard focus. */
+[data-gamepad-mode] [data-pad-focus] {
+  outline: 3px solid var(--focus);
+  outline-offset: -3px;
+  background: var(--hover);
+}
+[data-gamepad-mode] :is([data-pad-row], .row[data-id], [data-pad-action]) { scroll-margin-block: 12px 64px; }
+.pad-hints {
+  position: fixed; z-index: 59; bottom: var(--pad-hints-bottom, 12px); left: 50%; translate: -50% 0;
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 5px 14px; width: max-content; max-width: calc(100vw - 24px);
+  padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--r-lg); color: var(--ink);
+  background: var(--surface); box-shadow: var(--shadow-pop); font-size: var(--fs-sm); pointer-events: none;
+}
+.pad-hints span { display: inline-flex; align-items: center; gap: 6px; }
+.pad-hints kbd { flex: none; }
+.dialog > .pad-hints { position: static; translate: none; width: auto; margin: 4px 12px 12px; box-shadow: none; }
+[data-gamepad-mode]:has(.pad-hints) .toasts { bottom: calc(var(--pad-hints-bottom, 12px) + 60px); }
+@media (max-width: 720px) { [data-gamepad-mode] { --pad-hints-bottom: calc(62px + env(safe-area-inset-bottom)); } }
+.pad-hold { display: inline-flex; flex-direction: column; gap: 4px; margin: 8px; color: var(--ink-2); font-size: var(--fs-sm); }
+.pad-hold progress { width: 160px; height: 10px; accent-color: var(--focus); }
+.pad-mappings { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px 20px; }
+.gamepad-settings { padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+.pad-readout { white-space: pre-wrap; overflow-wrap: anywhere; }
+[data-pad-testing] { outline: 2px solid var(--focus); outline-offset: -2px; }
