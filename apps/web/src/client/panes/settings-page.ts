@@ -76,7 +76,7 @@ export class SettingsPane {
 
   private nav(): HTMLElement {
     const items = SETTINGS_SECTIONS.map(section => {
-      const item = h("a", { class: "set-nav-item", href: `#settings/${section.key}`, "aria-current": "false",
+      const item = h("a", { class: "set-nav-item", "data-pad-row": `settings:${section.key}`, href: `#settings/${section.key}`, "aria-current": "false",
         onclick: (event: Event) => { const click = event as MouseEvent; if (click.metaKey || click.ctrlKey || click.shiftKey) return; event.preventDefault(); this.navigate(section.key); } },
         h("span", { class: "set-nav-icon" }, icon(section.icon)),
         h("span", { class: "set-nav-text" }, h("span", { class: "set-nav-label" }, t(section.label)), h("span", { class: "set-nav-hint" }, t(section.hint))),
@@ -104,11 +104,13 @@ export class SettingsPane {
     const page = (...children: Array<Node | null | undefined | false>) => h("div", { class: "set-page" },
       h("header", { class: "set-head" }, h("h2", { class: "set-title" }, t(info.label)), h("p", { class: "set-lede" }, t(info.hint))), ...children);
     switch (key) {
-      case "general": {
-        const gamepad = this.gamepad ? new GamepadSettings(this.gamepad) : undefined;
+      case "general":
         return { element: page(
           this.group(t("Appearance"), t("Choose how Lumio looks on this device."), this.themes()),
-          this.group(t("Language"), t("Used for menus, dates and messages from the Hub."), this.languages()),
+          this.group(t("Language"), t("Used for menus, dates and messages from the Hub."), this.languages())) };
+      case "controls": {
+        const gamepad = this.gamepad ? new GamepadSettings(this.gamepad) : undefined;
+        return { element: page(
           this.group(t("Keyboard shortcuts"), undefined, h("div", { class: "set-rows" },
             this.row(t("Command menu"), h("span", { class: "set-value" }, h("kbd", {}, "⌘K"))),
             this.row(t("Switch sections"), h("span", { class: "set-value" }, h("kbd", {}, "1"), "–", h("kbd", {}, "6"))))),

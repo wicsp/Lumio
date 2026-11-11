@@ -60,6 +60,7 @@ class ElementStub extends EventTarget {
   matches(selector: string): boolean {
     if (selector === "dialog") return this.tagName === "DIALOG";
     if (selector === "[data-pad-region], .bar, .list-pane, .detail-pane") return !!this.dataset.padRegion;
+    if (selector === ".row.is-selected") return this.className === "is-selected";
     if (selector === ":disabled") return this.disabled;
     if (selector === ".is-busy, [inert]") return this.className === "is-busy" || this.hasAttribute("inert");
     if (selector === ROWS) return !!this.dataset.padRow || !!this.dataset.id;
@@ -356,4 +357,55 @@ test("a stick held through a pointer takeover waits for new controller activity"
   expect(body.hasAttribute("data-gamepad-mode")).toBe(false);
   navigation.handle({ phase: "activity" });
   expect(body.hasAttribute("data-gamepad-mode")).toBe(true);
+});
+
+test("returning to the gamepad follows a note selected while using the mouse", () => {
+  row.dataset.id = "pap_01J00000000000000000000001";
+  row.className = "is-selected";
+  const next = new ElementStub("ARTICLE");
+  next.dataset.id = "pap_01J00000000000000000000002";
+  next.bounds = { left: 0, right: 100, top: 40, bottom: 70 };
+  next.parent = pane;
+  pane.queries.set(ITEMS, [row, next]);
+  press("down");
+  navigation.leave(true);
+  row.className = "";
+  next.className = "is-selected";
+
+  // Opening a note can replace the document's detail without leaving DOM focus in the list.
+  press("down");
+  expect(doc.activeElement).toBe(next);
+  expect(next.hasAttribute("data-pad-focus")).toBe(true);
+  expect(row.hasAttribute("data-pad-focus")).toBe(false);
+});
+
+test("moving the mouse without selecting a different note preserves controller focus", () => {
+  row.dataset.id = "pap_01J00000000000000000000001";
+  row.className = "is-selected";
+  const next = new ElementStub("ARTICLE");
+  next.dataset.id = "pap_01J00000000000000000000002";
+  next.bounds = { left: 0, right: 100, top: 40, bottom: 70 };
+  next.parent = pane;
+  pane.queries.set(ITEMS, [row, next]);
+  press("down");
+  press("down");
+  expect(doc.activeElement).toBe(next);
+  navigation.leave(true);
+  navigation.handle({ phase: "activity" });
+  expect(doc.activeElement).toBe(next);
+});
+
+test("the open note has a focus target when it is outside the visible list", () => {
+  row.dataset.id = "pap_01J00000000000000000000001";
+  row.className = "is-selected";
+  press("down");
+  navigation.leave(true);
+  row.className = "";
+  const title = new ElementStub("DIV");
+  title.dataset.padSelection = "pap_01J00000000000000000000002";
+  title.parent = pane;
+  pane.queries.set("[data-pad-selection]", [title]);
+  press("down");
+  expect(doc.activeElement).toBe(title);
+  expect(title.hasAttribute("data-pad-focus")).toBe(true);
 });

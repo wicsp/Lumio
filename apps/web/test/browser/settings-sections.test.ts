@@ -13,6 +13,8 @@ describe("settings sections", () => {
   });
   test("route ids resolve to a section; empty or unknown ids mean the section list", () => {
     expect(settingsSection("ai")).toBe("ai");
+    expect(settingsSection("controls")).toBe("controls");
+    expect(DEFAULT_SETTINGS_SECTION).toBe("general");
     expect(settingsSection("")).toBeUndefined();
     expect(settingsSection(undefined)).toBeUndefined();
     expect(settingsSection("constructor")).toBeUndefined();

@@ -147,7 +147,7 @@ export class WorkbenchView {
     this.unsubscribePadStatus = this.gamepad.subscribe(({ pad }) => {
       if (pad && pad.mapping !== "standard" && !warned.has(pad.id)) {
         warned.add(pad.id);
-        toast(t("This controller’s buttons may be mismatched. You can remap them in Settings → General → Gamepad."));
+        toast(t("This controller’s buttons may be mismatched. You can remap them in Settings → Keyboard & gamepad."));
       }
     });
     const nav = h("nav", { class: "nav", "aria-label": t("Main navigation") });
