@@ -30,10 +30,10 @@ function dependentsClosure(id: string, tasks: readonly WorkTask[]): Set<string> 
   return seen;
 }
 
-/** 可以加为前置的任务：排除自己、已有前置和会成环的任务；未完成的排前面。 */
+/** 可以加为前置的同项目任务（无项目只匹配无项目）：排除自己、已有前置和会成环的任务；未完成的排前面。 */
 export function prerequisiteCandidates(task: WorkTask, tasks: readonly WorkTask[]): WorkTask[] {
   const blocked = dependentsClosure(task.id, tasks);
-  return tasks.filter(other => other.id !== task.id && !task.dependencies.includes(other.id) && !blocked.has(other.id) && other.outcome !== "cancelled")
+  return tasks.filter(other => other.project === task.project && other.id !== task.id && !task.dependencies.includes(other.id) && !blocked.has(other.id) && other.outcome !== "cancelled")
     .sort((a, b) => Number(a.outcome !== "open") - Number(b.outcome !== "open") || a.title.localeCompare(b.title));
 }
 
