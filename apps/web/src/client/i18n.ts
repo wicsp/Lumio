@@ -54,6 +54,7 @@ export const ZH: Record<string, string> = {
   "Lumio keeps the original text and has AI write a short card. Sort it later, or leave it for the AI to find when it's relevant.": "Lumio 会保留原文，并让 AI 写一张卡片。可以稍后分拣，也可以放着，等相关的时候让 AI 找出来。",
   "Already saved. It's in the list.": "已经存过了，就在列表里。",
   "You discarded this before. Restore it from Recently deleted if you want it back.": "你之前丢弃过它。想要回来的话，可以从「最近删除」恢复。",
+  "You discarded this before.": "你之前丢弃过它。",
   "{0} to sort": "{0} 条待分拣",
   "Nothing to sort. Paste a link above, or share one to Lumio from another app.": "没有待分拣的内容。在上面粘贴链接，或从其他 App 分享到 Lumio。",
   "Nothing saved yet.": "还没有保存任何内容。",
