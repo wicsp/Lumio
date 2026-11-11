@@ -1,6 +1,6 @@
 # S1-0 内置语音输入（与后续语音合成）
 
-依据：[ADR 0055](../adr/0055-speech-input-and-output.md)（Proposed，待人类批准；批准前只做 S1-1）。
+依据：[ADR 0055](../adr/0055-speech-input-and-output.md)（Accepted，2026-11-11 人类批准）。
 必读：`docs/DESIGN.md`、`docs/design/assistant.md`、`docs/design/web.md`、`docs/design/security.md`。
 
 ## 目标
@@ -25,7 +25,7 @@
 | S1-5 | 准确率：松手后整段再识别一次作为定稿（服务商支持时）；可选的 LLM 纠错与"提到的知识条目"建议，作为附加建议展示，人选择后才写入 | 待定 | 依 S1-4 试用结果再细化 |
 | S1-6 | 语音合成：口语摘要、逐句流式合成与播放、按说话键打断；协议另行细化后再开工 | 待定 | 依 ADR 0055 第 7 节 |
 
-S1-2 依赖 S1-1 与 ADR 0055 批准；S1-3 依赖 S1-2；S1-4 依赖 S1-3。手柄的"按住说话"见 [G1-0](G1-0-gamepad.md) 的 G1-4。
+S1-2 依赖 S1-1（服务商选定）；S1-3 依赖 S1-2；S1-4 依赖 S1-3。手柄的"按住说话"见 [G1-0](G1-0-gamepad.md) 的 G1-4。
 
 ## S1-3 验收要点
 
