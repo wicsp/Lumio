@@ -61,3 +61,7 @@ describe("icons", () => {
     }
   });
 });
+
+test("the app can receive shares into the Inbox (I1-5)", () => {
+  expect(MANIFEST.share_target).toEqual({ action: "/", method: "GET", params: { title: "title", text: "text", url: "url" } });
+});

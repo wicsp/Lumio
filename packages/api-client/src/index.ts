@@ -1,4 +1,4 @@
-import { CaptureCreate, CaptureCreateResult, KnowledgeAiNoteCommand, KnowledgeAiNoteResult, KnowledgeOriginal, KnowledgeOriginalShowArgs, ResourceSummary } from "@lumio/schema";
+import { Capture, CaptureCommand, CaptureList, CaptureListArgs, KnowledgeAIBinding, KnowledgeAIBindingUpdate, CaptureCreate, CaptureCreateResult, KnowledgeAiNoteCommand, KnowledgeAiNoteResult, KnowledgeOriginal, KnowledgeOriginalShowArgs, ResourceSummary } from "@lumio/schema";
 import {AIConnection,AIConnectionInput,AIProfile,AIProfileInput,AIConfiguration,AIRuntime,NativeConnectionAction,NativeConnectionView,NativeSession,NativeCreate,NativeAction,NativeEventRecord} from "@lumio/schema";
 import { AIQuotaSettings, AIQuotaView, AIQuotaViews, AliyunBillingUpdate } from "@lumio/schema";
 import { KnowledgeGraph, KnowledgeGraphArgs, Id, KnowledgeDocument, KnowledgeUpdateRequest, KnowledgeUpdateResult, KnowledgeRelatedRequest, KnowledgeRelatedResult, KnowledgeReferencesRequest, KnowledgeReferencesResult } from "@lumio/schema";
@@ -77,6 +77,22 @@ export function createClient(options: { url: string; token?: string; language?: 
   return {
     capture(input: CaptureCreate) {
       return request("/v2/inbox/captures", {}, CaptureCreateResult, validate(CaptureCreate, input));
+    },
+    captures(args: Partial<CaptureListArgs> = {}) {
+      const parsed = validate(CaptureListArgs, args);
+      return request("/v2/inbox/captures", { untriaged: String(parsed.untriaged), limit: String(parsed.limit) }, CaptureList);
+    },
+    getCapture(id: string) {
+      return request(`/v2/inbox/captures/${validate(idOf("cap"), id)}`, {}, Capture);
+    },
+    captureCommand(id: string, input: CaptureCommand) {
+      return request(`/v2/inbox/captures/${validate(idOf("cap"), id)}/commands`, {}, Capture, validate(CaptureCommand, input));
+    },
+    knowledgeBindings() {
+      return request("/v2/ai/knowledge-bindings", {}, KnowledgeAIBinding.array());
+    },
+    saveKnowledgeBinding(input: KnowledgeAIBindingUpdate) {
+      return request("/v2/ai/knowledge-bindings", {}, KnowledgeAIBinding.array(), validate(KnowledgeAIBindingUpdate, input), "PUT");
     },
     showOriginal(ref: string) {
       return request("/v2/knowledge/originals", validate(KnowledgeOriginalShowArgs, { ref }), KnowledgeOriginal);

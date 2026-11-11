@@ -66,6 +66,7 @@ export const placeholder = (iconName: string, text: string) =>
 // ───────────── 图标（本地路径，不加载远程资源） ─────────────
 
 const ICONS: Record<string, string> = {
+  inbox: "M4 13h4.5l1.5 2.5h4l1.5-2.5H20M4 13l2.5-8h11L20 13v6H4z",
   search: "M21 21l-4.3-4.3M17 10.5a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0",
   home: "M4 10.5 12 4l8 6.5V20h-5.5v-5.5h-5V20H4z",
   knowledge: "M5 4h5a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H5zM19 4h-5a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h5z",

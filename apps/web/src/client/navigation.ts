@@ -1,5 +1,5 @@
 /** 模块之间共用的导航类型（单独成文件，避免视图与模块互相引用）。 */
-export type Section = "overview" | "knowledge" | "work" | "execution" | "assistant" | "approvals" | "settings" | "trash";
+export type Section = "overview" | "inbox" | "knowledge" | "work" | "execution" | "assistant" | "approvals" | "settings" | "trash";
 export type Navigate = (section: Section, id?: string, intent?: string) => void;
 
 export interface Pane {
