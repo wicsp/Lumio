@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import {
-  CAPTURE_LIMITS, Capture, CaptureCommand, CaptureCreate, CaptureCreateResult, CaptureList, CaptureListArgs,
+  CAPTURE_LIMITS, Capture, CaptureCommand, CaptureCreate, CaptureCreateResult, CaptureList, CaptureListArgs, CaptureProxyUpdate,
   KnowledgeAIBinding, KnowledgeAIBindingUpdate, type CaptureError, type NoteRef,
 } from "@lumio/schema";
 import { CoreError, newId } from "@lumio/foundation";
@@ -11,6 +11,7 @@ import { HubError } from "./errors.ts";
 import { captureKind, extractCapture, normalizeCaptureUrl } from "./inbox-extract.ts";
 import { CaptureFailure, type CaptureNetwork } from "./inbox-fetch.ts";
 import { InboxFiles } from "./inbox-files.ts";
+import type { InboxProxySettings } from "./inbox-proxy-settings.ts";
 import { inboxConflict, inboxMissing, InboxStore, type StoredCapture } from "./inbox-store.ts";
 import { summarizeOriginal, type SummaryModel } from "./inbox-summary.ts";
 import { boundedText } from "./knowledge-authoring.ts";
@@ -24,6 +25,8 @@ export const INBOX_ROUTES = [
   { operation: "inbox.read", method: "GET", pattern: /^\/v2\/inbox\/captures$/, path: "/v2/inbox/captures" },
   { operation: "inbox.read", method: "GET", pattern: /^\/v2\/inbox\/captures\/(cap_[0-9A-HJKMNP-TV-Z]{26})$/, path: "/v2/inbox/captures/<id>" },
   { operation: "inbox.command", method: "POST", pattern: /^\/v2\/inbox\/captures\/(cap_[0-9A-HJKMNP-TV-Z]{26})\/commands$/, path: "/v2/inbox/captures/<id>/commands" },
+  { operation: "inbox.proxy-settings", method: "GET", pattern: /^\/v2\/inbox\/proxy-settings$/, path: "/v2/inbox/proxy-settings" },
+  { operation: "inbox.proxy-settings", method: "PUT", pattern: /^\/v2\/inbox\/proxy-settings$/, path: "/v2/inbox/proxy-settings" },
   { operation: "inbox.bindings", method: "GET", pattern: /^\/v2\/ai\/knowledge-bindings$/, path: "/v2/ai/knowledge-bindings" },
   { operation: "inbox.bindings", method: "PUT", pattern: /^\/v2\/ai\/knowledge-bindings$/, path: "/v2/ai/knowledge-bindings" },
 ] as const;
@@ -48,7 +51,8 @@ export class Inbox {
 
   constructor(private readonly config: HubConfig, private readonly hub: HubStore, private readonly ai: AIConfigurationService,
     private readonly trash: () => Trash, private readonly exclusive: <T>(action: () => Promise<T>) => Promise<T>,
-    private readonly now: () => Date, private readonly issue: (path: string, message: string) => void, private readonly options: InboxOptions = {},
+    private readonly now: () => Date, private readonly issue: (path: string, message: string) => void, private readonly proxy: InboxProxySettings,
+    private readonly options: InboxOptions = {},
     private readonly onReady?: (capture: Capture) => void) {
     this.state = new InboxStore(hub.db);
     ai.knowledgeProfileInUse = (profile, nextEngine) => this.state.profileInUse(profile, nextEngine);
@@ -68,6 +72,7 @@ export class Inbox {
   async stop() {
     this.stopping.abort();
     await this.worker;
+    await this.proxy.drain();
   }
 
   async handle(request: Request, operation: InboxOperation, id: string | undefined, identity: Identity): Promise<Response> {
@@ -75,6 +80,12 @@ export class Inbox {
     const owner = identity.actor.id;
     const params = new URL(request.url).searchParams;
     const respond = (value: unknown, status = 200) => Response.json(value, { status, headers: { "Cache-Control": "no-store" } });
+    if (operation === "inbox.proxy-settings") {
+      if (request.method === "GET") return respond(this.proxy.view());
+      const input = CaptureProxyUpdate.safeParse(await this.json(request, 40_960));
+      if (!input.success) throw invalid("inbox.proxy.invalid");
+      return respond(await this.proxy.update(input.data));
+    }
     if (operation === "inbox.bindings") {
       if (request.method === "GET") return respond(this.state.bindings(owner));
       const input = KnowledgeAIBindingUpdate.safeParse(await this.json(request));
@@ -106,8 +117,8 @@ export class Inbox {
     return respond(CaptureList.parse(this.state.list(owner, args.data)));
   }
 
-  private async json(request: Request): Promise<unknown> {
-    try { return JSON.parse(await boundedText(request.body, 6 * CAPTURE_LIMITS.max_content_chars + 32_768)); }
+  private async json(request: Request, limit = 6 * CAPTURE_LIMITS.max_content_chars + 32_768): Promise<unknown> {
+    try { return JSON.parse(await boundedText(request.body, limit)); }
     catch { throw invalid(); }
   }
 
@@ -257,7 +268,7 @@ export class Inbox {
     const capture = this.update(value, { state: "extracting" });
     try {
       const extracted = value.plan ? undefined : await extractCapture(capture.url, capture.kind!, capture.title, value.input.content,
-        this.stopping.signal, this.options.network);
+        this.stopping.signal, this.options.network ?? this.proxy.network());
       await this.exclusive(async () => {
         if (!value.plan) {
           const now = this.now();

@@ -98,7 +98,7 @@ export async function handleV2(request: Request, server: Pick<Bun.Server<undefin
       return response;
     }
     if (route.operation === "inbox.create" || route.operation === "inbox.read" ||
-        route.operation === "inbox.command" || route.operation === "inbox.bindings") {
+        route.operation === "inbox.command" || route.operation === "inbox.bindings" || route.operation === "inbox.proxy-settings") {
       return await modules.inbox.handle(request, route.operation, id, identity);
     }
     if (route.operation === "show") {

@@ -14,6 +14,7 @@ import { NoteRef } from "./query.ts";
  * - `GET  /v2/inbox/captures?untriaged=true|false&limit=`：CaptureList（新的在前）
  * - `GET  /v2/inbox/captures/<id>`：Capture
  * - `POST /v2/inbox/captures/<id>/commands`：CaptureCommand → Capture
+ * - `GET/PUT /v2/inbox/proxy-settings`：CaptureProxySettings / CaptureProxyUpdate（ADR 0062）
  * - `GET/PUT /v2/ai/knowledge-bindings`：KnowledgeAIBinding[] / KnowledgeAIBindingUpdate
  * Inbox 的"可能相关"复用编辑器相关推荐（`KnowledgeReferencesRequest`，ADR 0035），以捕获出的实体为来源，不另设接口。
  */
@@ -38,6 +39,34 @@ export const CAPTURE_LIMITS = {
 export const ORIGINALS_DIRECTORY = "files/originals";
 
 const HttpUrl = z.url({ protocol: /^https?$/ }).max(CAPTURE_LIMITS.max_url_chars);
+
+export const CAPTURE_PROXY_LIMITS = { address: CAPTURE_LIMITS.max_url_chars, bypass: 4096 } as const;
+const ProxyEndpoint = z.string().trim().pipe(z.url({ protocol: /^https?$/ }).max(CAPTURE_PROXY_LIMITS.address).refine(value => {
+  if (!URL.canParse(value)) return false;
+  const url = new URL(value);
+  return url.pathname === "/" && !url.search && !url.hash;
+}));
+const ProxyOrigin = ProxyEndpoint.refine(value => URL.canParse(value) && new URL(value).origin === value);
+const NoProxy = z.string().trim().max(CAPTURE_PROXY_LIMITS.bypass);
+
+export const CaptureProxySettings = z.discriminatedUnion("mode", [
+  z.strictObject({ revision: Revision, mode: z.literal("environment") }),
+  z.strictObject({ revision: Revision, mode: z.literal("custom"), proxy_origin: ProxyOrigin, no_proxy: NoProxy }),
+]);
+export type CaptureProxySettings = z.infer<typeof CaptureProxySettings>;
+
+export const CaptureProxyUpdate = z.discriminatedUnion("mode", [
+  z.strictObject({ expected_revision: Revision, mode: z.literal("environment") }),
+  z.strictObject({ expected_revision: Revision, mode: z.literal("custom"), proxy_url: ProxyEndpoint.optional(), no_proxy: NoProxy }),
+]);
+export type CaptureProxyUpdate = z.infer<typeof CaptureProxyUpdate>;
+
+/** Private file record. The URL may contain credentials. Use CaptureProxySettings for responses. */
+export const CaptureProxyRecord = z.discriminatedUnion("mode", [
+  z.strictObject({ revision: Revision, mode: z.literal("environment") }),
+  z.strictObject({ revision: Revision, mode: z.literal("custom"), proxy_url: ProxyEndpoint, no_proxy: NoProxy }),
+]);
+export type CaptureProxyRecord = z.infer<typeof CaptureProxyRecord>;
 
 /** 捕获从哪里来。 */
 export const CaptureChannel = z.enum(["web", "cli", "extension", "share"]);

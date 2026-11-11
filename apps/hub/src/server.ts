@@ -30,6 +30,7 @@ import { SpeechSessions, type SpeechSocketData } from "./speech.ts";
 import type { FunAsrOptions } from "./fun-asr.ts";
 import type { JevFetch } from "./jev.ts";
 import { AssistantConfiguration } from "./assistant-config.ts";
+import { InboxProxySettings } from "./inbox-proxy-settings.ts";
 import { configuredModel } from "./assistant-model.ts";
 import { V2_ROUTES, handleV2 } from "./v2.ts";
 import { Inbox, type InboxOptions } from "./inbox.ts";
@@ -132,8 +133,9 @@ async function startHubInstance(config: HubConfig, options: {
     if (config.vault) modules.aiNotes = new AiNotes(config, store, modules.resources,
       action => watch.exclusive(action), (path, message) => watch.issue(path, message), options.now ?? (() => new Date()));
     const now = options.now ?? (() => new Date());
+    const inboxProxy = await InboxProxySettings.open(config.stateDir);
     const inbox = modules.inbox = new Inbox(config, store, modules.ai, () => modules!.trash,
-      action => watch.exclusive(action), now, (path, message) => watch.issue(path, message), options.inbox,
+      action => watch.exclusive(action), now, (path, message) => watch.issue(path, message), inboxProxy, options.inbox,
       capture => modules!.notices.capture(capture));
     modules.trash = new Trash(config, store, modules, action => watch.exclusive(action), now, (path, message) => watch.issue(path, message), inbox);
     await modules.trash.sweep();
