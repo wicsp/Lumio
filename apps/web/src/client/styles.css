@@ -631,6 +631,16 @@ div.note-rich-preview { padding:4px 0; }
 .note-sources li { padding: 2px 0; overflow-wrap: anywhere; }
 .resource-link { color: var(--blue); text-decoration: underline dotted; text-underline-offset: 3px; }
 .resource-link.is-unavailable { color: var(--ink-3); }
+
+/* 资源卡片：助手消息中的紧凑任务/项目/笔记引用 */
+.resource-card { display: flex; align-items: center; gap: 10px; margin: 10px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); text-decoration: none; transition: background 0.15s, border-color 0.15s; }
+.resource-card:hover, .resource-card:focus-visible { background: var(--hover); border-color: var(--blue); }
+.resource-card-icon { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: var(--r-sm); background: var(--blue-wash); color: var(--blue); flex: none; }
+.resource-card-icon .icon { width: 18px; height: 18px; }
+.resource-card-content { min-width: 0; flex: 1; }
+.resource-card-type { display: block; margin-bottom: 2px; color: var(--ink-3); font-size: var(--fs-sm); font-weight: 500; text-transform: uppercase; letter-spacing: 0.3px; }
+.resource-card-title { display: block; color: var(--ink); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .msg-user.is-target, .msg-assistant.is-target, .msg-tool.is-target { outline: 2px solid var(--focus); outline-offset: 4px; border-radius: var(--r-md); }
 
 /* ───────────── 弹层 ───────────── */

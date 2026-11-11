@@ -10,6 +10,7 @@ import { newRequestId } from "./commands.ts";
 import { autosize, clear, failure, h, icon, toast } from "./dom.ts";
 import { t } from "./i18n.ts";
 import type { Navigate, Section } from "./navigation.ts";
+import { hydrateResourceCards } from "./resource-card.ts";
 import { openResource } from "./resources.ts";
 import { renderMarkdown } from "./utils/markdown.ts";
 import { toolCallView } from "./tool-call-view.ts";
@@ -144,6 +145,7 @@ export class MainDock {
   }
   private reply(text: string): HTMLElement {
     const body = h("div", { class: "markdown" }); body.innerHTML = renderMarkdown(text);
+    hydrateResourceCards(body, this.client, this.host.navigate);
     return h("div", { class: "msg-assistant dock-reply" }, body);
   }
 
@@ -273,6 +275,7 @@ export class MainDock {
       clear(this.notice, h("div", { class: "notice" }, icon("alert"), h("span", {}, controller.signal.aborted
         ? t("Stopped receiving. What was already done is saved in the conversation.") : errorText(cause))));
     } finally {
+      if (!this.disposed) hydrateResourceCards(content, this.client, this.host.navigate);
       content.classList.remove("streaming");
       if (!streamed && !content.childElementCount) content.remove();
       this.controller = undefined; this.setBusy(false);
