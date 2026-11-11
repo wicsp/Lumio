@@ -38,7 +38,7 @@ afterEach(async () => { if (daemon) { daemon.kill("SIGTERM"); await daemon.exite
 test("runtime installation commands pin the Hub release, while development and client invitations omit a version", async () => {
   const identity = hub.store.authenticate(`Bearer ${human}`)!;
   for (const version of ["0.1.4", "0.1.5-rc.1", "0.0.0-dev"]) {
-    const pairing = new Pairing(hub.store, { publicUrl: "https://synthetic.example" }, () => new Date(now), version);
+    const pairing = new Pairing(hub.store, { publicUrl: "https://synthetic.example" }, base, () => new Date(now), version);
     const runtime = RuntimeInvite.parse(pairing.invite("runtime", "server", identity));
     expect(runtime.command).toBe(`curl -fsSL https://raw.githubusercontent.com/wicsp/Lumio/main/install.sh | sh -s -- runtime${version === "0.0.0-dev" ? "" : ` --version v${version}`} --hub https://synthetic.example --code ${runtime.code}`);
     const client = ClientInvite.parse(pairing.invite("client", "cli@mac", identity));
@@ -58,8 +58,6 @@ test("explicit authorization table permits only public join, human invites/remov
   for (const token of [human, agent]) expect((await request("/v1/runtime/signing-key", token)).status).toBe(403);
   const key = HubSigningKey.parse(await (await request("/v1/runtime/signing-key", runtime)).json()); expect(key.fingerprint).toMatch(/^[a-f0-9]{4}(-[a-f0-9]{4}){3}$/);
   for (const token of [agent, runtime]) expect((await request("/v1/runtimes/server", token, undefined, "DELETE")).status).toBe(403);
-  await hub.stop(); hub = await boot("");
-  for (const kind of ["runtime", "client"]) { const res = await request(`/v1/${kind}-invites`, human, { name: "server" }); expect(res.status).toBe(400); expect(ApiError.parse(await res.json()).error.message).toContain("Hub 还没有对外地址"); }
 });
 
 test("new invite invalidates old codes, persists only hashes, expires exactly at ten minutes and returns identical 401", async () => {
@@ -148,10 +146,27 @@ test("logging in again from the same machine revokes the previous CLI token; a l
   expect(ApiError.parse(await refused.json()).error.message).toContain("--name");
 });
 
-test("without a public URL the pairing hint names --public-url and --server", async () => {
+test("without a public URL clients can pair using the bound local address", async () => {
+  await hub.stop(); hub = await boot("");
+  const invitation = ClientInvite.parse(await invite("client", "extension"));
+  expect(invitation.hub_url).toBe(base());
+  expect(invitation.command).toBe(`lumio login ${base()} --code ${invitation.code}`);
+  const response = await fetch(new URL("/v1/client/join", invitation.hub_url), {
+    method: "POST",
+    headers: { Origin: "chrome-extension://abcdefghijklmnopabcdefghijklmnop", "Content-Type": "application/json" },
+    body: JSON.stringify({ code: invitation.code }),
+  });
+  expect(response.status).toBe(200);
+  const client = ClientJoin.parse(await response.json());
+  expect(client.actor).toBe(hub.store.authenticate(`Bearer ${human}`)!.actor.id);
+  expect((await request("/v2/work/tasks", client.token)).status).toBe(200);
+});
+
+test("without a public URL the runtime pairing hint names --public-url and --server", async () => {
   await hub.stop(); hub = await boot("");
   const response = await request("/v1/runtime-invites", human, { name: "server" });
   expect(response.status).toBe(400);
   const message = ApiError.parse(await response.json()).error.message;
+  expect(message).toContain("Hub 还没有对外地址");
   expect(message).toContain("--public-url"); expect(message).toContain("--server");
 });

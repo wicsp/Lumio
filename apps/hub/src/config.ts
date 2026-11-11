@@ -67,6 +67,11 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env) {
 }
 export type HubConfig = ReturnType<typeof readConfig>;
 
+export function localHubUrl(hostname: string, port: number): string {
+  const host = hostname === "0.0.0.0" ? "127.0.0.1" : hostname === "::" ? "::1" : hostname;
+  return `http://${host.includes(":") ? `[${host}]` : host}:${port}`;
+}
+
 export function isLoopback(host: string): boolean {
   host = host.replace(/^\[|\]$/g, "");
   return host === "localhost" || host === "::1" || /^127\.\d+\.\d+\.\d+$/.test(host);

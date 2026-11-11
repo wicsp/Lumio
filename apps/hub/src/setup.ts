@@ -6,7 +6,7 @@ import { homedir, hostname } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { askTerminal, openTerminal } from "@lumio/platform";
 import { CliConfig, RuntimeName } from "@lumio/schema";
-import { readConfig, isLoopback, runtimeName, rememberLocalRuntime } from "./config.ts";
+import { readConfig, isLoopback, localHubUrl, runtimeName, rememberLocalRuntime } from "./config.ts";
 import { HubError } from "./errors.ts";
 import { HubStore } from "./store.ts";
 
@@ -148,9 +148,7 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
   const config = readConfig({ ...env, LUMIO_VAULT: vault, LUMIO_STATE_DIR: state, LUMIO_HUB_LISTEN: listen, LUMIO_PUBLIC_URL: publicUrl });
   if (!interactive) log(msg("setup.configuration_vault_listen_public_url_tailscale_will_not_be_enabled", vault, listen, config.publicUrl ?? msg("setup.not_set")));
   if (!config.port) throw new HubError("INVALID", { key: "setup.setup_requires_a_fixed_non_zero_port", args: [] });
-  // For a binding to one interface, the local client must use that interface as well.
-  const localHost = ["0.0.0.0", "::"].includes(config.hostname) ? "127.0.0.1" : config.hostname;
-  const url = `http://${localHost.includes(":") ? `[${localHost}]` : localHost}:${config.port}`;
+  const url = localHubUrl(config.hostname, config.port);
   if (publicUrl.startsWith("http://") && !isLoopback(new URL(publicUrl).hostname)) log(msg("setup.warning_the_public_url_uses_http_tokens_will_travel_in_plain_text_co"));
   const store = await HubStore.open(state);
   let token: string, runtimeToken: string;

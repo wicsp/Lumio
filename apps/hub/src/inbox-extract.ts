@@ -122,9 +122,10 @@ export async function extractCapture(
   if (url) validateCaptureUrl(new URL(url));
   let body = content?.body.trim() ?? "", extractor = "pasted@1", lang: string | undefined;
   if (content?.format === "html") {
-    const pasted = htmlText(/<html[\s>]/i.test(body) ? body : `<html><body>${body}</body></html>`, url, false, true);
-    ({ body, lang } = pasted);
-    title ??= pasted.title;
+    const page = htmlText(/<html[\s>]/i.test(body) ? body : `<html><body>${body}</body></html>`, url, false, true);
+    ({ body, lang } = page);
+    title ??= page.title;
+    extractor = "page-html@1";
   }
   if (kind === "paper") {
     const paperUrl = new URL(url!);

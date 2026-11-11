@@ -24,7 +24,8 @@ export function browserAllowed(request: Request, config: { hostname: string; pub
   const origins = new Set([...hosts.map(host => new URL(`http://${host}:${port}`).origin), ...(config.publicUrl ? [new URL(config.publicUrl).origin] : []), ...(config.webOrigins ?? [])]);
   const allowedHosts = new Set([...origins].map(origin => new URL(origin).host));
   const host = request.headers.get("host"), origin = request.headers.get("origin");
-  return Boolean(host && allowedHosts.has(host.toLowerCase()) && (origin === null || origins.has(origin)));
+  const extensionOrigin = origin !== null && /^(?:chrome|moz)-extension:\/\/[a-z0-9-]+$/i.test(origin);
+  return Boolean(host && allowedHosts.has(host.toLowerCase()) && (origin === null || origins.has(origin) || extensionOrigin));
 }
 export function browserDenied(): Response {
   return Response.json(ApiError.parse({ error: { code: "FORBIDDEN", message: msg("web.browser_origin_or_host_is_not_allowed") } }), { status: 403 });
