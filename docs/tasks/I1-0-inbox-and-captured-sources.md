@@ -23,7 +23,7 @@ I1-4 另读 `docs/design/execution.md`，I1-5、I1-7 另读 `docs/design/web.md`
 
 | 编号 | 内容 | 负责 | 改动范围 |
 |---|---|---|---|
-| I1-1 | 契约：`cap` 前缀与 `Capture`（输入、渠道、状态 `queued / extracting / summarizing / ready / failed`、实体 ID、`triaged`、错误）；捕获、列表、分拣、重试、重新抽取、深读的请求与结果；`paper` / `source` 的 `status` 增加 `reference`；原文文件 frontmatter（`of`、`url`、`captured`、`extractor`、`lang`、`sha256`、可选 `pdf` 文件 ID）；AI 用途绑定 `knowledge.summary`、`knowledge.embedding`（向量 Profile 只能绑向量用途）；能力 `knowledge.original.show`；搜索结果增加命中位置（`body` / `original`）、阅读状态与入库时间 | Claude 起草（ADR 已批准） | `packages/schema` |
+| I1-1 ✅ | 契约：`cap` 前缀与 `Capture`（输入、渠道、状态 `queued / extracting / summarizing / ready / failed`、实体 ID、`triaged`、错误）；捕获、列表、分拣、重试、重新抽取、深读的请求与结果；`paper` / `source` 的 `status` 增加 `reference`；原文文件 frontmatter（`of`、`url`、`captured`、`extractor`、`lang`、`sha256`、可选 `pdf` 文件 ID）；AI 用途绑定 `knowledge.summary`、`knowledge.embedding`（向量 Profile 只能绑向量用途）；能力 `knowledge.original.show`；搜索结果增加命中位置（`body` / `original`）、阅读状态与入库时间 | Claude 起草（ADR 已批准） | `packages/schema` |
 | I1-2 | Knowledge 与索引：`VAULT_LAYOUT` 增加非实体目录 `files/originals/`；原文文件的命名、写入（只由 Lumio 写）、读取；原文进入单独的全文表并映射回实体；实体模板开头的 AI 笔记嵌入段；`reference` 状态 | 后端（Codex） | `packages/knowledge`、`packages/storage` |
 | I1-3 | Hub 捕获流程：`POST /v2/inbox/captures` 等接口与 `lumio capture <url>`；URL 规范化与去重（含"曾丢弃"提示）；受限抓取（第 7 节的地址检查）；网页正文抽取、arXiv HTML 全文；生成实体与原文；Inbox 处理身份；卡片生成写 AI 笔记（原文放在明确的数据边界内，无工具调用）；深读；失败记录与人工重试；分拣与丢弃（实体、原文、AI 笔记一起进回收站）；`knowledge.original.show` 登记进能力目录 | 后端（Codex） | `apps/hub`、`packages/knowledge`（如需） |
 | I1-4 | 重的抽取走执行器：PDF 转 Markdown、字幕或音频下载、本地语音识别作为 command Job 运行登记过的程序，结果经托管文件交回后由 Hub 写入原文；可选改用云端语音识别（语音 Profile）；字幕所需 Cookie 只放在执行器机器上 | 后端（Codex） | `apps/hub`、`apps/runtime`、`packages/execution` |
@@ -32,6 +32,21 @@ I1-4 另读 `docs/design/execution.md`，I1-5、I1-7 另读 `docs/design/web.md`
 | I1-7 | 浏览器插件：把当前页面的 URL、标题与正文（人当前看到的内容）送到 Inbox；配对方式沿用 Web 登录 | 前端（Claude） | `apps/chrome-ext` |
 
 依赖：I1-2、I1-3 依赖 I1-1；I1-4、I1-5、I1-6、I1-7 依赖 I1-3。I1-3 做完即可日常使用（网页与 arXiv）。
+
+## I1-1 契约交接
+
+契约在 `packages/schema/src/inbox.ts`（2026-11-11）：
+
+- `Capture`、`CaptureCreate` / `CaptureCreateResult`（`duplicate: none / existing / discarded`）、`CaptureListArgs` / `CaptureList`、
+  `CaptureCommand`（`triage` / `retry` / `reextract` / `summarize`，都带 `expected_revision`）、`CAPTURE_LIMITS`、`CaptureErrorCode`。
+  处理状态 `state` 只有 `queued / extracting / ready / failed`；卡片单独记在 `card`（`none / pending / ready / deep / failed`），没有卡片不影响入库。
+- HTTP 路径写在 `inbox.ts` 文件头注释里；全部只授予 human。Inbox 的"可能相关"复用 `KnowledgeReferencesRequest`（ADR 0035），以捕获出的实体为来源。
+- `READING_STATUSES` / `ReadingStatus` 在 `entities.ts`，`paper` 与 `source` 的 `status` 都用它（增加 `reference`）。
+- `ORIGINALS_DIRECTORY`、`OriginalFrontmatter`（`of` 只能是 `pap_` / `src_`；`extractor` 形如 `readability@1`）。
+- `SearchHit` 增加可选的 `matched_in`（`body / original / semantic`）、`status`、`created`。
+- `KnowledgeAIBinding` / `KnowledgeAIBindingUpdate`（`knowledge.summary` / `knowledge.embedding`）；`AIProfile.engine` 增加 `embedding`。
+  Hub 现有规则已拒绝把 `embedding` Profile 用于聊天；I1-3 校验摘要 Profile 为 `lumio`，I1-6 校验向量 Profile 为 `embedding`。
+- `knowledge.original.show`：`KnowledgeOriginalShowArgs` / `KnowledgeOriginal` / `ORIGINAL_SUMMARY` 已定义，**未登记进 `CAPABILITIES`**，由 I1-3 实现时登记（同 K4-3）。
 
 ## 实现约定
 

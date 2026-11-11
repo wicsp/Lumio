@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { Id, Sha256, Timestamp } from "./common.ts";
-import { Citekey } from "./entities.ts";
+import { Citekey, ReadingStatus } from "./entities.ts";
 
 /**
  * 查询结果的契约：CLI 的 `--json` 输出与 Hub 查询 API 的响应体（ADR 0014 第 2 节）。
@@ -23,6 +23,10 @@ export const NoteRef = z.strictObject({
 export const SearchHit = z.strictObject({
   note: NoteRef,
   snippet: z.string().describe("命中位置附近的一段纯文本，不超过 200 个字符"),
+  // ADR 0057：命中位置、阅读状态与入库时间，缺失表示不适用或未知（旧 Hub 不返回）。
+  matched_in: z.enum(["body", "original", "semantic"]).optional().describe("body：笔记正文或标题；original：资料原文；semantic：只按意思相近（向量）命中"),
+  status: ReadingStatus.optional().describe("论文与资料的阅读状态"),
+  created: Timestamp.optional().describe("笔记的 created，资料即入库时间"),
 });
 
 export const SearchResult = z.strictObject({
