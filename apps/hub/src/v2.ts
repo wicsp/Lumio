@@ -7,6 +7,7 @@ import { HubError } from "./errors.ts";
 import type { HubStore, Identity } from "./store.ts";
 import type { authorize } from "./authorize.ts";
 import { handleArtifacts } from "./artifacts.ts";
+import { isTaskProposalCapability } from "./capabilities.ts";
 
 export const V2_ROUTES = [
   { operation: "resource.read", method: "GET", pattern: /^\/v2\/resources\/([^/]+)$/, path: "/v2/resources/<id>" },
@@ -200,7 +201,10 @@ export async function handleV2(request: Request, server: Pick<Bun.Server<undefin
         audited = true; return respond(value, 202);
       }
       if (commandDecision.result !== "allow") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: commandDecision.result === "deny" ? commandDecision.reason : msg("v2.approval_required") });
-      if (capability(operation.op)) return respond((await modules.capabilities.execute(operation.op, operation.args, identity, request_id)).result);
+      // These Work commands already have an HTTP path with its own transactional audit.
+      if (capability(operation.op) && !isTaskProposalCapability(operation.op)) {
+        return respond((await modules.capabilities.execute(operation.op, operation.args, identity, request_id)).result);
+      }
       const receipt = operation.op === "work.task.delete" && identity.actor.role === "human"
         ? modules.workStore.receipt(identity.actor.id, request_id)?.result : undefined;
       const referenceCount = operation.op === "work.task.delete" && identity.actor.role === "human"

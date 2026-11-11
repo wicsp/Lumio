@@ -27,7 +27,7 @@ import type { AssistantContext } from "@lumio/assistant";
 import type { AssistantService } from "@lumio/assistant";
 import type { SqliteAssistantStore } from "@lumio/storage";
 import type { AIConfigurationService } from "./ai-config.ts";
-import { assistantToolDescription, isAiNoteCapability, type Capabilities } from "./capabilities.ts";
+import { assistantToolDescription, isAiNoteCapability, isTaskProposalCapability, type Capabilities } from "./capabilities.ts";
 import { AIUsage } from "./ai-usage.ts";
 import type { Notifications } from "./notifications.ts";
 import type { SpeechConfiguration } from "./speech-config.ts";
@@ -906,7 +906,7 @@ export class NativeAssistant {
         this.ai.invalidate(s.id);
         await this.interrupt(s.id);
       }
-      if (known) throw isAiNoteCapability(def.name) ? e : problem("native.tool_failed", "FORBIDDEN");
+      if (known) throw isAiNoteCapability(def.name) || isTaskProposalCapability(def.name) ? e : problem("native.tool_failed", "FORBIDDEN");
       throw problem("native.unknown", "CONFLICT");
     }
   }

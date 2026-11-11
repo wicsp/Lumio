@@ -2,7 +2,7 @@ import { CoreError } from "@lumio/foundation";
 import type { AiNotes } from "./ai-notes.ts";
 import type { ConversationSource, Resources } from "./resources.ts";
 import type { WorkCommands } from "./work-commands.ts";
-import type { WorkService } from "@lumio/work";
+import { WorkError, type WorkService } from "@lumio/work";
 import type { ExecutionRoutines } from "@lumio/execution";
 import { assertNoteVisible } from "./trash.ts";
 import { AI_NOTE_CAPABILITY_NAMES, KnowledgeAiNoteCommand, capability, RESPONSE_REASONS, CAPABILITIES, toolName, WorkCommandRequest, WorkAttention, type CapabilityChange, type CapabilityNameOf } from "@lumio/schema";
@@ -33,7 +33,14 @@ export function isAiNoteCapability(name: string): boolean {
 
 export interface CapabilityResult { result: unknown; change?: CapabilityChange; private_read?: boolean }
 
+export function isTaskProposalCapability(name: string): boolean {
+  return name === "work.task.dispatch" || name === "work.task.plan.set";
+}
+
 export function assistantToolDescription(def: (typeof CAPABILITIES)[number]): string {
+  if (isTaskProposalCapability(def.name)) {
+    return `${def.summary.en} First read the task with ${toolName("work.task.show")} and pass its revision as expected_revision. Use ${toolName("execution.target.list")} to check delegation targets.`;
+  }
   if (def.name !== "work.task.update") return def.summary.en;
   return `${def.summary.en} To add, remove, or reorder prerequisites, first read the task with ${toolName("work.task.show")} and use its revision as expected_revision. Set patch.dependencies to the complete list of prerequisite task IDs, preserving any dependencies the user did not ask to change. Use [] to clear all prerequisites. To make A wait for B, put B's ID in A's dependencies. The Hub checks for cycles and stale revisions.`;
 }
@@ -79,7 +86,8 @@ export class Capabilities {
     const operation = aiNote ? "knowledge.ai-note" : def.kind === "write" ? "work.command" : name.startsWith("knowledge.") ? name.split(".")[2]!
       : name.startsWith("work.") ? "work.read" : name === "execution.job.list" ? "jobs" : name === "execution.job.show" ? "job.show" : name === "approval.proposal.list" ? "proposals" : "execution.read";
     const decision = this.decide(identity.actor, { operation, ...(def.kind === "write" ? { command: name, args } : {}), includePrivate });
-    if (decision.result !== "allow") {
+    const taskProposal = isTaskProposalCapability(name);
+    if (decision.result === "deny" || (decision.result === "needs_approval" && !taskProposal)) {
       this.store.audit(identity, name, decision.result, undefined, "FORBIDDEN");
       throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: decision.result === "deny" ? decision.reason : msg("v2.approval_required") });
     }
@@ -94,6 +102,17 @@ export class Capabilities {
     if (def.kind === "write") {
       const input = WorkCommandRequest.safeParse({ request_id: requestId, operation: { op: name, args } });
       if (!input.success) throw new HubError("INVALID", { key: "capability.invalid", args: [] });
+      if (taskProposal) {
+        try {
+          return { result: def.result.parse(this.modules.workCommands.execute(input.data, identity)) };
+        } catch (cause) {
+          if (cause instanceof WorkError) {
+            const reason = cause.params.key === "index.task_changed_reload_before_dispatching" ? "revision_conflict" : cause.reason;
+            throw new HubError(cause.code, cause.params, { reason });
+          }
+          throw cause;
+        }
+      }
       return this.store.db.transaction(() => {
         let before: Record<string, unknown> | undefined;
         if (name.endsWith(".update")) {

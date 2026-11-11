@@ -7,7 +7,7 @@ import { KnowledgeRevision } from "./knowledge-editing.ts";
 import { LinksResult, NOTE_TYPES, NoteDetail, NoteRef, SearchResult } from "./query.ts";
 import {
   ProjectStatus, TaskStatus, WorkCommandResult, WorkProject, WorkProjectCreate, WorkProjectUpdate,
-  WorkAttention, WorkTask, WorkTaskComment, WorkTaskCreate, WorkTaskDetail, WorkTaskHand, WorkTaskUpdate,
+  WorkAttention, WorkTask, WorkTaskComment, WorkTaskCreate, WorkTaskDetail, WorkTaskDispatch, WorkTaskHand, WorkTaskPlanSet, WorkTaskUpdate,
 } from "./work.ts";
 
 /**
@@ -25,8 +25,8 @@ import {
 export const CAPABILITY_KINDS = ["read", "write"] as const;
 export const CapabilityKind = z.enum(CAPABILITY_KINDS);
 
-/** 能力名称：`<模块>.<对象>.<动作>`，只用小写字母、数字、点和单个下划线（工具名见 toolName）。 */
-export const CapabilityName = z.string().regex(/^[a-z][a-z0-9]*(_[a-z0-9]+)*(\.[a-z][a-z0-9]*(_[a-z0-9]+)*){2}$/);
+/** 能力名称：模块、对象、动作，可带一级子动作。工具名见 toolName。 */
+export const CapabilityName = z.string().regex(/^[a-z][a-z0-9]*(_[a-z0-9]+)*(\.[a-z][a-z0-9]*(_[a-z0-9]+)*){2,3}$/);
 
 /** 给模型和 skill 看的说明；英文为基准（ADR 0028、0029）。 */
 export const CapabilitySummary = z.strictObject({ en: z.string().min(1), zh: z.string().min(1) });
@@ -165,6 +165,10 @@ export const CAPABILITIES = [
     summary: { en: "Change task fields. Tasks have outcome and turn, with no status or assignee; only the user decides completion.", zh: "修改任务字段。任务没有状态与负责人；完成由用户决定。" } }),
   define({ name: "work.task.comment", kind: "write", args: WorkTaskComment.shape.args, result: WorkCommandResult,
     summary: { en: "Add a comment to a task's discussion.", zh: "在任务讨论里发表评论。" } }),
+  define({ name: "work.task.dispatch", kind: "write", args: WorkTaskDispatch.shape.args, result: WorkCommandResult,
+    summary: { en: "Delegate or continue a task. Agent calls propose the delegation and require user approval before it starts.", zh: "委派或继续任务。agent 调用时提交提议，用户批准后才开始执行轮次。" } }),
+  define({ name: "work.task.plan.set", kind: "write", args: WorkTaskPlanSet.shape.args, result: WorkCommandResult,
+    summary: { en: "Set, replace, or clear a task handoff plan. Agent calls require user approval. Saving the plan does not start a round. Use null to clear it.", zh: "设置、替换或清除任务交接计划。agent 调用时需要用户批准。保存计划后仍需另行派出执行。传 null 清除计划。" } }),
   define({ name: "work.task.hand", kind: "write", args: WorkTaskHand.shape.args, result: WorkCommandResult,
     summary: { en: "Hand a task back to the human or to external waiting (with a note). Agents cannot hand to nobody.", zh: "交回给人或交给外部等待（附说明）。agent 不能交给无人。" } }),
   define({ name: "work.project.create", kind: "write", args: WorkProjectCreate.shape.args, result: WorkCommandResult,

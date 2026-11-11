@@ -17,7 +17,6 @@ describe("capability catalog (ADR 0029 §2)", () => {
       expect(toolName(name)).toMatch(/^[a-zA-Z0-9_-]{1,64}$/);
       expect(capabilityFromTool(toolName(name))?.name).toBe(name);
     }
-    expect(capability("work.task.dispatch")).toBeUndefined();
   });
 
   test("every capability has English and Chinese summaries and exportable JSON Schemas", () => {
@@ -30,11 +29,11 @@ describe("capability catalog (ADR 0029 §2)", () => {
     }
   });
 
-  test("writes are low-risk Work and AI note commands and own-proposal withdrawal; dispatch and approval decisions are absent", () => {
+  test("writes include Work proposals and own-proposal withdrawal; approval decisions are absent", () => {
     const writes = CAPABILITIES.filter((item) => item.kind === "write").map((item) => item.name).sort();
-    expect(writes).toEqual(["approval.proposal.withdraw", "knowledge.ainote.create", "knowledge.ainote.update", "work.project.create", "work.project.update", "work.task.comment", "work.task.create", "work.task.hand", "work.task.update"]);
+    expect(writes).toEqual(["approval.proposal.withdraw", "knowledge.ainote.create", "knowledge.ainote.update", "work.project.create", "work.project.update", "work.task.comment", "work.task.create", "work.task.dispatch", "work.task.hand", "work.task.plan.set", "work.task.update"]);
     for (const name of writes.filter(name => name.startsWith("work."))) expect(WorkCommand.options.some((option) => option.shape.op.value === name)).toBe(true);
-    expect(CAPABILITY_NAMES.some((name) => /dispatch|accept|reject|routine\.(create|update)|privileged/.test(name))).toBe(false);
+    expect(CAPABILITY_NAMES.some((name) => /accept|reject|routine\.(create|update)|privileged/.test(name))).toBe(false);
   });
 
   test("write arguments are the Work command arguments", () => {
@@ -44,6 +43,17 @@ describe("capability catalog (ADR 0029 §2)", () => {
     const update = capability("work.task.update")!;
     expect(update.args.safeParse({ task: TASK, expected_revision: 3, patch: { title: "Updated" } }).success).toBe(true);
     expect(update.args.safeParse({ task: TASK, expected_revision: 3, patch: {} }).success).toBe(false);
+  });
+
+  test("task plan proposals use the Work plan arguments and proposal result", () => {
+    const plan = capability("work.task.plan.set")!;
+    expect(plan.kind).toBe("write");
+    const args = { task: TASK, expected_revision: 3, plan: null };
+    expect(plan.args.parse(args)).toEqual(args);
+    expect(plan.args.safeParse({ task: TASK, plan: null }).success).toBe(false);
+    const proposed = { kind: "proposal", proposal: "prop_01JABCDEFGHJKMNPQRSTVWXYZ0" } as const;
+    expect(plan.result.parse(proposed)).toEqual(proposed);
+    expect(capability("work.task.dispatch")?.result.parse(proposed)).toEqual(proposed);
   });
 
   test("task updates cannot bypass outcome and turn commands", () => {
@@ -113,14 +123,15 @@ describe("rounds that need the user (ADR 0030)", () => {
     expect(WorkAttention.safeParse({ ...item, kind: "waiting" }).success).toBe(false);
     expect(capability("work.attention.list")?.kind).toBe("read");
   });
-  test("answer-and-continue is a dispatch with a comment; acknowledge names a round; neither is an agent capability", () => {
+  test("answer-and-continue is a dispatch proposal with a comment; acknowledge is not an agent capability", () => {
     const dispatch = { request_id: "req_answer_continue_01", operation: { op: "work.task.dispatch", args: { task: TASK, to: "pi@server", expected_revision: 3, comment: "中文，确认继续" } } };
     expect(WorkCommandRequest.safeParse(dispatch).success).toBe(true);
+    expect(capability("work.task.dispatch")?.args.parse(dispatch.operation.args)).toEqual(dispatch.operation.args);
     expect(WorkCommandRequest.safeParse({ ...dispatch, operation: { ...dispatch.operation, args: { task: TASK, comment: "" } } }).success).toBe(false);
     const acknowledge = { request_id: "req_acknowledge_0001", operation: { op: "work.task.acknowledge", args: { task: TASK, round: 2 } } };
     expect(WorkCommandRequest.safeParse(acknowledge).success).toBe(false);
     expect(capability("work.task.acknowledge")).toBeUndefined();
-    expect(capability("work.task.dispatch")).toBeUndefined();
+    expect(capability("work.task.dispatch")?.kind).toBe("write");
   });
   test("executions stored before ADR 0030 still parse", () => {
     const execution = { task: TASK, job: JOB, round: 1, input_revision: 1, input_snapshot: "", created: NOW, applied: true };
