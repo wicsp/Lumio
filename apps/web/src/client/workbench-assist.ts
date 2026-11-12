@@ -73,6 +73,8 @@ export const IDLE_BEFORE_NAVIGATE_MS = 3000;
 
 export interface PageActivity {
   now: number;
+  /** A navigation requested by the current chat may follow activity before that message, never activity after it. */
+  requestedAt?: number;
   /** 最近一次输入、滚动、点击或按键的时间。 */
   lastActivity: number;
   /** 焦点在输入框、文本区或可编辑区域里，或有打开的对话框。 */
@@ -82,7 +84,9 @@ export interface PageActivity {
 }
 
 export function canNavigateNow(activity: PageActivity): boolean {
-  return activity.attentive && !activity.editing && activity.now - activity.lastActivity >= IDLE_BEFORE_NAVIGATE_MS;
+  return activity.attentive && !activity.editing && (activity.requestedAt === undefined
+    ? activity.now - activity.lastActivity >= IDLE_BEFORE_NAVIGATE_MS
+    : activity.lastActivity <= activity.requestedAt);
 }
 
 type Navigate = Extract<WorkbenchAction, { action: "navigate" }>;

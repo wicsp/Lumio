@@ -30,7 +30,7 @@ export interface DockHost {
   focus(): FocusInput;
   navigate: Navigate;
   /** 跳转与高亮；人正在操作时跳转返回 deferred。 */
-  apply(action: Extract<WorkbenchAction, { action: "navigate" | "highlight" }>): "applied" | "deferred";
+  apply(action: Extract<WorkbenchAction, { action: "navigate" | "highlight" }>, requestedAt?: number): "applied" | "deferred";
   clearHighlights(): void;
   /** 面板开合改变布局。 */
   layout(open: boolean): void;
@@ -57,6 +57,7 @@ export class MainDock {
   private mode: FocusMode = "auto";
   private pinned?: FocusInput;
   private chipGeneration = 0;
+  private panelGeneration = 0;
   private disposed = false;
   private shown = new Set<string>();
   /** 正在探索的对象 ID（来自 Hub，定时刷新）。 */
@@ -217,6 +218,7 @@ export class MainDock {
   private async submit(): Promise<void> {
     const message = this.text.value.trim();
     if (!message || this.controller) return;
+    const origin = { requestedAt: Date.now(), page: this.host.focus() };
     const input = this.focusInput();
     const focus = input && buildFocus({ ...input, ...(input.id ? { label: input.label ?? this.titles.get(input.id) } : {}) });
     await this.start();
@@ -256,7 +258,7 @@ export class MainDock {
         }
         else if (event.type === "topic") void this.topic(event.anchors, block);
         else if (event.type === "notice") { this.remember(event.notice.id); this.messages.append(this.noticeCard(event.notice)); }
-        else if (event.type === "ui") this.act(event.action, extras);
+        else if (event.type === "ui") this.act(event.action, extras, origin);
         else if (event.type === "result") {
           // 以保存的最终回复为准：模型没有逐字输出（或只在工具调用后才回复）时也能显示出来。
           const final = event.messages.filter(message => message.role === "assistant" && message.content.trim()).map(message => message.content).join("\n\n");
@@ -299,10 +301,15 @@ export class MainDock {
   }
 
   /** 执行一个展示动作。面板在这里画；跳转与高亮交给工作台。 */
-  private act(action: WorkbenchAction, where: HTMLElement): void {
+  private act(action: WorkbenchAction, where: HTMLElement, origin?: { requestedAt: number; page: FocusInput }): void {
     if (action.action === "show") { void this.show(action.panel); return; }
     if (action.action === "clear") { this.closePanel(); return; }
-    if (this.host.apply(action) === "deferred" && action.action === "navigate") {
+    const current = this.host.focus();
+    if (action.action === "navigate" && current.section === action.section && current.id === action.target?.id) return;
+    const moved = action.action === "navigate" && origin && (current.section !== origin.page.section || current.id !== origin.page.id);
+    const outcome = moved ? "deferred" : this.host.apply(action, origin?.requestedAt);
+    if (outcome === "applied" && action.action === "navigate") this.closePanel();
+    if (outcome === "deferred" && action.action === "navigate") {
       const [section, id] = navigateRoute(action);
       where.append(h("button", { type: "button", class: "btn btn-small take-me", onclick: (event: Event) => {
         (event.currentTarget as HTMLElement).remove(); this.host.navigate(section as Section, id);
@@ -310,9 +317,11 @@ export class MainDock {
     }
   }
 
-  private closePanel(): void { clear(this.panel); this.panel.hidden = true; this.host.clearHighlights(); }
+  private closePanel(): void { this.panelGeneration++; clear(this.panel); this.panel.hidden = true; this.host.clearHighlights(); }
 
   private async show(panel: WorkbenchPanel): Promise<void> {
+    const generation = ++this.panelGeneration;
+    const current = () => !this.disposed && generation === this.panelGeneration;
     const close = h("button", { type: "button", class: "icon-btn", "aria-label": t("Close"), onclick: () => this.closePanel() }, icon("close"));
     const body = h("div", { class: "dock-panel-body" });
     const heading = panel.kind === "dependency_graph" ? t("Dependency graph") : panel.title ?? (panel.kind === "search" ? t("Search results") : t("Related"));
@@ -329,7 +338,7 @@ export class MainDock {
     if (panel.kind === "refs") {
       const rows = panel.refs.map(ref => {
         const label = h("span", {}, ref.label ?? ref.id);
-        void this.title(ref.id).then(title => { if (title) label.textContent = title; });
+        void this.title(ref.id).then(title => { if (current() && title) label.textContent = title; });
         return h("button", { type: "button", class: "panel-card", onclick: () => void openResource(this.client, this.host.navigate, ref.id) }, label);
       });
       clear(body, ...rows);
@@ -338,6 +347,7 @@ export class MainDock {
     clear(body, h("p", { class: "muted" }, t("Loading…")));
     try {
       const all = await this.client.workTasks();
+      if (!current()) return;
       const tasks = all.filter(task => task.project === panel.project.id);
       const open = tasks.filter(task => task.outcome === "open");
       if (!open.length) { clear(body, h("p", { class: "muted" }, t("No unfinished tasks to draw."))); return; }
@@ -347,6 +357,6 @@ export class MainDock {
         return { state: group, sub: group === "blocked" ? t("Waiting on {0}", task.blocked_by!.length) : group === "todo" ? t("Ready to start") : turnText(task) };
       });
       clear(body, dependencyGraph(nodes, edges, id => this.host.navigate("work", id)));
-    } catch (cause) { clear(body, failure(errorText(cause))); }
+    } catch (cause) { if (current()) clear(body, failure(errorText(cause))); }
   }
 }

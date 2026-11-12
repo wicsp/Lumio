@@ -198,7 +198,7 @@ export class WorkbenchView {
     this.dock = new MainDock(session.client, {
       focus: () => this.focusInput(),
       navigate: (section, id, intent) => void this.go(section, id, intent),
-      apply: action => this.applyAction(action),
+      apply: (action, requestedAt) => this.applyAction(action, requestedAt),
       clearHighlights: () => this.clearHighlights(),
       layout: open => shell.classList.toggle("dock-open", open),
     });
@@ -340,13 +340,13 @@ export class WorkbenchView {
   }
 
   /** 助手的跳转与高亮（ADR 0060 第 2、3 节）。人正在操作页面时不跳转，交给面板显示「带我过去」。 */
-  private applyAction(action: Extract<WorkbenchAction, { action: "navigate" | "highlight" }>): "applied" | "deferred" {
+  private applyAction(action: Extract<WorkbenchAction, { action: "navigate" | "highlight" }>, requestedAt?: number): "applied" | "deferred" {
     if (action.action === "navigate") {
       const active = document.activeElement;
-      const editing = !!document.querySelector("dialog[open]") || (!!active && this.main.contains(active) &&
+      const editing = !!this.current?.pane.dirty || !!document.querySelector("dialog[open]") || (!!active && this.main.contains(active) &&
         (active.matches("input, textarea, select") || (active as HTMLElement).isContentEditable));
       const attentive = document.visibilityState === "visible" && document.hasFocus();
-      if (!canNavigateNow({ now: Date.now(), lastActivity: this.lastActivity, editing, attentive })) return "deferred";
+      if (!canNavigateNow({ now: Date.now(), lastActivity: this.lastActivity, requestedAt, editing, attentive })) return "deferred";
       const [section, id] = navigateRoute(action);
       void this.go(section, id);
       return "applied";
