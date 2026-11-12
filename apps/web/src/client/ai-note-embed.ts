@@ -45,6 +45,12 @@ export function aiNoteLine(line: string): { id: string; label: string } | undefi
   return id ? { id, label: md[1]!.trim() } : undefined;
 }
 
+/** Keep the initial caret off a leading card so opening a material shows its embed. */
+export function initialNoteCursor(body: string): number {
+  const end = body.indexOf("\n");
+  return end >= 0 && aiNoteLine(body.slice(0, end)) ? end + 1 : 0;
+}
+
 export function aiNoteCard(client: Client, id: string, label: string, options: EmbedOptions): HTMLElement {
   const title = h("span", { class: "ai-embed-title" }, label || t("AI note"));
   const body = h("div", { class: "ai-embed-body markdown", hidden: true });

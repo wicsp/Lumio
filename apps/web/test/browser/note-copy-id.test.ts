@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
-import { NoteDetail } from "@lumio/schema";
+import { Capture, NoteDetail } from "@lumio/schema";
+import { InboxPane } from "../../src/client/panes/inbox.ts";
 import { KnowledgePane } from "../../src/client/panes/knowledge.ts";
 import { lang, setLang, t } from "../../src/client/i18n.ts";
 
@@ -114,4 +115,49 @@ test("an unavailable clipboard shows an error instead of claiming success", asyn
   await Promise.resolve();
   expect(body.textContent).toContain("Couldn't copy ID");
   expect(body.textContent).not.toContain("ID copied");
+});
+
+
+test("material pages expose a safe prominent source link and an archive menu in either language", () => {
+  for (const language of ["en", "zh"] as const) for (const type of ["paper", "source", "idea"] as const) {
+    setLang(language, false);
+    const detail = new ElementStub("section");
+    const pane = Object.assign(Object.create(KnowledgePane.prototype), {
+      detail, client: {}, outline: { refresh() {} }, enableEditing: async () => {},
+    }) as { render(note: NoteDetail, links: undefined): void };
+    for (const url of ["https://example.com/material", "javascript:alert(1)"]) {
+      pane.render(NoteDetail.parse({ note: { type, title: "Material", path: "library/papers/material.md" }, frontmatter: { url }, body: "Synthetic body" }), undefined);
+      const link = detail.find(node => node.tag === "a" && node.textContent === t("Open original link"));
+      const more = detail.find(node => node.attrs["aria-label"] === t("More"));
+      if (type === "idea") { expect(link).toBeUndefined(); expect(more).toBeUndefined(); }
+      else {
+        expect(more?.tag).toBe("button");
+        if (url.startsWith("https:")) {
+          expect(link?.attrs).toMatchObject({ href: url, target: "_blank", rel: "noopener noreferrer nofollow" });
+          expect(link?.className).toContain("btn-primary");
+        } else expect(link).toBeUndefined();
+      }
+      expect(detail.textContent).not.toContain(t("View archived text"));
+    }
+  }
+});
+
+test("collection actions retain open, retry and removal without reading-state or deep-read choices", () => {
+  const pane = Object.assign(Object.create(InboxPane.prototype), { summaryConfigured: true }) as { actions(capture: Capture): ElementStub };
+  for (const card of ["none", "ready", "deep", "failed"] as const) {
+    const capture = Capture.parse({ id: "cap_00000000000000000000000001", owner: "act_00000000000000000000000001",
+      channel: "web", revision: 1, created: "2026-11-12T00:00:00Z", updated: "2026-11-12T00:00:00Z", attempt: 1,
+      state: "ready", card, triage: "read", url: "https://example.com/material",
+      entity: { type: "paper", id: "pap_00000000000000000000000001", title: "Material", path: "library/papers/material.md" } });
+    const actions = pane.actions(capture);
+    expect(actions.textContent).toContain(t("Open in knowledge base"));
+    expect(actions.textContent).toContain(t("Open original link"));
+    for (const label of ["Deep read", "To read", "Archive", "Original"]) expect(actions.textContent).not.toContain(t(label));
+    expect(actions.find(node => node.attrs["aria-label"] === t("Remove"))?.className).toContain("icon-btn");
+    expect(!!actions.find(node => node.textContent === t("Write a card"))).toBe(card === "none");
+    expect(!!actions.find(node => node.textContent === t("Try the card again"))).toBe(card === "failed");
+    const unsafe = pane.actions(Capture.parse({ ...capture, url: "https://example.com/material", state: "failed", error: { code: "fetch_failed", message: "Synthetic failure" } }));
+    expect(unsafe.textContent).toContain(t("Retry"));
+    expect(unsafe.textContent).toContain(t("Paste the text"));
+  }
 });

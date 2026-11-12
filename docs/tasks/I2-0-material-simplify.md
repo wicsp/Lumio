@@ -1,6 +1,6 @@
 # I2-0 资料入库后的显示与入口收敛
 
-依据：[ADR 0065](../adr/0065-material-ai-card-host-inbox-without-triage.md)（Accepted，2026-11-12 人类批准）。
+依据：[ADR 0065](../adr/0065-material-ai-card-host-inbox-without-triage.md)（Implemented，2026-11-12）。
 必读：`docs/DESIGN.md`、`docs/design/knowledge.md`（「来源与 AI 笔记」「外部资料与 Inbox」「搜索」）；I2-3 另读 `docs/design/web.md` 与 `apps/web/README.md`。
 
 ## 目标
@@ -75,3 +75,10 @@
 - 资料页的"问助手"入口：等单入口助手的锚点上下文（A1-0）提供后再接。
 - 删除资料时连带移走原文与 AI 笔记（目前只有 Inbox 的移除会三件一起进回收站）。
 - 删除契约中暂不使用的分拣与深读字段。
+
+## 交付记录
+
+- I2-1：PR #214，派生宿主索引与结果收敛；人类批准同步 core 的单个索引版本测试断言。
+- I2-2：PR #212，已有资料补嵌入、四项提示词、收藏夹查询。
+- I2-3：收藏夹与资料页入口收敛，侧栏取消分拣计数，打开编辑器仍显示首行卡片。
+- 验证：三个切片分别通过 `bun run check`；临时合成 Hub + 假模型完成桌面/窄屏、存档只读与移除确认验收。无新增依赖、契约修改或业务数据迁移。

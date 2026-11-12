@@ -1,19 +1,19 @@
 /**
- * Inbox（ADR 0057，I1-5）：未分拣的捕获。粘贴链接或正文存下来，Hub 解析出原文并让 AI 写卡片；
- * 人在这里分拣（想读 / 存档 / 已读 / 丢弃）。不分拣也能被检索到。
+ * Inbox（ADR 0065，I2-3）：收藏夹。粘贴链接或正文存下来，资料即进入知识库；
+ * 失败的置顶，其余按保存时间排列，不要求分拣。
  *
  * - 处理中的条目每 2 秒刷新一次，处理完就停。
  * - 卡片是这条资料的 AI 笔记；"可能相关"用卡片内容做词法相关推荐（ADR 0035），实时计算、不保存。
  * - 系统分享（PWA share target）带来的链接在 main.ts 暂存，这里取出后直接捕获。
  */
-import { type Capture, type CaptureCommand, type CaptureCreate, type CaptureTriage, type NoteDetail, type KnowledgeRelatedResult } from "@lumio/schema";
+import { type Capture, type CaptureCommand, type CaptureCreate, type NoteDetail, type KnowledgeRelatedResult } from "@lumio/schema";
 import { errorText, isConflict, type Client } from "../api.ts";
 import { newRequestId, formatTime } from "../commands.ts";
-import { autosize, clear, empty, failure, h, icon, loading, openDialog, toast } from "../dom.ts";
+import { autosize, clear, confirmDialog, empty, failure, h, icon, loading, openDialog, toast } from "../dom.ts";
 import { ago } from "../format.ts";
 import { t, translated } from "../i18n.ts";
 import type { Navigate } from "../navigation.ts";
-import { renderMarkdown } from "../utils/markdown.ts";
+import { renderMarkdown, safeExternalUrl } from "../utils/markdown.ts";
 
 const SHARE_KEY = "lumio.web.share";
 const POLL_MS = 2000;
@@ -59,7 +59,6 @@ const busy = (capture: Capture) => capture.state === "queued" || capture.state =
 
 const KIND_LABEL = translated({ paper: "Paper", web: "Web page", video: "Video", podcast: "Podcast", text: "Pasted text" });
 const KIND_ICON: Record<string, string> = { paper: "file", web: "globe", video: "play", podcast: "mic", text: "edit" };
-const TRIAGE_LABEL: Record<CaptureTriage, string> = translated({ "to-read": "To read", reading: "Reading", read: "Read", reference: "Archive", discard: "Discarded" });
 const ERROR_TEXT = translated({
   blocked: "This address isn't allowed: it points to this computer or a private network.",
   fetch_failed: "Couldn't download the page.",
@@ -77,12 +76,16 @@ function hostOf(url: string | undefined): string {
   try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; }
 }
 
+export function collectionCaptures(captures: readonly Capture[]): Capture[] {
+  return captures.filter(capture => capture.triage !== "discard").sort((a, b) =>
+    Number(b.state === "failed") - Number(a.state === "failed") || Date.parse(b.created) - Date.parse(a.created) || b.id.localeCompare(a.id));
+}
+
 export class InboxPane {
   private input = autosize(h("textarea", { rows: "1", class: "inbox-input", "aria-label": t("Link or text to save"), placeholder: t("Paste a link, or text to save…") }));
   private save = h("button", { type: "button", class: "btn btn-primary" }, t("Save"));
   private list = h("div", { class: "inbox-list" });
   private meta = h("span", { class: "bar-meta" });
-  private untriaged = true;
   private captures: Capture[] = [];
   private rows = new Map<string, { key: string; row: HTMLElement }>();
   private generation = 0;
@@ -91,13 +94,6 @@ export class InboxPane {
   private summaryConfigured?: boolean;
 
   constructor(root: HTMLElement, private client: Client, private navigate: Navigate, private changed: () => void) {
-    const seg = h("div", { class: "segmented", role: "group", "aria-label": t("Show") });
-    for (const [value, label] of [[true, "To sort"], [false, "All"]] as const) {
-      seg.append(h("button", { type: "button", "aria-pressed": String(value === this.untriaged), onclick: (event: Event) => {
-        this.untriaged = value; seg.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(b === event.currentTarget)));
-        this.rows.clear(); void this.load();
-      } }, t(label)));
-    }
     this.input.addEventListener("keydown", event => {
       if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); void this.submit(); }
     });
@@ -106,12 +102,11 @@ export class InboxPane {
       h("header", { class: "bar" },
         h("h1", { class: "bar-title" }, t("Inbox"), this.meta),
         h("span", { class: "bar-spacer" }),
-        seg,
         h("button", { type: "button", class: "icon-btn", title: t("Refresh"), "aria-label": t("Refresh"), onclick: () => void this.load() }, icon("refresh"))),
       h("div", { class: "inbox-scroll" }, h("div", { class: "inbox-page" },
         h("form", { class: "inbox-capture", onsubmit: (event: Event) => { event.preventDefault(); void this.submit(); } },
           this.input, this.save),
-        h("p", { class: "field-hint inbox-hint" }, t("Lumio keeps the original text and has AI write a short card. Sort it later, or leave it for the AI to find when it's relevant.")),
+        h("p", { class: "field-hint inbox-hint" }, t("Your saved materials are in the knowledge base. Come here to pick something to read.")),
         this.list)));
     void this.load();
     void this.loadBindings();
@@ -155,7 +150,7 @@ export class InboxPane {
         if (result.capture.entity?.id) toast(t("You discarded this before. Restore it from Recently deleted if you want it back."), "ok", { label: t("Open Recently deleted"), run: () => this.navigate("trash") });
         else toast(t("You discarded this before."), "ok");
       }
-      this.upsert(result.capture, true);
+      this.upsert(result.capture);
       this.changed();
       return true;
     } catch (cause) {
@@ -171,10 +166,10 @@ export class InboxPane {
     clearTimeout(this.timer);
     if (!quiet && !this.captures.length) clear(this.list, loading());
     try {
-      const { captures, total } = await this.client.captures({ untriaged: this.untriaged, limit: 100 });
+      const { captures, total } = await this.client.captures({ untriaged: false, limit: 200 });
       if (!this.active || generation !== this.generation) return;
-      this.captures = captures;
-      this.meta.textContent = this.untriaged ? (total ? t("{0} to sort", total) : "") : "";
+      this.captures = collectionCaptures(captures);
+      this.meta.textContent = total > captures.length ? t("Showing {0} of {1} saved items", captures.length, total) : "";
       this.render();
     } catch (cause) {
       if (this.active && generation === this.generation && !quiet) clear(this.list, failure(errorText(cause), () => void this.load()));
@@ -187,13 +182,9 @@ export class InboxPane {
     if (this.active && this.captures.some(busy)) this.timer = setTimeout(() => void this.load(true), POLL_MS);
   }
 
-  /** 新捕获或命令结果：放进列表（新的在最上面），未分拣视图里去掉已分拣的。 */
-  private upsert(capture: Capture, first = false): void {
-    const others = this.captures.filter(item => item.id !== capture.id);
-    const exists = others.length !== this.captures.length;
-    if (this.untriaged && capture.triage) this.captures = others;
-    else if (exists && !first) this.captures = this.captures.map(item => item.id === capture.id ? capture : item);
-    else this.captures = [capture, ...others];
+  /** Merge live updates, preserving the collection order and excluding removed items. */
+  private upsert(capture: Capture): void {
+    this.captures = collectionCaptures([capture, ...this.captures.filter(item => item.id !== capture.id)]);
     this.render();
     this.schedule();
   }
@@ -201,7 +192,7 @@ export class InboxPane {
   private render(): void {
     if (!this.captures.length) {
       this.rows.clear();
-      clear(this.list, empty(this.untriaged ? t("Nothing to sort. Paste a link above, or share one to Lumio from another app.") : t("Nothing saved yet.")));
+      clear(this.list, empty(t("Nothing saved yet.")));
       return;
     }
     const next = new Map<string, { key: string; row: HTMLElement }>();
@@ -224,7 +215,7 @@ export class InboxPane {
     const meta = [KIND_LABEL[kind], hostOf(capture.url), ago(capture.created)].filter(Boolean).join(" · ");
     const status = this.statusPill(capture);
     const body = h("div", { class: "inbox-body" });
-    const row = h("article", { class: `inbox-row${capture.triage ? " is-triaged" : ""}`, tabindex: "0", "data-pad-row": capture.id },
+    const row = h("article", { class: "inbox-row", tabindex: "0", "data-pad-row": capture.id },
       h("div", { class: "inbox-head" },
         h("span", { class: "inbox-kind", title: KIND_LABEL[kind] }, icon(KIND_ICON[kind] ?? "file")),
         h("div", { class: "inbox-main" },
@@ -240,11 +231,10 @@ export class InboxPane {
   }
 
   private statusPill(capture: Capture): HTMLElement | null {
-    if (capture.triage) return h("span", { class: `pill${capture.triage === "discard" ? " pill-red" : ""}` }, TRIAGE_LABEL[capture.triage]);
     if (capture.state === "queued" || capture.state === "extracting") return h("span", { class: "pill pill-blue" }, icon("refresh", "icon spin"), capture.state === "queued" ? t("Waiting") : t("Extracting"));
     if (capture.state === "failed") return h("span", { class: "pill pill-red" }, t("Failed"));
     if (capture.card === "pending") return h("span", { class: "pill pill-blue" }, icon("refresh", "icon spin"), t("Writing card"));
-    return null;
+    return h("span", { class: "pill" }, t("Saved"));
   }
 
   private fillBody(body: HTMLElement, capture: Capture): void {
@@ -263,8 +253,14 @@ export class InboxPane {
     } else if ((capture.card === "ready" || capture.card === "deep") && capture.ai_note) {
       const card = h("div", { class: "inbox-card markdown" }, h("p", { class: "muted" }, t("Loading…")));
       const related = h("div", { class: "inbox-related", hidden: true });
+      const toggle = h("button", { type: "button", class: "btn btn-small", "aria-expanded": "false" }, t("Show"));
+      toggle.addEventListener("click", () => {
+        const expanded = card.classList.toggle("is-expanded");
+        toggle.setAttribute("aria-expanded", String(expanded));
+        toggle.textContent = expanded ? t("Hide") : t("Show");
+      });
       body.append(h("div", { class: "inbox-card-wrap" },
-        h("span", { class: "pill ai-pill", title: t("Written by AI") }, capture.card === "deep" ? t("AI · deep read") : t("AI")), card), related);
+        h("span", { class: "pill ai-pill", title: t("Written by AI") }, t("AI")), card, toggle), related);
       void this.loadCard(capture, card, related);
     }
   }
@@ -275,11 +271,10 @@ export class InboxPane {
     catch { if (this.active) clear(card, h("p", { class: "muted" }, t("This AI note isn't available."))); return; }
     if (!this.active) return;
     card.innerHTML = renderMarkdown(note.body);
-    if (capture.card === "deep") card.classList.add("is-long");
     let hits: KnowledgeRelatedResult["hits"] = [];
     try {
       const result = await this.client.relatedNotes({ title: note.note.title, text: note.body.slice(0, 20000), focus: "", ...(capture.entity?.id ? { exclude_id: capture.entity.id } : {}) });
-      hits = result.hits.filter(hit => hit.note.id !== capture.ai_note && hit.note.id !== capture.entity?.id && hit.note.type !== "ai-note").slice(0, 3);
+      hits = result.hits.filter(hit => hit.note.id !== capture.ai_note && hit.note.id !== capture.entity?.id).slice(0, 3);
     } catch { return; }
     if (!this.active || !hits.length) return;
     related.hidden = false;
@@ -292,6 +287,12 @@ export class InboxPane {
     const bar = h("div", { class: "inbox-actions" });
     const command = (action: CaptureCommand["action"], done?: string) => async (event: Event) => {
       const button = event.currentTarget as HTMLButtonElement;
+      if (action.op === "triage" && action.triage === "discard" && !(await confirmDialog({
+        title: t("Remove this saved item?"),
+        message: t("The material, archived text and AI card will move to Recently deleted."),
+        confirm: t("Remove"), danger: true,
+      }))) return;
+      if (!this.active) return;
       bar.querySelectorAll("button").forEach(b => { b.disabled = true; });
       try {
         const updated = await this.client.captureCommand(capture.id, { request_id: newRequestId("inbox"), expected_revision: capture.revision, action });
@@ -301,7 +302,6 @@ export class InboxPane {
           else toast(t("Discarded"), "ok");
         } else if (done) toast(done, "ok");
         this.upsert(updated);
-        if (action.op === "triage" && this.untriaged) void this.load(true);
         this.changed();
       } catch (cause) {
         if (!this.active) return;
@@ -311,33 +311,25 @@ export class InboxPane {
         button.focus();
       }
     };
-    const triage = (value: CaptureTriage, label: string, done: string, iconName: string, primary = false) =>
-      h("button", { type: "button", class: `btn btn-small${primary ? " btn-primary" : ""}`, onclick: command({ op: "triage", triage: value }, done) }, icon(iconName), t(label));
-
-    if (capture.state === "failed" && !capture.triage) {
+    if (capture.state === "failed") {
       // 地址被拒绝、类型不支持、页面太大时，原样重试不会有不同结果，只提供粘贴正文。
       const pointless = capture.error && ["blocked", "unsupported", "too_large"].includes(capture.error.code);
       if (!pointless) bar.append(h("button", { type: "button", class: "btn btn-small btn-primary", "data-pad-action": "retry", onclick: command({ op: "retry" }) }, icon("refresh"), t("Retry")));
       bar.append(h("button", { type: "button", class: `btn btn-small${pointless ? " btn-primary" : ""}`, onclick: () => this.pasteAndRetry(capture, command) }, icon("edit"), t("Paste the text")));
     }
-    if (capture.state === "ready" && !capture.triage) {
-      bar.append(
-        triage("to-read", "To read", t("Kept in your reading list."), "flag", true),
-        triage("reference", "Archive", t("Archived. The AI can still find it."), "folder"),
-        triage("read", "Read", t("Marked as read."), "check"));
-    }
     if (capture.state === "ready" && capture.triage !== "discard") {
-      bar.append(h("button", { type: "button", class: "btn btn-small btn-quiet", onclick: () => void this.showOriginal(capture) }, icon("file"), t("Original")));
-      if (capture.card === "ready" || capture.card === "failed" || (capture.card === "none" && this.summaryConfigured)) {
-        const deep = capture.card === "ready";
+      if (capture.card === "failed" || (capture.card === "none" && this.summaryConfigured)) {
         bar.append(h("button", { type: "button", class: "btn btn-small btn-quiet",
-          onclick: command({ op: "summarize", depth: deep ? "deep" : "card" }, deep ? t("The AI is reading the full text.") : t("The AI is writing a card.")) },
-        icon("assistant"), deep ? t("Deep read") : capture.card === "failed" ? t("Try the card again") : t("Write a card")));
+          onclick: command({ op: "summarize", depth: "card" }, t("The AI is writing a card.")) },
+        icon("assistant"), capture.card === "failed" ? t("Try the card again") : t("Write a card")));
       }
     }
-    if (!capture.triage && (capture.state === "ready" || capture.state === "failed")) {
+    if (capture.entity) bar.append(h("button", { type: "button", class: "btn btn-small", onclick: () => this.openEntity(capture) }, icon("file"), t("Open in knowledge base")));
+    const url = capture.url && safeExternalUrl(capture.url);
+    if (url) bar.append(h("a", { href: url, target: "_blank", rel: "noopener noreferrer nofollow", class: "btn btn-small" }, icon("external"), t("Open original link")));
+    if (capture.state === "ready" || capture.state === "failed") {
       bar.append(h("span", { class: "bar-spacer" }),
-        h("button", { type: "button", class: "icon-btn row-delete", title: t("Discard"), "aria-label": t("Discard"), "data-pad-action": "discard",
+        h("button", { type: "button", class: "icon-btn row-delete", title: t("Remove"), "aria-label": t("Remove"), "data-pad-action": "discard",
           onclick: command({ op: "triage", triage: "discard" }) }, icon("trash")));
     }
     return bar;
@@ -355,22 +347,6 @@ export class InboxPane {
     const dialog = openDialog(t("Paste the text"), h("div", { class: "form-stack" },
       h("p", { class: "field-hint" }, t("Copy the article from your browser and paste it here. Lumio saves it as the original.")), area), [go], { wide: true });
     area.focus();
-  }
-
-  private async showOriginal(capture: Capture): Promise<void> {
-    const ref = capture.entity?.id ?? capture.entity?.path;
-    if (!ref) return;
-    const body = h("div", { class: "inbox-original markdown" }, loading());
-    const head = h("p", { class: "field-hint" });
-    openDialog(capture.entity?.title || t("Original"), h("div", { class: "form-stack" }, head, body), [], { wide: true, cancelLabel: t("Close") });
-    try {
-      const original = await this.client.showOriginal(ref);
-      const fm = original.frontmatter;
-      head.textContent = [t("Saved {0}", formatTime(fm.captured)), fm.url ? hostOf(fm.url) : "", t("Third-party content, read-only")].filter(Boolean).join(" · ");
-      body.innerHTML = renderMarkdown(original.body);
-    } catch (cause) {
-      clear(body, failure(errorText(cause)));
-    }
   }
 
   private openEntity(capture: Capture): void {

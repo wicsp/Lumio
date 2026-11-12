@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { renderInline, renderMarkdown } from "../../src/client/utils/markdown.ts";
 import { MESSAGE_SEPARATOR, aiNoteIdOf, referenceConsequence, resourceRoute } from "../../src/client/resources.ts";
-import { aiNoteLine } from "../../src/client/ai-note-embed.ts";
+import { aiNoteLine, initialNoteCursor } from "../../src/client/ai-note-embed.ts";
 
 // ADR 0051（K4-4）：lumio: 链接、来源跳转与 AI 笔记嵌入的纯函数部分。只用合成 ID。
 const ULID = "01JA0000000000000000000000";
@@ -64,4 +64,13 @@ describe("resource routes", () => {
     expect(referenceConsequence(0)).toEqual([]);
     expect(referenceConsequence(2)).toHaveLength(1);
   });
+});
+
+
+test("opening a material starts the caret after its leading card without rewriting the document", () => {
+  const link = `[AI note](../../ai/notes/Title%20${ain}.md)`;
+  const body = link + "\n\nHuman notes";
+  expect(initialNoteCursor(body)).toBe(link.length + 1);
+  expect(aiNoteLine(body.slice(0, initialNoteCursor(body)).trim())?.id).toBe(ain);
+  for (const text of ["Human notes\n" + link, "", "```\n" + link, link]) expect(initialNoteCursor(text)).toBe(0);
 });

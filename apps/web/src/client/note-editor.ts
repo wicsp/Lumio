@@ -14,7 +14,7 @@ import { footnotes, referenceTrigger, insertReference, protectedText } from "./n
 import { chineseQuoteInput, chineseQuoteChange } from "./note-input.ts";
 import { activatePreview } from "./note-preview.ts";
 import { OUTLINE_DEPTH, markdownHeadings, mayHaveHeadings } from "./article-outline.ts";
-import { aiNoteLine } from "./ai-note-embed.ts";
+import { aiNoteLine, initialNoteCursor } from "./ai-note-embed.ts";
 import type { RailEntry } from "./side-rail.ts";
 type Hit = KnowledgeReferencesResult["hits"][number];
 type ReferenceCompletion = Completion & { hit: Hit; terms: string[] };
@@ -98,7 +98,7 @@ export class NoteEditor {
         insert.addEventListener("mousedown", event => event.preventDefault());
         this.help.append(this.message, insert);
         const field = StateField.define<DecorationSet>({ create: state => this.decorate(state), update: (value, tr) => tr.docChanged || tr.selection ? this.decorate(tr.state) : value, provide: f => EditorView.decorations.from(f) });
-        this.view = new EditorView({ parent: this.editor, state: EditorState.create({ doc: options.value, extensions: [
+        this.view = new EditorView({ parent: this.editor, state: EditorState.create({ doc: options.value, selection: { anchor: options.embed ? initialNoteCursor(options.value) : 0 }, extensions: [
                     this.lock.of(EditorState.readOnly.of(false)), EditorView.contentAttributes.of({ "aria-label": t("Note body"), spellcheck: "true" }),
                     EditorView.cspNonce.of(document.querySelector<HTMLMetaElement>('meta[name="lumio-style-nonce"]')?.content ?? ""),
                     history(), markdown(), chineseQuoteInput, EditorView.lineWrapping, field,
