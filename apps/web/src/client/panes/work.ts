@@ -48,7 +48,7 @@ export class WorkPane {
   private active = true;
   private unbindKeys: () => void;
 
-  constructor(private root: HTMLElement, private client: Client, private hub: HubExtras, private mode: Mode, initialId: string | undefined, private navigate: Navigate, private changed: () => void, private focusChanged?: () => void) {
+  constructor(private root: HTMLElement, private client: Client, private hub: HubExtras, private mode: Mode, initialId: string | undefined, private navigate: Navigate, private changed: () => void, private focusChanged?: (resetSharing: boolean) => void) {
     this.query.placeholder = mode === "tasks" ? t("Search tasks") : t("Search projects");
     this.statusButton.addEventListener("click", () => this.pickStatusFilter());
     this.projectButton.addEventListener("click", () => this.pickProjectFilter());
@@ -87,13 +87,13 @@ export class WorkPane {
     if (record.id !== this.selected) return undefined;
     return this.editor?.focus ?? { module: "work", id: record.id, label: record.title, revision: String(record.revision) };
   }
-  private clearFocus(): void {
+  private clearFocus(resetSharing = false): void {
     this.displayed = undefined;
-    this.focusChanged?.();
+    this.focusChanged?.(resetSharing);
   }
   /** 静默刷新列表；详情只在没有未保存内容、焦点不在详情里时重新载入。 */
   private closeDetail(): void {
-    this.detailGeneration++; this.editor?.dispose(); this.editor = undefined; this.clearFocus();
+    this.detailGeneration++; this.editor?.dispose(); this.editor = undefined; this.clearFocus(true);
     this.clearDock();
     this.selected = undefined; markSelected(this.list, undefined); this.showPlaceholder();
   }
@@ -330,7 +330,7 @@ export class WorkPane {
       if (location.hash !== hash) history.replaceState(null, "", hash);
     }
     this.split.classList.add("has-detail");
-    if (!quiet || this.focus?.id !== id) this.clearFocus();
+    if (!quiet || this.focus?.id !== id) this.clearFocus(!quiet);
     if (!quiet) { this.editor?.dispose(); this.editor = undefined; this.clearDock(); clear(this.detail, loading()); }
     try {
       const object = id.startsWith("task_") ? await this.client.workTask(id) : await this.client.workProject(id);
@@ -346,7 +346,7 @@ export class WorkPane {
       clear(this.detail);
       this.displayed = object;
       this.renderEditor(object, id);
-      this.focusChanged?.();
+      this.focusChanged?.(false);
       if (quiet) this.detail.scrollTop = scroll;
     } catch (error) {
       if (!live && this.active && generation === this.detailGeneration) {
@@ -360,7 +360,7 @@ export class WorkPane {
 
   private renderEditor(object: WorkTaskDetail | WorkProject, id: string): void {
     this.editor = new WorkEditor(this.detail, this.dock, this.client, this.hub, object, this.projects, {
-      changed: () => { this.changed(); this.focusChanged?.(); void this.load(); },
+      changed: () => { this.changed(); this.focusChanged?.(false); void this.load(); },
       reload: () => void this.open(id, true),
       back: () => { if (this.canLeave()) this.closeDetail(); },
       navigate: this.navigate,
