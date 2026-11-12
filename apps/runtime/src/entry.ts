@@ -20,8 +20,26 @@ import { prepareMigration } from "./prepare-migration.ts";
 import { StorageError } from "@lumio/storage";
 import { sampleClaudeFromStdin } from "./claude-usage.ts";
 import { setupClaudeQuota } from "./native/claude-quota.ts";
+import { updateCheck } from "./update-check.ts";
+import { trustBuildKey } from "./trust-build-key.ts";
+import { readFile } from "node:fs/promises";
 
 export async function run(args: string[]): Promise<void> {
+  if (args[0] === "update-check" || args[0] === "trust-build-key") {
+    try {
+      const { values, positionals } = parseArgs({ args: args.slice(1), allowPositionals: true, options: { "state-dir": { type: "string" }, file: { type: "string" } } });
+      if (args[0] === "update-check") {
+        if (positionals.length || values.file) throw new Error();
+        const env = await runtimeEnvironment();
+        const config = readConfig({ ...env, ...(values["state-dir"] ? { LUMIO_RUNTIME_STATE_DIR: values["state-dir"] } : {}) });
+        await updateCheck(config.stateDir);
+      } else {
+        if (values["state-dir"] || (values.file ? positionals.length !== 0 : positionals.length !== 1)) throw new Error();
+        await trustBuildKey(values.file ? await readFile(values.file, "utf8") : positionals[0]!);
+      }
+    } catch { console.error(msg("update.command_failed")); process.exitCode = 1; }
+    return;
+  }
   if(args[0]==="native-mcp"){await runNativeMCP();return;}
   if (args[0] === "claude-quota-login") {
     try {

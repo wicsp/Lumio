@@ -564,7 +564,18 @@ export class NativeAssistant {
   }
   readonly run = async (input: Parameters<NonNullable<AssistantContext["native"]>["run"]>[0],
     workbenchEvent?: (event: AssistantEvent) => void) => {
-    const s = this.owned(input.conversation.native_session!, input.conversation.owner);
+    let s = this.owned(input.conversation.native_session!, input.conversation.owner);
+    // Keep the accepted turn pending while its Runtime drains and reconnects. Never send it twice.
+    const waiting = this.hub.runtimes(new Date()).some(runtime => runtime.actor === s.runtime && runtimeDraining(runtime));
+    while (waiting && (this.hub.runtimes(new Date()).some(runtime => runtime.actor === s.runtime && runtimeDraining(runtime)) ||
+      !this.online(s.runtime) || ["starting", "offline"].includes(s.view.state))) {
+      if (input.signal.aborted) return { text: "", status: "cancelled" as const };
+      await new Promise<void>(resolve => {
+        const done = () => { clearTimeout(timer); input.signal.removeEventListener("abort", done); resolve(); };
+        const timer = setTimeout(done, 500); input.signal.addEventListener("abort", done, { once: true });
+      });
+      s = this.owned(input.conversation.native_session!, input.conversation.owner);
+    }
     this.validate(input.conversation, input.request);
     const context_revision = createHash("sha256")
       .update(JSON.stringify(input.memories.map((m) => [m.id, m.revision])))
@@ -973,3 +984,4 @@ export class NativeAssistant {
     await Bun.sleep(0);
   }
 }
+import { runtimeDraining } from "@lumio/execution";

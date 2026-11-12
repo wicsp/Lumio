@@ -14,6 +14,7 @@ import { NOTICE_ROUTES } from "./notices.ts";
 import { ORIGINAL_CAPABILITY_NAME } from "@lumio/schema";
 import { handleArtifacts } from "./artifacts.ts";
 import { isTaskProposalCapability } from "./capabilities.ts";
+import { updateRuntime } from "./runtime-updates.ts";
 
 export const V2_ROUTES = [
   ...INBOX_ROUTES,
@@ -218,6 +219,12 @@ export async function handleV2(request: Request, server: Pick<Bun.Server<undefin
     }
     if (route.operation === "work.command" || route.operation === "execution.command") {
       const body = await json(request);
+      if (route.operation === "execution.command" && typeof body === "object" && body !== null && "operation" in body &&
+        typeof body.operation === "object" && body.operation !== null && "op" in body.operation &&
+        typeof body.operation.op === "string" && body.operation.op.startsWith("execution.runtime.update.")) {
+        audited = true;
+        return updateRuntime(store, identity, body, now);
+      }
       const parsed = (route.operation === "work.command" ? WorkCommandRequest : ExecutionRoutineCommandRequest).safeParse(body);
       if (!parsed.success) throw new HubError("INVALID", { key: "index.invalid_work_command_parameters", args: [] });
       const { operation, request_id } = parsed.data;

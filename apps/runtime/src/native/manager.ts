@@ -54,6 +54,7 @@ export class NativeManager {
   // Retain timer evictions so a turn sent against the last ready view can resume.
   private idleEvictions = new Map<string, Promise<void>>();
   private stopped = false;
+  get busy(): boolean { return this.chains.size > 0 || [...this.clients.values()].some(client => !!client.turn) || this.store.all().some(value => ["running", "awaiting_approval", "starting"].includes(value.view.state)); }
   constructor(
     readonly store: NativeLocalStore,
     readonly stateDir: string,

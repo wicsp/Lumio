@@ -1,11 +1,8 @@
 import { JOB_PROTOCOL_VERSION, Job, JobResult, JobRun, JobSpec, RuntimeName, RuntimeSync,
-  type RoutineSpec, type RuntimeInfo, type RuntimeHeartbeat, type ApiErrorCode, type ApiError } from "@lumio/schema";
+  type RoutineSpec, type RuntimeInfo, type RuntimeHeartbeat } from "@lumio/schema";
+import { ExecutionError } from "./errors.ts";
+export { ExecutionError } from "./errors.ts";
 
-export class ExecutionError extends Error {
-  constructor(public readonly code: ApiErrorCode, public readonly params: { key: string; args: readonly unknown[] }, public readonly details: Omit<ApiError["error"], "code" | "message"> = {}) {
-    super(code); this.name = "ExecutionError";
-  }
-}
 export interface ExecutionStore {
   get(id: string): Job | undefined;
   list(filter?: { task?: string; routine?: string; status?: string; runtime?: string; open?: boolean }): Job[];
@@ -93,9 +90,11 @@ export class ExecutionJobs {
       const running = new Set(heartbeat.running);
       for (const job of this.store.list({ runtime: actor, open: true })) if (running.has(job.spec.id) && active(job)) this.store.save({ ...job, status: "running", last_seen: now.toISOString() });
       const jobs = this.store.list({ runtime: actor, open: true }), cancellations = new Set(this.store.cancellations());
-      return RuntimeSync.parse({ jobs: jobs.filter((job) => job.status === "queued").map((job) => job.spec),
+      const runtime = this.store.runtimes(now).find(value => value.actor === actor);
+      return RuntimeSync.parse({ jobs: runtime && runtimeDraining(runtime) ? [] : jobs.filter((job) => job.status === "queued").map((job) => job.spec),
         cancel: jobs.filter((job) => !job.result && job.assigned && (cancellations.has(job.spec.id) || job.status === "cancelled")).map((job) => job.spec.id),
         routines: this.routines?.plans(actor) ?? [] });
     });
   }
 }
+import { runtimeDraining } from "./runtime-updates.ts";

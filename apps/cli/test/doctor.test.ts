@@ -119,7 +119,7 @@ test("doctor shows reminders with ! and failure count/exit code separately, incl
   const output: string[] = [];
   expect(printChecks(await doctor(f.options), false, line => output.push(line), { output: { isTTY: false }, env: {} })).toBe(0);
   expect(output).toContain("! 助手模型：未配置 → 运行 lumio hub assistant setup");
-  expect(output.at(-1)).toMatch(/\d+ 项通过，2 项提醒，0 项失败/);
+  expect(output.at(-1)).toMatch(/\d+ 项通过，3 项提醒，0 项失败/);
   f.options.realpath = async path => path;
   const checks = await doctor(f.options);
   expect(checks.find(check => check.name === "本机程序与兼容链接")?.fix).toContain("再运行一次 lumio upgrade");

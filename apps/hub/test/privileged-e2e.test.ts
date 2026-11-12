@@ -56,6 +56,7 @@ console.log(JSON.stringify({out,err,code,roundTokenReceived:!!process.env.LUMIO_
 `);
   await Bun.write(join(temp, "bin/pi"), `#!/bin/sh\nexec "${process.execPath}" "${join(temp, "bin/pi.ts")}" "$@"\n`); await chmod(join(temp, "bin/pi"), 0o755);
   await Bun.write(join(temp, "helper.ts"), `import {appendFileSync} from "node:fs";
+if(process.argv.includes("--version")){console.log("0.0.0-dev");process.exit(0);}
 const a=JSON.parse(await new Response(Bun.stdin.stream()).text());appendFileSync(process.argv[2]!,JSON.stringify(a)+"\\n");
 const child=Bun.spawn(a.argv,{stdout:"pipe",stderr:"pipe"});
 process.stdout.write(Buffer.from(await new Response(child.stdout).arrayBuffer()));process.stderr.write("helper stderr\\n");await child.exited;await Bun.sleep(300);process.exit(7);

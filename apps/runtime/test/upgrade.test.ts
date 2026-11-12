@@ -3,12 +3,16 @@ let previousLocale: string | undefined;
 beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
 afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { afterEach, expect, test } from "bun:test";
-import { createHash } from "node:crypto";
+import { createHash, generateKeyPairSync } from "node:crypto";
 import { chmod, lstat, readlink, stat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { upgrade } from "../src/upgrade.ts";
 import { releaseShim } from "@lumio/platform";
+import { signManifest } from "@lumio/platform";
+const signing = generateKeyPairSync("ed25519");
+const privateKey = signing.privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+const publicKey = signing.publicKey.export({ type: "spki", format: "pem" }).toString();
 const roots: string[] = [];
 afterEach(async () => { for (const p of roots.splice(0)) await rm(p, { recursive: true, force: true }); });
 const names = ["lumio", "lumio-hub", "lumio-runtime"];
@@ -29,6 +33,9 @@ async function fixture() {
     const path = new URL(req.url).pathname; requests.push(path);
     if (path === "/health") return Response.json({ ok: true, version: health });
     const bytes = await readFile(file), hash = createHash("sha256").update(bytes).digest("hex");
+    const manifest = Buffer.from(JSON.stringify({ format: 1, version: "2.3.4", channel: "release", commit: "a".repeat(40), created: "2026-11-12T00:00:00Z", artifacts: ["linux-x64", "darwin-arm64"].map(platform => ({ platform, file: `lumio-${platform}.tar.gz`, size: bytes.length, sha256: corrupt ? "0".repeat(64) : hash })) }));
+    if (path.endsWith("manifest.json")) return new Response(manifest);
+    if (path.endsWith("manifest.sig")) return new Response(duplicate ? "invalid" : signManifest(manifest, privateKey));
     if (path.endsWith("SHA256SUMS")) return new Response(`${corrupt ? "0".repeat(64) : hash}  lumio-linux-x64.tar.gz\n`.repeat(duplicate ? 2 : 1));
     return new Response(bytes);
   } });
@@ -36,7 +43,7 @@ async function fixture() {
   await mkdir(join(home, ".config/lumio"), { recursive: true }); await mkdir(join(home, ".config/systemd/user"), { recursive: true });
   await writeFile(join(home, ".config/lumio/config.json"), JSON.stringify({ hub_url: url, token: "synthetic" }));
   for (const service of ["hub", "runtime"]) await writeFile(join(home, `.config/systemd/user/lumio-${service}.service`), `[Service]\nExecStart="${bin}/lumio-${service}"\nEnvironmentFile=${home}/synthetic.env\n`);
-  const options = { home, env: {}, platform: "linux", arch: "x64", releaseBase: url, log: (l: string) => logs.push(l),
+  const options = { releaseKeys: [publicKey], home, env: {}, platform: "linux", arch: "x64", releaseBase: url, log: (l: string) => logs.push(l),
     run: async (argv: string[]) => {
       commands.push(argv);
       if (argv[0] === "plutil") return { code: 0, stdout: "", stderr: "" };

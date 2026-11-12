@@ -44,7 +44,13 @@ export async function handleRuntime(request: Request, operation: "runtime.regist
     }
     if (!RuntimeHeartbeat.safeParse(body).success) throw new HubError("INVALID", { key: "runtime.invalid_runtime_heartbeat", args: [] });
     return store.db.transaction(() => {
-      const sync = jobs.sync(identity.actor.id, RuntimeHeartbeat.parse(body), now);
+      const heartbeat = RuntimeHeartbeat.parse(body), runtime = store.runtimes(now).find(value => value.actor === identity.actor.id);
+      if (runtime) store.runtimeUpdates.report(runtime, heartbeat.update);
+      const sync = jobs.sync(identity.actor.id, heartbeat, now);
+      if (runtime) {
+        const update = store.runtimeUpdates.directive(runtime);
+        if (update) sync.update = update;
+      }
       if (request.headers.get("X-Lumio-Features")?.split(",").some(value => value.trim() === "job-access")) {
         sync.access = sync.jobs.flatMap(spec => { const access = store.issueJobAccess(spec, now); return access ? [access] : []; });
       }

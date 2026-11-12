@@ -140,9 +140,9 @@ test("real daemon with fake PATH survives Hub restart, detects agents once and b
   daemon = child;
   const output = new Response(child.stdout).text(), errors = new Response(child.stderr).text();
   await eventually(async () => (await list()).length === 1);
-  expect((await list())[0]!.registration).toEqual({ ...registration, features: ["stage_permissions", "hooks", "permission_request"], engines: [
+  expect((await list())[0]!.registration).toEqual(RuntimeRegistration.parse({ ...registration, version: "0.0.0-dev", platform: `${process.platform}-${process.arch}`, install: "external", features: ["stage_permissions", "hooks", "permission_request", "self_update"], engines: [
     { name: "codex", version: "0.42.0", sandbox: "os" }, { name: "claude-code", version: "2.0.1", sandbox: "none" },
-  ] });
+  ] }));
   const port = hub!.server.port!;
   await hub!.stop(); hub = undefined;
   await Bun.sleep(200); expect(daemon.exitCode).toBeNull();

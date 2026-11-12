@@ -57,6 +57,7 @@ export const COMMANDS: CommandDefinition[] = [
   def("runtime list"), def("runtime add", "<name>"), def("runtime remove", "<name>"), def("runtime serve"),
   def("runtime join", "", ["hub", "code"], undefined, { required: ["hub", "code"] }), def("runtime doctor"), def("runtime upgrade", "", ["version"]),
   def("runtime prepare-migration", "", ["state-dir"], undefined, { required: ["state-dir"] }), def("runtime install-service"), def("runtime install-sudo-helper", "", ["uninstall"]),
+  def("runtime update-check", "", ["state-dir"]), def("runtime trust-build-key", "[public-key]", ["file"]),
   def("runtime sudo", "", [], undefined, { tail: "-- <absolute-program> [args...]" }),
   def("hub serve"), def("hub status"), def("hub setup", "", ["vault", "server", "public-url", "yes"]), def("hub switch", "", ["retire-legacy"], undefined, { required: ["retire-legacy"] }),
   def("hub actor create", "<name>", ["role"], undefined, { required: ["role"] }), def("hub actor list"), def("hub token create", "<label>", ["actor"], undefined, { required: ["actor"] }), def("hub token list"), def("hub token revoke", "<label>"), def("hub signing-key"),

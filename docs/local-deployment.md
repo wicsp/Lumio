@@ -8,9 +8,11 @@
 bun run scripts/deploy-local.ts
 ```
 
-脚本串行部署 7420，从最新 `origin/main` 导出独立源码目录，用仓库固定的 Bun 构建带 Web 资源的统一程序。它验证业务快照，备份现有程序、服务定义、Hub 安装配置与 Runtime 状态，再把已验签的文件从同目录原子换入。随后重启 Hub，核对 `/health` 版本、首页、JS、CSS 和本机 Runtime 的新心跳。验收失败时脚本原子还原备份的旧程序并再次验收；业务数据保留在现有状态目录。备份位于 Hub 状态目录下的 `deploy-backups/`。
+脚本串行部署 7420，从最新 `origin/main` 导出独立源码目录，用仓库固定的 Bun 构建带 Web 资源的统一程序。它验证业务快照，备份现有程序、服务定义、Hub 安装配置与 Runtime 状态，再把已验签的文件从同目录原子换入。随后只重启 Hub，核对 `/health` 版本、首页、JS、CSS 和本机 Runtime 的新心跳及期望版本确认。验收失败时脚本原子还原备份的旧程序并再次验收；业务数据保留在现有状态目录。备份位于 Hub 状态目录下的 `deploy-backups/`。
 
-默认要求 Hub 和 Runtime 空闲。有活跃工作时，脚本退出，待其结束后重试。Runtime 源码及相关包没有变化时保留 Runtime 进程。有 Runtime 改动时，脚本会在队列空闲时一并重启 Runtime。经人明确同意并核实新旧版本的 Runtime 和 Job 协议兼容后，可用 `--allow-active` 保留执行中的 Runtime 任务。该选项只重启 Hub，要求 Runtime 正在运行且 Runtime 和执行模块源码没有改动；仍需等待 Hub 内置助手的活跃轮次结束。涉及数据迁移时先单独确认迁移和恢复方案。业务备份、vault 与安装配置的边界见 [Hub 部署与备份](design/hub.md#存放)。
+只要求 Hub 助手没有活跃轮次；Runtime Job 可以继续执行。脚本不重启 Runtime，支持 `self_update` 的本机 Runtime 发现磁盘程序变化后自行等空闲重启，远端受管 Runtime 下载、验签、预检后等空闲替换。脚本输出各台机器的版本、策略和当前状态，不等更新完成。`--allow-active` 保留为兼容参数，已不再需要。旧 Runtime 会提示需要一次手动升级以启用自更新。涉及数据迁移时先单独确认迁移和恢复方案。业务备份、vault 与安装配置的边界见 [Hub 部署与备份](design/hub.md#存放)。
+
+开发构建按已登记的 `managed` Runtime 平台交叉编译，签出 `manifest.json` / `manifest.sig`，原子发布到 Hub 状态目录 `updates/<版本>/`；只保留当前与上一版本。构建密钥保存在 `~/.config/lumio/build-signing/private.pem`（0600），不存在时自动生成，公钥为同目录 `public.pem`，脚本只打印公钥路径和 SHA-256 指纹。远端第一次使用开发构建时，将公钥交给那台机器，运行 `lumio runtime trust-build-key --file <公钥文件>`，与 Hub 输出核对后输入完整指纹；私钥不复制给 Runtime。未信任时显示 `blocked / untrusted_build`，信任后下一轮自动重新检查。正式发布密钥与本机构建密钥分开（U1-2～U1-5）。
 
 回退代码时，先将 revert 合入 `main`，再运行同一脚本。脚本遇到部署锁时，先确认持锁部署已经结束；异常退出留下的锁可在确认后删除。
 

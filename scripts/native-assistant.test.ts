@@ -466,3 +466,30 @@ test("a turn arriving during idle eviction resumes the same native thread", asyn
         await f.close();
     }
 }, 20_000);
+
+test("runtime draining queues a native turn until admission resumes; open idle sessions do not count as busy", async () => {
+    const f = await fixture();
+    const receive = spyOn(f.manager, "receive");
+    let pending: ReturnType<typeof f.client.assistantChat> | undefined;
+    try {
+        const session = await f.create();
+        await until(() => f.manager.busy, value => !value);
+        const runtime = f.hub.store.runtimes(new Date())[0]!;
+        f.hub.store.runtimeVersion = "0.2.3";
+        f.hub.store.registerRuntime(runtime.actor, { ...runtime.registration, features: ["self_update"], version: "0.2.2", platform: "darwin-arm64", install: "managed" }, new Date());
+        const current = f.hub.store.runtimes(new Date())[0]!;
+        f.hub.store.runtimeUpdates.report(current, { state: "draining", target: "0.2.3", since: new Date().toISOString() });
+        receive.mockClear();
+        pending = f.client.assistantChat({ request_id: crypto.randomUUID(), conversation: session.conversation, message: "RECALL" });
+        await Bun.sleep(100);
+        expect(receive.mock.calls.some(([command]) => command.type === "turn")).toBe(false);
+        f.hub.store.runtimeUpdates.report(current, { state: "current", since: new Date().toISOString() });
+        expect((await pending).turn.status).toBe("done");
+        expect(receive.mock.calls.filter(([command]) => command.type === "turn")).toHaveLength(1);
+        await until(() => f.manager.busy, value => !value);
+    } finally {
+        const runtime = f.hub.store.runtimes(new Date())[0];
+        if (runtime) f.hub.store.runtimeUpdates.report(runtime, { state: "current", since: new Date().toISOString() });
+        await pending?.catch(() => {}); receive.mockRestore(); await f.close();
+    }
+}, 20_000);

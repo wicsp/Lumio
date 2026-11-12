@@ -6,12 +6,16 @@ export class DownloadError extends Error {
   readonly code = "DOWNLOAD_FAILED";
   constructor(public readonly params: { key: string; args: readonly unknown[] }) { super("DOWNLOAD_FAILED"); this.name = "DownloadError"; }
 }
+export class DownloadLimitError extends DownloadError {
+  constructor() { super({ key: "download.download_failed_check_network_or_proxy_https_proxy_and_retry", args: [] }); }
+}
 export interface DownloadOptions {
   text?: Text; fetch?: typeof globalThis.fetch; tty?: boolean;
   /** Legacy source transport callback. New displays consume onProgress. */
   progress?: (line: string) => void;
   onProgress?: (progress: DownloadProgress) => void;
   connectMs?: number; windowMs?: number; now?: () => number;
+  maxBytes?: number;
 }
 export async function downloadRelease(url: string, options: DownloadOptions = {}): Promise<Buffer> {
   const msg = options.text ?? untranslated;
@@ -38,6 +42,9 @@ export async function downloadRelease(url: string, options: DownloadOptions = {}
     if (!response.ok) throw new DownloadError({ key: "download.download_failed_http_check_network_and_version", args: [response.status] });
     if (!response.body) throw new DownloadError({ key: "download.download_response_has_no_body", args: [] });
     const size = Number(response.headers.get("content-length")); total = Number.isFinite(size) && size > 0 ? size : undefined;
+    if (options.maxBytes !== undefined && total !== undefined && total > options.maxBytes) {
+      await response.body.cancel(); throw new DownloadLimitError();
+    }
     started = now(); reportProgress(false);
     const report = () => progress(msg("Downloaded ${0} / ${1} bytes / ${2}", downloaded, total ?? msg("Unknown"), total ? `${Math.min(100, downloaded / total * 100).toFixed(1)}%` : msg("Unknown percentage")));
     reader = response.body.getReader(); windowStart = now();
@@ -57,7 +64,9 @@ export async function downloadRelease(url: string, options: DownloadOptions = {}
     while (true) {
       const part = await Promise.race([reader!.read(), deadline]);
       if (part.done) break;
-      chunks.push(part.value!); downloaded += part.value!.byteLength;
+      downloaded += part.value!.byteLength;
+      if (options.maxBytes !== undefined && downloaded > options.maxBytes) throw new DownloadLimitError();
+      chunks.push(part.value!);
     }
     reportProgress(true); finished = true;
     if (!options.onProgress && options.tty) report();

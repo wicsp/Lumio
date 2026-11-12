@@ -20,8 +20,11 @@ jobs:
       - run: bun run check
       - name: Compile, sign, and package
         shell: bash
+        env:
+          LUMIO_RELEASE_SIGNING_KEY: ${{ secrets.LUMIO_RELEASE_SIGNING_KEY }}
         run: |
           set -euo pipefail
+          test -n "$LUMIO_RELEASE_SIGNING_KEY" || { echo "Release signing key is required"; exit 1; }
           VERSION=${GITHUB_REF_NAME#v}
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][a-zA-Z0-9.-]+)?$ ]] || exit 1
           mkdir -p release
@@ -34,6 +37,7 @@ jobs:
             tar -czf "release/lumio-$platform.tar.gz" -C "build/$platform" lumio lumio-hub lumio-runtime
           done
           (cd release && shasum -a 256 lumio-*.tar.gz > SHA256SUMS)
+          bun run apps/cli/src/sign-release.ts release "$VERSION" "$GITHUB_SHA"
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
