@@ -1,6 +1,7 @@
 # 0063 Runtime 跟随 Hub 版本：期望版本对账与空闲自更新
 
 - 状态：Accepted（2026-11-12 人类批准方向与本文全部决定）
+- 实施状态：U1-1～U1-5 已实现后端与发布部署链路（第 1～4、6～7 节及第 5 节 CLI/通知）；第 5 节 Web 界面由 U1-6 接续。
 - 日期：2026-11-12
 - 领域：Hub 与运行、发布与升级兼容、安全、HTTP 契约
 - 关联：[ADR 0019](0019-hub-runtimes-tasks-rounds.md)、[ADR 0020](0020-privileged-exec-signed-approvals.md)、[ADR 0021](0021-install-pairing-selftest.md)、[ADR 0027](0027-v0.2-rollout.md)、[ADR 0028](0028-language-terminal-theme.md)、[ADR 0042](0042-native-agent-sessions.md)、任务 [U1-0](../tasks/U1-0-runtime-auto-update.md)

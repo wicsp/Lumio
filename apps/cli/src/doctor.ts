@@ -105,6 +105,7 @@ export async function doctor(options: DoctorOptions = {}): Promise<Check[]> {
     if (!base) throw new Error(); const runtimes = await client.runtimes();
     if (!runtimes.length) checks.push({ name: msg("doctor.runtime"), ok: false, problem: msg("doctor.no_registered_runtimes"), fix: msg("doctor.run_lumio_hub_setup_or_lumio_runtime_add_name") });
     for (const r of runtimes) {
+      checks.push({ name: `${r.registration.name} ${msg("update.version")}`, ok: r.update?.report?.state !== "failed", warning: r.update?.report?.state !== "failed" && (r.registration.version !== hubVersion || r.update?.report?.state === "blocked"), problem: msg("update.summary", r.registration.version ?? msg("update.legacy"), r.registration.install ? msg(`update.${r.registration.install}`) : msg("update.legacy"), msg(`update.${r.update?.policy ?? "manual"}`), r.update?.report ? msg(`update.${r.update.report.state}`) : msg("update.legacy"), r.update?.report?.reason ? `: ${msg(`update.${r.update.report.reason}`)}` : "") });
       checks.push({ name: msg("doctor.runtime_2", r.registration.name), ok: r.online, problem: msg("doctor.last_seen", r.last_seen, r.online ? "" : msg("doctor.offline")),
         ...(!r.online ? { fix: msg("doctor.run_lumio_runtime_doctor_on_the_server") } : {}) });
       if (!r.registration.engines.length) checks.push({ name: `${r.registration.name} agent`, ok: false, problem: msg("doctor.no_agent_detected"), fix: msg("doctor.install_an_agent_update_path_in_runtime_env_and_restart_runtime") });

@@ -11,6 +11,7 @@ export async function runNativeChannel(
   config: RuntimeConfig,
   signal: AbortSignal,
   env: NodeJS.ProcessEnv = process.env,
+  updates?: { attach: (busy: () => boolean) => void; switching: () => boolean },
 ) {
   await mkdir(config.stateDir, { recursive: true, mode: 0o700 });
   const store = new NativeLocalStore(config.stateDir);
@@ -59,6 +60,7 @@ export async function runNativeChannel(
     runtimeName: config.registration.name,
     codex: env.LUMIO_NATIVE_CODEX,
   }, accounts);
+  updates?.attach(() => manager.busy);
   await manager.recover();
   try {
     while (!signal.aborted) {
@@ -105,6 +107,7 @@ export async function runNativeChannel(
               buffer = buffer.slice(end + 1);
               if (!line.trim()) continue;
               const c = NativeRuntimeCommand.parse(JSON.parse(line));
+              if (c.type === "turn" && updates?.switching()) throw new Error("Runtime is restarting");
               if (c.type === "claude_usage") {
                 if (!claudeUsage) throw new Error("Claude usage was not negotiated");
                 if (c.connection !== claudeQuotaConnection) {
@@ -172,6 +175,7 @@ export async function runNativeChannel(
     await claudeFlight?.result;
     await manager.stop();
     await accounts.stop();
+    updates?.attach(() => false);
     store.close();
   }
 }

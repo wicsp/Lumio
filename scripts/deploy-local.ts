@@ -1,11 +1,11 @@
 import { Database } from "bun:sqlite";
+import { buildSigningKey, managedPlatforms, publishBuildUpdates } from "./build-updates.ts";
 import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, renameSync, rmdirSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 const hubUrl = "http://127.0.0.1:7420";
-const runtimeSources = ["apps/runtime/src", "packages/execution/src", "packages/storage/src",
-  "packages/schema/src", "packages/platform/src", "packages/foundation/src"];
+
 
 function output(command: string[], options?: { cwd?: string; env?: NodeJS.ProcessEnv; stdin?: Uint8Array }): string {
   const result = Bun.spawnSync(command, options);
@@ -72,15 +72,9 @@ function readOnly<T>(path: string, read: (db: Database) => T): T {
   finally { db.close(); }
 }
 
-function assertIdle(hubDb: string, allowActive: boolean, runtimeDb?: string) {
-  const { jobs, turns } = readOnly(hubDb, db => ({
-    jobs: db.query<{ count: number }, []>("SELECT count(*) AS count FROM jobs WHERE json_extract(record,'$.status') IN ('assigned','running')").get()!.count,
-    turns: db.query<{ count: number }, []>("SELECT count(*) AS count FROM assistant_turns WHERE status='running'").get()!.count,
-  }));
-  const localRunning = runtimeDb && readOnly(runtimeDb, db => db.query("SELECT 1 FROM queue WHERE state='running' LIMIT 1").get());
-  if (turns || (!allowActive && (jobs || localRunning))) {
-    throw new Error(`Wait for active work before deployment (${jobs} Runtime jobs, ${turns} Hub assistant turns).`);
-  }
+export function assertHubIdle(hubDb: string) {
+  const turns = readOnly(hubDb, db => db.query<{ count: number }, []>("SELECT count(*) AS count FROM assistant_turns WHERE status='running'").get()!.count);
+  if (turns) throw new Error(`Wait for ${turns} active Hub assistant turns before deployment.`);
 }
 
 export function snapshotDatabase(source: string, target: string) {
@@ -161,18 +155,34 @@ async function verifyWeb(version: string, hubService: string, oldPid: number | u
   throw new Error(`Hub ${version} did not serve a healthy homepage, JavaScript and CSS on 7420.`);
 }
 
-async function verifyRuntime(hubDb: string, name: string, service: string, since: number, previousPid: number | undefined, restarted: boolean) {
-  // Runtime backs off for up to 60 seconds before it registers again.
+async function verifyRuntime(hubDb: string, name: string, service: string, since: number, version: string) {
   for (let attempt = 0; attempt < 90; attempt++) {
-    const pid = servicePid(service);
-    const seen = readOnly(hubDb, db => db.query<{ last_seen: string }, [string]>("SELECT last_seen FROM runtimes WHERE name=?").get(name)?.last_seen);
-    if (pid && (restarted ? pid !== previousPid : pid === previousPid) && seen && Date.parse(seen) > since) return;
+    const row = readOnly(hubDb, db => {
+      const runtime = db.query<{ last_seen: string; registration: string }, [string]>("SELECT last_seen,registration FROM runtimes WHERE name=?").get(name);
+      const report = db.query<{ record: string }, [string]>("SELECT record FROM runtime_updates WHERE actor=(SELECT actor FROM runtimes WHERE name=?)").get(name);
+      return { runtime, report };
+    });
+    const registration = row.runtime && JSON.parse(row.runtime.registration);
+    const report = row.report && JSON.parse(row.report.record).report;
+    const supports = registration?.features?.includes("self_update");
+    if (servicePid(service) && row.runtime && Date.parse(row.runtime.last_seen) > since &&
+      (!supports || registration.version === version || report?.target === version)) {
+      if (!supports) console.log(`Runtime ${name} requires a one-time manual upgrade to enable self_update.`);
+      return;
+    }
     await Bun.sleep(1000);
   }
-  throw new Error(`Runtime ${name} did not send a fresh heartbeat after deployment.`);
+  throw new Error(`Runtime ${name} did not acknowledge the desired version after deployment.`);
+}
+function reportRuntimeUpdates(hubDb: string) {
+  const rows = readOnly(hubDb, db => db.query<{ name: string; registration: string; record: string | null }, []>("SELECT r.name,r.registration,u.record FROM runtimes r LEFT JOIN runtime_updates u ON u.actor=r.actor ORDER BY r.name").all());
+  for (const row of rows) {
+    const registration = JSON.parse(row.registration), update = row.record && JSON.parse(row.record);
+    console.log(`${row.name}: ${registration.version ?? "unknown"} (${registration.install ?? "legacy"}), ${update?.policy ?? "follow"}, ${update?.report?.state ?? "waiting for heartbeat"}${update?.report?.reason ? `: ${update.report.reason}` : ""}`);
+  }
 }
 
-async function deploy(allowActive: boolean) {
+async function deploy() {
   if (process.platform !== "darwin" || process.getuid?.() === 0) throw new Error("Run this on macsp as the Lumio LaunchAgent owner.");
   const repo = output(["git", "rev-parse", "--show-toplevel"], { cwd: import.meta.dir });
   const git = (args: string[]) => output(["git", ...args], { cwd: repo });
@@ -213,18 +223,9 @@ async function deploy(allowActive: boolean) {
   try {
     const originalIdentity = fileIdentity(installed);
     const previousVersion = output([installed, "--version"]);
-    const runtimePid = servicePid(runtimeService);
-    assertIdle(hubDb, allowActive);
+    assertHubIdle(hubDb);
     git(["fetch", "--no-write-fetch-head", "origin", "+refs/heads/main:refs/remotes/origin/main"]);
     const commit = git(["rev-parse", "refs/remotes/origin/main"]);
-    const previousCommit = previousVersion.match(/\.local\.([a-f0-9]{7,40})$/)?.[1];
-    const unchanged = (paths: string[]) => !!previousCommit
-      && Bun.spawnSync(["git", "diff", "--quiet", previousCommit, commit, "--", ...paths], { cwd: repo }).success;
-    if (allowActive && (!runtimePid || !unchanged(["apps/runtime", "packages/execution/src"]))) {
-      throw new Error("--allow-active requires a running Runtime and unchanged Runtime and execution code.");
-    }
-    const restartRuntime = !runtimePid || (!allowActive && !unchanged(runtimeSources));
-    const runtimeDb = restartRuntime ? join(runtimeState, "runtime.sqlite") : undefined;
 
     build = mkdtempSync(join(tmpdir(), "lumio-7420."));
     const archive = Bun.spawnSync(["git", "archive", commit], { cwd: repo });
@@ -243,7 +244,17 @@ async function deploy(allowActive: boolean) {
       if (output([path, "--version"]) !== version) throw new Error("Staged version does not match origin/main.");
     };
     verify(candidate);
-    assertIdle(hubDb, allowActive, runtimeDb);
+    const registrations = readOnly(hubDb, db => db.query<{ registration: string }, []>("SELECT registration FROM runtimes").all().map(row => JSON.parse(row.registration)));
+    const platforms = managedPlatforms(registrations);
+    const signing = await buildSigningKey(join(home, ".config/lumio/build-signing"));
+    console.log(`Build signing public key: ${join(home, ".config/lumio/build-signing/public.pem")}`);
+    console.log(`Build signing SHA-256 fingerprint: ${signing.fingerprint}`);
+    await publishBuildUpdates({ root: join(hubState, "updates"), build, version, commit, previous: previousVersion, key: signing.privateKey, platforms,
+      compile: async (platform, outfile) => {
+        if (platform === "darwin-arm64") copyFileSync(candidate, outfile);
+        else output([process.execPath, "run", "apps/cli/src/build-binary.ts", "--target", `bun-${platform}`, "--version", version, "--outfile", outfile], { cwd: build });
+      }, run: async argv => { output(argv); } });
+    assertHubIdle(hubDb);
 
     const backup = mkdtempSync(join(backups, `main-${commit.slice(0, 7)}-`));
     console.log(`Deployment backup: ${backup}`);
@@ -266,18 +277,17 @@ async function deploy(allowActive: boolean) {
       chmodSync(target, 0o600);
     }
     backupRuntime(runtimeState, join(backup, "runtime"));
-    assertIdle(hubDb, allowActive, runtimeDb);
+    assertHubIdle(hubDb);
     const activate = async (expected: string) => {
       const oldHubPid = servicePid(hubService);
       restartService(domain, "hub", hubPlist);
       await verifyWeb(expected, hubService, oldHubPid);
-      const previousRuntimePid = restartRuntime ? servicePid(runtimeService) : runtimePid;
-      if (restartRuntime) restartService(domain, "runtime", runtimePlist);
-      await verifyRuntime(hubDb, runtimeName, runtimeService, Date.now(), previousRuntimePid, restartRuntime);
+      await verifyRuntime(hubDb, runtimeName, runtimeService, Date.now(), expected);
     };
     await replaceBinary({ installed, candidate, previous, originalIdentity, verify,
       activate: () => activate(version), rollback: () => activate(previousVersion) });
-    console.log(`Verified ${version} on ${hubUrl}, including homepage, static assets and ${runtimeName} heartbeat.`);
+    console.log(`Verified ${version} on ${hubUrl}; Runtime updates continue in the background.`);
+    reportRuntimeUpdates(hubDb);
   } finally {
     if (build) rmSync(build, { recursive: true, force: true });
     rmdirSync(lock);
@@ -293,7 +303,7 @@ if (import.meta.main) {
     process.exitCode = 2;
   } else {
     process.umask(0o077);
-    try { await deploy(args.length === 1); }
+    try { if (args.length) console.log("--allow-active is no longer needed: deployment always leaves Runtime running."); await deploy(); }
     catch (error) { console.error(error); process.exitCode = 1; }
   }
 }

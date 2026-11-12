@@ -5,7 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { buildWebAssets } from "../../web/src/entry.ts";
-import { releaseShim } from "@lumio/platform";
+import { RELEASE_PUBLIC_KEYS, releaseShim } from "@lumio/platform";
 
 export interface BinaryOptions { outfile: string; target?: string; version?: string }
 /** The release tarball keeps three regular files so the v0.1.x upgrader can install it. */
@@ -29,6 +29,7 @@ export async function buildBinary(options: BinaryOptions): Promise<void> {
     const child = Bun.spawn([process.execPath, "build", "--compile", join(work, "entry.ts"), "--outfile", resolve(options.outfile),
       ...(options.target ? [`--target=${options.target}`] : []),
       ...(options.version ? ["--define", `LUMIO_VERSION=${JSON.stringify(options.version)}`] : []),
+      "--define", `LUMIO_RELEASE_PUBLIC_KEYS=${JSON.stringify(RELEASE_PUBLIC_KEYS)}`,
     ], { stdout: "pipe", stderr: "pipe" });
     const [, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
     if (code) throw new Error(msg("build-binary.lumio_build_failed", stderr.trim()));

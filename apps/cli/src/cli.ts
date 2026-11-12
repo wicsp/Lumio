@@ -140,6 +140,7 @@ async function executeCli(args: string[], options: CliOptions): Promise<number> 
     if (values.json) log(JSON.stringify(runtimes));
     else for (const runtime of runtimes) {
       const registration = runtime.registration;
+      log(msg("update.summary", registration.version ?? msg("update.legacy"), registration.install ? msg(`update.${registration.install}`) : msg("update.legacy"), msg(`update.${runtime.update?.policy ?? "manual"}`), runtime.update?.report ? msg(`update.${runtime.update.report.state}`) : msg("update.legacy"), runtime.update?.report?.reason ? `: ${msg(`update.${runtime.update.report.reason}`)}` : ""));
       log(msg("cli.last_seen", registration.name, runtime.online ? msg("cli.online") : msg("cli.disconnected"), runtime.last_seen, registration.engines.map((engine) => `${engine.name} ${engine.version}`).join(", "), registration.tags.join(", ")));
     }
     return 0;

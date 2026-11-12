@@ -7,6 +7,8 @@ import { join, resolve } from "node:path";
 import { diagnosticIO, environment, httpURL, localAddress, serviceCommand, type DiagnosticOptions } from "./diagnostics.ts";
 import { createProgressLine } from "./terminal.ts";
 import { releaseShim } from "./release-shims.ts";
+import { manifestArtifact, permitsUnsignedRelease, verifyArtifact, verifyManifest, ReleaseVerificationError, type releasePublicKeys } from "./release-manifest.ts";
+import { RuntimeInfo, type RuntimePlatform } from "@lumio/schema";
 
 export class UpgradeError extends Error {
   readonly code = "UPGRADE_FAILED";
@@ -15,6 +17,7 @@ export class UpgradeError extends Error {
 export interface UpgradeOptions extends DiagnosticOptions {
   tty?: boolean; progress?: (chunk: string) => void; columns?: () => number;
   arch?: string; version?: string; runtimeOnly?: boolean; releaseBase?: string;
+  releaseKeys?: typeof releasePublicKeys;
   log?: (line: string) => void; now?: () => number; sleep?: (ms: number) => Promise<void>;
 }
 const binaries = ["lumio", "lumio-hub", "lumio-runtime"] as const;
@@ -65,7 +68,16 @@ export async function upgrade(options: UpgradeOptions = {}): Promise<void> {
         services.push({ role, path, old, content, mode: io.platform === "darwin" ? 0o600 : 0o644 });
       } catch (cause) { if (cause instanceof UpgradeError) throw cause; if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause; }
     }
-    return { current, services, localHub, hubUrl };
+    let runtimeSelfUpdates = false;
+    if (localHub) {
+      try {
+        const env = environment(await io.read(join(io.home, ".config/lumio-runtime/runtime.env")));
+        const state = io.env.LUMIO_RUNTIME_STATE_DIR ?? env.LUMIO_RUNTIME_STATE_DIR ?? join(io.home, ".local/share/lumio-runtime");
+        const runtime = RuntimeInfo.parse(JSON.parse(await io.read(join(state, "registered.json"))));
+        runtimeSelfUpdates = runtime.registration.install === "hub-shared" && !!runtime.registration.features?.includes("self_update");
+      } catch { /* Older Runtime registrations retain the previous restart behavior. */ }
+    }
+    return { current, services, localHub, hubUrl, runtimeSelfUpdates };
   };
   try {
     let requested = options.version;
@@ -87,11 +99,28 @@ export async function upgrade(options: UpgradeOptions = {}): Promise<void> {
     const download = `${base.replace(/\/+$/, "")}/${requested ? `download/${requested}` : "latest/download"}`;
     const onProgress = createProgressLine({ text: msg, label: msg("Downloading Lumio ${0} (${1})", requested?.slice(1) ?? msg("latest version"), platform),
       tty: options.tty ?? false, columns: options.columns, write: options.progress ?? (() => {}) });
-    const bytes = await downloadRelease(`${download}/${archive}`, { fetch: options.fetch ?? globalThis.fetch, onProgress });
-    const sums = (await downloadRelease(`${download}/SHA256SUMS`, { fetch: options.fetch ?? globalThis.fetch, tty: false })).toString("utf8");
-    const matches = sums.split(/\r?\n/).map(line => line.trim().split(/\s+/)).filter(parts => parts[1] === archive);
-    if (matches.length !== 1 || matches[0]!.length !== 2 || !/^[0-9a-fA-F]{64}$/.test(matches[0]![0]!)) throw new UpgradeError({ key: "upgrade.sha256sums_has_missing_or_duplicate_entries_program_was_not_replaced", args: [] });
-    if (createHash("sha256").update(bytes).digest("hex") !== matches[0]![0]!.toLowerCase()) throw new UpgradeError({ key: "upgrade.sha256_verification_failed_no_programs_were_replaced", args: [] });
+    // A missing signature or an invalid manifest never falls back to unsigned checksums.
+    const manifestResponse = await io.fetch(`${download}/manifest.json`, { signal: AbortSignal.timeout(20_000) });
+    let signedVersion: string | undefined;
+    let artifact: ReturnType<typeof manifestArtifact> | undefined;
+    if (manifestResponse.ok) {
+      const manifestBytes = await downloadRelease(`${download}/manifest.json`, { fetch: (async (_input: string | URL | Request) => manifestResponse) as typeof fetch, maxBytes: 64 * 1024 });
+      const signature = (await downloadRelease(`${download}/manifest.sig`, { fetch: io.fetch, maxBytes: 256 })).toString("utf8");
+      const manifest = verifyManifest(manifestBytes, signature, options.releaseKeys, requested?.slice(1));
+      signedVersion = manifest.version;
+      artifact = manifestArtifact(manifest, platform as RuntimePlatform);
+    } else {
+      await manifestResponse.body?.cancel();
+      if (manifestResponse.status !== 404 || !requested || !permitsUnsignedRelease(requested.slice(1))) throw new UpgradeError({ key: "upgrade.signed_manifest_required", args: [] });
+    }
+    const bytes = await downloadRelease(`${download}/${archive}`, { fetch: io.fetch, onProgress, maxBytes: artifact?.size });
+    if (artifact) verifyArtifact(bytes, artifact);
+    else {
+      const sums = (await downloadRelease(`${download}/SHA256SUMS`, { fetch: options.fetch ?? globalThis.fetch, tty: false })).toString("utf8");
+      const matches = sums.split(/\r?\n/).map(line => line.trim().split(/\s+/)).filter(parts => parts[1] === archive);
+      if (matches.length !== 1 || matches[0]!.length !== 2 || !/^[0-9a-fA-F]{64}$/.test(matches[0]![0]!)) throw new UpgradeError({ key: "upgrade.sha256sums_has_missing_or_duplicate_entries_program_was_not_replaced", args: [] });
+      if (createHash("sha256").update(bytes).digest("hex") !== matches[0]![0]!.toLowerCase()) throw new UpgradeError({ key: "upgrade.sha256_verification_failed_no_programs_were_replaced", args: [] });
+    }
     const tar = join(temp, archive), extracted = join(temp, "extracted");
     await writeFile(tar, bytes, { mode: 0o600 }); await mkdir(extracted, { mode: 0o700 });
     const entries = (await command(["tar", "-tzf", tar])).trim().split("\n"), types = (await command(["tar", "-tvzf", tar])).trim().split("\n");
@@ -109,8 +138,8 @@ export async function upgrade(options: UpgradeOptions = {}): Promise<void> {
     const source = join(extracted, "lumio");
     await chmod(source, 0o755);
     const target = releaseVersion.exec((await command([source, "--version"])).trim())?.[1];
-    if (!target || (requested && target !== requested.slice(1))) throw new UpgradeError({ key: "upgrade.downloaded_program_version_mismatch_program_was_not_replaced", args: [] });
-    const { current, services, localHub, hubUrl } = initial ?? await installation(target);
+    if (!target || (requested && target !== requested.slice(1)) || (signedVersion && target !== signedVersion)) throw new UpgradeError({ key: "upgrade.downloaded_program_version_mismatch_program_was_not_replaced", args: [] });
+    const { current, services, localHub, hubUrl, runtimeSelfUpdates } = initial ?? await installation(target);
     if (current && services.every(service => service.old === service.content)) { log(msg("Already at ${0} version ${1}", options.version ? msg("specified") : msg("latest"), target)); return; }
     await mkdir(bin, { recursive: true });
     const changes: { path: string; stage: string; restore?: string; link?: string; mode?: number }[] = [];
@@ -147,6 +176,7 @@ export async function upgrade(options: UpgradeOptions = {}): Promise<void> {
     }
     if (io.platform === "linux" && services.length) await command(["systemctl", "--user", "daemon-reload"]);
     for (const service of services) {
+      if (service.role === "runtime" && runtimeSelfUpdates) continue;
       if (io.platform === "darwin") {
         await io.run(["launchctl", "bootout", `gui/${io.uid}`, service.path]);
         await command(["launchctl", "bootstrap", `gui/${io.uid}`, service.path]);
@@ -174,6 +204,7 @@ export async function upgrade(options: UpgradeOptions = {}): Promise<void> {
   } catch (cause) {
     if (cause instanceof UpgradeError) throw cause;
     if (cause instanceof DownloadError) throw new UpgradeError(cause.params);
+    if (cause instanceof ReleaseVerificationError) throw new UpgradeError({ key: `update.${cause.reason}`, args: [] });
     throw new UpgradeError({ key: "upgrade.upgrade_failed_check_network_download_source_program_permissions_and", args: [] });
   } finally { await Promise.all(stages.map(path => rm(path, { force: true }))); await rm(temp, { recursive: true, force: true }); }
 }

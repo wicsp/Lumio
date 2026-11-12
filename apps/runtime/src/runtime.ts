@@ -14,6 +14,9 @@ import { RoutinePlans } from "./routines.ts";
 import { RuntimeArchives } from "./archive.ts";
 import { acquireStateLease } from "@lumio/storage";
 import type { ArchiveDelivery } from "./archive.ts";
+import { SelfUpdate } from "./self-update.ts";
+import { detectInstall, helperCompatible, UpdateInstall, updatePlatform, UPDATE_EXIT_CODE } from "./update-install.ts";
+import { version } from "./version.ts";
 
 class Wake {
   private listeners = new Set<() => void>();
@@ -46,7 +49,20 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
   const events = new Wake(), deliveries = new Wake(), archiveWake = new Wake();
   const wait = options.sleep ?? ((milliseconds, signal) => events.wait(milliseconds, signal));
   await mkdir(config.stateDir, { recursive: true, mode: 0o700 });
-  const registration = RuntimeRegistration.parse({ ...config.registration, engines: await detectEngines(options.env), features: ["stage_permissions", "hooks", "permission_request", ...(config.sudoCommand.length ? ["privileged_helper" as const] : [])] });
+  const platform = updatePlatform(), install = await detectInstall({ env: options.env });
+  const helper = config.sudoCommand.length ? await helperCompatible(config.sudoCommand, version) : false;
+  if (config.sudoCommand.length && !helper) { log("Privileged helper version mismatch; run sudo lumio-runtime install-sudo-helper"); config = { ...config, sudoCommand: [] }; }
+  const updater: SelfUpdate | undefined = platform ? new SelfUpdate({ ...config, platform, install, version, binary: process.execPath, fetch: fetcher,
+    beforeSwitch: async target => {
+      try {
+        const latest = await post("/v1/runtime/sync", { ...queue.heartbeat(), update: updater!.heartbeat() }, RuntimeSync);
+        return latest.update?.version === target && !latest.update.hold;
+      } catch { return true; /* Verified staged updates can finish while Hub is temporarily unreachable. */ }
+    },
+    restart: () => { process.exitCode = UPDATE_EXIT_CODE; shutdown.abort(); } }) : undefined;
+  await updater?.open();
+  const registration = RuntimeRegistration.parse({ ...config.registration, engines: await detectEngines(options.env),
+    ...(platform ? { version, platform, install } : {}), features: ["stage_permissions", "hooks", "permission_request", ...(helper ? ["privileged_helper" as const] : []), ...(platform ? ["self_update" as const] : [])] });
   const queue = new Queue(config.stateDir);
   const plans = new RoutinePlans(queue);
   const archives = options.archive ?? new RuntimeArchives(config, queue, fetcher, log);
@@ -96,13 +112,14 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
   let archiving: Promise<void> | undefined;
   let deliveryFailure: unknown;
   let native:Promise<void>|undefined;
+  let nativeBusy = () => false;
   let claudeUsage: Promise<void> | undefined;
   let nextClaudeUsage = 0;
   const claudeSentAt = new Map<string, string>();
   try {
     await sudo.start();
     await executor.recover();
-    if((options.env??process.env).LUMIO_NATIVE_SESSIONS==="1")native=runNativeChannel(config,signal,options.env??process.env).catch(()=>{log(msg("native.channel_failed"));});
+    if((options.env??process.env).LUMIO_NATIVE_SESSIONS==="1")native=runNativeChannel(config,signal,options.env??process.env, { attach: busy => { nativeBusy = busy; }, switching: () => updater?.restarting ?? false }).catch(()=>{log(msg("native.channel_failed"));});
     delivering = deliver().catch((cause) => { deliveryFailure = cause; shutdown.abort(); });
     archiving = (async () => {
       while (!signal.aborted) {
@@ -117,7 +134,16 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
       let justAcked = false;
       try {
         if (!registered) {
-          const info = await post("/v1/runtime/register", registration, RuntimeInfo);
+          updater?.resetNegotiation();
+          let response = await send("/v1/runtime/register", registration);
+          if (response.status === 400) {
+            await response.body?.cancel();
+            await updater?.reconcile(undefined, () => true);
+            const { version: _version, platform: _platform, install: _install, features: _features, ...legacy } = registration;
+            response = await send("/v1/runtime/register", legacy);
+          }
+          if (!response.ok) throw new Error(msg("selftest.hub_request_failed"));
+          const info = RuntimeInfo.parse(await response.json());
           actor = info.actor;
           await privateFile(join(config.stateDir, "registered.json"), JSON.stringify(info));
           registered = true;
@@ -126,7 +152,9 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
           disconnected = false;
           archives.retryNow(); archiveWake.notify();
         } else {
-          const sync = await post("/v1/runtime/sync", queue.heartbeat(), RuntimeSync);
+          const report = updater?.heartbeat();
+          const sync = await post("/v1/runtime/sync", { ...queue.heartbeat(), ...(report ? { update: report } : {}) }, RuntimeSync);
+          await updater?.install.confirm(version);
           queue.receive(sync.jobs, sync.access);
           const accepted = queue.jobs().filter((j) => !j.acked).map((j) => j.spec.id);
           if (accepted.length) {
@@ -135,6 +163,7 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
           }
           executor.cancel(sync.cancel);
           if (actor) plans.replace(sync.routines, actor, now());
+          await updater?.reconcile(sync.update, () => queue.heartbeat().running.length > 0 || nativeBusy());
         }
         backoff = Math.min(config.pollSeconds, 60);
         if (!claudeUsage && Date.now() >= nextClaudeUsage) {
@@ -148,8 +177,10 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
         delay = backoff; backoff = Math.min(backoff * 2, 60);
       }
       // 例行任务到点就生成 Job，不论 Hub 是否在线（ADR 0019 第 6 节）。
-      if (plans.fire(now()).length) deliveries.notify();
-      if (!justAcked) executor.pump();
+      if (!updater?.draining && !signal.aborted) {
+        if (plans.fire(now()).length) deliveries.notify();
+        if (!justAcked) executor.pump();
+      }
       try { await wait(delay * 1000, signal); } catch (cause) { if (!signal.aborted) throw cause; }
     }
   } finally {
@@ -160,6 +191,7 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
     await archiving;
     await native;
     await claudeUsage;
+    await updater?.close();
     queue.close();
   }
   if (deliveryFailure) throw deliveryFailure;
@@ -167,5 +199,15 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
 
 export async function runRuntime(config: RuntimeConfig, options: Parameters<typeof runRuntimeInstance>[1]): Promise<void> {
   const lease = await acquireStateLease(config.stateDir);
-  try { await withLanguage("en", () => runRuntimeInstance(config, options)); } finally { lease.close(); }
+  try {
+    // The lease is the only initialization before recovery; a second daemon must not consume attempts or replace a live program.
+    const update = new UpdateInstall(config.stateDir, process.execPath);
+    if (await update.startup(version, async () => {
+      try {
+        const response = await (options.fetch ?? fetch)(`${config.url}/health`, { redirect: "error", signal: AbortSignal.any([options.signal, AbortSignal.timeout(10_000)]) });
+        await response.body?.cancel(); return response.ok;
+      } catch { return false; }
+    })) { process.exitCode = UPDATE_EXIT_CODE; return; }
+    await withLanguage("en", () => runRuntimeInstance(config, options));
+  } finally { lease.close(); }
 }

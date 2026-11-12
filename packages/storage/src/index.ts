@@ -14,3 +14,4 @@ export { migrateTaskModel, workSystemActor } from "./task-model.ts";
 
 export * from "./ai.ts";
 export * from "./speech.ts";
+export * from "./runtime-updates.ts";

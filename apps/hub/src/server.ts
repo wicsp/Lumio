@@ -16,6 +16,8 @@ import { startVaultWatch, type WatchOptions } from "./watch.ts";
 import { handleOperation, type OperationOptions } from "./operations.ts";
 import { handleJobs } from "./jobs.ts";
 import { handleRuntime } from "./runtime.ts";
+import { UpdateArtifacts } from "./update-artifacts.ts";
+import { notifyRuntimeUpdate } from "./runtime-updates.ts";
 import { authorize, PAIRING_OPERATIONS, type PairingOperation } from "./authorize.ts";
 import { localHubUrl, networkWarning, rememberLocalRuntime, type HubConfig } from "./config.ts";
 import { HubError } from "./errors.ts";
@@ -150,6 +152,7 @@ async function startHubInstance(config: HubConfig, options: {
       await watch.exclusive(() => routines!.start());
     }
     const speech = new SpeechSessions(modules.speech, modules.funAsr, store, options.now ?? (() => new Date()), log);
+    const updateArtifacts = new UpdateArtifacts(config.stateDir, store.runtimeVersion);
     const handle = async (request: Request, server: Bun.Server<SpeechSocketData>, lang: Language): Promise<Response | undefined> => {
         const start = performance.now();
         const time = new Date().toISOString();
@@ -196,6 +199,7 @@ async function startHubInstance(config: HubConfig, options: {
             return response;
           }
           if(url.pathname.startsWith("/v2/runtime/native")){const response=await modules!.native.channel(request,identity!);status=response.status;return response;}
+          if (url.pathname.startsWith("/v2/execution/updates/")) { const response = await updateArtifacts.handle(request, identity!); status = response.status; return response; }
           if(url.pathname==="/v2/runtime/claude-usage"){const response=await modules!.native.usage.claude(request,identity!);status=response.status;return response;}
           if(url.pathname==="/v2/ai/usage"||/^\/v2\/ai\/connections\/[^/]+\/usage\//.test(url.pathname)){
             const response=await modules!.native.usage.human(request,identity!);
@@ -237,6 +241,11 @@ async function startHubInstance(config: HubConfig, options: {
             const response = await handleRuntime(request, route.operation, identity!, store, decide, (options.now ?? (() => new Date()))(), hooks,
               job => modules!.runtimeRound(job));
             status = response.status;
+            if (route.operation === "runtime.sync") {
+              const now = (options.now ?? (() => new Date()))();
+              const runtime = store.runtimes(now).find(value => value.actor === identity!.actor.id);
+              if (runtime) notifyRuntimeUpdate(store, modules!.notifications, runtime, now);
+            }
             // 结果到了就尽快写回笔记（失败的留给定时任务重试）。
             if (route.operation === "runtime.results" && response.status === 200) {
               modules!.reconcile();

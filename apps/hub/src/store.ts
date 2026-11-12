@@ -5,18 +5,22 @@ import { join } from "node:path";
 import { newId } from "@lumio/foundation";
 import { AgentInfo, AgentTokenIssued, JobAccess, type JobSpec, Actor, Proposal, type ProposalOperation, type ProposalStatus, type ActorRole, RuntimeRegistration, RuntimeInfo } from "@lumio/schema";
 import { HubError } from "./errors.ts";
-import { ExecutionRuntimes } from "@lumio/execution";
-import { workSystemActor, SqliteRuntimeRegistry, SqliteExecutionStore } from "@lumio/storage";
+import { ExecutionRuntimes, RuntimeUpdates } from "@lumio/execution";
+import { workSystemActor, SqliteRuntimeRegistry, SqliteExecutionStore, SqliteRuntimeUpdates } from "@lumio/storage";
+import { version } from "./version.ts";
 
 export interface Identity { actor: Actor; label: string; job?: string }
 export class HubStore {
   proposalCreated: ((proposal: Proposal) => void) | undefined;
   readonly executionStore: SqliteExecutionStore;
+  readonly runtimeUpdates: RuntimeUpdates;
+  runtimeVersion = version;
   private readonly runtimeRegistry: ExecutionRuntimes;
   private constructor(public readonly db: Database) {
     this.runtimeRegistry = new ExecutionRuntimes(new SqliteRuntimeRegistry(db));
+    this.runtimeUpdates = new RuntimeUpdates(new SqliteRuntimeUpdates(db), () => this.runtimeVersion);
     this.executionStore = new SqliteExecutionStore(db, {
-      runtimes: (now) => this.runtimeRegistry.list(now), syncRuntime: (actor, now) => this.runtimeRegistry.sync(actor, now),
+      runtimes: (now) => this.runtimes(now), syncRuntime: (actor, now) => this.runtimeRegistry.sync(actor, now),
     });
   }
 
@@ -256,7 +260,7 @@ export class HubStore {
 
   registerRuntime(actor: string, registration: RuntimeRegistration, now: Date): RuntimeInfo { return this.runtimeRegistry.register(actor, registration, now); }
   syncRuntime(actor: string, now: Date): void { this.runtimeRegistry.sync(actor, now); }
-  runtimes(now: Date): RuntimeInfo[] { return this.runtimeRegistry.list(now); }
+  runtimes(now: Date): RuntimeInfo[] { return this.runtimeRegistry.list(now).map(runtime => runtime.registration.features?.includes("self_update") ? { ...runtime, update: this.runtimeUpdates.view(runtime) } : runtime); }
 
   close(): void { this.db.close(); }
 }
