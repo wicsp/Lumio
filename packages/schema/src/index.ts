@@ -11,6 +11,7 @@ export * from "./common.ts";
 export * from "./knowledge-graph.ts";
 export * from "./entities.ts";
 export * from "./job.ts";
+export * from "./runtime-update.ts";
 export * from "./query.ts";
 export * from "./actor.ts";
 export * from "./operation.ts";
@@ -52,6 +53,7 @@ import {
 import { ApiError, OperationRequest, OperationResult } from "./api.ts";
 import { AiNote, Asset, Experiment, Idea, Paper, Post, Project, Routine, Source, Task } from "./entities.ts";
 import { ExecutionTarget, Job, JobResult, JobSpec, RoutineInfo, RuntimeAck, RuntimeHeartbeat, RuntimeInfo, RuntimeRegistration, RuntimeSync } from "./job.ts";
+import { ExecutionRuntimeUpdateCommandRequest, ReleaseManifest, RuntimeUpdateDirective, RuntimeUpdateReport } from "./runtime-update.ts";
 import { Operation } from "./operation.ts";
 import { PrivilegedApproval, PrivilegedReport, PrivilegedStatus } from "./privileged.ts";
 import { CliConfig, ClientInvite, ClientInviteRequest, ClientJoin, ClientJoinRequest, HubSigningKey, RuntimeInvite, RuntimeInviteRequest, RuntimeJoin, RuntimeJoinRequest } from "./setup.ts";
@@ -112,6 +114,10 @@ export const CONTRACTS = {
   "runtime-heartbeat": RuntimeHeartbeat,
   "runtime-sync": RuntimeSync,
   "runtime-ack": RuntimeAck,
+  "runtime-update-report": RuntimeUpdateReport,
+  "runtime-update-directive": RuntimeUpdateDirective,
+  "runtime-update-command-request": ExecutionRuntimeUpdateCommandRequest,
+  "release-manifest": ReleaseManifest,
   "routine-info": RoutineInfo,
   "privileged-approval": PrivilegedApproval,
   "privileged-status": PrivilegedStatus,
