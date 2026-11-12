@@ -2,6 +2,7 @@ import {
   MODULE_ID_PREFIXES, ResourceRef,
   type AssistantConversation, type AssistantMessage, type AssistantModelMessage, type AssistantModelRequest, type FocusSnapshot,
 } from "@lumio/schema";
+import { boundedHistory, type HistoryEntry } from "./history.ts";
 
 export interface AssistantWorkbenchScope {
   owner: string;
@@ -123,7 +124,7 @@ export function workbenchMemories(values: readonly string[]): string[] {
   return takeWithin([...values].reverse(), budgets.memoryBytes).reverse();
 }
 
-interface HistoricalTurn {
+interface HistoricalTurn extends Pick<HistoryEntry, "status" | "calls"> {
   records: AssistantMessage[];
   anchors: readonly ResourceRef[];
   messages: AssistantModelMessage[];
@@ -134,6 +135,7 @@ export function workbenchTurns(
   anchors: ReadonlyMap<string, readonly ResourceRef[]>,
   settled: ReadonlySet<string>,
   history: (records: AssistantMessage[]) => AssistantModelMessage[],
+  facts?: (turn: string) => Pick<HistoryEntry, "status" | "calls">,
 ): HistoricalTurn[] {
   const turns = new Map<string, AssistantMessage[]>();
   for (const message of records) {
@@ -145,7 +147,7 @@ export function workbenchTurns(
   return [...turns.entries()].flatMap(([id, entries]) => {
     const user = entries[0]!;
     if (user.role !== "user" || !settled.has(id)) return [];
-    return [{ records: entries, anchors: anchors.get(user.id) ?? [], messages: history(entries) }];
+    return [{ records: entries, anchors: anchors.get(user.id) ?? [], messages: history(entries), ...(facts?.(id) ?? { status: "done" as const, calls: [] }) }];
   });
 }
 
@@ -171,7 +173,7 @@ export function fragmentOnSwitch(
   let remaining = budgets.summaryInputBytes - 2;
   for (let index = previousIndex; index >= 0; index--) {
     const turn = history[index]!;
-    if (!sameAnchors(previous, turn.anchors)) break;
+    if (turn.status !== "done" || !sameAnchors(previous, turn.anchors)) break;
     const cost = workbenchBytes(summaryMessages(turn.messages)) + 1;
     if (cost > remaining) break;
     segment.unshift(turn);
@@ -203,7 +205,7 @@ export function fragmentMessages(fragment: AssistantFragmentSource, history: rea
   const end = history.findIndex(turn => turn.records.at(-1)!.id === fragment.lastMessage);
   if (start < 0 || end < start) return [];
   const segment = history.slice(start, end + 1);
-  if (segment.some(turn => !sameAnchors(turn.anchors, fragment.anchors))) return [];
+  if (segment.some(turn => turn.status !== "done" || !sameAnchors(turn.anchors, fragment.anchors))) return [];
   const messages = segment.flatMap(turn => summaryMessages(turn.messages));
   return workbenchBytes(messages) <= budgets.summaryInputBytes ? messages : [];
 }
@@ -342,20 +344,19 @@ export class WorkbenchResources {
     const matching = byRecency.filter(({ turn, index }) => matches(turn.anchors) &&
       !summaries.some(summary => summary.start <= index && index <= summary.end)).slice(0, budgets.anchorTurns);
     const eligible = [];
-    for (const { turn, index } of new Map([...matching, ...recent].map(item => [item.index, item])).values()) {
-      // In clarify mode, keep recent messages (last 2 turns) even without visible anchors
-      const keepInClarify = resolution.clarify && byRecency.indexOf(byRecency.find(item => item.index === index)!) < 2;
-      if (keepInClarify || (!resolution.clarify && await this.visible(turn.anchors))) {
-        eligible.push({ index, messages: turn.messages });
-      }
+    for (const { turn, index } of new Map([...recent, ...matching].map(item => [item.index, item])).values()) {
+      if (await this.visible(turn.anchors)) eligible.push({ ...turn, index });
     }
-    const messages = takeWithin(eligible, budgets.historyBytes).sort((left, right) => left.index - right.index).flatMap(turn => turn.messages);
+    const included = boundedHistory(eligible, budgets.historyBytes);
     const notices = await this.adapter.pendingNotices?.(this.scope.owner, this.actor, this.signal, this.scope) ?? [];
     const visibleNotices = [];
     for (const notice of notices.slice(0, 20)) if (await this.read(notice.ref)) visibleNotices.push(compactSummary(notice));
     return {
-      messages,
+      messages: included.messages,
       data: {
+        compact_turns: included.compact_turns,
+        history: { complete: included.included === history.length && !included.compact_turns.length,
+          included_turns: included.included, compacted_turns: included.compact_turns.length, omitted_turns: history.length - included.included },
         focus: resolution.focus,
         anchors: takeWithin(anchors, budgets.anchorBytes),
         related: takeWithin([...new Map(related.map(value => [value.ref.id, value])).values()], budgets.relatedBytes),
