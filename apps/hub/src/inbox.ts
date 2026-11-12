@@ -321,7 +321,7 @@ export class Inbox {
         assertNoteVisible(this.hub.db, id);
         const now = this.now();
         const note = await this.files.card(id, input, actor.actor.id, now, revision);
-        if (value.ownsEntity && !capture.ai_note) await this.files.embed(original.note, note, owner, now);
+        await this.files.embed(original.note, note, owner, now);
         this.update(value, { ai_note: id, card: value.summary === "deep" ? "deep" : "ready", error: undefined });
         this.hub.audit(actor, revision ? "knowledge.ainote.update" : "knowledge.ainote.create", "allow", undefined, `applied:${id}`);
       });

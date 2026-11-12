@@ -92,7 +92,7 @@ files/     attachments/  drawings/（Excalidraw）  templates/  originals/（资
 ## 外部资料与 Inbox（ADR 0057、0065，I1、I2）
 
 - **三层**：原文（Lumio 写，只读）、AI 层（该资料的 AI 笔记，即入库时的卡片）、人的层（`paper` / `source` 实体：笔记、链接、状态）。
-  论文入库为 `paper`（citekey 与去重不变），其他为 `source`。实体正文开头单独一段嵌入它的 AI 笔记，其余归人；卡片写好而实体未嵌入时补上。
+  论文入库为 `paper`（citekey 与去重不变），其他为 `source`。实体正文开头单独一段嵌入它的 AI 笔记，其余归人；卡片写好而实体未嵌入时补上（I2-2）。
 - **原文**：`files/originals/<标题> <实体 ID>.md`，frontmatter 记 `of`、`url`、`captured`、`extractor`、`lang`、`sha256`；不扫描为实体、不进链接图。
   只用于检索、问答和备份，人读资料时打开原链接；重新抽取时整体替换。PDF 存 Hub 托管文件，不进 vault；图片、视频、音频不保存。
 - **Inbox 是收藏夹**（ADR 0065）：捕获记录（`cap_`）在 `hub.sqlite`，属 Hub 的跨模块协调数据。解析成功即生成实体，资料就在知识库里，不需要分拣。
