@@ -108,8 +108,8 @@ export class MainDock {
   }
 
   /** 页面变化：去掉焦点的选择只对当时的页面有效；固定的焦点不变。 */
-  pageChanged(): void {
-    if (this.mode === "off") this.mode = "auto";
+  pageChanged(resetSharing = true): void {
+    if (resetSharing && this.mode === "off") this.mode = "auto";
     void this.renderChip();
   }
 
@@ -217,10 +217,10 @@ export class MainDock {
   private async submit(): Promise<void> {
     const message = this.text.value.trim();
     if (!message || this.controller) return;
-    await this.start();
-    if (!this.conversation) return;
     const input = this.focusInput();
     const focus = input && buildFocus({ ...input, ...(input.id ? { label: input.label ?? this.titles.get(input.id) } : {}) });
+    await this.start();
+    if (!this.conversation) return;
     const request: AssistantChatRequest = { request_id: newRequestId("chat"), conversation: this.conversation, message,
       ...(this.profile ? { profile: this.profile } : {}), ...(focus ? { focus } : {}) };
     this.text.value = ""; this.text.dispatchEvent(new Event("input"));

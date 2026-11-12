@@ -41,21 +41,22 @@ const project = WorkProject.parse({ schema_version: 2, type: "project", id: "prj
 function setup(mode: "tasks" | "projects" = "tasks", hash = "#work/tasks") {
   let result: Promise<WorkTaskDetail | WorkProject> = Promise.resolve(first);
   const changes: (ResourceRef | undefined)[] = [];
+  const sharingResets: boolean[] = [];
   const pane = Object.assign(Object.create(WorkPane.prototype), {
     active: true, mode, root: new ElementStub(), detail: new ElementStub(), dock: new ElementStub(), list: new ElementStub(), split: new ElementStub(), detailGeneration: 0,
     client: { workTask: () => result, workProject: () => result }, renderEditor() {},
-    focusChanged: () => changes.push(pane.focus),
+    focusChanged: (reset: boolean) => { changes.push(pane.focus); sharingResets.push(reset); },
   }) as WorkPane;
   const view = Object.assign(Object.create(WorkbenchView.prototype), { currentHash: hash, current: { pane }, main: { contains: () => false } }) as unknown as { focusInput(): FocusInput };
-  return { pane, view, changes, load(value: Promise<WorkTaskDetail | WorkProject> | WorkTaskDetail | WorkProject) { result = Promise.resolve(value); },
+  return { pane, view, changes, sharingResets, load(value: Promise<WorkTaskDetail | WorkProject> | WorkTaskDetail | WorkProject) { result = Promise.resolve(value); },
     snapshot: () => buildFocus(view.focusInput()) };
 }
 
-async function send(focus: () => FocusInput, mode = "auto", pinned?: FocusInput) {
+async function send(focus: () => FocusInput, mode = "auto", pinned?: FocusInput, start = async () => {}) {
   let request: AssistantChatRequest | undefined;
   const text = new ElementStub(); text.value = "What is this task?";
   const dock = Object.assign(Object.create(MainDock.prototype), {
-    mode, pinned, host: { focus }, text, conversation: "conv_00000000000000000000000001", titles: new Map(), start: async () => {}, setBusy() {},
+    mode, pinned, host: { focus }, text, conversation: "conv_00000000000000000000000001", titles: new Map(), start, setBusy() {},
     notice: new ElementStub(), messages: new ElementStub(), scroller: new ElementStub(),
     client: { async *assistantEvents(value: AssistantChatRequest) { request = AssistantChatRequest.parse(value); } },
   }) as unknown as { submit(): Promise<void> };
@@ -121,4 +122,28 @@ test("a delayed title lookup cannot replace the current context chip", async () 
   finish("Old title"); await old;
   expect(chip.children).toEqual(current);
   expect(JSON.stringify(chip.children)).toContain(second.task.title);
+});
+
+test("background refresh updates focus without re-enabling disabled sharing", async () => {
+  const f = setup(); await f.pane.open(first.task.id);
+  expect(f.sharingResets).toEqual([true, false]);
+  f.sharingResets.length = 0;
+  Object.assign(f.pane, { canRefreshDetail: () => true });
+  f.load({ ...first, task: { ...first.task, revision: 2 } });
+  await f.pane.open(first.task.id, true, true);
+  expect(f.sharingResets).toEqual([false]);
+  expect(f.snapshot()?.primary?.revision).toBe("2");
+  const dock = Object.assign(Object.create(MainDock.prototype), { mode: "off", renderChip: async () => {} }) as MainDock;
+  dock.pageChanged(f.sharingResets[0]);
+  expect(Reflect.get(dock, "mode")).toBe("off");
+  dock.pageChanged(true);
+  expect(Reflect.get(dock, "mode")).toBe("auto");
+});
+
+test("sending fixes the selected task before waiting for the conversation to initialize", async () => {
+  const f = setup(); await f.pane.open(first.task.id);
+  f.load(second);
+  const request = await send(() => f.view.focusInput(), "auto", undefined, () => f.pane.open(second.task.id));
+  expect(f.snapshot()?.primary?.id).toBe(second.task.id);
+  expect(request.focus?.primary?.id).toBe(first.task.id);
 });
