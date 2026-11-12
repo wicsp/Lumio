@@ -2,7 +2,7 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ApiError, HandoffPlan, Job, WorkCommandRequest, WorkCommandResult, WorkProject, WorkTask, WorkTaskDetail } from "@lumio/schema";
+import { ApiError, HandoffPlan, Job, SecurityReviewRequest, SecurityReviewResult, WorkCommandRequest, WorkCommandResult, WorkProject, WorkTask, WorkTaskDetail } from "@lumio/schema";
 import { runCli } from "../src/cli.ts";
 import { COMMANDS, commandUsage } from "../src/command-definitions.ts";
 import { printHelp } from "../src/help.ts";
@@ -204,4 +204,27 @@ test("plan files reject invalid JSON, unknown fields and invalid graph settings 
     expect(invalid.code).toBe(1);
     expect(ApiError.parse(JSON.parse(invalid.stdout)).error).toMatchObject({ code: "INVALID", message: expect.stringContaining(expected) });
   }
+});
+
+test("security review sends a validated resource and prints a location-only report", async () => {
+  const id = "ast_00000000000000000000000001";
+  const input = SecurityReviewRequest.parse({ kind: "note", ref: id, include_private: true });
+  const result = SecurityReviewResult.parse({ resource: input, findings: [
+    { reason: "possible-card-number", field: "file", line: 7, column: 3 },
+  ], truncated: false });
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
+    expect(new URL(request.url).pathname).toBe("/v2/security/review");
+    expect(request.method).toBe("POST");
+    expect(SecurityReviewRequest.parse(await request.json())).toEqual(input);
+    return Response.json(result);
+  } });
+  try {
+    const args = ["security", "review", "note", id, "--include-private"];
+    const json = await cli([...args, "--json"], "en", server.url.origin);
+    expect(json.code, json.stdout + json.stderr).toBe(0);
+    expect(SecurityReviewResult.parse(JSON.parse(json.stdout))).toEqual(result);
+    const text = await cli(args, "zh", server.url.origin);
+    expect(text.code, text.stdout + text.stderr).toBe(0);
+    expect(text.stdout).toContain("file:7:3  疑似银行卡号");
+  } finally { await server.stop(true); }
 });

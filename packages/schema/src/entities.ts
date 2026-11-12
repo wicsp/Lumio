@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { AgentAssignee, Assignee, Base, DerivedFrom, Timestamp, idOf, optional, withDefault } from "./common.ts";
-import { containsCardNumber } from "./secrets.ts";
 
 /**
  * 论文 citekey：`<第一作者姓>_<年份>_<标题缩写>`，例如 `He_2020_LightGCN`。
@@ -192,7 +191,7 @@ const Last4 = z.union([
   z.number().int().min(0).max(9999).transform((n) => String(n).padStart(4, "0")),
 ]);
 
-const CARD_NUMBER_MESSAGE = "疑似完整卡号：vault 中只能记后四位（last4），完整卡号请放在密码管理器中";
+
 
 /**
  * 订阅、卡、账户、域名、保险、证件等资产，位于 `life/assets/`（私密，ADR 0012 第 5、6 节）。
@@ -219,11 +218,6 @@ export const Asset = Base.extend({
   last4: optional(Last4),
   vault_item: optional(z.string()).describe("密码管理器中对应条目的名称"),
   manage_url: optional(z.url()),
-}).superRefine((asset, ctx) => {
-  // 检查所有键，包括 schema 之外的未知字段（Base 是 looseObject）。
-  for (const [key, value] of Object.entries(asset)) {
-    if (containsCardNumber(value)) ctx.addIssue({ code: "custom", path: [key], message: CARD_NUMBER_MESSAGE });
-  }
 });
 
 // ───────────────────────── ADR 0051：AI 笔记 ─────────────────────────

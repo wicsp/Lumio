@@ -5,7 +5,6 @@ import { KnowledgeCreationStore, KnowledgeEditingStore, openVaultGit, updateInde
 import type { HubConfig } from "./config.ts";
 import type { HubStore, Identity } from "./store.ts";
 import { HubError } from "./errors.ts";
-import { containsSecret } from "./tasks.ts";
 import { assertNoteVisible } from "./trash.ts";
 import { text as msg } from "./messages.ts";
 import type { ConversationSource, Resources } from "./resources.ts";
@@ -30,9 +29,6 @@ export class AiNotes {
           throw new HubError("FORBIDDEN", { key: "knowledge.ai_note_source_unavailable", args: [] }, { reason: "source-unavailable" });
       }
     };
-    const validate = (bytes: Buffer) => {
-      if (containsSecret(bytes.toString("utf8"))) throw new HubError("INVALID", { key: "knowledge.sensitive", args: [] }, { reason: "sensitive-content" });
-    };
     const finalize = async (path: string, bytes: Buffer, writer = actor) => {
       await updateIndex(this.config.vault, { stateDir: this.config.stateDir });
       const git = await openVaultGit(this.config.vault);
@@ -51,14 +47,13 @@ export class AiNotes {
         if (operation.op === AI_NOTE_CAPABILITY_NAMES[0]) {
           await validateSources([...(operation.args.derived_from ?? []), ...(currentSource ? [currentSource] : [])]);
           return this.creations.createAiNote(actor, request_id, operation.args, { now, newId: prefix => newId(prefix, now, randomBytes), tz: "UTC" }, {
-            validate: note => validate(note.content),
             finalize: (result, bytes) => finalize(result.note.path, bytes),
             audit: result => audit(result.note.id!),
           }, currentSource);
         }
         assertNoteVisible(this.store.db, operation.args.note);
         return this.edits.updateAiNote(actor, request_id, operation.args, {
-          now, validate, validateSources,
+          now, validateSources,
           finalize: (document, bytes, writer) => finalize(document.note.path, bytes, writer),
           audit: (document, writer) => {
             if (writer === actor) audit(document.note.id!);

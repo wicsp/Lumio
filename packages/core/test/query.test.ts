@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { LinksResult, NoteDetail, SearchResult } from "@lumio/schema";
-import { CoreError, excludedCardPaths, exportBib, noteLinks, parseFrontmatter, searchNotes, showNote } from "../src/index.ts";
+import { CoreError, exportBib, noteLinks, parseFrontmatter, searchNotes, showNote } from "../src/index.ts";
 import { extractLinks } from "../src/index/links.ts";
 
 const fixture = fileURLToPath(new URL("../../../fixtures/query-vault", import.meta.url));
@@ -104,37 +104,41 @@ test("private notes and backlinks are hidden by default; inclusion restores them
   expect(main.incoming.some((l) => l.note.type === "asset")).toBe(true);
 });
 
-test("card text is never indexed or exposed, even with private inclusion", async () => {
-  expect((await searchNotes(vault, "cardonlymarker", { stateDir, includePrivate: true })).total).toBe(0);
-  expect((await searchNotes(vault, "4111", { stateDir })).total).toBe(0);
-  await expect(showNote(vault, "Card", { stateDir })).rejects.toMatchObject({ code: "NOTE_NOT_FOUND" });
-  expect(await excludedCardPaths(vault, { stateDir })).toEqual(["research/ideas/Card.md"]);
+test("a derived index from before ADR 0064 rebuilds and includes formerly excluded notes", async () => {
+  const options = { stateDir };
+  const ref = "research/ideas/Card.md";
+  expect((await searchNotes(vault, "cardonlymarker", options)).total).toBe(1);
   const db = new Database(join(stateDir, "index.sqlite"));
-  // 只查文本列：mtime 这类数字列偶尔会恰好含有 "4111"，与卡号无关。
-  expect(JSON.stringify(db.query("SELECT path, id, title, frontmatter, body, search_text FROM notes").all())).not.toContain("4111");
-  expect(JSON.stringify(db.query("SELECT * FROM fulltext").all())).not.toContain("4111");
+  db.query("DELETE FROM fulltext WHERE rowid=(SELECT rowid FROM notes WHERE path=?)").run(ref);
+  db.query("DELETE FROM notes WHERE path=?").run(ref);
+  db.exec("UPDATE metadata SET version=5");
   db.close();
+
+  expect((await searchNotes(vault, "cardonlymarker", options)).total).toBe(1);
+  expect((await showNote(vault, "Card", options)).body).toContain("4111");
 });
 
 test("incremental queries parse only changed files, remove deleted notes and refresh link resolution", async () => {
   let parsed = 0;
   const options = { stateDir, parse: ((source) => { parsed++; return parseFrontmatter(source); }) as typeof parseFrontmatter };
   await searchNotes(vault, "index", options);
-  expect(parsed).toBe(14);
+  expect(parsed).toBe(15);
   await noteLinks(vault, "Main", options);
-  expect(parsed).toBe(14);
+  expect(parsed).toBe(15);
   const sourcePath = join(vault, "library/sources/来源笔记.md");
   await writeFile(sourcePath, (await readFile(sourcePath, "utf8")) + "\nnewincrementalmarker\n");
   expect((await searchNotes(vault, "newincrementalmarker", options)).total).toBe(1);
-  expect(parsed).toBe(15);
+  expect(parsed).toBe(16);
   await unlink(sourcePath);
   expect((await searchNotes(vault, "newincrementalmarker", options)).total).toBe(0);
   expect((await noteLinks(vault, "Main", options)).outgoing.find((l) => l.target === "来源笔记")?.dangling).toBe(true);
-  expect(parsed).toBe(15);
+  expect(parsed).toBe(16);
+  const incoming = (await noteLinks(vault, alpha, options)).incoming;
+  expect(incoming.length).toBeGreaterThan(0);
   const mainPath = join(vault, "research/ideas/Main.md");
   await writeFile(mainPath, (await readFile(mainPath, "utf8")) + "\n4111 1111 1111 1111\n");
-  await expect(showNote(vault, "Main", options)).rejects.toMatchObject({ code: "NOTE_NOT_FOUND" });
-  expect((await noteLinks(vault, alpha, options)).incoming).toHaveLength(0);
+  expect((await showNote(vault, "Main", options)).body).toContain("4111");
+  expect((await noteLinks(vault, alpha, options)).incoming).toEqual(incoming);
 });
 
 test("short queries sort by modification time and long snippets stay plain and bounded", async () => {
@@ -168,7 +172,7 @@ test("damaged, incompatible and other-vault indexes rebuild safely", async () =>
   expect((await searchNotes(second, "index", { stateDir })).total).toBe(2);
 });
 
-test("BibTeX export is sorted, corrects keys, warns on missing blocks, excludes sensitive/private data and avoids rewrites", async () => {
+test("BibTeX export is sorted, corrects keys, warns on missing blocks, excludes private notes and avoids rewrites", async () => {
   const first = await exportBib(vault);
   expect(first.count).toBe(2);
   expect(first.changed).toBe(true);
@@ -188,7 +192,7 @@ test("BibTeX export is sorted, corrects keys, warns on missing blocks, excludes 
   const paper = join(vault, "library/papers/Alpha_2024_Paper.md");
   await writeFile(paper, (await readFile(paper, "utf8")) + "\n4111 1111 1111 1111\n");
   const exported = await exportBib(vault, join(temp, "custom", "output.bib"));
-  expect(exported.count).toBe(1);
+  expect(exported.count).toBe(2);
   expect((await readFile(exported.path, "utf8"))).not.toContain("Private");
   expect(JSON.stringify(exported)).not.toContain("4111");
 });

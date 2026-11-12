@@ -6,7 +6,7 @@ import { startHub } from "../src/server.ts";
 import { readConfig } from "../src/config.ts";
 import { KnowledgeDocument, KnowledgeUpdateResult, KnowledgeRelatedResult, KnowledgeReferencesResult, ApiError } from "@lumio/schema";
 import { webFileResponse, webResponse } from "../src/web.ts";
-test("editing HTTP contracts, permissions, snippets, conflict and sensitive-content guard", async () => {
+test("editing HTTP contracts, permissions, snippets, conflict and editing content that matches review patterns", async () => {
     const root = await mkdtemp(join(tmpdir(), "lumio-edit-http-")), vault = join(root, "vault");
     await cp(new URL("../../../fixtures/query-vault", import.meta.url).pathname, vault, { recursive: true });
     const hub = await startHub({ ...readConfig({ LUMIO_VAULT: vault, LUMIO_STATE_DIR: join(root, "state") }), port: 0 }, { log() { } });
@@ -22,8 +22,8 @@ test("editing HTTP contracts, permissions, snippets, conflict and sensitive-cont
         const stale = await call(path, "PUT", { ...request, request_id: "http-edit-0000000002" });
         expect(stale.status).toBe(409);
         expect(ApiError.parse(await stale.json()).error.reason).toBe("revision_conflict");
-        const sensitive = await call(path, "PUT", { ...request, expected_revision: saved.revision, request_id: "http-edit-0000000003", body: "sk-" + "x".repeat(30) });
-        expect(sensitive.status).toBe(400);
+        const sensitive = await call(path, "PUT", { ...request, expected_revision: saved.revision, request_id: "http-edit-0000000003", body: request.body + "\n" + "sk-" + "x".repeat(30) });
+        expect(sensitive.status).toBe(200);
         const refs = KnowledgeReferencesResult.parse(await (await call("v2/knowledge/references", "POST", { source_kind: "idea", query: "quantum" })).json());
         expect(refs.hits.some(h => h.note.id === id && h.snippet.includes("quantum"))).toBe(true);
         const related = KnowledgeRelatedResult.parse(await (await call("v2/knowledge/related", "POST", { title: "", text: "", focus: "quantum" })).json());

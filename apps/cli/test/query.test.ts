@@ -54,13 +54,9 @@ test("every query JSON is one newline-terminated object accepted by the correspo
   expect("id" in noId).toBe(false);
 });
 
-test("human search ends with blocked paths only and never exposes card text", () => {
-  const result = cli(["search", "cardonlymarker"]);
-  expect(result.code).toBe(0);
-  expect(result.stderr).toBe("");
-  expect(result.stdout).toBe("找到 0 篇笔记\n有 1 个文件因疑似含卡号未被索引\nresearch/ideas/Card.md\n");
-  expect(result.stdout + result.stderr).not.toContain("4111");
-  expect(SearchResult.parse(json(["search", "cardonlymarker"])).total).toBe(0);
+test("search includes notes containing a pattern that can be checked on demand", () => {
+  const result = SearchResult.parse(json(["search", "cardonlymarker"]));
+  expect(result.hits.map(hit => hit.note.path)).toEqual(["research/ideas/Card.md"]);
 });
 
 test("private notes are invisible by default in all commands and restored only explicitly", () => {
@@ -80,7 +76,7 @@ test("private notes are invisible by default in all commands and restored only e
 
 test("errors go only to stderr, use exit code 1, and ambiguity lists candidate paths", () => {
   for (const args of [
-    ["show", "Twin"], ["links", "Twin", "--json"], ["show", "missing"], ["show", "Card"],
+    ["show", "Twin"], ["links", "Twin", "--json"], ["show", "missing"],
     ["search", "x", "--limit", "0"], ["search", "x", "--limit", "1.5"], ["search", "x", "--type", "nonsense"],
     ["search", "x", "--out", "file"], ["show", "Main", "--limit", "1"], ["links", "Main", "--type", "idea"],
     ["export", "bib", "--include-private"], ["export", "bib", "--json"], ["search"],

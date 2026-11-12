@@ -1,3 +1,4 @@
+import { SecurityReviewRequest, SecurityReviewResult } from "@lumio/schema";
 import { Capture, CaptureCommand, CaptureList, CaptureListArgs, CaptureProxySettings, CaptureProxyUpdate, KnowledgeAIBinding, KnowledgeAIBindingUpdate, CaptureCreate, CaptureCreateResult, KnowledgeAiNoteCommand, KnowledgeAiNoteResult, KnowledgeOriginal, KnowledgeOriginalShowArgs, ResourceSummary } from "@lumio/schema";
 import {AIConnection,AIConnectionInput,AIProfile,AIProfileInput,AIConfiguration,AIRuntime,NativeConnectionAction,NativeConnectionView,NativeSession,NativeCreate,NativeAction,NativeEventRecord} from "@lumio/schema";
 import { AssistantMain, AssistantMainEnsure, Exploration, ExplorationCommand, ExplorationList, ExplorationListArgs, NoticeCommand, NoticeCommandResult, NoticeList, NoticeListArgs } from "@lumio/schema";
@@ -76,6 +77,9 @@ export function createClient(options: { url: string; token?: string; language?: 
   }
   const queryParams = (options: QueryOptions): Record<string, string> => options.includePrivate === undefined ? {} : { include_private: String(options.includePrivate) };
   return {
+    securityReview(input: SecurityReviewRequest) {
+      return request("/v2/security/review", {}, SecurityReviewResult, validate(SecurityReviewRequest, input));
+    },
     capture(input: CaptureCreate) {
       return request("/v2/inbox/captures", {}, CaptureCreateResult, validate(CaptureCreate, input));
     },

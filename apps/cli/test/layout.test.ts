@@ -58,12 +58,12 @@ test("sync completes every type directory of the ADR 0012 layout and leaves non-
 test("private assets are reported by path only, never by field content", async () => {
   const path = join(vault, "life/assets/subscriptions/Example Cloud.md");
   const source = await readFile(path, "utf8");
-  await writeFile(path, source.replace("provider: Example Cloud Inc", "provider: Example Cloud Inc\nlogin: 4111 1111 1111 1111"));
+  await writeFile(path, source.replace("provider: Example Cloud Inc", "provider: Example Cloud Inc\nlast4: 4111x"));
   const { code, lines } = await sync();
   expect(code).toBe(1);
   const line = lines.find((l) => l.includes("life/assets/"))!;
   expect(line.startsWith("问题  life/assets/subscriptions/Example Cloud.md")).toBe(true);
-  expect(line).toContain("login");
+  expect(line).toContain("last4");
   expect(lines.join("\n")).not.toContain("4111");
   expect(lines.join("\n")).not.toContain("Example Cloud Inc");
 });

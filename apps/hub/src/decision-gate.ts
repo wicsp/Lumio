@@ -3,7 +3,6 @@ import {
 } from "@lumio/schema";
 import type { DecisionGateConfiguration } from "./decision-gate-config.ts";
 import { askJev, isCount, isRecord, NOTICE_QUESTION, PROGRESS_QUESTION, type JevFetch, type JevRequest } from "./jev.ts";
-import { containsSecret } from "./tasks.ts";
 
 const NOTICE_STATES = [
   "delivered", "waiting_for_human", "failed", "pending", "ready", "report", "found", "nothing", "stopped", "cancelled",
@@ -78,7 +77,7 @@ export function buildDecisionGateRequest(kind: "notice" | "progress", value: unk
   const event = NoticeSourceKind.safeParse(value.event_kind);
   const title = value.subject_title;
   if (!event.success || (title !== undefined &&
-      (typeof title !== "string" || !title.trim() || title.length > 240 || /[\r\n\0]/.test(title) || containsSecret(title)))) {
+      (typeof title !== "string" || !title.trim() || title.length > 240 || /[\r\n\0]/.test(title)))) {
     return undefined;
   }
   return {

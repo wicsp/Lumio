@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { parseFrontmatter } from "@lumio/knowledge";
 import {
   AIConnection, AIProfile, AiNote, Capture, CaptureCreate, CaptureCreateResult, CaptureList, KnowledgeAIBinding,
-  KnowledgeOriginal, NoteDetail, ORIGINAL_CAPABILITY_NAME, Paper, SearchResult, Source, TrashListResult, TrashRestoreResult,
+  KnowledgeOriginal, NoteDetail, ORIGINAL_CAPABILITY_NAME, Paper, SearchResult, SecurityReviewResult, Source, TrashListResult, TrashRestoreResult,
   type AssistantModelRequest, type CaptureCommand,
 } from "@lumio/schema";
 import { readConfig } from "../src/config.ts";
@@ -176,16 +176,25 @@ test("arXiv aliases share one paper and HTML original; triage, reextract, discar
   const f = await fixture();
   try {
     expect((await f.bind()).status).toBe(200);
-    const first = await f.create("http://arxiv.org/pdf/2611.01234v2.pdf");
+    const first = await f.create("https://arxiv.org/html/2611.01234v3");
     const ready = await f.wait(first.capture.id);
     expect(ready).toMatchObject({ state: "ready", card: "ready", kind: "paper", url: "https://arxiv.org/abs/2611.01234" });
-    expect((await f.create("https://arxiv.org/html/2611.01234v3")).duplicate).toBe("existing");
+    expect((await f.create("http://arxiv.org/pdf/2611.01234v2.pdf")).duplicate).toBe("existing");
     expect((await f.create("https://arxiv.org/abs/2611.01234v1")).capture.id).toBe(ready.id);
     const paper = Paper.parse((await f.note(ready.entity!.id!)).frontmatter);
     expect(paper.citekey).toBe("Example_2026_Basalt");
     expect((await f.note(paper.id)).body).toContain("@misc{Example_2026_Basalt,");
     const original = await f.original(paper.citekey);
     expect(original.frontmatter.extractor).toBe("arxiv-html@1");
+    expect(original.body).toContain("Ada Example");
+    const orcid = "0000-0000-0001-0058";
+    expect(original.body).toContain(`https://orcid.org/${orcid}`);
+    const review = await f.api("/v2/security/review", "POST", { kind: "original", ref: paper.id });
+    expect(review.status).toBe(200);
+    expect(review.headers.get("Cache-Control")).toBe("no-store");
+    const report = SecurityReviewResult.parse(await review.json());
+    expect(report.findings).toContainEqual(expect.objectContaining({ field: "body", reason: "possible-card-number" }));
+    expect(JSON.stringify(report)).not.toContain(orcid);
     expect(original.body).toContain("arxivmethodmarker");
     expect(original.body).toContain("$E=mc^2$");
     expect((await f.command(ready, { op: "triage", triage: "reference" })).status).toBe(200);

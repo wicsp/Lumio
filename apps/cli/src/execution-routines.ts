@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { createClient, ApiClientError } from "@lumio/api-client";
-import { ExecutionRoutineCommandRequest, WorkCommandRequest, textContainsCardNumber } from "@lumio/schema";
+import { ExecutionRoutineCommandRequest, WorkCommandRequest } from "@lumio/schema";
 import { hubCredentials } from "./config.ts";
 
 /** Return undefined only before a v2 object resolves, so failed mutations are never repeated through v1. */
@@ -48,11 +48,11 @@ export async function runExecutionRoutines(args: string[], log: (line: string) =
       const runs = (await client.jobs(undefined, undefined, current.id)).filter((job) => job.spec.source?.fired_at && (job.spec.id === date || local(job.spec.source.fired_at).startsWith(date.replace("T", " "))));
       if (runs.length !== 1) throw new Error(runs.length ? msg("execution-routines.multiple_runs_on_this_date_specify_the_minute_or_job_id") : msg("execution-routines.run_not_found"));
       const job = runs[0]!, report = job.result?.report ?? msg("execution-routines.no_report");
-      const sensitive = textContainsCardNumber(report) || /\b(?:sk-|gh[pousr]_|github_pat_|AKIA|xox[abprs]-|lumio_)[A-Za-z0-9_-]{16,}|-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(report);
+
       const { workdir, model, gpus, timeout_minutes } = current;
       emit(await client.workCommand(WorkCommandRequest.parse({ request_id: request, operation: { op: "work.task.create", args: {
         title: msg("execution-routines.followup", current.title, local(job.spec.source!.fired_at!)), workdir, model, gpus, timeout_minutes,
-        description: msg("execution-routines.source_run_result", values.description ?? msg("execution-routines.write_your_followup_here"), sensitive ? msg("execution-routines.report_may_contain_sensitive_information_use_lumio_job_show_to_view") : report.slice(0, 20_000)),
+        description: msg("execution-routines.source_run_result", values.description ?? msg("execution-routines.write_your_followup_here"), report.slice(0, 20_000)),
         references: [{ module: "execution", id: current.id }, { module: "execution", id: job.spec.id }],
       } } }))); return 0;
     }

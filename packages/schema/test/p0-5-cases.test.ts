@@ -8,7 +8,6 @@ type Case = Record<string, unknown>;
 const cases = JSON.parse(readFileSync(join(import.meta.dir, "../../../fixtures/entities/cases.json"), "utf8")) as {
   valid: Record<string, Case>;
   invalid: Record<string, Case>;
-  cardNumbers: string[];
 };
 
 describe("ADR 0012 entities: fixtures", () => {
@@ -86,17 +85,6 @@ describe("Asset", () => {
     expect(Asset.parse(cases.valid["asset-card"]).status).toBe("active");
     expect(Asset.parse(cases.valid["asset-card"]).expires).toBe("2028-09");
     expect(Asset.parse(cases.valid["asset-domain"]).expires).toBe("2027-03-14");
-  });
-
-  test("card-number guard never echoes the number", () => {
-    for (const name of cases.cardNumbers) {
-      const result = Asset.safeParse(cases.invalid[name]);
-      expect(result.success).toBe(false);
-      const text = JSON.stringify(result.error?.issues);
-      expect(text).not.toMatch(/[0-9]{8,}/);
-      expect(text).not.toContain("4111");
-      expect(text).not.toContain("5500");
-    }
   });
 
   test("short digit runs (dates, last4, prices) are not flagged", () => {

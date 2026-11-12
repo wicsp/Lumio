@@ -44,7 +44,7 @@ interface Receipt {
 }
 interface EditingHooks {
     now: Date;
-    validate(bytes: Buffer): void;
+    validate?(bytes: Buffer): void;
     finalize(note: NoteDetail, bytes: Buffer, actor: string): Promise<void>;
     audit(note: NoteDetail, actor: string): void;
     beforeWrite?(): Promise<void>;
@@ -124,7 +124,7 @@ export class KnowledgeEditingStore {
                 await validateSources?.(sources ?? []);
             }
             const after = editKnowledgeDocument(before, request.title ?? note.title, request.body ?? body, hooks.now.toISOString(), metadata);
-            hooks.validate(after);
+            hooks.validate?.(after);
             const result = KnowledgeUpdateResult.parse({ ...document(row, after), request_id: request.request_id });
             const stale = this.db.query<Receipt, [
                 string
@@ -142,7 +142,7 @@ export class KnowledgeEditingStore {
             await validateSources(AiNote.parse(pending.document.frontmatter).derived_from ?? []);
         }
         const result = KnowledgeUpdateResult.parse(JSON.parse(receipt.result)), after = Buffer.from(receipt.after), old = Buffer.from(receipt.before);
-        hooks.validate(after);
+        hooks.validate?.(after);
         if (!before.equals(after)) {
             if (!before.equals(old)) {
                 this.abandon(actor, request.request_id);

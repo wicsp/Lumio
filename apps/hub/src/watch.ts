@@ -4,7 +4,6 @@ import { lstat, readFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { entityTypeOfPath, isPrivateType, isVaultNotePath, VAULT_LAYOUT } from "@lumio/knowledge";
 import { openVaultGit, syncFile, syncVault, updateIndex, vaultFileAt, type SyncFileResult, type SyncOptions, type VaultGit } from "@lumio/storage";
-import { textContainsCardNumber } from "@lumio/schema";
 
 export interface HubStatus {
   watching: boolean;
@@ -32,10 +31,6 @@ export interface WatchOptions {
   onNote?: (path: string) => Promise<void>;
 }
 
-// Schema diagnostics can mention user-controlled YAML keys. Never log card text.
-function safe(line: string): string {
-  return line.replace(/\d(?:[\d -]*\d)?/g, (value) => textContainsCardNumber(value) ? msg("assistant-setup.hidden") : value);
-}
 function privatePath(path: string): boolean {
   const type = entityTypeOfPath(path);
   return VAULT_LAYOUT.some((entry) => entry.private && (path === entry.dir.split("/")[0] || path.startsWith(`${entry.dir.split("/")[0]}/`)))
@@ -48,7 +43,7 @@ function changesAutosave(path: string): boolean {
 
 export async function startVaultWatch(config: { vault: string; stateDir: string; autosaveIdle: number }, options: WatchOptions = {}) {
   const clock = options.clock ?? systemClock;
-  const log = (line: string) => options.log?.(safe(line));
+  const log = options.log ?? (() => {});
   const git = await (options.git ?? openVaultGit)(config.vault);
   if (!git) log(msg("watch.vault_git_is_unavailable_skipping_autosave_commit"));
   const issues: { path: string; line: string }[] = [];
@@ -61,11 +56,10 @@ export async function startVaultWatch(config: { vault: string; stateDir: string;
   let watcher: FSWatcher | undefined;
 
   function report(path: string, line: string) {
-    const clean = safe(line);
-    if (issues.some((issue) => issue.path === path && issue.line === clean)) return;
-    issues.push({ path, line: clean });
+    if (issues.some((issue) => issue.path === path && issue.line === line)) return;
+    issues.push({ path, line });
     if (issues.length > 20) issues.shift();
-    log(clean);
+    log(line);
   }
   function result(result: SyncFileResult) {
     if (result.code === "FILE_CHANGED") return;
@@ -107,10 +101,6 @@ export async function startVaultWatch(config: { vault: string; stateDir: string;
           }
           if (!regular) { report(path, msg("watch.skip_could_not_check_a_non_regular_file", path)); continue; }
           const source = deleted ? null : await readFile(target);
-          if (source && textContainsCardNumber(source.toString("utf8"))) {
-            // A blocked entry contains only its path, never content or diagnostics.
-            report(path, path); continue;
-          }
           await git.add(path, source);
           eligible.push(path);
         } catch { retry = true; report(path, msg("watch.skip_could_not_check_or_stage_file", path)); }

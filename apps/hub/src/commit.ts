@@ -2,7 +2,6 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { CoreError } from "@lumio/foundation";
 import { openVaultGit, writeFileAtomic, type GitTrailers } from "@lumio/storage";
-import { textContainsCardNumber } from "@lumio/schema";
 
 /**
  * Hub 执行的写入立即单独提交，提交信息带 trailer 标明是谁做的（ADR 0016 第 5 节）。
@@ -11,19 +10,17 @@ import { textContainsCardNumber } from "@lumio/schema";
  *   保证归属清楚。
  * - 只提交这一个文件。git 不可用时只写入。提交失败不撤销写入（任务已经派出或结果已经写回），
  *   留给自动保存，并返回 false 让调用方记一条问题。
- * - 文件含疑似卡号时不提交（与自动保存的规则一致，ADR 0012）。
  */
 export async function writeAndCommit(vault: string, relativePath: string, before: Buffer, write: () => Promise<void>,
   message: string, trailers: GitTrailers): Promise<boolean> {
   const git = await openVaultGit(vault);
-  if (git && !textContainsCardNumber(before.toString("utf8")) && (await git.changedFiles()).includes(relativePath)) {
+  if (git && (await git.changedFiles()).includes(relativePath)) {
     try { await git.add(relativePath, before); await git.commit([relativePath], "lumio: auto-save 1 files"); } catch { /* 留给自动保存 */ }
   }
   await write();
   if (!git) return true;
   try {
     const after = await readFile(join(vault, relativePath));
-    if (textContainsCardNumber(after.toString("utf8"))) return false;
     await git.add(relativePath, after);
     await git.commit([relativePath], message.replace(/[\r\n]+/g, " "), trailers);
     return true;

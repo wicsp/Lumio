@@ -5,7 +5,7 @@ import { completedStages, graphPlan, graphProgress, readyStages, resetStages, wo
 export { nextTurn, migrateTurn, type LegacyTurnFacts, type PlannedDelivery } from "./turn.ts";
 import {
   WorkProject, WorkTask, WorkComment, WorkExecution, WorkTaskDetail,
-  WorkCommandRequest, WorkCommandResult, TaskTurnChange, Turn, StagePermissions, PlanTemplate, DEFAULT_PLAN_MAX_ROUNDS, textContainsCardNumber,
+  WorkCommandRequest, WorkCommandResult, TaskTurnChange, Turn, StagePermissions, PlanTemplate, DEFAULT_PLAN_MAX_ROUNDS,
   type WorkTaskListArgs, type PlanRun, TrashItem, TRASH_RETENTION_DAYS, TRASHED_REASON,
   type ActorRole, type ID_PREFIXES, type Job, type HandoffPlan, planAncestors, planSinks, DISPATCH_TARGET_SOURCES,
 } from "@lumio/schema";
@@ -89,15 +89,6 @@ function patch<T extends object>(value: T, changes: Record<string, unknown>): T 
     else if (change !== undefined) next[key] = change;
   }
   return next as T;
-}
-
-function secret(text: string): boolean {
-  return textContainsCardNumber(text) || [
-    /\bsk-[A-Za-z0-9_-]{20,}/, /\bgh[pousr]_[A-Za-z0-9]{30,}/,
-    /\bgithub_pat_[A-Za-z0-9_]{30,}/, /\bAKIA[0-9A-Z]{16}\b/,
-    /\bxox[abprs]-[A-Za-z0-9-]{10,}/, /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
-    /\blumio_[A-Za-z0-9_-]{43}\b/,
-  ].some((pattern) => pattern.test(text));
 }
 
 /** Work owns task/project semantics; storage, time, IDs and execution are injected. */
@@ -217,7 +208,7 @@ export class WorkService {
     const turns = this.store.turns(task.id);
     const returned = turns.filter(change => change.to.reason !== "working").at(-1);
     const previous = latest ? this.context.job?.(latest.job) : undefined;
-    const line = (value: string) => secret(value) ? "[sensitive content omitted]" : value.replace(/\s+/g, " ").trim().slice(0, 500);
+    const line = (value: string) => value.replace(/\s+/g, " ").trim().slice(0, 500);
     const history = this.store.comments(task.id);
     const runtimes = new Set(this.store.executions(task.id).map(run => this.context.job?.(run.job)?.spec.runtime).filter(Boolean));
     // Comments and hand-backs may share a millisecond: the appended report is also an ordering boundary.
@@ -838,8 +829,7 @@ export class WorkService {
         return;
       }
       const body = [this.msg("Round ${0}: ${1}", execution.round, job.status), job.result?.report ?? "", job.result?.question ? this.msg("Question: ${0}", job.result.question) : "", job.result?.error ?? ""].filter(Boolean).join("\n\n");
-      const shown = secret(body) ? this.msg("Round ${0}: ${1}\n\nReport may contain sensitive information and was not added to task discussion; use lumio job show ${2} to view it.", execution.round, job.status, job.spec.id)
-        : `${body.slice(0, 3000)}${body.length > 3000 ? this.msg("\n\n… (truncated)") : ""}`;
+      const shown = `${body.slice(0, 3000)}${body.length > 3000 ? this.msg("\n\n… (truncated)") : ""}`;
       this.store.putComment(WorkComment.parse({ id: this.context.id("wmsg"), task: execution.task, author: job.spec.runtime,
         body: shown, created: this.context.now().toISOString() }));
       this.store.putExecution({ ...execution, applied: true });

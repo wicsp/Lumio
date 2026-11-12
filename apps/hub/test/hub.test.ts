@@ -85,8 +85,9 @@ test("query endpoints validate against schemas and URL-encoded Unicode reference
   LinksResult.parse(await (await request("/v1/notes/Main/links", human)).json());
   expect(NoteDetail.parse(await (await request(`/v1/notes/${encodeURIComponent("来源笔记")}`, human)).json()).note.type).toBe("source");
   const noId = NoteDetail.parse(await (await request("/v1/notes/NoID", human)).json()); expect("id" in noId.note).toBe(true);
-  expect(SearchResult.parse(await (await request("/v1/search?q=cardonlymarker", human)).json()).total).toBe(0);
-  await error("/v1/notes/Card", human, 404, "NOT_FOUND");
+  expect(SearchResult.parse(await (await request("/v1/search?q=cardonlymarker", human)).json()).total).toBe(1);
+  const card = NoteDetail.parse(await (await request("/v1/notes/Card", human)).json());
+  expect(card.body).toContain("cardonlymarker");
 });
 
 test("private notes are hidden from agents, and only explicit human requests reveal them", async () => {

@@ -109,7 +109,7 @@ Foundation 提供 ID 和错误；Platform 提供终端、诊断、下载与升�
 | [`design/assistant.md`](design/assistant.md) | 内置助手：对话、模型适配、显式记忆、工具状态 |
 | [`design/hub.md`](design/hub.md) | Hub 的职责、运行数据存放与备份、部署与安装、旧数据迁移 |
 | [`design/web.md`](design/web.md) | Web 工作台 |
-| [`design/security.md`](design/security.md) | AI 协作与权限、身份与令牌、审计、私密实体、卡号防护、委派的安全底线 |
+| [`design/security.md`](design/security.md) | AI 协作与权限、身份与令牌、审计、私密实体、敏感信息审查、委派的安全底线 |
 
 **体积上限**（ADR 0036）：本文件和每个分册各不超过 15 KB（约 5000 个汉字）。超出说明混进了功能细节，在造成超出的 PR 里精简；
 做不到时告诉人类。阶段与进度不写在这里，见 [`tasks/README.md`](tasks/README.md)。

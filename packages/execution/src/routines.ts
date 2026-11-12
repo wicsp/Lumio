@@ -1,5 +1,5 @@
 import { ExecutionRoutine, ExecutionRoutineCommandRequest, ExecutionRoutineInfo, RoutineSpec, Job,
-  JOB_PROTOCOL_VERSION, parseAssignee, textContainsCardNumber, type RuntimeInfo } from "@lumio/schema";
+  JOB_PROTOCOL_VERSION, parseAssignee, type RuntimeInfo } from "@lumio/schema";
 import { idTime } from "@lumio/foundation";
 import { parseCron, nextFire, validTimeZone } from "./cron.ts";
 import { routineJobId } from "./ids.ts";
@@ -90,8 +90,7 @@ export class ExecutionRoutines {
     if (target === "human") throw new ExecutionError("INVALID", { key: "routines.routine_must_be_assigned_to_an_agent", args: [] });
     const previous = this.jobs.list(undefined, undefined, routine.id).filter((job) => job.result).at(-1);
     const raw = previous?.result?.report;
-    const sensitive = raw && (textContainsCardNumber(raw) || /\b(?:sk-|gh[pousr]_|github_pat_|AKIA|xox[abprs]-|lumio_)[A-Za-z0-9_-]{16,}|-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(raw));
-    const report = routine.context === "previous" && !sensitive ? raw?.slice(0, 3000) : undefined;
+    const report = routine.context === "previous" ? raw?.slice(0, 3000) : undefined;
     const prompt = this.msg("You are running an independent routine. Work only in the working directory; do not access the Lumio knowledge directory. Request privileged approval through lumio-runtime sudo.\nReport results clearly; if a user decision is needed, use <lumio-question>Question</lumio-question> and end the round.\n\n# ${0}\n\n${1}${2}", routine.title, routine.description, report ? this.msg("\n\n## Previous report\n\n${0}", report) : "");
     const template: RoutineSpec["template"] = { run: { kind: "agent", engine: target.agent, prompt, ...(routine.model ? { model: routine.model } : {}) },
       workdir: routine.workdir ?? "~", timeout_seconds: (routine.timeout_minutes ?? 120) * 60, ...(routine.gpus ? { gpus: routine.gpus } : {}) };

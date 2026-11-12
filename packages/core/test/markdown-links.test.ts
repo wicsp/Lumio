@@ -96,7 +96,7 @@ test("rebuilds version 2 indexes so unchanged notes gain Markdown links on the f
   db.close();
   expect((await noteLinks(vault, "Markdown", { stateDir })).outgoing.some((l) => l.source === "markdown" && l.note?.path === paperPath)).toBe(true);
   const rebuilt = new Database(join(stateDir, "index.sqlite"));
-  try { expect(rebuilt.query("SELECT version FROM metadata").get()).toEqual({ version: 5 }); }
+  try { expect(rebuilt.query("SELECT version FROM metadata").get()).toEqual({ version: 6 }); }
   finally { rebuilt.close(); }
 });
 

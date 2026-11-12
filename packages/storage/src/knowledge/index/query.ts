@@ -1,8 +1,11 @@
+import { constants } from "node:fs";
+import { open } from "node:fs/promises";
 import type { Database } from "bun:sqlite";
 import { CheckResult, KnowledgeGraph, KnowledgeOriginal, LinksResult, NoteDetail, ReadingStatus, SearchResult, Timestamp, type Link, type NoteRef } from "@lumio/schema";
 import { CoreError } from "@lumio/foundation";
-import { extractCitations, resolveMarkdownPath } from "@lumio/knowledge";
+import { extractCitations, parseFrontmatter, resolveMarkdownPath } from "@lumio/knowledge";
 import { readOriginalFile } from "../originals.ts";
+import { vaultFileAt } from "../vault.ts";
 import { noteRef, snippet, withIndex, readIndex, type IndexOptions, type NoteRow } from "./store.ts";
 
 export interface QueryOptions extends IndexOptions { includePrivate?: boolean }
@@ -61,8 +64,9 @@ export async function searchNotes(root: string, query: string, options: SearchOp
   });
 }
 
-export async function showOriginal(root: string, reference: string, options: IndexOptions = {}) {
-  const { note, path } = await withIndex(root, options, db => {
+export async function showOriginal(root: string, reference: string, options: IndexOptions & { readOnly?: boolean } = {}) {
+  const index = options.readOnly ? readIndex : withIndex;
+  const { note, path } = await index(root, options, db => {
     const row = resolveReference(db, reference);
     if ((row.type === "paper" && row.id?.startsWith("pap_")) || (row.type === "source" && row.id?.startsWith("src_"))) {
       const paths = db.query<{ path: string }, [string]>("SELECT path FROM original_files WHERE owner=? LIMIT 2").all(row.id!);
@@ -88,6 +92,23 @@ export async function showNote(root: string, reference: string, options: QueryOp
     const row = resolveReference(db, reference, options.includePrivate);
     return NoteDetail.parse({ note: noteRef(row), frontmatter: JSON.parse(row.frontmatter), body: row.body });
   });
+}
+
+/** Resolve an authorized note from the existing index without refreshing it, then read its current bytes. */
+export async function readNoteForReview(root: string, id: string, options: QueryOptions): Promise<string> {
+  const missing = () => new CoreError("NOTE_NOT_FOUND", { key: "query.note_not_found_candidates_none", args: [] });
+  const row = await readIndex(root, options, db => resolveReference(db, id, options.includePrivate));
+  if (row.id !== id) throw missing();
+  const file = await vaultFileAt(root, row.path);
+  if (!file || (file.private && !options.includePrivate)) throw missing();
+  const handle = await open(file.path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
+    .catch(() => { throw missing(); });
+  try {
+    if (!(await handle.stat()).isFile()) throw missing();
+    const bytes = await handle.readFile();
+    if (parseFrontmatter(bytes).data.id !== id) throw missing();
+    return bytes.toString("utf8");
+  } finally { await handle.close(); }
 }
 
 export async function noteLinks(root: string, reference: string, options: QueryOptions = {}): Promise<LinksResult> {
@@ -163,11 +184,6 @@ export async function countKnowledgeReferences(root: string, targets: readonly s
     SELECT count(*) AS count FROM refs JOIN notes n ON n.path=refs.from_path
     WHERE n.private=0 OR $includePrivate=1
   `).get({ targets: JSON.stringify(targets), includePrivate: Number(options.includePrivate ?? false) })!.count);
-}
-
-/** Paths only: raw sensitive text is never stored or returned. */
-export async function excludedCardPaths(root: string, options: QueryOptions = {}): Promise<string[]> {
-  return withIndex(root, options, (db) => db.query<{ path: string }, []>("SELECT path FROM files WHERE blocked=1 UNION ALL SELECT path FROM original_files WHERE blocked=1 ORDER BY path").all().map((f) => f.path));
 }
 
 /** Whole graph comes from one consistent index snapshot, never a per-note query loop. */

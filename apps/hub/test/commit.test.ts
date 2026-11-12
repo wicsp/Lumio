@@ -41,7 +41,7 @@ test("pending human edits are saved first, then the Hub write is committed alone
   expect(git("status", "--porcelain", "--untracked-files=all")).toBe("?? other.md\n");
 });
 
-test("without git the write still happens; card numbers are never committed", async () => {
+test("writes succeed without Git and content patterns do not prevent a commit", async () => {
   const plain = join(temp, "plain"); await mkdir(plain);
   await writeFile(join(plain, "a.md"), "x\n");
   expect(await writeAndCommit(plain, "a.md", Buffer.from("x\n"), () => writeFile(join(plain, "a.md"), "y\n"), "m", {})).toBe(true);
@@ -49,6 +49,6 @@ test("without git the write still happens; card numbers are never committed", as
 
   const before = await readFile(join(vault, path));
   const ok = await writeAndCommit(vault, path, before, () => writeFile(join(vault, path), "卡号 4111 1111 1111 1111\n"), "m", {});
-  expect(ok).toBe(false);
-  expect(git("log", "--format=%s")).toBe("fixture\n");
+  expect(ok).toBe(true);
+  expect(git("show", `HEAD:${path}`)).toContain("4111 1111 1111 1111");
 });

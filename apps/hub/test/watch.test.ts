@@ -175,17 +175,16 @@ test("non-note files (reports, attachments) also start the idle timer and get co
   expect(Number(git("rev-list", "--count", "HEAD").trim())).toBe(base + 1);
 });
 
-test("all pending files are card-checked, including pre-staged non-notes; safe files still commit", async () => {
+test("pending notes and pre-staged non-notes are committed independently of content patterns", async () => {
   initGit(); const hub = await start();
   const safe = "research/ideas/safe.md", blocked = "research/ideas/card.md", other = "files/card.txt";
   await cp(fixture, join(vault, safe)); await cp(cardFixture, join(vault, blocked));
   await mkdir(join(vault, "files")); await cp(cardFixture, join(vault, other));
   git("add", other);
   hub.notify(safe); hub.notify(blocked); await tick(2000); await tick(8000);
-  expect(git("show", "--format=", "--name-only", "HEAD").trim()).toBe(safe);
-  const status = await hub.status(); expect(status.pending_files).toBe(2);
-  expect(status.issues).toContain(blocked); expect(status.issues).toContain(other);
-  expect(indexedPaths()).toEqual([safe]);
+  expect(git("show", "--format=", "--name-only", "HEAD").trim().split("\n").sort()).toEqual([other, blocked, safe].sort());
+  const status = await hub.status(); expect(status.pending_files).toBe(0);
+  expect(indexedPaths().sort()).toEqual([blocked, safe].sort());
   const raw = await readFile(cardFixture, "utf8"); const number = raw.match(/\d{16}/)![0];
   expect(logs.join("\n") + JSON.stringify(status)).not.toContain(number);
 });

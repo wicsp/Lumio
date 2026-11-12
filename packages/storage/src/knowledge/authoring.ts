@@ -13,8 +13,8 @@ const digest = (value: string | Buffer) => createHash("sha256").update(value).di
 function conflict(code: string): never { throw new CoreError(code, { key: "create.could_not_create_note_check_that_vault_directory_exists_and_is_writa", args: [] }); }
 
 interface CreationHooks<Result> {
-  validate(note: NewNote): void;
   published?(result: Result): Promise<void>;
+  validate?(note: NewNote): void;
   finalize(result: Result, content: Buffer): Promise<void>;
   audit(result: Result): void;
 }
@@ -104,7 +104,7 @@ export class KnowledgeCreationStore {
       await operation.checkDuplicates?.(root);
       for (const suffix of operation.suffixes) {
         const rendered = operation.render(suffix);
-        hooks.validate(rendered);
+        hooks.validate?.(rendered);
         if (await this.existing(rendered.relativePath)) continue;
         const occupied = this.db.query("SELECT 1 FROM knowledge_creations WHERE vault=? AND path=? AND ready=0").get(root, rendered.relativePath);
         if (occupied) continue;
@@ -116,7 +116,7 @@ export class KnowledgeCreationStore {
     }
     const result = operation.parse(JSON.parse(row.result));
     const note = { relativePath: row.path, content: Buffer.from(row.content) };
-    hooks.validate(note);
+    hooks.validate?.(note);
     let bytes: Buffer | undefined;
     try { bytes = await this.existing(row.path); }
     catch { conflict("NOTE_RECOVERY_CONFLICT"); }
