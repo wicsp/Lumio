@@ -212,28 +212,39 @@ async function candidates(root: string, context: {
                 string,
                 string | null,
                 string | null
-            ]>(`SELECT n.* FROM fulltext JOIN notes n ON n.rowid=fulltext.rowid WHERE fulltext MATCH ? AND ${filter} ORDER BY bm25(fulltext),n.path LIMIT 120`).all(longer.map(t => '"' + t.replaceAll('"', '""') + '"').join(" OR "), exclude ?? null, exclude ?? null));
+            ]>(`SELECT n.* FROM fulltext JOIN notes n ON n.rowid=fulltext.rowid WHERE fulltext MATCH ? AND ${filter} ORDER BY bm25(fulltext),n.path`).all(longer.map(t => '"' + t.replaceAll('"', '""') + '"').join(" OR "), exclude ?? null, exclude ?? null));
         const fragments = [...shorter, ...longer.map(t => t.slice(0, Math.max(3, Math.floor(t.length * .65))))].slice(0, 16);
         if (fragments.length) {
             const conditions = fragments.map(() => "n.search_text LIKE ? ESCAPE '\\'").join(" OR ");
-            rows.push(...db.query<NoteRow, any>(`SELECT n.* FROM notes n WHERE ${filter} AND (${conditions}) ORDER BY n.path LIMIT 120`).all(exclude ?? null, exclude ?? null, ...fragments.map(t => '%' + t.replace(/[\\%_]/g, "\\$&") + '%')));
+            rows.push(...db.query<NoteRow, any>(`SELECT n.* FROM notes n WHERE ${filter} AND (${conditions}) ORDER BY n.path`).all(exclude ?? null, exclude ?? null, ...fragments.map(t => '%' + t.replace(/[\\%_]/g, "\\$&") + '%')));
         }
-        return [...new Map(rows.map(r => [r.path, r])).values()].filter(r => { try {
+        const eligible = [...new Map(rows.map(r => [r.path, r])).values()].filter(r => { try {
             return editableMetadata(JSON.parse(r.frontmatter), r.type);
         }
         catch {
             return false;
-        } }).map(r => ({ note: noteRef(r), body: r.body }));
+        } });
+        const ranked = rankRelated(eligible.map(r => ({ note: noteRef(r), body: r.body })), context, query);
+        const byPath = new Map(eligible.map(r => [r.path, r]));
+        const merged = new Map<string, (typeof ranked)[number]>();
+        for (const hit of ranked) {
+            const host = byPath.get(hit.note.path)?.host_path;
+            const row = host ? db.query<NoteRow, [string]>("SELECT * FROM notes WHERE path=? AND private=0").get(host) : undefined;
+            const note = row ? noteRef(row) : hit.note;
+            if (note.id === exclude || merged.has(note.path)) continue;
+            merged.set(note.path, { ...hit, note });
+        }
+        return [...merged.values()];
     });
 }
 export async function relatedKnowledge(root: string, input: KnowledgeRelatedRequest, options: IndexOptions = {}): Promise<KnowledgeRelatedResult> {
     const request = KnowledgeRelatedRequest.parse(input);
-    return KnowledgeRelatedResult.parse({ method: "lexical", hits: rankRelated(await candidates(root, request, request.exclude_id, undefined, options), request).slice(0, 5) });
+    return KnowledgeRelatedResult.parse({ method: "lexical", hits: (await candidates(root, request, request.exclude_id, undefined, options)).slice(0, 5) });
 }
 export async function knowledgeReferences(root: string, input: KnowledgeReferencesRequest, options: IndexOptions = {}): Promise<KnowledgeReferencesResult> {
     const request = KnowledgeReferencesRequest.parse(input), context = request.context ?? { title: "", text: "", focus: "" };
     const source = request.source_id ? (await readKnowledgeDocument(root, request.source_id, options)).document.note.path : entityDirectory(request.source_kind === "video" || request.source_kind === "web" ? "source" : request.source_kind!) + "/new.md";
-    const hits = rankRelated(await candidates(root, context, request.source_id, request.query || undefined, options), context, request.query || undefined).slice(0, request.query ? 10 : 5);
+    const hits = (await candidates(root, context, request.source_id, request.query || undefined, options)).slice(0, request.query ? 10 : 5);
     return withIndex(root, options, db => KnowledgeReferencesResult.parse({ hits: hits.map(hit => ({ ...hit, insert_text: referenceText(source, hit.note, db.query<{
                 n: number;
             }, [

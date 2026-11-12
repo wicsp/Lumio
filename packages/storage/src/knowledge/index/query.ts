@@ -26,40 +26,40 @@ export async function searchNotes(root: string, query: string, options: SearchOp
   if (!Number.isSafeInteger(limit) || limit < 1) throw new CoreError("INVALID_LIMIT", { key: "query.limit_must_be_a_positive_integer", args: [] });
   return withIndex(root, options, (db) => {
     const fts = Array.from(query).length >= 3;
-    const filter = "(n.private=0 OR $private=1) AND ($type IS NULL OR n.type=$type)";
-    const from = fts ? "fulltext JOIN notes n ON n.rowid=fulltext.rowid" : "notes n";
+    const filter = "(n.private=0 OR $private=1) AND ($type IS NULL OR coalesce(host.type,n.type)=$type)";
+    const from = (fts ? "fulltext JOIN notes n ON n.rowid=fulltext.rowid" : "notes n") + " LEFT JOIN notes host ON host.path=n.host_path";
     const match = fts ? "fulltext MATCH $query" : "n.search_text LIKE $query ESCAPE '\\'";
     const params = {
       query: fts ? `"${query.replaceAll('"', '""')}"` : `%${query.replace(/[\\%_]/g, "\\$&")}%`,
       private: Number(options.includePrivate ?? false), type: options.type ?? null,
     };
-    const bodyHits = `SELECT n.rowid AS id, ${fts ? "bm25(fulltext)" : "0"} AS rank
-      FROM ${from} WHERE ${filter} AND ${match}`;
+    const bodyHits = `SELECT coalesce(host.rowid,n.rowid) AS id, n.search_text AS text, ${fts ? "bm25(fulltext)" : "0"} AS rank
+      FROM ${from} WHERE ${filter} AND ${match} ${query ? "" : "AND n.host_path IS NULL"}`;
     const originals = !query ? "SELECT NULL AS id, NULL AS body, NULL AS rank WHERE 0" : `
       SELECT n.rowid AS id, o.body, ${fts ? "bm25(originals_fts)" : "0"} AS rank
-      FROM originals_fts o JOIN original_files f ON f.rowid=o.rowid JOIN notes n ON n.id=f.owner
+      FROM originals_fts o JOIN original_files f ON f.rowid=o.rowid JOIN notes n ON n.id=f.owner LEFT JOIN notes host ON host.path=n.host_path
       WHERE ${filter} AND n.private=0 AND
         ((n.type='paper' AND f.owner GLOB 'pap_*') OR (n.type='source' AND f.owner GLOB 'src_*'))
         AND (SELECT count(*) FROM notes WHERE id=n.id)=1
         AND ${fts ? "originals_fts MATCH $query" : "o.body LIKE $query ESCAPE '\\'"}`;
     const cte = `WITH body_hits AS MATERIALIZED (${bodyHits}), original_hits AS MATERIALIZED (${originals}),
       hits AS (
-        SELECT id, NULL AS original, rank, 0 AS priority FROM body_hits
-        UNION ALL
-        SELECT id, body, min(rank), 1 FROM original_hits
-        WHERE id NOT IN (SELECT id FROM body_hits) GROUP BY id
+        SELECT id, text, rank, 0 AS priority FROM body_hits
+        UNION ALL SELECT id, body AS text, rank, 1 AS priority FROM original_hits
+      ), merged AS (
+        SELECT *, row_number() OVER (PARTITION BY id ORDER BY priority, rank, text) AS choice FROM hits
       )`;
-    const total = db.query<{ total: number }, typeof params>(`${cte} SELECT count(*) AS total FROM hits`).get(params)!.total;
-    const rows = db.query<NoteRow & { original: string | null }, typeof params & { limit: number }>(
-      `${cte} SELECT n.*, h.original FROM hits h JOIN notes n ON n.rowid=h.id
+    const total = db.query<{ total: number }, typeof params>(`${cte} SELECT count(*) AS total FROM merged WHERE choice=1`).get(params)!.total;
+    const rows = db.query<NoteRow & { text: string; priority: number }, typeof params & { limit: number }>(
+      `${cte} SELECT n.*, h.text, h.priority FROM merged h JOIN notes n ON n.rowid=h.id WHERE h.choice=1
        ORDER BY h.priority, h.rank, n.mtime DESC, n.path LIMIT $limit`,
     ).all({ ...params, limit });
     return SearchResult.parse({ query, total, hits: rows.map(row => {
       const fm = JSON.parse(row.frontmatter);
       const created = Timestamp.safeParse(fm.created).data;
       const status = row.type === "paper" || row.type === "source" ? ReadingStatus.safeParse(fm.status ?? "to-read").data : undefined;
-      return { note: noteRef(row), snippet: snippet(row.original ?? row.search_text, query),
-        ...(query ? { matched_in: row.original === null ? "body" : "original" } : {}), status, created };
+      return { note: noteRef(row), snippet: snippet(row.text, query),
+        ...(query ? { matched_in: row.priority === 0 ? "body" : "original" } : {}), status, created };
     }) });
   });
 }
@@ -192,7 +192,7 @@ export async function knowledgeGraph(root: string, options: SearchOptions & { in
     const params = { private: Number(options.includePrivate ?? false), type: options.type ?? null, legacy: Number(options.includeLegacy ?? false) };
     const rows = db.query<NoteRow, typeof params>(`SELECT * FROM notes WHERE (private=0 OR $private=1)
       AND ($type IS NULL OR type=$type) AND ($legacy=1 OR type NOT IN ('task','project','routine'))
-      AND path NOT LIKE '.trash/%' AND path NOT LIKE '%/.trash/%' ORDER BY path`).all(params);
+      AND host_path IS NULL AND path NOT LIKE '.trash/%' AND path NOT LIKE '%/.trash/%' ORDER BY path`).all(params);
     const shown = new Set(rows.map(row => row.path)), edges = new Map<string, { from: string; to: string; count: number }>();
     let dangling = 0;
     const links = db.query<{ from_path: string; resolved_path: string | null }, []>("SELECT from_path,resolved_path FROM links ORDER BY from_path,resolved_path,rowid").all();
