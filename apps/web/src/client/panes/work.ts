@@ -3,7 +3,7 @@
  * 列表上可直接交回、完成、取消（带 revision）；新建在对话框里完成，新建不会委派。
  */
 import { knowledgeReferences, referenceConsequence } from "../resources.ts";
-import type { WorkProject, WorkTask, WorkTaskDetail } from "@lumio/schema";
+import type { ResourceRef, WorkProject, WorkTask, WorkTaskDetail } from "@lumio/schema";
 import { PROJECT_STATUSES } from "@lumio/schema";
 import { errorText, isConflict, type Client, type HubExtras } from "../api.ts";
 import { newRequestId, projectCreateCommand, taskCreateCommand } from "../commands.ts";
@@ -48,7 +48,7 @@ export class WorkPane {
   private active = true;
   private unbindKeys: () => void;
 
-  constructor(private root: HTMLElement, private client: Client, private hub: HubExtras, private mode: Mode, initialId: string | undefined, private navigate: Navigate, private changed: () => void) {
+  constructor(private root: HTMLElement, private client: Client, private hub: HubExtras, private mode: Mode, initialId: string | undefined, private navigate: Navigate, private changed: () => void, private focusChanged?: () => void) {
     this.query.placeholder = mode === "tasks" ? t("Search tasks") : t("Search projects");
     this.statusButton.addEventListener("click", () => this.pickStatusFilter());
     this.projectButton.addEventListener("click", () => this.pickProjectFilter());
@@ -80,9 +80,20 @@ export class WorkPane {
 
   dispose(): void { this.active = false; this.listGeneration++; this.detailGeneration++; this.editor?.dispose(); this.unbindKeys(); }
   get dirty(): boolean { return this.editor?.dirty ?? false; }
+  /** Only the loaded, currently selected object is shared; routes and drafts are not focus. */
+  get focus(): ResourceRef | undefined {
+    if (!this.displayed) return undefined;
+    const record = "task" in this.displayed ? this.displayed.task : this.displayed;
+    if (record.id !== this.selected) return undefined;
+    return this.editor?.focus ?? { module: "work", id: record.id, label: record.title, revision: String(record.revision) };
+  }
+  private clearFocus(): void {
+    this.displayed = undefined;
+    this.focusChanged?.();
+  }
   /** 静默刷新列表；详情只在没有未保存内容、焦点不在详情里时重新载入。 */
   private closeDetail(): void {
-    this.detailGeneration++; this.editor?.dispose(); this.editor = undefined; this.displayed = undefined;
+    this.detailGeneration++; this.editor?.dispose(); this.editor = undefined; this.clearFocus();
     this.clearDock();
     this.selected = undefined; markSelected(this.list, undefined); this.showPlaceholder();
   }
@@ -313,12 +324,13 @@ export class WorkPane {
     if (id.startsWith("prj_") !== (this.mode === "projects")) { this.navigate("work", id); return; }
     const generation = ++this.detailGeneration;
     this.selected = id; markSelected(this.list, id);
-    // 更新 URL 以触发 workbench 的 readSubject，标记通知为已读
+    // Preserve a deep link; replaceState does not notify the workbench of focus changes.
     if (!quiet && !this.root.hidden) {
       const hash = `#work/${encodeURIComponent(id)}`;
       if (location.hash !== hash) history.replaceState(null, "", hash);
     }
     this.split.classList.add("has-detail");
+    if (!quiet || this.focus?.id !== id) this.clearFocus();
     if (!quiet) { this.editor?.dispose(); this.editor = undefined; this.clearDock(); clear(this.detail, loading()); }
     try {
       const object = id.startsWith("task_") ? await this.client.workTask(id) : await this.client.workProject(id);
@@ -333,23 +345,29 @@ export class WorkPane {
       this.clearDock();
       clear(this.detail);
       this.displayed = object;
-      this.editor = new WorkEditor(this.detail, this.dock, this.client, this.hub, object, this.projects, {
-        changed: () => { this.changed(); void this.load(); },
-        reload: () => void this.open(id, true),
-        back: () => { if (this.canLeave()) this.closeDetail(); },
-        navigate: this.navigate,
-        openProject: projectId => this.navigate("work", projectId),
-        newTask: projectId => this.create("tasks", projectId),
-        newSubtask: (parent, projectId) => this.create("tasks", projectId, parent),
-      });
+      this.renderEditor(object, id);
+      this.focusChanged?.();
       if (quiet) this.detail.scrollTop = scroll;
     } catch (error) {
       if (!live && this.active && generation === this.detailGeneration) {
         this.editor?.dispose(); this.editor = undefined;
+        this.clearFocus();
         this.clearDock();
         clear(this.detail, failure(errorText(error), () => this.open(id, true)));
       }
     }
+  }
+
+  private renderEditor(object: WorkTaskDetail | WorkProject, id: string): void {
+    this.editor = new WorkEditor(this.detail, this.dock, this.client, this.hub, object, this.projects, {
+      changed: () => { this.changed(); this.focusChanged?.(); void this.load(); },
+      reload: () => void this.open(id, true),
+      back: () => { if (this.canLeave()) this.closeDetail(); },
+      navigate: this.navigate,
+      openProject: projectId => this.navigate("work", projectId),
+      newTask: projectId => this.create("tasks", projectId),
+      newSubtask: (parent, projectId) => this.create("tasks", projectId, parent),
+    });
   }
 
   // ───────────── 新建 ─────────────

@@ -56,6 +56,7 @@ export class MainDock {
   private titles = new Map<string, string>();
   private mode: FocusMode = "auto";
   private pinned?: FocusInput;
+  private chipGeneration = 0;
   private disposed = false;
   private shown = new Set<string>();
   /** 正在探索的对象 ID（来自 Hub，定时刷新）。 */
@@ -164,6 +165,7 @@ export class MainDock {
   }
 
   private async renderChip(): Promise<void> {
+    const generation = ++this.chipGeneration;
     const input = this.focusInput();
     if (this.mode === "off") {
       clear(this.chip, h("span", { class: "muted" }, t("Not sharing this page")),
@@ -172,7 +174,7 @@ export class MainDock {
     }
     if (!input?.id && !input?.selection) { clear(this.chip); return; }
     const label = input.label ?? (input.id ? await this.title(input.id) ?? input.id : t("Selected text"));
-    if (this.disposed) return;
+    if (this.disposed || generation !== this.chipGeneration) return;
     const pinned = this.mode === "pinned";
     const target = input.id && EXPLORABLE.test(input.id) ? input.id : undefined;
     const explore = target && (this.exploring.has(target)
