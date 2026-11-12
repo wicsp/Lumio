@@ -1,5 +1,5 @@
 import {
-  MODULE_ID_PREFIXES, ResourceRef,
+  MODULE_ID_PREFIXES, ResourceRef, toolName, WorkbenchAction,
   type AssistantConversation, type AssistantMessage, type AssistantModelMessage, type AssistantModelRequest, type FocusSnapshot,
 } from "@lumio/schema";
 import { boundedHistory, type HistoryEntry } from "./history.ts";
@@ -130,6 +130,34 @@ interface HistoricalTurn extends Pick<HistoryEntry, "status" | "calls"> {
   messages: AssistantModelMessage[];
 }
 
+/** Resources actually discussed/read, including old turns whose original page anchor was unrelated. */
+function discussedRefs(turn: HistoricalTurn): ResourceRef[] {
+  const refs: ResourceRef[] = [];
+  for (const call of turn.calls) {
+    if (call.status !== "succeeded" || call.private_read) continue;
+    if (["knowledge.note.show", "work.task.show", "work.project.show"].some(name => toolName(name) === call.name)) {
+      for (const key of ["ref", "task", "project"]) {
+        const value = call.args[key];
+        if (typeof value === "string") refs.push(...referencedIds(value));
+      }
+      // Knowledge reads may have been requested by title/path; their returned stable ID is authoritative.
+      const result = call.result as { item?: { id?: unknown }; note?: { id?: unknown }; id?: unknown } | undefined;
+      const id = result?.item?.id ?? result?.note?.id ?? result?.id;
+      if (typeof id === "string") refs.push(...referencedIds(id));
+    }
+    const shown = navigatedTopic(call.name, call.args);
+    if (shown) refs.push(shown);
+  }
+  for (const message of turn.records) if (message.role !== "tool") refs.push(...referencedIds(message.content));
+  return unique([...refs, ...turn.anchors]).slice(0, budgets.anchors);
+}
+
+export function navigatedTopic(name: string, args: Record<string, unknown>): ResourceRef | undefined {
+  if (name !== toolName("ui.navigate")) return;
+  const parsed = WorkbenchAction.safeParse({ ...args, action: "navigate" });
+  return parsed.success && parsed.data.action === "navigate" && parsed.data.target ? bare(parsed.data.target) : undefined;
+}
+
 export function workbenchTurns(
   records: readonly AssistantMessage[],
   anchors: ReadonlyMap<string, readonly ResourceRef[]>,
@@ -147,7 +175,8 @@ export function workbenchTurns(
   return [...turns.entries()].flatMap(([id, entries]) => {
     const user = entries[0]!;
     if (user.role !== "user" || !settled.has(id)) return [];
-    return [{ records: entries, anchors: anchors.get(user.id) ?? [], messages: history(entries), ...(facts?.(id) ?? { status: "done" as const, calls: [] }) }];
+    const latest = entries.findLast(entry => anchors.get(entry.id)?.length);
+    return [{ records: entries, anchors: anchors.get(latest?.id ?? user.id) ?? [], messages: history(entries), ...(facts?.(id) ?? { status: "done" as const, calls: [] }) }];
   });
 }
 
@@ -261,6 +290,42 @@ export class WorkbenchResources {
     return resources.every(value => value !== undefined);
   }
 
+  /** Bounded recall index, not a second conversation or a source of action authority. */
+  async topics(history: readonly HistoricalTurn[], query: string) {
+    const groups = new Map<string, { ref: ResourceRef; turn: HistoricalTurn }>();
+    for (const turn of [...history].reverse()) {
+      for (const ref of discussedRefs(turn)) if (!groups.has(ref.id)) groups.set(ref.id, { ref, turn });
+    }
+    // Exact text overlap only ranks candidates; the model selects the intended topic using the existing tools.
+    const normalized = query.toLowerCase();
+    const boilerplate = /^(?:继续|刚才|刚刚|上次|那个|这个|话题|讨论|看看|我们|一下|关于)$/u;
+    const terms = [...new Set([...normalized.slice(0, 2000).matchAll(/[a-z0-9]{3,}|[\p{Script=Han}]+/gu)].flatMap(([word]) => {
+      if (/^[a-z0-9]/u.test(word)) return [word];
+      const characters = Array.from(word);
+      return characters.slice(1).map((character, index) => characters[index]! + character);
+    }))].filter(term => !boilerplate.test(term)).slice(0, 32);
+    const score = (turn: HistoricalTurn) => terms.reduce((total, term) => total + Number(turn.records.some(message => message.role === "user" && message.content.toLowerCase().includes(term))), 0);
+    const candidates = [...groups.values()].sort((a, b) => score(b.turn) - score(a.turn)).slice(0, 16);
+    const topics = [];
+    for (const { ref, turn } of candidates) {
+      if (!(await this.visible(discussedRefs(turn)))) continue;
+      const resource = await this.read(ref);
+      if (!resource) continue;
+      const reply = turn.records.findLast(message => message.role === "assistant" && message.content.trim());
+      topics.push({ ref, title: excerpt(resource.title, 200), last_discussed_at: turn.records[0]!.created,
+        first_message: turn.records[0]!.id, last_message: turn.records.at(-1)!.id,
+        question: excerpt(turn.records[0]!.content, 500), reply: reply && excerpt(reply.content, 700) });
+    }
+    return takeWithin(topics, 12 * 1024);
+  }
+
+  async observation(focus: FocusSnapshot | undefined, capturedAt: string, previous: FocusSnapshot | undefined, previousAt?: string) {
+    const prior = previous && (await this.resolve("", [], previous, true)).focus;
+    return { captured_at: capturedAt, source: "client_message_snapshot", live: false,
+      change: !previousAt ? "first_observation" : sameWorkbenchFocus(prior, focus) && prior?.section === focus?.section ? "unchanged" : "changed",
+      previous: previousAt ? { captured_at: previousAt, focus: prior } : undefined };
+  }
+
   async resolve(message: string, previous: readonly ResourceRef[], focus: FocusSnapshot | undefined, focusChanged: boolean): Promise<Resolution> {
     const explicit = referencedIds(message);
     const candidates = unique([...(focus?.selected ?? []), ...(focus?.primary ? [focus.primary] : []), ...previous, ...explicit.slice(0, budgets.anchors)]);
@@ -341,11 +406,11 @@ export class WorkbenchResources {
     const summaries = takeWithin(summarized, budgets.summaryBytes);
     const byRecency = history.map((turn, index) => ({ turn, index })).reverse();
     const recent = byRecency.slice(0, budgets.recentTurns);
-    const matching = byRecency.filter(({ turn, index }) => matches(turn.anchors) &&
+    const matching = byRecency.filter(({ turn, index }) => matches(discussedRefs(turn)) &&
       !summaries.some(summary => summary.start <= index && index <= summary.end)).slice(0, budgets.anchorTurns);
     const eligible = [];
     for (const { turn, index } of new Map([...recent, ...matching].map(item => [item.index, item])).values()) {
-      if (await this.visible(turn.anchors)) eligible.push({ ...turn, index });
+      if (await this.visible(discussedRefs(turn))) eligible.push({ ...turn, index });
     }
     const included = boundedHistory(eligible, budgets.historyBytes);
     const notices = await this.adapter.pendingNotices?.(this.scope.owner, this.actor, this.signal, this.scope) ?? [];
