@@ -32,6 +32,9 @@
   加执行器：`lumio runtime add <名称>` 生成一次性配对码（10 分钟、一次有效），那台机器上 `lumio runtime join` 换取令牌并装好后台服务；
   客户端配对码优先返回 Hub 对外地址，未配置时返回供本机客户端使用的地址（I1-7a）。另一台机器上的 CLI 用 `lumio login`。`lumio doctor`、`lumio runtime doctor` 检查安装（含 Web 服务与助手配置）；`lumio selftest` 用真实 agent 和数据库任务验证关键路径；`upgrade` 升级（从 v0.1.x 升级时替换为单个程序并改写本机服务文件）。
   `upgrade` 始终直接升到目标版本（默认最新），已是该版本时不下载；发布包格式或安装布局变化时，上一个已发布版本的升级程序必须能直接完成升级（ADR 0028）。
+  Release 附 Ed25519 签名的发布清单，`upgrade` 与 Runtime 自更新先验签再核对哈希；`install.sh` 首次安装仍只校验 SHA-256（ADR 0063）。
+  Hub 机器上，本机 Runtime 声明 `self_update` 时 `upgrade` 与 `deploy-local` 只重启 Hub，Runtime 空闲后自己重启；远端 Runtime 跟随 Hub 的期望版本自动更新，见 [execution.md](execution.md#runtime-版本与自动更新adr-0063u1-0)。
+  Hub 在状态目录 `updates/` 保存供 Runtime 下载的更新产物，只保留当前与上一个期望版本；正式版本由 Hub 从 Releases 取来缓存，开发构建由 `deploy-local` 交叉编译、签名后写入（ADR 0063）。
   从旧笔记模式切到数据库任务：不需要保留旧任务时 `lumio hub switch --retire-legacy` 一条命令退役旧笔记（不导入、不改文件，ADR 0027）；需要导入时按 `docs/migration-v2.md`。
   Nix 以后作为另一种安装方式。作者自己的用法见 `docs/personal-setup.md`。
 - 只信任配置过的反向代理传来的客户端信息。

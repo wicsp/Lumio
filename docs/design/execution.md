@@ -56,6 +56,16 @@ Job 协议、执行器主动连接、lease 校验与可靠交回仍共同适用�
 - **普通权限申请**（ADR 0049，H1-9）：执行器从 agent 汇报末尾的独立 `<lumio-permission>` 行提取权限，按等待人决定交回并保留理由。
 - **不做**：跨设备调用工具、上下文管理、模型路由；留给以后自研的 agent（作为执行器里的一种引擎接入）。
 
+## Runtime 版本与自动更新（ADR 0063，U1-0）
+
+- **期望版本对账**：Hub 为每台 Runtime 声明期望版本，默认等于 Hub 自己的版本（策略 `follow`；`manual` 时只显示落后）。期望版本只通过同步回复发给声明了 `self_update` 的 Runtime，由 Runtime 自己收敛；更新不是 Task 或 Job，Job 协议仍为 2。
+- Runtime 登记版本、平台、安装方式与 `self_update`，在心跳中报告更新状态（`current / downloading / staged / waiting_idle / draining / restarting / failed / blocked`）。
+- **安装方式**：`hub-shared`（与本机 Hub 共用 `~/.local/bin/lumio`）不替换程序，磁盘程序版本变化后空闲时重启；`managed`（`install.sh`/`upgrade` 管理且本机无 Hub）下载、验签、替换并重启；`external`（Nix、brew、容器、源码运行或 `LUMIO_RUNTIME_AUTO_UPDATE=off`）只报告落后。
+- **来源与验签**：优先从 Hub 产物库 `/v2/execution/updates/` 取清单与压缩包（只授予 runtime），正式版本可退回 GitHub；Runtime 只接受内置正式公钥或本机人工信任的构建公钥签过的清单，并核对大小与 SHA-256。Hub 只下发版本号。
+- **切换不打断工作**：后台下载、预检（新程序 `--version` 与只读 `runtime update-check`）后等空闲（无执行中 Job、原生轮次、钩子与高权限请求；只是开着的原生会话与待交回结果不算忙）。30 分钟内没等到空闲就排空：Hub 不再指派新 Job 与原生轮次，本地暂缓排队的 Job 与到点的例行任务，不杀进行中的工作；排空超过 2 小时通知人选择暂缓或立即重启（中断的轮次为 `unknown`）。
+- **替换与回退**：保留 `previous` 副本并写待确认标记后原子替换，正常退出由服务管理器拉起；新进程向 Hub 登记并同步一次才算确认，连续 3 次启动未确认则换回旧程序并报告 `failed`，同一版本不再自动重试。Hub 不可达不计次数。
+- 兼容：新 Hub 继续接受上一个正式版本的 Runtime；不支持 `self_update` 的 Runtime 只显示需手动升级。允许按签名清单降级。高权限助手不随自更新替换，不兼容时 Runtime 不再声明 `privileged_helper` 并提示重装。
+
 ## 数据库 Routine 与设备（ADR 0025）
 
 - 数据库 Routine 使用 `/v2/execution/routines` 与 `/v2/execution/commands`；计划在 Execution，独立于 Task 与知识目录。
