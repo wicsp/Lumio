@@ -32,6 +32,12 @@ Hub 升级后，各台 Runtime 自己跟上 Hub 的版本：后台下载并验�
 
 依赖：U1-2 至 U1-6 依赖 U1-1；U1-4 依赖 U1-2 的验签工具；U1-5 依赖 U1-3、U1-4。U1-2 可与 U1-3 并行。
 
+## U1-2 密钥格式（人已于 2026-11-12 生成）
+
+- 私钥：Ed25519，PKCS#8 PEM，整段在 GitHub Actions 仓库密钥 `LUMIO_RELEASE_SIGNING_KEY` 中，由人保管备份。
+- 公钥：SPKI DER 的 base64（一行），已写入 `packages/platform/src/release-keys.ts` 的 `RELEASE_PUBLIC_KEYS`（列表形式，换钥时新旧并存）。U1-2 由 `build-binary.ts` 把它编入程序。
+- 签名：对 `manifest.json` 原始字节做 `crypto.sign(null, bytes, privateKey)`，结果 base64 写入 `manifest.sig`；验签用 `crypto.verify(null, bytes, publicKey, signature)`。
+
 ## U1-1 契约交接（给 U1-2～U1-6）
 
 - 新文件 `packages/schema/src/runtime-update.ts`：`LumioVersion`（不带 `v`）、`RuntimePlatform`、`RuntimeInstall`、`RuntimeUpdatePolicy`、`RuntimeUpdateReport`、`RuntimeUpdateDirective`、`ReleaseManifest`、`RuntimeUpdateView`、`ExecutionRuntimeUpdateCommandRequest`；已登记进 `CONTRACTS`（`runtime-update-report`、`runtime-update-directive`、`runtime-update-command-request`、`release-manifest`）。
