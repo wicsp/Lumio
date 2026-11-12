@@ -23,7 +23,7 @@ Hub 升级后，各台 Runtime 自己跟上 Hub 的版本：后台下载并验�
 
 | 编号 | 内容 | 负责 | 改动范围 |
 |---|---|---|---|
-| U1-1 | 契约：`RuntimeRegistration` 增加可选 `version`、`platform`（`darwin-arm64` / `linux-x64` / `linux-arm64`）、`install`（`hub-shared` / `managed` / `external`）；`RUNTIME_FEATURES` 增加 `self_update`；`RuntimeHeartbeat` 增加可选 `update`（状态 `current / downloading / staged / waiting_idle / draining / restarting / failed / blocked`、目标版本、开始时间、原因 code 与参数）；`RuntimeSync` 增加可选 `update`（期望版本、是否要求排空、人决定的动作 `defer` / `restart_now` / `retry`），只发给声明了 `self_update` 的 Runtime；发布清单 `ReleaseManifest`（格式 1：版本、来源提交、构建时间、渠道 `release` / `dev`、各平台文件名/大小/SHA-256）；每台 Runtime 的更新策略 `follow` / `manual` 与人操作的请求；`RuntimeInfo` 与执行器视图带上以上信息 | Claude 起草（ADR 已批准） | `packages/schema` |
+| U1-1 ✅ | 契约（`packages/schema/src/runtime-update.ts`）：`RuntimeRegistration` 增加可选 `version`、`platform`（`darwin-arm64` / `linux-x64` / `linux-arm64`）、`install`（`hub-shared` / `managed` / `external`）；`RUNTIME_FEATURES` 增加 `self_update`；`RuntimeHeartbeat` 增加可选 `update`（状态 `current / downloading / staged / waiting_idle / draining / restarting / failed / blocked`、目标版本、开始时间、原因 code 与参数）；`RuntimeSync` 增加可选 `update`（期望版本、是否要求排空、人决定的动作 `defer` / `restart_now` / `retry`），只发给声明了 `self_update` 的 Runtime；发布清单 `ReleaseManifest`（格式 1：版本、来源提交、构建时间、渠道 `release` / `dev`、各平台文件名/大小/SHA-256）；每台 Runtime 的更新策略 `follow` / `manual` 与人操作的请求；`RuntimeInfo` 与执行器视图带上以上信息 | Claude 起草（ADR 已批准） | `packages/schema` |
 | U1-2 | 发布签名：Ed25519 签名与验签工具（`node:crypto`，不加依赖）；`build-binary.ts` 用 `--define` 写入正式公钥列表；`release.yml` 生成 `manifest.json` 与 `manifest.sig`（私钥来自 Actions 密钥 `LUMIO_RELEASE_SIGNING_KEY`），没有密钥时发布失败；`upgrade` 改为先验清单签名、再按清单核对哈希；过渡规则：目标版本没有清单时，只在它低于第一个签名版本时接受旧的 `SHA256SUMS` | 后端（Codex）；生成密钥并写入 Actions 密钥由人做 | `packages/platform`、`apps/cli`、`.github/workflows/release.yml` |
 | U1-3 | Hub：按策略计算每台 Runtime 的期望版本（默认 Hub 自己的版本）并放进同步回复；Runtime 处于 `draining` 时不再指派新 Job 和原生轮次；更新产物库（状态目录 `updates/`，只留当前与上一个期望版本）及 `GET /v2/execution/updates/<版本>/manifest.json`、`manifest.sig`、`<压缩包>`（只授予 runtime 身份）；正式版本从 GitHub Releases 取来缓存（走 Hub 服务环境代理），先验签再入库；开发构建由 `deploy-local` 直接原子写入产物库目录（同一账户、同一台机器，不开上传接口），Hub 只负责提供，不判断其可信度；策略修改与人对更新的操作（暂缓、立即重启、重试）记审计；`failed` / `blocked` / 排空超过 2 小时发通知；`lumio runtime list` 与 `lumio doctor` 显示版本与更新状态 | 后端（Codex） | `apps/hub`、`packages/execution`、`packages/storage` |
 | U1-4 | Runtime：判断安装方式（ADR 0063 第 2 节）；对账循环；`managed` 的下载（优先 Hub，正式版本可退回 GitHub）、验签（内置正式公钥 + 本机已信任构建公钥）、暂存与预检（新程序 `--version` 与只读 `runtime update-check`）；空闲判断、30 分钟后排空、排空期间暂缓本地排队的 Job 与到点的例行任务；`previous` 副本、待确认标记、原子替换、约定退出码重启；启动最早阶段的确认/回退（3 次）；`hub-shared` 只在磁盘程序版本变化时空闲重启；`external` 只报告；`lumio runtime trust-build-key`（打印指纹并要求确认，存放在 Runtime 配置目录 `0600`）；高权限助手不兼容时不再声明 `privileged_helper` 并提示重装 | 后端（Codex） | `apps/runtime`、`packages/platform` |
@@ -31,6 +31,16 @@ Hub 升级后，各台 Runtime 自己跟上 Hub 的版本：后台下载并验�
 | U1-6 | Web「设置 → Hub 与执行器」：每台 Runtime 的版本、安装方式、策略开关（跟随 Hub / 手动）、更新状态与原因；排空中显示正在等待的工作并提供"暂缓这次更新""立即重启（会中断进行中的工作）"；`failed` 时提供"重试"；`blocked`（未信任构建）时显示需要在那台机器上运行的命令与公钥指纹 | 前端（Claude） | `packages/api-client`、`apps/web` |
 
 依赖：U1-2 至 U1-6 依赖 U1-1；U1-4 依赖 U1-2 的验签工具；U1-5 依赖 U1-3、U1-4。U1-2 可与 U1-3 并行。
+
+## U1-1 契约交接（给 U1-2～U1-6）
+
+- 新文件 `packages/schema/src/runtime-update.ts`：`LumioVersion`（不带 `v`）、`RuntimePlatform`、`RuntimeInstall`、`RuntimeUpdatePolicy`、`RuntimeUpdateReport`、`RuntimeUpdateDirective`、`ReleaseManifest`、`RuntimeUpdateView`、`ExecutionRuntimeUpdateCommandRequest`；已登记进 `CONTRACTS`（`runtime-update-report`、`runtime-update-directive`、`runtime-update-command-request`、`release-manifest`）。
+- `job.ts`：`RUNTIME_FEATURES` 增加 `self_update`；`RuntimeRegistration` 增加可选 `version`、`platform`、`install`，声明 `self_update` 时三者必填；`RuntimeHeartbeat.update`、`RuntimeSync.update`、`RuntimeInfo.update` 均为可选。
+- **与旧 Hub 的兼容（U1-4 要做）**：协议是严格对象，旧 Hub 会拒绝新字段。所以 Runtime 只在收到过带 `update` 的同步回复之后，才在心跳里带 `update`；登记被拒绝（400）时，去掉 `version`、`platform`、`install` 和 Hub 不认识的 features 再登记一次。
+- `RuntimeUpdateDirective`：`version` 与 `hold` 必有；`restart_now`、`retry` 是人操作的请求 ID，Runtime 对同一个 ID 只执行一次。不含任何下载地址。
+- `ReleaseManifest`：`format: 1`；`channel` 与版本后缀一致（`dev` ⇔ 版本含 `-dev.`）；每个平台一项，文件名固定为 `lumio-<platform>.tar.gz`，SHA-256 用小写十六进制。签名不在清单里：`manifest.sig` 是对清单原始字节的 Ed25519 签名（base64）。
+- 人的操作：`execution.runtime.update.policy`（`follow` / `manual`）、`.hold`、`.restart_now`、`.retry`。后三个带人看到的版本，与 Hub 当前期望版本不一致时返回 `CONFLICT`；只授予 human，记审计。
+- 失败原因代码见 `RUNTIME_UPDATE_REASONS`，文字由各 app 翻译；`detail` 只放排查用的技术细节，不翻译。
 
 ## 验收要点
 

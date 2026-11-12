@@ -71,7 +71,7 @@
 | [S1-0](S1-0-speech.md) | 内置语音输入（ADR 0055，Accepted；S1-1 预研 Codex，S1-2 契约 Claude，S1-3 Hub Codex，S1-4 Web Claude；纠错与语音合成在后） | 见任务说明 | — |
 | [G1-0](G1-0-gamepad.md) | 用手柄操作 Lumio：手柄模式与提示条、两层焦点导航、审批长按确认、按住说话（无新 ADR） | G1-1～G1-3 Codex | G1-4 依赖 S1-4 |
 | [I1-0](I1-0-inbox-and-captured-sources.md) | Inbox 与外部资料入库：原文、AI 卡片、分拣、混合检索与关联建议（ADR 0057，Accepted；I1-1 契约 ✅ Claude，I1-2～I1-4、I1-6 后端 Codex，I1-5、I1-7 前端 Claude） | 见任务说明 | — |
-| [U1-0](U1-0-runtime-auto-update.md) | Runtime 跟随 Hub 自动更新：期望版本对账、发布签名、Hub 产物库、空闲切换与回退、Web 状态（ADR 0063，Accepted；U1-1 契约 Claude，U1-2～U1-5 后端 Codex，U1-6 Web Claude） | 见任务说明 | —
+| [U1-0](U1-0-runtime-auto-update.md) | Runtime 跟随 Hub 自动更新：期望版本对账、发布签名、Hub 产物库、空闲切换与回退、Web 状态（ADR 0063，Accepted；U1-1 契约 ✅ Claude，U1-2～U1-5 后端 Codex，U1-6 Web Claude） | 见任务说明 | —
 
 P1 的设计决定见 ADR 0014、0016、0017、0018；P2 见 ADR 0019、0020、0021、0022 与修订后的 ADR 0005；契约见 `packages/schema/src/` 中的 `query.ts`、`actor.ts`、`operation.ts`、`proposal.ts`、`api.ts`。
 

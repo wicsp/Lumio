@@ -3,6 +3,7 @@ import { AGENTS, AgentTarget, Timestamp, RuntimeName, idOf } from "./common.ts";
 import { NoteRef } from "./query.ts";
 import { JobAccess } from "./access.ts";
 import { PlanHook, StagePermissions } from "./plan.ts";
+import { LumioVersion, RuntimeInstall, RuntimePlatform, RuntimeUpdateDirective, RuntimeUpdateReport, RuntimeUpdateView } from "./runtime-update.ts";
 
 /**
  * Hub ↔ 执行器（Runtime）的协议（ADR 0005、ADR 0019）。
@@ -120,10 +121,15 @@ export const Job = z.strictObject({
 /**
  * 执行器可选能力（ADR 0049）：按阶段权限启动 agent、运行钩子、提取权限申请；
  * privileged_helper：已配置高权限助手（ADR 0020），人可在设置里看到哪台执行器还没装。
+ * self_update：能按 Hub 的期望版本自更新（ADR 0063）；声明它时必须同时登记 version、platform、install。
  */
-export const RUNTIME_FEATURES = ["stage_permissions", "hooks", "permission_request", "privileged_helper"] as const;
+export const RUNTIME_FEATURES = ["stage_permissions", "hooks", "permission_request", "privileged_helper", "self_update"] as const;
 
-/** 执行器启动时登记自己的能力。 */
+/**
+ * 执行器启动时登记自己的能力。
+ * 新执行器遇到旧 Hub（例如 Hub 回退了版本）时，登记可能因未知字段被拒绝（400）；
+ * 这时执行器去掉 version、platform、install 与 Hub 不认识的 features 再登记一次（ADR 0063 第 6 节）。
+ */
 export const RuntimeRegistration = z.strictObject({
   protocol_version: z.literal(JOB_PROTOCOL_VERSION),
   name: RuntimeName,
@@ -132,7 +138,12 @@ export const RuntimeRegistration = z.strictObject({
   max_concurrent: z.number().int().positive(),
   features: z.array(z.enum(RUNTIME_FEATURES)).optional()
     .describe("执行器支持的可选能力；Hub 只把对应字段发给声明了它的执行器（ADR 0049）。缺失表示都不支持"),
-});
+  version: LumioVersion.optional().describe("执行器程序版本（ADR 0063）；旧执行器没有"),
+  platform: RuntimePlatform.optional().describe("执行器所在平台，决定下载哪个压缩包"),
+  install: RuntimeInstall.optional().describe("安装方式，由执行器自己判断（ADR 0063 第 2 节）"),
+}).refine((registration) => !registration.features?.includes("self_update")
+  || (registration.version !== undefined && registration.platform !== undefined && registration.install !== undefined),
+{ path: ["features"], message: "声明 self_update 时必须登记 version、platform 与 install" });
 
 /** `lumio runtime list` / `GET /v1/runtimes` 的一项：Hub 记录的执行器。 */
 export const RuntimeInfo = z.strictObject({
@@ -140,6 +151,7 @@ export const RuntimeInfo = z.strictObject({
   registration: RuntimeRegistration,
   last_seen: Timestamp,
   online: z.boolean().describe("最近 3 分钟内轮询过 Hub；否则显示为失联"),
+  update: RuntimeUpdateView.optional().describe("版本与自动更新情况（ADR 0063）；旧 Hub 没有"),
 });
 
 /**
@@ -187,6 +199,7 @@ export const RuntimeHeartbeat = z.strictObject({
   running: z.array(idOf("job")),
   queued: z.array(idOf("job")),
   outbox: z.number().int().nonnegative().describe("还没交回的结果数"),
+  update: RuntimeUpdateReport.optional().describe("自更新进度（ADR 0063）；只在 Hub 的同步回复带过 update 之后报告"),
 });
 
 /** Hub 对轮询的回复：新指派的活、要取消的活、当前全部例行任务计划。 */
@@ -197,6 +210,10 @@ export const RuntimeSync = z.strictObject({
   access: z.array(JobAccess).optional().describe(
     "本次新指派的各轮的访问凭据（ADR 0029 第 5 节）。只在执行器的同步请求带有 X-Lumio-Features: job-access 头时出现，"
     + "这样旧执行器不会遇到它不认识的字段。执行器把它与 Job 一起存进本地私有队列，只交给该轮的 agent 进程",
+  ),
+  update: RuntimeUpdateDirective.optional().describe(
+    "期望版本（ADR 0063）。只发给登记了 self_update 的执行器；策略为 manual 时缺失。"
+    + "执行器收到过它，才在之后的心跳里带 update，避免旧 Hub 遇到不认识的字段",
   ),
 });
 
