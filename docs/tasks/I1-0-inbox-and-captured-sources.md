@@ -1,6 +1,8 @@
 # I1-0 Inbox 与外部资料入库
 
 依据：[ADR 0057](../adr/0057-inbox-and-captured-sources.md)（Accepted，2026-11-11 人类批准方向）。
+
+> 2026-11-12：分拣、深读与 Inbox 里的原文阅读由 [ADR 0065](../adr/0065-material-ai-card-host-inbox-without-triage.md) 取消，改动见 [I2-0](I2-0-material-simplify.md)；下文相关描述以 I2-0 为准。
 必读：`docs/DESIGN.md`、`docs/design/knowledge.md`（「外部资料与 Inbox」「来源与 AI 笔记」「搜索」）、`docs/design/security.md`；
 I1-4 另读 `docs/design/execution.md`，I1-5、I1-7 另读 `docs/design/web.md`。
 
