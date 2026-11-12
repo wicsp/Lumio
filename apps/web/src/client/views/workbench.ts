@@ -392,7 +392,7 @@ export class WorkbenchView {
 
   private async refreshCounts(): Promise<void> {
     const client = this.session.client;
-    const [tasks, proposals, jobs, attention, inbox, notices] = await Promise.allSettled([client.workTasks(), client.proposals("pending"), client.jobs(), this.session.hub.attention(), client.captures({ untriaged: true, limit: 1 }),
+    const [tasks, proposals, jobs, attention, notices] = await Promise.allSettled([client.workTasks(), client.proposals("pending"), client.jobs(), this.session.hub.attention(),
       client.notices({ unread: true, limit: 100 })]);
     if (notices.status === "fulfilled") this.applyNotices(notices.value.notices);
     const set = (section: Section, value: number | undefined, attention = false) => {
@@ -401,7 +401,7 @@ export class WorkbenchView {
       el.classList.toggle("attention", attention && !!value);
     };
     set("work", tasks.status === "fulfilled" ? tasks.value.filter(t => turnGroup(t) === "needs" || turnGroup(t) === "todo").length : undefined);
-    set("inbox", inbox.status === "fulfilled" ? inbox.value.total : undefined);
+    set("inbox", undefined);
     set("approvals", proposals.status === "fulfilled" ? proposals.value.length : undefined, true);
     const groups = jobs.status === "fulfilled" ? executionGroups(jobs.value,
       tasks.status === "fulfilled" ? tasks.value : undefined,

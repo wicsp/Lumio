@@ -38,7 +38,15 @@ export const ZH: Record<string, string> = {
   "Mark all read": "全部标为已读",
   "To look at": "待处理",
   "Couldn't show that on the page.": "没能在页面上展示。",
-  // Inbox（I1-5）
+  // Inbox（I2-3）
+  "Your saved materials are in the knowledge base. Come here to pick something to read.": "存下的资料都在知识库里，想看时到这里挑。",
+  "Showing {0} of {1} saved items": "显示 {1} 条收藏中的 {0} 条",
+  "Remove this saved item?": "移除这条收藏？",
+  "The material, archived text and AI card will move to Recently deleted.": "资料、存档文本和 AI 卡片将一起移入「最近删除」。",
+  "Open in knowledge base": "在知识库打开",
+  "Open original link": "打开原链接",
+  "View archived text": "查看存档文本",
+  "More": "更多",
   "Browser extension": "浏览器插件",
   "Save the page you're reading to the Inbox with one click.": "一键把正在看的页面存进 Inbox。",
   "Create pairing code": "生成配对码",

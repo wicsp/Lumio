@@ -263,6 +263,7 @@ export class KnowledgePane {
     this.focusChanged?.();
     this.currentPath = note.note.path;
     const fm = note.frontmatter;
+    const material = note.note.type === "paper" || note.note.type === "source";
     const sourceUrl = typeof fm.url === "string" ? safeExternalUrl(fm.url) : undefined;
     const kindLabel = note.note.type === "source" && fm.kind === "video" ? t("Video") : note.note.type === "source" && fm.kind === "web" ? t("Web page") : TYPE_LABEL[note.note.type] ?? note.note.type;
     const attribution = [Array.isArray(fm.authors) ? fm.authors.filter(value => typeof value === "string").join(", ") : typeof fm.author === "string" ? fm.author : "", typeof fm.year === "number" ? String(fm.year) : typeof fm.site === "string" ? fm.site : ""].filter(Boolean).join(" · ");
@@ -276,8 +277,12 @@ export class KnowledgePane {
         note.note.id && h("div", { class: "detail-actions" },
           h("button", { type: "button", class: "icon-btn", title: t("Copy ID"), "aria-label": t("Copy ID"), onclick: () => void this.copyId(note.note.id!) }, icon("link")))),
       h("h1", { class: "reader-title" }, note.note.title),
-      h("div", { class: "reader-meta" }, h("span", { class: "pill" }, kindLabel), attribution && h("span", {}, attribution), sourceUrl && h("a", { href: sourceUrl, target: "_blank", rel: "noopener noreferrer nofollow", class: "btn btn-small" }, icon("external"), t("Open source")), note.note.citekey && h("span", { class: "pill" }, note.note.citekey),
+      h("div", { class: "reader-meta" }, h("span", { class: "pill" }, kindLabel), attribution && h("span", {}, attribution), note.note.citekey && h("span", { class: "pill" }, note.note.citekey),
         h("button", { type: "button", class: "btn btn-small", title: t("Show how this note links to others"), onclick: () => this.openGraph(note.note.id ?? note.note.path, note.note.title) }, icon("graph"), t("Graph"))),
+      material && h("div", { class: "material-actions" },
+        sourceUrl && h("a", { href: sourceUrl, target: "_blank", rel: "noopener noreferrer nofollow", class: "btn btn-primary" }, icon("external"), t("Open original link")),
+        h("button", { type: "button", class: "btn btn-small", "aria-label": t("More"), onclick: (event: Event) => openMenu(event.currentTarget as HTMLElement,
+          [{ value: "original", label: t("View archived text"), icon: icon("file") }], () => void this.showOriginal(note)) }, icon("more"), t("More"))),
       ai && h("p", { class: "ai-note-notice" }, icon("bot"), h("span", {}, model ? t("Written by AI ({0}). Your own notes embed it with a link on its own line.", model) : t("Written by AI. Your own notes embed it with a link on its own line."))),
       this.sources(fm.derived_from),
       body,
@@ -286,6 +291,20 @@ export class KnowledgePane {
     this.outlineEntries = () => renderedOutline(this.detail, body); this.outline.refresh();
     if(editableId(note.note))void this.enableEditing(note);
     else this.detail.querySelector("article")?.append(h("p",{class:"field-hint"},t("This note is read-only here. Check its metadata or edit it in your external editor.")));
+  }
+  private async showOriginal(note: NoteDetail): Promise<void> {
+    const body = h("div", { class: "inbox-original markdown" }, loading());
+    const head = h("p", { class: "field-hint" });
+    const generation = this.generation;
+    const dialog = openDialog(t("View archived text"), h("div", { class: "form-stack" }, head, body), [], { wide: true, cancelLabel: t("Close") });
+    try {
+      const original = await this.client.showOriginal(note.note.id ?? note.note.path);
+      if (!this.active || generation !== this.generation || !dialog.open) return;
+      head.textContent = t("Third-party content, read-only");
+      body.innerHTML = renderMarkdown(original.body);
+    } catch (cause) {
+      if (this.active && generation === this.generation && dialog.open) clear(body, failure(errorText(cause)));
+    }
   }
   private async copyId(id: string): Promise<void> {
     try {
