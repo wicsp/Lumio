@@ -71,11 +71,12 @@ export class InboxStore {
   }
 
   list(owner: string, args: CaptureListArgs) {
-    const condition = `owner=? AND (?=0 OR ${triage} IS NULL)`;
+    const condition = `owner=? AND coalesce(${triage},'')!='discard' AND (?=0 OR ${triage} IS NULL)`;
+    const order = args.untriaged ? "created DESC,id DESC" : `(${state}='failed') DESC,created DESC,id DESC`;
     const params = [owner, Number(args.untriaged)] as const;
     return {
       captures: this.db.query<{ record: string }, [string, number, number]>(
-        `SELECT record FROM inbox_captures WHERE ${condition} ORDER BY created DESC,id DESC LIMIT ?`,
+        `SELECT record FROM inbox_captures WHERE ${condition} ORDER BY ${order} LIMIT ?`,
       ).all(...params, args.limit).map(row => read(row).capture),
       total: this.db.query<{ count: number }, [string, number]>(`SELECT count(*) AS count FROM inbox_captures WHERE ${condition}`).get(...params)!.count,
     };

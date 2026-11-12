@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -23,7 +23,7 @@ function response(body: string, status = 200, headers: Record<string, string> = 
   return { status, header: (name: string) => headers[name], close() {}, body: (async function* () { yield enc.encode(body); })() };
 }
 
-async function fixture() {
+async function fixture(language = "Chinese") {
   const root = await mkdtemp(join(tmpdir(), "lumio-inbox-")), vault = join(root, "vault");
   await mkdir(vault);
   const requests: string[] = [], calls: AssistantModelRequest[] = [];
@@ -43,7 +43,7 @@ async function fixture() {
   };
   const hub = await startHub(readConfig({
     HOME: root, LUMIO_STATE_DIR: join(root, "state"), LUMIO_VAULT: vault, LUMIO_HUB_LISTEN: "127.0.0.1:0",
-    LUMIO_CAPTURE_CARD_INPUT_TOKENS: "140",
+    LUMIO_CAPTURE_CARD_INPUT_TOKENS: "140", LUMIO_CAPTURE_SUMMARY_LANGUAGE: language,
   }), { log() {}, inbox: { network, model() {
     return { settings: { model: "synthetic-summary" }, model: { async complete(input) {
       calls.push(input);
@@ -353,4 +353,52 @@ test("capture delegates public hostnames to a configured proxy and checks each r
     proxy.closeAllConnections();
     await closed;
   }
+});
+
+
+test("capturing an existing paper embeds the card and regeneration repairs a removed embed exactly once", async () => {
+  const f = await fixture("English");
+  try {
+    const id = "pap_00000000000000000000000001";
+    const path = join(f.vault, "library/papers/Alpha_2024_Paper.md");
+    await mkdir(join(f.vault, "library/papers"), { recursive: true });
+    const bytes = (await readFile(new URL("../../../fixtures/query-vault/library/papers/Alpha_2024_Paper.md", import.meta.url), "utf8"))
+      .replace("authors:", "arxiv: '2611.01234'\nauthors:");
+    await writeFile(path, bytes);
+    await f.bind();
+    const created = await f.create("https://arxiv.org/abs/2611.01234");
+    let ready = await f.wait(created.capture.id);
+    expect(ready).toMatchObject({ state: "ready", card: "ready", entity: { id } });
+    const embedded = (await f.note(id)).body;
+    expect(embedded).toMatch(/^\[AI note\]\([^\n]+\)\n\n/);
+    expect(embedded).toContain("Research indexing.");
+    expect(f.calls[0]!.messages[0]!.content).toContain("Write in English");
+    for (const heading of ["What it is", "How it works", "Findings", "Limitations", "Not stated in the source", "300–500", "translated into the requested language"]) {
+      expect(f.calls[0]!.messages[0]!.content).toContain(heading);
+    }
+    for (const remove of [false, true]) {
+      if (remove) await writeFile(path, bytes);
+      expect((await f.command(ready, { op: "summarize", depth: "card" })).status).toBe(200);
+      ready = await f.wait(ready.id);
+      expect(ready.card).toBe("ready");
+      expect((await f.note(id)).body).toBe(embedded);
+    }
+  } finally { await f.close(); }
+});
+
+test("collection listing includes previously sorted items, hides removed items and puts failures ahead of the limit", async () => {
+  const f = await fixture();
+  try {
+    const failed = await f.wait((await f.create("https://locked.example/")).capture.id);
+    const ready = await f.wait((await f.create(article)).capture.id);
+    expect((await f.command(ready, { op: "triage", triage: "read" })).status).toBe(200);
+    let list = CaptureList.parse(await (await f.api(captures + "?untriaged=false&limit=1")).json());
+    expect(list.total).toBe(2);
+    expect(list.captures.map(c => c.id)).toEqual([failed.id]);
+    const sorted = await f.get(ready.id);
+    expect((await f.command(sorted, { op: "triage", triage: "discard" })).status).toBe(200);
+    list = CaptureList.parse(await (await f.api(captures + "?untriaged=false")).json());
+    expect(list.total).toBe(1);
+    expect(list.captures.map(c => c.id)).toEqual([failed.id]);
+  } finally { await f.close(); }
 });
