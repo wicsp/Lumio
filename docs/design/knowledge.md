@@ -85,7 +85,7 @@ files/     attachments/  drawings/（Excalidraw）  templates/  originals/（资
   人的笔记用**单独成段的普通链接**嵌入 AI 笔记，Web 渲染为标明 AI 的可折叠卡片，不新增语法；人正文里的文字归人，嵌入的不归人。
   人指向 AI 笔记的链接计入链接图；AI 笔记正文里的链接不计入人的链接图，引用导出不取 AI 笔记。AI 笔记的链接存在单独的索引表，`links` 结果以可选的 `ai_outgoing` / `ai_incoming` 列出（"AI 笔记提到"，ADR 0053）。
 - 人可在 Web 修改 AI 笔记，作者不变；AI 更新须带读到的版本，人改过则冲突。搜索与相关推荐包含 AI 笔记并标明。
-- **宿主**（ADR 0065）：被 `paper` / `source` 单独成段嵌入、`derived_from` 又含其 ID 的 AI 笔记以它为宿主（索引推出；多个视为没有）。这类 AI 笔记不出现在列表、搜索、推荐、`[[` 候选与图谱，命中时换成宿主（`matched_in: body`，合并）；按 ID 或链接仍可打开。
+- **宿主**（ADR 0065，I2-1）：被 `paper` / `source` 单独成段嵌入、`derived_from` 又含其 ID 的 AI 笔记以它为宿主（索引推出；多个视为没有）。这类 AI 笔记不出现在列表、搜索、推荐、`[[` 候选与图谱，命中时换成宿主（`matched_in: body`，合并）；按 ID 或链接仍可打开。
 - **被引用资源的删除**：删除对话、任务等时提示被多少知识引用；仍可删除，知识中显示"已在回收站/已删除"，恢复后复原。对话与执行记录默认长期保留。
 - agent 写 AI 笔记的权限见 [security.md](security.md)。
 

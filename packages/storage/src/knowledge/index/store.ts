@@ -10,7 +10,9 @@ import { originalBytes, parseOriginal, scanOriginals } from "../originals.ts";
 import { scanVault } from "../vault.ts";
 import { extractKnowledgeLinks, plainText, resolveMarkdownPath } from "@lumio/knowledge";
 
-const VERSION = 6; // ADR 0064: rebuild to include files omitted by the old content checks.
+import { embeddedLinks } from "./hosts.ts";
+
+const VERSION = 7; // ADR 0065: rebuild derived host relationships; no business-data migration.
 export interface IndexOptions {
   text?: (key: string, ...args: unknown[]) => string;
   stateDir?: string;
@@ -20,7 +22,7 @@ export interface IndexOptions {
 export interface NoteRow {
   path: string; id: string | null; type: NoteRef["type"]; title: string; citekey: string | null;
   filename: string; private: number; mtime: number; size: number;
-  frontmatter: string; body: string; search_text: string;
+  frontmatter: string; body: string; search_text: string; host_path: string | null;
 }
 
 /** 查询结果中的笔记引用。没有 ID 的笔记不带 `id`，不生成替代值（P1-1 review）。 */
@@ -56,11 +58,12 @@ function initialize(db: Database, root: string): void {
     CREATE TABLE files (path TEXT PRIMARY KEY, mtime REAL NOT NULL, size INTEGER NOT NULL);
     CREATE TABLE notes (path TEXT UNIQUE NOT NULL, id TEXT, type TEXT NOT NULL, title TEXT NOT NULL,
       citekey TEXT, filename TEXT NOT NULL, private INTEGER NOT NULL, mtime REAL NOT NULL, size INTEGER NOT NULL,
-      frontmatter TEXT NOT NULL, body TEXT NOT NULL, search_text TEXT NOT NULL);
+      frontmatter TEXT NOT NULL, body TEXT NOT NULL, search_text TEXT NOT NULL, host_path TEXT);
     CREATE INDEX notes_id ON notes(id);
     CREATE INDEX notes_filename ON notes(filename);
     CREATE VIRTUAL TABLE fulltext USING fts5(title, body, authors, citekey, tags, tokenize='trigram');
     ${ORIGINALS_TABLES}
+    CREATE TABLE embedded_links (from_path TEXT NOT NULL, source TEXT NOT NULL, target TEXT NOT NULL, resolved_path TEXT);
     CREATE TABLE links (from_path TEXT NOT NULL, source TEXT NOT NULL, target TEXT NOT NULL, resolved_path TEXT);
     CREATE INDEX links_from ON links(from_path);
     CREATE INDEX links_to ON links(resolved_path);
@@ -110,7 +113,7 @@ async function openStore(path: string, root: string): Promise<Database> {
       ? db.query<{ version: number; vault: string }, []>("SELECT * FROM metadata").get() : null;
     const healthy = Object.values(db.query("PRAGMA quick_check").get() ?? {})[0] === "ok";
     if (healthy && metadata?.version === VERSION && metadata.vault === root
-      && ["files", "notes", "fulltext", "links", "derived_from", "resource_links", "ai_links"].every((name) => tables.some((t) => t.name === name))) {
+      && ["files", "notes", "fulltext", "links", "derived_from", "resource_links", "ai_links", "embedded_links"].every((name) => tables.some((t) => t.name === name))) {
       db.exec("INSERT INTO fulltext(fulltext) VALUES ('integrity-check')");
       // Additive derived metadata remains readable by older clients; no business migration.
       if (!db.query<{ name: string }, []>("PRAGMA table_info(metadata)").all().some(column => column.name === "updated_at")) {
@@ -175,7 +178,7 @@ export async function withIndex<T>(root: string, options: IndexOptions, query: (
         path: file.relativePath, id: Id.safeParse(fm.id).success ? fm.id as string : null,
         type: file.type, title, citekey, filename: basename(file.path, ".md"), private: Number(file.private),
         mtime: info.mtimeMs, size: info.size, frontmatter: JSON.stringify(fm), body,
-        search_text: [title, body, authors, citekey ?? "", tags].join("\n"),
+        search_text: [title, body, authors, citekey ?? "", tags].join("\n"), host_path: null,
       } });
     }
     const previousOriginals = new Map(db.query<{ path: string; mtime: number; size: number }, []>(
@@ -214,13 +217,14 @@ export async function withIndex<T>(root: string, options: IndexOptions, query: (
         database.query("DELETE FROM derived_from WHERE from_path=?").run(path);
         database.query("DELETE FROM resource_links WHERE from_path=?").run(path);
         database.query("DELETE FROM ai_links WHERE from_path=?").run(path);
+        database.query("DELETE FROM embedded_links WHERE from_path=?").run(path);
         database.query("DELETE FROM files WHERE path=?").run(path);
       };
       for (const path of removed) remove(path);
       for (const { note: n, authors, tags } of changes) {
         remove(n.path);
         database.query("INSERT INTO files VALUES (?, ?, ?)").run(n.path, n.mtime, n.size);
-        const result = database.query("INSERT INTO notes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        const result = database.query("INSERT INTO notes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)")
           .run(n.path, n.id, n.type, n.title, n.citekey, n.filename, n.private, n.mtime, n.size, n.frontmatter, n.body, n.search_text);
         database.query("INSERT INTO fulltext(rowid, title, body, authors, citekey, tags) VALUES (?, ?, ?, ?, ?, ?)")
           .run(result.lastInsertRowid, n.title, n.body, authors, n.citekey ?? "", tags);
@@ -235,9 +239,12 @@ export async function withIndex<T>(root: string, options: IndexOptions, query: (
         for (const id of new Set(resourceIds)) database.query("INSERT INTO resource_links VALUES (?, ?)").run(id, n.path);
         // AI 笔记的出链不进人的链接图（ADR 0051），单独存放供"AI 笔记提到"查询（ADR 0053）。
         const table = n.type === "ai-note" ? "ai_links" : "links";
+        if (!n.private && (n.type === "paper" || n.type === "source")) {
+          for (const link of embeddedLinks(n.body, n.path)) database.query("INSERT INTO embedded_links VALUES (?, ?, ?, NULL)").run(n.path, link.source, link.target);
+        }
         for (const link of links) database.query(`INSERT INTO ${table} VALUES (?, ?, ?, NULL)`).run(n.path, link.source, link.target);
       }
-      for (const table of ["links", "ai_links"] as const) {
+      for (const table of ["links", "ai_links", "embedded_links"] as const) {
         database.exec(`UPDATE ${table} SET resolved_path = (SELECT min(path) FROM notes WHERE filename=${table}.target HAVING count(*)=1)
           WHERE source='wikilink'`);
         // Resolve every Markdown edge again: an unchanged source may gain or lose a target.
@@ -251,6 +258,13 @@ export async function withIndex<T>(root: string, options: IndexOptions, query: (
           update.run(path ? find.get(path)?.path ?? null : null, link.rowid);
         }
       }
+      // Recompute after all links resolve: either side may change, disappear, or become ambiguous.
+      database.exec(`UPDATE notes SET host_path = (
+        SELECT min(h.path) FROM embedded_links e JOIN notes h ON h.path=e.from_path
+        JOIN derived_from d ON d.from_path=notes.path AND d.target=h.id
+        WHERE e.resolved_path=notes.path AND h.private=0 AND h.type IN ('paper','source')
+        HAVING count(DISTINCT h.path)=1
+      ) WHERE type='ai-note' AND private=0`);
       const removeOriginal = (path: string) => {
         database.query("DELETE FROM originals_fts WHERE rowid=(SELECT rowid FROM original_files WHERE path=?)").run(path);
         database.query("DELETE FROM original_files WHERE path=?").run(path);
