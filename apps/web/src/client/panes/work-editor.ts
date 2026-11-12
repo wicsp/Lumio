@@ -6,7 +6,7 @@
  * - 委派是单独的明确动作；一轮成功也不会自动完成任务。有交接计划时，下一轮交给计划里写明的 agent。
  * - 讨论、轮次和交接记录按时间合并成一条时间线。
  */
-import { PROJECT_STATUSES, type WorkProject, type WorkTask, type WorkTaskDetail, type WorkCommandRequest } from "@lumio/schema";
+import { PROJECT_STATUSES, type ResourceRef, type WorkProject, type WorkTask, type WorkTaskDetail, type WorkCommandRequest } from "@lumio/schema";
 import { errorText, isConflict, type Client, type HubExtras } from "../api.ts";
 import { attentionCard, attentionFor } from "../attention-card.ts";
 import { answerCommand, commentCommand, dispatchCommand, engineTargets, formatTime, newRequestId, workPatchCommand } from "../commands.ts";
@@ -137,6 +137,9 @@ export class WorkEditor {
 
   dispose(): void { this.canLeave(); this.active = false; this.titleResize?.disconnect(); clearTimeout(this.timer); this.disposeBodyReferences?.(); this.disposeReferences?.(); this.messageNav?.dispose(); }
   get dirty(): boolean { return this.writer.dirty; }
+  get focus(): ResourceRef {
+    return { module: "work", id: this.record.id, label: this.record.title, revision: String(this.record.revision) };
+  }
   get isBusy(): boolean { return this.busy; }
   get hasUnsentComment(): boolean { return !!this.commentDraft?.value.trim(); }
   /** Related task outcomes/titles can change while this task's own revision stays the same. */
