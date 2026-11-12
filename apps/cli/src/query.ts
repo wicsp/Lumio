@@ -1,6 +1,6 @@
 import { text as msg } from "./messages.ts";
 import { readFile } from "node:fs/promises";
-import { vaultFileAt, buildBib, checkLinks, collectCitations, excludedCardPaths, exportBib, noteLinks, searchNotes, showNote, type SearchOptions } from "@lumio/storage";
+import { vaultFileAt, buildBib, checkLinks, collectCitations, exportBib, noteLinks, searchNotes, showNote, type SearchOptions } from "@lumio/storage";
 import { parseFrontmatter } from "@lumio/knowledge";
 import { createClient } from "@lumio/api-client";
 import { NOTE_TYPES, parseAssignee, type NoteRef } from "@lumio/schema";
@@ -70,8 +70,6 @@ export async function runQuery(root: string | undefined, command: QueryCommand, 
     else {
       log(msg("query.found_notes", result.total));
       for (const hit of result.hits) log(`${hit.note.title}  ${hit.note.path}\n  ${hit.snippet}`);
-      const paths = remote ? [] : await excludedCardPaths(root!, options);
-      if (paths.length) log(msg("query.files_were_not_indexed_because_they_may_contain_card_numbers", paths.length, paths.join("\n")));
     }
   } else if (command.command === "show") {
     const result = await (remote ? remote.show(command.argument, options) : local!.show(command.argument, options));

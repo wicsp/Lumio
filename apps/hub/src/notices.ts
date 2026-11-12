@@ -13,7 +13,6 @@ import { text as msg } from "./messages.ts";
 import type { Notifications } from "./notifications.ts";
 import type { Resources } from "./resources.ts";
 import type { HubStore, Identity } from "./store.ts";
-import { containsSecret } from "./tasks.ts";
 import type { WorkCommands } from "./work-commands.ts";
 
 export const NOTICE_ROUTES = [
@@ -47,7 +46,7 @@ const roundStatus = (status: Job["status"]): Status | undefined => {
   if (status === "failed" || status === "unknown") return "failed";
 };
 function excerpt(text: string | undefined, limit: number): string | undefined {
-  if (!text?.trim() || containsSecret(text)) return;
+  if (!text?.trim()) return;
   const clipped = text.trim().slice(0, limit).replace(/[\uD800-\uDBFF]$/u, "");
   return clipped || undefined;
 }

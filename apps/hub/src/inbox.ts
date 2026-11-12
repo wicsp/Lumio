@@ -18,7 +18,6 @@ import { boundedText } from "./knowledge-authoring.ts";
 import { text as msg } from "./messages.ts";
 import type { HubStore, Identity } from "./store.ts";
 import { assertNoteVisible, type Trash, type TrashCompanion } from "./trash.ts";
-import { containsSecret } from "./tasks.ts";
 
 export const INBOX_ROUTES = [
   { operation: "inbox.create", method: "POST", pattern: /^\/v2\/inbox\/captures$/, path: "/v2/inbox/captures" },
@@ -95,14 +94,14 @@ export class Inbox {
     if (!this.config.vault) throw invalid("knowledge.no_vault");
     if (operation === "inbox.create") {
       const input = CaptureCreate.safeParse(await this.json(request));
-      if (!input.success || containsSecret(JSON.stringify(input.data))) throw invalid();
+      if (!input.success) throw invalid();
       const result = await this.exclusive(async () => this.create(owner, input.data));
       this.schedule();
       return respond(result, result.duplicate === "none" ? 202 : 200);
     }
     if (operation === "inbox.command") {
       const input = CaptureCommand.safeParse(await this.json(request));
-      if (!input.success || containsSecret(JSON.stringify(input.data))) throw invalid();
+      if (!input.success) throw invalid();
       const result = await this.exclusive(() => this.command(id!, input.data, identity));
       this.schedule();
       return respond(result);
@@ -310,7 +309,6 @@ export class Inbox {
       assertNoteVisible(this.hub.db, capture.entity.id);
       assertNoteVisible(this.hub.db, id);
       const original = await showOriginal(this.config.vault, capture.entity.id, this.indexOptions);
-      if (containsSecret(original.body)) throw new CaptureFailure("summary_failed");
       const existing = await noteById(this.config.vault, id, this.indexOptions);
       const revision = existing ? (await readKnowledgeDocument(this.config.vault, id, this.indexOptions)).revision : undefined;
       if (!revision && capture.ai_note) throw inboxMissing();

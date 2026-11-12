@@ -15,7 +15,7 @@ import { editNote, writeAndCommit } from "./commit.ts";
 import { HubError } from "./errors.ts";
 import type { Jobs } from "./jobs.ts";
 import type { HubStore, Identity } from "./store.ts";
-import { OUTCOME, assigneeKey, containsSecret, pickRuntime, workdirInVault } from "./tasks.ts";
+import { OUTCOME, assigneeKey, pickRuntime, workdirInVault } from "./tasks.ts";
 import type { WatchClock } from "./watch.ts";
 
 /**
@@ -226,17 +226,10 @@ export class Routines {
       } catch { /* schedule 已改得无法解析：不统计 */ }
     }
     const report = r?.report ?? "", question = r?.question;
-    if (containsSecret(report) || (question && containsSecret(question))) {
-      lines.push(msg("routines.report_may_contain_sensitive_information_keys_or_card_numbers_it_was", job.spec.id));
-    } else {
-      if (report) lines.push(report.length > MAX_SUMMARY ? msg("tasks.truncated", report.slice(0, MAX_SUMMARY)) : report, "");
-      if (question) lines.push(msg("tasks.question", question), "");
-    }
+    if (report) lines.push(report.length > MAX_SUMMARY ? msg("tasks.truncated", report.slice(0, MAX_SUMMARY)) : report, "");
+    if (question) lines.push(msg("tasks.question", question), "");
     lines.push(msg("tasks.full_report_lumio_job_show", job.spec.id));
-    const block = lines.join("\n");
-    // error、版本等元数据同样来自执行器，检查最终区块而不是只检查 report/question。
-    if (containsSecret(block)) return msg("tasks.result_not_written_report_may_contain_sensitive_information_keys_or", job.spec.id);
-    return block;
+    return lines.join("\n");
   }
 
   /** `GET /v1/routines`。 */
@@ -288,8 +281,7 @@ export class Routines {
     // JSON 的字符串、数组与对象都是合法的 YAML 流式写法，不必引入 YAML 序列化的细节。
     const header = Object.entries(fields).map(([k, v]) => `${k}: ${typeof v === "string" && /^[A-Za-z0-9_.:+-]+$/.test(v) ? v : JSON.stringify(v)}`).join("\n");
     const report = job.result?.report ?? "";
-    const shown = containsSecret(report) ? msg("routines.report_may_contain_sensitive_information_it_was_not_written_to_the_n", job.spec.id)
-      : report ? (report.length > 20_000 ? msg("tasks.truncated", report.slice(0, 20_000)) : report) : msg("routines.no_report_for_this_run");
+    const shown = report ? (report.length > 20_000 ? msg("tasks.truncated", report.slice(0, 20_000)) : report) : msg("routines.no_report_for_this_run");
     const body = msg("routines.from_routine_result_at_write_your_followup_here_then_set_assignee_to", basename(path, ".md"), when, assigneeKey(routine.assignee));
     let bytes: Buffer = Buffer.from(`---\n${header}\n---\n${body}`, "utf8");
     bytes = upsertBlock(bytes, "routine-run", `job=${job.spec.id}`, msg("routines.result_for_2", when, shown));

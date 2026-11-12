@@ -127,7 +127,6 @@ files/     attachments/  drawings/（Excalidraw）  templates/  originals/（资
 ## 自动提交（ADR 0014）
 - vault 安静 5 分钟（可配置）后自动提交一次；没有 git 仓库时跳过。任何非隐藏文件的变化都会重新计时（报告、附件也会被提交），补全只处理笔记。
 - Hub 启动时先全量补全与索引一次，覆盖它没运行期间的改动。
-- 提交前检查疑似卡号，命中的文件不提交（见 [security.md](security.md)「安全」一节）。
 
 ## 搜索（ADR 0014）
 - SQLite FTS5 + trigram 分词；**少于 3 个字符的查询改用子串匹配**（trigram 搜不到两个汉字的词）。

@@ -3,14 +3,14 @@ import { Database } from "bun:sqlite";
 import { mkdir, readFile, stat, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import { Citekey, DerivedFrom, Id, textContainsCardNumber, type NoteRef } from "@lumio/schema";
+import { Citekey, DerivedFrom, Id, type NoteRef } from "@lumio/schema";
 import { CoreError } from "@lumio/foundation";
 import { parseFrontmatter } from "@lumio/knowledge";
 import { originalBytes, parseOriginal, scanOriginals } from "../originals.ts";
 import { scanVault } from "../vault.ts";
 import { extractKnowledgeLinks, plainText, resolveMarkdownPath } from "@lumio/knowledge";
 
-const VERSION = 5; // 4：来源及跨模块引用表（K4-2）；5：AI 笔记的出链单独成表（ADR 0053）。旧索引自动重建
+const VERSION = 6; // ADR 0064: rebuild to include files omitted by the old content checks.
 export interface IndexOptions {
   text?: (key: string, ...args: unknown[]) => string;
   stateDir?: string;
@@ -44,7 +44,7 @@ function initializeOnce(db: Database, root: string): void {
 
 const ORIGINALS_TABLES = `
   CREATE TABLE IF NOT EXISTS original_files (
-    path TEXT UNIQUE NOT NULL, owner TEXT, mtime REAL NOT NULL, size INTEGER NOT NULL, blocked INTEGER NOT NULL
+    path TEXT UNIQUE NOT NULL, owner TEXT, mtime REAL NOT NULL, size INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS original_owner ON original_files(owner);
   CREATE VIRTUAL TABLE IF NOT EXISTS originals_fts USING fts5(body, tokenize='trigram');
@@ -53,7 +53,7 @@ const ORIGINALS_TABLES = `
 function initialize(db: Database, root: string): void {
   db.exec(`
     CREATE TABLE metadata (version INTEGER NOT NULL, vault TEXT NOT NULL, updated_at TEXT NOT NULL);
-    CREATE TABLE files (path TEXT PRIMARY KEY, mtime REAL NOT NULL, size INTEGER NOT NULL, blocked INTEGER NOT NULL);
+    CREATE TABLE files (path TEXT PRIMARY KEY, mtime REAL NOT NULL, size INTEGER NOT NULL);
     CREATE TABLE notes (path TEXT UNIQUE NOT NULL, id TEXT, type TEXT NOT NULL, title TEXT NOT NULL,
       citekey TEXT, filename TEXT NOT NULL, private INTEGER NOT NULL, mtime REAL NOT NULL, size INTEGER NOT NULL,
       frontmatter TEXT NOT NULL, body TEXT NOT NULL, search_text TEXT NOT NULL);
@@ -158,49 +158,41 @@ export async function withIndex<T>(root: string, options: IndexOptions, query: (
     const [files, originals] = await Promise.all([scanVault(root), scanOriginals(root)]);
     const previous = new Map(db.query<{ path: string; mtime: number; size: number }, []>("SELECT * FROM files").all().map((f) => [f.path, f]));
     const current = new Set(files.map((f) => f.relativePath));
-    const changes: { path: string; mtime: number; size: number; note?: Omit<NoteRow, "mtime" | "size">; authors?: string; tags?: string; blocked: boolean }[] = [];
+    const changes: { note: NoteRow; authors: string; tags: string }[] = [];
     for (const file of files) {
       const info = await stat(file.path);
       const old = previous.get(file.relativePath);
       if (old?.mtime === info.mtimeMs && old.size === info.size) continue;
       const source = await readFile(file.path);
-      const change: (typeof changes)[number] = { path: file.relativePath, mtime: info.mtimeMs, size: info.size, blocked: textContainsCardNumber(source.toString("utf8")) };
-      if (!change.blocked) {
-        let fm: Record<string, unknown> = {}, body = source.toString("utf8");
-        try { const parsed = (options.parse ?? parseFrontmatter)(source); fm = parsed.data; body = parsed.body.toString("utf8"); }
-        catch (cause) { if (!(cause instanceof CoreError) || cause.code !== "INVALID_FRONTMATTER") throw cause; }
-        const title = strings(fm.title) || basename(file.path, ".md");
-        const citekey = file.type === "paper" && Citekey.safeParse(fm.citekey).success ? fm.citekey as string : null;
-        const authors = [strings(fm.authors), strings(fm.author)].filter(Boolean).join(" ");
-        const tags = strings(fm.tags);
-        change.note = {
-          path: file.relativePath, id: Id.safeParse(fm.id).success ? fm.id as string : null,
-          type: file.type, title, citekey, filename: basename(file.path, ".md"), private: Number(file.private),
-          frontmatter: JSON.stringify(fm), body,
-          search_text: [title, body, authors, citekey ?? "", tags].join("\n"),
-        };
-        change.authors = authors; change.tags = tags;
-      }
-      changes.push(change);
+      let fm: Record<string, unknown> = {}, body = source.toString("utf8");
+      try { const parsed = (options.parse ?? parseFrontmatter)(source); fm = parsed.data; body = parsed.body.toString("utf8"); }
+      catch (cause) { if (!(cause instanceof CoreError) || cause.code !== "INVALID_FRONTMATTER") throw cause; }
+      const title = strings(fm.title) || basename(file.path, ".md");
+      const citekey = file.type === "paper" && Citekey.safeParse(fm.citekey).success ? fm.citekey as string : null;
+      const authors = [strings(fm.authors), strings(fm.author)].filter(Boolean).join(" ");
+      const tags = strings(fm.tags);
+      changes.push({ authors, tags, note: {
+        path: file.relativePath, id: Id.safeParse(fm.id).success ? fm.id as string : null,
+        type: file.type, title, citekey, filename: basename(file.path, ".md"), private: Number(file.private),
+        mtime: info.mtimeMs, size: info.size, frontmatter: JSON.stringify(fm), body,
+        search_text: [title, body, authors, citekey ?? "", tags].join("\n"),
+      } });
     }
     const previousOriginals = new Map(db.query<{ path: string; mtime: number; size: number }, []>(
       "SELECT path,mtime,size FROM original_files",
     ).all().map(file => [file.path, file]));
     const currentOriginals = new Set(originals.map(file => file.relativePath));
-    const originalChanges: { path: string; mtime: number; size: number; blocked: boolean; original?: ReturnType<typeof parseOriginal> }[] = [];
+    const originalChanges: { path: string; mtime: number; size: number; original?: ReturnType<typeof parseOriginal> }[] = [];
     for (const file of originals) {
       try {
         const info = await stat(file.path);
         const old = previousOriginals.get(file.relativePath);
         if (old?.mtime === info.mtimeMs && old.size === info.size) continue;
         const bytes = await originalBytes(root, file.relativePath);
-        const blocked = textContainsCardNumber(bytes.toString("utf8"));
-        const change: (typeof originalChanges)[number] = { path: file.relativePath, mtime: info.mtimeMs, size: info.size, blocked };
-        if (!blocked) {
-          try { change.original = parseOriginal(bytes); }
-          catch (cause) {
-            if (!(cause instanceof CoreError) || !["INVALID_FRONTMATTER", "NOTE_NOT_FOUND"].includes(cause.code)) throw cause;
-          }
+        const change: (typeof originalChanges)[number] = { path: file.relativePath, mtime: info.mtimeMs, size: info.size };
+        try { change.original = parseOriginal(bytes); }
+        catch (cause) {
+          if (!(cause instanceof CoreError) || !["INVALID_FRONTMATTER", "NOTE_NOT_FOUND"].includes(cause.code)) throw cause;
         }
         originalChanges.push(change);
       } catch (cause) {
@@ -225,15 +217,13 @@ export async function withIndex<T>(root: string, options: IndexOptions, query: (
         database.query("DELETE FROM files WHERE path=?").run(path);
       };
       for (const path of removed) remove(path);
-      for (const change of changes) {
-        remove(change.path);
-        database.query("INSERT INTO files VALUES (?, ?, ?, ?)").run(change.path, change.mtime, change.size, Number(change.blocked));
-        if (!change.note) continue;
-        const n = change.note;
+      for (const { note: n, authors, tags } of changes) {
+        remove(n.path);
+        database.query("INSERT INTO files VALUES (?, ?, ?)").run(n.path, n.mtime, n.size);
         const result = database.query("INSERT INTO notes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-          .run(n.path, n.id, n.type, n.title, n.citekey, n.filename, n.private, change.mtime, change.size, n.frontmatter, n.body, n.search_text);
+          .run(n.path, n.id, n.type, n.title, n.citekey, n.filename, n.private, n.mtime, n.size, n.frontmatter, n.body, n.search_text);
         database.query("INSERT INTO fulltext(rowid, title, body, authors, citekey, tags) VALUES (?, ?, ?, ?, ?, ?)")
-          .run(result.lastInsertRowid, n.title, n.body, change.authors!, n.citekey ?? "", change.tags!);
+          .run(result.lastInsertRowid, n.title, n.body, authors, n.citekey ?? "", tags);
         const { derived_from: sources } = JSON.parse(n.frontmatter);
         if (Array.isArray(sources)) {
           for (const source of sources) {
@@ -268,8 +258,8 @@ export async function withIndex<T>(root: string, options: IndexOptions, query: (
       for (const path of removedOriginals) removeOriginal(path);
       for (const change of originalChanges) {
         removeOriginal(change.path);
-        const { lastInsertRowid } = database.query("INSERT INTO original_files VALUES (?, ?, ?, ?, ?)")
-          .run(change.path, change.original?.frontmatter.of ?? null, change.mtime, change.size, Number(change.blocked));
+        const { lastInsertRowid } = database.query("INSERT INTO original_files VALUES (?, ?, ?, ?)")
+          .run(change.path, change.original?.frontmatter.of ?? null, change.mtime, change.size);
         if (change.original) database.query("INSERT INTO originals_fts(rowid, body) VALUES (?, ?)").run(lastInsertRowid, change.original.body);
       }
       database.query("UPDATE metadata SET updated_at=?").run(new Date().toISOString());

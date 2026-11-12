@@ -16,7 +16,8 @@ export * from "./actor.ts";
 export * from "./operation.ts";
 export * from "./proposal.ts";
 export * from "./api.ts";
-export * from "./secrets.ts";
+export * from "./security-review.ts";
+import { SecurityReviewRequest, SecurityReviewResult } from "./security-review.ts";
 export * from "./privileged.ts";
 export * from "./setup.ts";
 export * from "./work.ts";
@@ -135,6 +136,8 @@ export const CONTRACTS = {
   "operation-result": OperationResult,
   proposal: Proposal,
   "api-error": ApiError,
+  "security-review-request": SecurityReviewRequest,
+  "security-review-result": SecurityReviewResult,
   // v2 业务对象（ADR 0025，R0-1）
   "resource-ref": ResourceRef,
   "work-project": WorkProject,

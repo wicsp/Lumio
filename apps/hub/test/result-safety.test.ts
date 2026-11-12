@@ -7,7 +7,7 @@ import { cp, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { routineJobId } from "@lumio/execution";
-import { Job, JobResult } from "@lumio/schema";
+import { Job, JobResult, SecurityReviewResult } from "@lumio/schema";
 import { readConfig } from "../src/config.ts";
 import { startHub } from "../src/server.ts";
 import { HubStore } from "../src/store.ts";
@@ -41,7 +41,7 @@ beforeEach(async () => {
 afterEach(async () => { await hub?.stop(); await rm(temp, { recursive: true, force: true }); });
 
 for (const kind of ["task", "routine"] as const) for (const field of ["error", "engine.version"] as const) {
-  test(`${kind}: sensitive ${field} is withheld from the note while the original result stays queryable`, async () => {
+  test(`${kind}: result ${field} is preserved in the note and original Job`, async () => {
     let j: Job;
     if (kind === "task") {
       expect((await api("/v1/operations", human, { operation: { op: "task.dispatch", args: { task, trigger: "cli" } } })).status).toBe(200);
@@ -56,7 +56,10 @@ for (const kind of ["task", "routine"] as const) for (const field of ["error", "
     expect((await api("/v1/runtime/results", runtime, result)).status).toBe(200);
     const note = () => readFile(join(temp, "vault", kind === "task" ? "plan/tasks/safety.md" : "plan/routines/safety.md"), "utf8");
     await eventually(async () => (await note()).includes(`lumio job show ${j.spec.id}`));
-    const text = await note(); expect(text).not.toContain(sensitive); expect(text).toContain("疑似包含敏感信息"); expect(text).toContain("人写的要求。"); expect(text).toContain(`lumio job show ${j.spec.id}`);
+    const text = await note(); expect(text).toContain(sensitive); expect(text).toContain("人写的要求。"); expect(text).toContain(`lumio job show ${j.spec.id}`);
     const stored = Job.parse(await (await api(`/v1/jobs/${j.spec.id}`, human)).json()); expect(stored.result).toEqual(result);
+    const review = SecurityReviewResult.parse(await (await api("/v2/security/review", human, { kind: "job", ref: j.spec.id })).json());
+    expect(review.findings).toEqual([{ field: field === "error" ? "error" : "engine_version", line: 1, column: 1, reason: "possible-api-key" }]);
+    expect(JSON.stringify(review)).not.toContain(sensitive);
   });
 }

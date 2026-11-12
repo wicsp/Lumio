@@ -17,6 +17,7 @@ import { isTaskProposalCapability } from "./capabilities.ts";
 
 export const V2_ROUTES = [
   ...INBOX_ROUTES,
+  { operation: "security.review", method: "POST", pattern: /^\/v2\/security\/review$/, path: "/v2/security/review" },
   ...NOTICE_ROUTES,
   { operation: "explorations.read", method: "GET", pattern: /^\/v2\/explorations$/, path: "/v2/explorations" },
   { operation: "explorations.read", method: "GET", pattern: /^\/v2\/explorations\/(xpl_[0-9A-HJKMNP-TV-Z]{26})$/, path: "/v2/explorations/<id>" },
@@ -86,6 +87,10 @@ export async function handleV2(request: Request, server: Pick<Bun.Server<undefin
   let audited = false;
   try {
     if (decision.result !== "allow") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: decision.result === "deny" ? decision.reason : msg("v2.approval_required") });
+    if (route.operation === "security.review") {
+      if (identity.actor.role !== "human") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] });
+      return await modules.securityReview(request);
+    }
     const url = new URL(request.url), id = route.pattern.exec(url.pathname)?.[1];
     if (route.operation === "explorations.read" || route.operation === "explorations.command") {
       const response = await modules.explorations.handle(request, id, identity);

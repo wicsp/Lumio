@@ -15,13 +15,8 @@ import type { HubConfig } from "./config.ts";
 import type { Extracted } from "./inbox-extract.ts";
 import { CaptureFailure } from "./inbox-fetch.ts";
 import { text as msg, withLanguage } from "./messages.ts";
-import { containsSecret } from "./tasks.ts";
 
 const digest = (bytes: Buffer | string) => createHash("sha256").update(bytes).digest("hex");
-const validation = (value: string) => {
-  if (containsSecret(value)) throw new CaptureFailure("extract_failed");
-};
-
 export interface CapturePlan {
   entity: NoteRef;
   entityBytes?: string;
@@ -39,7 +34,6 @@ export class InboxFiles {
 
   async prepare(capture: Capture, extracted: Extracted, id: string, now: Date): Promise<CapturePlan> {
     const note = extracted.note, captured = now.toISOString();
-    validation(JSON.stringify(extracted));
     const extraction = { body: extracted.body, extractor: extracted.extractor, lang: extracted.lang, captured };
     if (capture.entity?.id && capture.original) {
       const { document } = await readKnowledgeDocument(this.vault, capture.entity.id, this.options);
@@ -131,7 +125,6 @@ export class InboxFiles {
   }
 
   private async publishNote(note: NoteRef, bytes: string): Promise<void> {
-    validation(bytes);
     try { await saveNewNote(this.vault, { relativePath: note.path, content: Buffer.from(bytes) }); }
     catch (cause) {
       if (!(cause instanceof CoreError) || cause.code !== "FILE_EXISTS" || !(await this.noteBytes(note)).equals(Buffer.from(bytes))) throw cause;
@@ -143,12 +136,10 @@ export class InboxFiles {
     if (!file || file.private || file.type !== note.type) throw new CaptureFailure("extract_failed");
     const bytes = await readFile(file.path);
     if (parseFrontmatter(bytes).data.id !== note.id) throw new CaptureFailure("extract_failed");
-    validation(bytes.toString("utf8"));
     return bytes;
   }
 
   private async replaceNote(note: NoteRef, before: Buffer, after: Buffer, actor: string, message: string) {
-    validation(after.toString("utf8"));
     if (!before.equals(after)) await writeFileAtomic(join(this.vault, note.path), after, { expectedContent: before });
     await this.commit([note.path], actor, message);
   }

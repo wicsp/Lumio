@@ -4,7 +4,7 @@ import { lstat, mkdir, open, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { CoreError } from "@lumio/foundation";
 import { aiNoteFileName, parseFrontmatter, VAULT_LAYOUT } from "@lumio/knowledge";
-import { OriginalFrontmatter, textContainsCardNumber } from "@lumio/schema";
+import { OriginalFrontmatter } from "@lumio/schema";
 import { writeFileAtomic } from "./write.ts";
 
 const directory = VAULT_LAYOUT.originals;
@@ -66,7 +66,6 @@ export async function originalBytes(root: string, path: string): Promise<Buffer>
 
 export async function readOriginalFile(root: string, path: string) {
   const bytes = await originalBytes(root, path);
-  if (textContainsCardNumber(bytes.toString("utf8"))) throw missing();
   return parseOriginal(bytes);
 }
 
@@ -84,7 +83,6 @@ export async function writeOriginal(
   const path = replace ?? `${directory}/${aiNoteFileName(title, frontmatter.of)}.md`;
   const fields = Object.fromEntries(Object.entries(frontmatter).filter(([, value]) => value !== undefined));
   const bytes = Buffer.concat([parseFrontmatter("").render(fields), content]);
-  if (textContainsCardNumber(bytes.toString("utf8"))) throw new CoreError("INVALID_METADATA", { key: "create.could_not_generate_valid_idea_metadata", args: [] });
   let expectedContent: Buffer | undefined;
   if (replace) {
     expectedContent = await originalBytes(root, replace);

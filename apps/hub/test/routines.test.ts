@@ -99,7 +99,7 @@ test("the plan reaches only the assigned runtime; pausing removes it and edits c
   expect((await sync()).routines).toEqual([]);
 }, 30_000);
 
-test("runtime-fired jobs are recognised by ID, results are appended in order, skipped fires noted, secrets withheld", async () => {
+test("runtime-fired jobs are recognised by ID, reports are appended in order and skipped fires are noted", async () => {
   await writeRoutine({ context: "previous" });
   await eventually(async () => (await sync()).routines.length === 1);
   const plan = (await sync()).routines[0]!;
@@ -126,8 +126,7 @@ test("runtime-fired jobs are recognised by ID, results are appended in order, sk
   const text = await note();
   expect(text.indexOf("10:10 的结果")).toBeLessThan(text.indexOf("10:40 的结果"));
   expect(text).toContain("上一次之后有 2 次计划触发没有执行");
-  expect(text).toContain("汇报中疑似包含敏感信息");
-  expect(text).not.toContain("sk-aaaa");
+  expect(text).toContain("sk-aaaa");
   expect(parseFrontmatter(Buffer.from(text)).body.toString().startsWith("总结今天的 GPU 使用情况。")).toBe(true);
   // 重复交回同一结果只记一次。
   expect((await request("/v1/runtime/results", runtime, result(first, plan.lease))).status).toBe(200);

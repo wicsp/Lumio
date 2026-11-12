@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { cp, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { KnowledgeCreateRequest, KnowledgeCreateResult, KnowledgeTemplateResult, ApiError, NoteDetail, SearchResult, PaperResolveResult, type KnowledgeTemplateRequest, type PaperResolveRequest } from "@lumio/schema";
+import { KnowledgeCreateRequest, KnowledgeCreateResult, KnowledgeTemplateResult, ApiError, NoteDetail, SearchResult, PaperResolveResult, SecurityReviewResult, type SecurityReviewRequest, type KnowledgeTemplateRequest, type PaperResolveRequest } from "@lumio/schema";
 import { startHub } from "../src/server.ts";
 import { readConfig } from "../src/config.ts";
 import { resolvePaper, type PaperFetch } from "../src/knowledge-authoring.ts";
@@ -18,6 +18,7 @@ const client = (auth = token) => {
   return {
     knowledgeTemplate: (input: KnowledgeTemplateRequest) => call(`v2/knowledge/templates?kind=${input.kind}&locale=${input.locale}`, KnowledgeTemplateResult),
     resolvePaper: (input: PaperResolveRequest) => call("v2/knowledge/papers/resolve", PaperResolveResult, input),
+    securityReview: (input: SecurityReviewRequest) => call("v2/security/review", SecurityReviewResult, input),
     createNote: (input: KnowledgeCreateRequest) => call("v2/knowledge/notes", KnowledgeCreateResult, input),
     show: (id: string) => call(`v1/notes/${id}`, NoteDetail),
     search: (q: string) => call(`v1/search?q=${encodeURIComponent(q)}`, SearchResult),
@@ -59,14 +60,16 @@ test("agent/runtime authorization precedes parsing and cannot read templates or 
     }
   }
 });
-test("invalid fields and sensitive body are refused without creating a receipt", async () => {
+test("invalid fields are refused without creating a receipt; body patterns do not block creation", async () => {
   const request = KnowledgeCreateRequest.parse(fixtures[0]);
   const secret = "sk-" + "x".repeat(30);
-  const result = await client().createNote({ ...request, body: secret }).catch(e => e);
-  expect(result.code).toBe("INVALID"); expect(result.message).not.toContain(secret);
   const res = await fetch(`${hub.server.url}v2/knowledge/notes`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ ...request, note: { ...request.note, path: "../private.md" } }) });
   expect(res.status).toBe(400);
   expect(hub.store.db.query<{ n: number }, []>("SELECT count(*) n FROM knowledge_creations").get()!.n).toBe(0);
+  const created = await client().createNote({ ...request, body: secret });
+  const review = await client().securityReview({ kind: "note", ref: created.id });
+  expect(review.findings).toEqual([{ field: "file", line: expect.any(Number), column: 1, reason: "possible-api-key" }]);
+  expect(JSON.stringify(review)).not.toContain(secret);
 });
 test("no configured vault clearly rejects creation and template loading", async () => {
   await hub.stop(); hub = await startHub({ ...readConfig({ LUMIO_STATE_DIR: join(root, "state") }), port: 0 }, { log() {} });

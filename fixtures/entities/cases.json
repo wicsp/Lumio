@@ -165,6 +165,72 @@
       "last4": 4417,
       "expires": "2028-09",
       "vault_item": "招行 Visa"
+    },
+    "asset-card-in-login": {
+      "type": "asset",
+      "id": "ast_01J9Z3K8M2N4P6Q8R0S2T4V6W8",
+      "title": "招行 Visa 4417",
+      "created": "2026-10-23T16:00:00+08:00",
+      "updated": "2026-10-23T16:00:00+08:00",
+      "kind": "card",
+      "provider": "招商银行",
+      "last4": "4417",
+      "expires": "2028-09",
+      "vault_item": "招行 Visa",
+      "login": "4111111111111111"
+    },
+    "asset-card-in-title-spaces": {
+      "type": "asset",
+      "id": "ast_01J9Z3K8M2N4P6Q8R0S2T4V6W8",
+      "title": "Visa 4111 1111 1111 1111",
+      "created": "2026-10-23T16:00:00+08:00",
+      "updated": "2026-10-23T16:00:00+08:00",
+      "kind": "card",
+      "provider": "招商银行",
+      "last4": "4417",
+      "expires": "2028-09",
+      "vault_item": "招行 Visa"
+    },
+    "asset-card-in-title-hyphens": {
+      "type": "asset",
+      "id": "ast_01J9Z3K8M2N4P6Q8R0S2T4V6W8",
+      "title": "4111-1111-1111-1111",
+      "created": "2026-10-23T16:00:00+08:00",
+      "updated": "2026-10-23T16:00:00+08:00",
+      "kind": "card",
+      "provider": "招商银行",
+      "last4": "4417",
+      "expires": "2028-09",
+      "vault_item": "招行 Visa"
+    },
+    "asset-card-as-number": {
+      "type": "asset",
+      "id": "ast_01J9Z3K8M2N4P6Q8R0S2T4V6W8",
+      "title": "招行 Visa 4417",
+      "created": "2026-10-23T16:00:00+08:00",
+      "updated": "2026-10-23T16:00:00+08:00",
+      "kind": "card",
+      "provider": "招商银行",
+      "last4": "4417",
+      "expires": "2028-09",
+      "vault_item": "招行 Visa",
+      "note": 4111111111111111
+    },
+    "asset-card-nested": {
+      "type": "asset",
+      "id": "ast_01J9Z3K8M2N4P6Q8R0S2T4V6W8",
+      "title": "招行 Visa 4417",
+      "created": "2026-10-23T16:00:00+08:00",
+      "updated": "2026-10-23T16:00:00+08:00",
+      "kind": "card",
+      "provider": "招商银行",
+      "last4": "4417",
+      "expires": "2028-09",
+      "vault_item": "招行 Visa",
+      "aliases": [
+        "ok",
+        "5500 0000 0000 0004"
+      ]
     }
   },
   "invalid": {
@@ -396,79 +462,6 @@
       "paid_with": "pap_01J9Z3K8M2N4P6Q8R0S2T4V6W8",
       "login": "someone@example.com",
       "manage_url": "https://claude.ai/settings/billing"
-    },
-    "asset-card-in-login": {
-      "type": "asset",
-      "id": "ast_01J9Z3K8M2N4P6Q8R0S2T4V6W8",
-      "title": "招行 Visa 4417",
-      "created": "2026-10-23T16:00:00+08:00",
-      "updated": "2026-10-23T16:00:00+08:00",
-      "kind": "card",
-      "provider": "招商银行",
-      "last4": "4417",
-      "expires": "2028-09",
-      "vault_item": "招行 Visa",
-      "login": "4111111111111111"
-    },
-    "asset-card-in-title-spaces": {
-      "type": "asset",
-      "id": "ast_01J9Z3K8M2N4P6Q8R0S2T4V6W8",
-      "title": "Visa 4111 1111 1111 1111",
-      "created": "2026-10-23T16:00:00+08:00",
-      "updated": "2026-10-23T16:00:00+08:00",
-      "kind": "card",
-      "provider": "招商银行",
-      "last4": "4417",
-      "expires": "2028-09",
-      "vault_item": "招行 Visa"
-    },
-    "asset-card-in-title-hyphens": {
-      "type": "asset",
-      "id": "ast_01J9Z3K8M2N4P6Q8R0S2T4V6W8",
-      "title": "4111-1111-1111-1111",
-      "created": "2026-10-23T16:00:00+08:00",
-      "updated": "2026-10-23T16:00:00+08:00",
-      "kind": "card",
-      "provider": "招商银行",
-      "last4": "4417",
-      "expires": "2028-09",
-      "vault_item": "招行 Visa"
-    },
-    "asset-card-as-number": {
-      "type": "asset",
-      "id": "ast_01J9Z3K8M2N4P6Q8R0S2T4V6W8",
-      "title": "招行 Visa 4417",
-      "created": "2026-10-23T16:00:00+08:00",
-      "updated": "2026-10-23T16:00:00+08:00",
-      "kind": "card",
-      "provider": "招商银行",
-      "last4": "4417",
-      "expires": "2028-09",
-      "vault_item": "招行 Visa",
-      "note": 4111111111111111
-    },
-    "asset-card-nested": {
-      "type": "asset",
-      "id": "ast_01J9Z3K8M2N4P6Q8R0S2T4V6W8",
-      "title": "招行 Visa 4417",
-      "created": "2026-10-23T16:00:00+08:00",
-      "updated": "2026-10-23T16:00:00+08:00",
-      "kind": "card",
-      "provider": "招商银行",
-      "last4": "4417",
-      "expires": "2028-09",
-      "vault_item": "招行 Visa",
-      "aliases": [
-        "ok",
-        "5500 0000 0000 0004"
-      ]
     }
-  },
-  "cardNumbers": [
-    "asset-card-in-login",
-    "asset-card-in-title-spaces",
-    "asset-card-in-title-hyphens",
-    "asset-card-as-number",
-    "asset-card-nested"
-  ]
+  }
 }

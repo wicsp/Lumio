@@ -6,7 +6,6 @@ import { knowledgeTemplate, parsePaperInput, parseArxivMetadata, parseCrossrefMe
 import { KnowledgeCreationStore, updateIndex, openVaultGit } from "@lumio/storage";
 import { HubError } from "./errors.ts";
 import { text as msg, withLanguage } from "./messages.ts";
-import { containsSecret } from "./tasks.ts";
 import type { HubConfig } from "./config.ts";
 import type { HubStore, Identity } from "./store.ts";
 import type { authorize } from "./authorize.ts";
@@ -70,9 +69,7 @@ export async function resolvePaper(input: PaperResolveRequest, fetcher: PaperFet
           : `https://api.crossref.org/works/${encodeURIComponent(source.doi)}/transform/application/x-bibtex`, "application/x-bibtex");
         bibtex = rewriteBibtexKey(rawBib, generateCitekey(metadata));
       } catch { if (controller.signal.aborted) throw new Error("TIMEOUT"); /* Metadata can still be confirmed without a BibTeX response. */ }
-      const result = PaperResolveResult.parse({ ...metadata, ...(bibtex ? { bibtex } : {}) });
-      if (containsSecret(JSON.stringify(result))) throw new Error("UNSAFE_METADATA");
-      return result;
+      return PaperResolveResult.parse({ ...metadata, ...(bibtex ? { bibtex } : {}) });
     })()]);
   } catch { throw new HubError("INVALID", { key: "knowledge.paper_failed", args: [] }, { reason: "paper-resolution-failed" }); }
   finally { clearTimeout(timer!); controller.abort(); }
@@ -115,7 +112,6 @@ export class KnowledgeAuthoring {
     if (!parsed.success) throw new HubError("INVALID", { key: "knowledge.invalid", args: [] }, { reason: "invalid-note" });
     try {
       const result = await this.exclusive(() => this.creations!.create(identity.actor.id, parsed.data, { now, newId: prefix => newId(prefix, now, randomBytes), tz: "UTC" }, {
-        validate: note => { if (containsSecret(note.content.toString("utf8"))) throw new HubError("INVALID", { key: "knowledge.sensitive", args: [] }, { reason: "sensitive-content" }); },
         finalize: async (note, bytes) => {
           await updateIndex(this.config.vault, { stateDir: this.config.stateDir });
           const git = await openVaultGit(this.config.vault);

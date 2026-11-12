@@ -7,7 +7,7 @@ export { workdirInVault } from "./execution-policy.ts";
 import { CoreError } from "@lumio/foundation";
 import { entityDirectory, humanPart, parseFrontmatter, setFields, upsertBlock } from "@lumio/knowledge";
 import { scanVault, showNote, type GitTrailers } from "@lumio/storage";
-import { parseAssignee, textContainsCardNumber, type AgentRun, type Job, type Operation, type RuntimeInfo } from "@lumio/schema";
+import { parseAssignee, type AgentRun, type Job, type Operation, type RuntimeInfo } from "@lumio/schema";
 import type { HubConfig } from "./config.ts";
 import { HubError } from "./errors.ts";
 import type { Jobs } from "./jobs.ts";
@@ -31,14 +31,6 @@ type TaskTrigger = Extract<Operation, { op: "task.dispatch" }>["args"]["trigger"
 interface TaskState { task: string; path: string; last_turn: string | null; session: string | null; snapshot: string | null; rounds: number; pending_since: number | null }
 
 const TASK_ID = /^task_[0-9A-HJKMNP-TV-Z]{26}$/;
-/** 写回笔记前检查的常见密钥格式（ADR 0019 第 7 节）。 */
-const SECRET_PATTERNS = [
-  /\bsk-[A-Za-z0-9_-]{20,}/, /\bsk-ant-[A-Za-z0-9_-]{20,}/, /\bgh[pousr]_[A-Za-z0-9]{30,}/, /\bgithub_pat_[A-Za-z0-9_]{30,}/,
-  /\bAKIA[0-9A-Z]{16}\b/, /\bxox[abprs]-[A-Za-z0-9-]{10,}/, /-----BEGIN [A-Z ]*PRIVATE KEY-----/, /\blumio_[A-Za-z0-9_-]{43}\b/,
-];
-export function containsSecret(text: string): boolean {
-  return textContainsCardNumber(text) || SECRET_PATTERNS.some((p) => p.test(text));
-}
 const MAX_SUMMARY = 3000;
 
 export const INSTRUCTIONS = (fields: { round: number; title: string; id: string; workdir: string }) => msg("tasks.you_are_working_on_round_of_a_user_task_task_working_directory_requi", fields.round, fields.title, fields.id, fields.workdir);
@@ -330,20 +322,13 @@ export class TaskRounds {
     const lines = [msg("tasks.round_2", round, title), "", msg("(${0})", `${engine} · ${runtime} · ${time(r?.started)} → ${time(r?.finished)}`), ""];
     const report = r?.report ?? "";
     const question = r?.question;
-    if (containsSecret(report) || (question && containsSecret(question))) {
-      lines.push(msg("tasks.report_may_contain_sensitive_information_keys_or_card_numbers_it_was") + job.spec.id + msg("tasks.to_view_it"));
-    } else {
-      if (report) lines.push(report.length > MAX_SUMMARY ? msg("tasks.truncated", report.slice(0, MAX_SUMMARY)) : report, "");
-      if (question) lines.push(msg("tasks.question", question), "");
-    }
+    if (report) lines.push(report.length > MAX_SUMMARY ? msg("tasks.truncated", report.slice(0, MAX_SUMMARY)) : report, "");
+    if (question) lines.push(msg("tasks.question", question), "");
     if (r?.git?.before || r?.git?.after) {
       lines.push(`git${msg(": ")}${r.git.before?.commit.slice(0, 8) ?? "—"} → ${r.git.after?.commit.slice(0, 8) ?? "—"}${r.git.after?.dirty ? msg("jobs.uncommitted_changes") : ""}`);
     }
     lines.push(msg("tasks.full_report_lumio_job_show", job.spec.id));
-    const block = lines.join("\n");
-    // error、版本等元数据同样来自执行器，检查最终区块而不是只检查 report/question。
-    if (containsSecret(block)) return msg("tasks.result_not_written_report_may_contain_sensitive_information_keys_or", job.spec.id);
-    return block;
+    return lines.join("\n");
   }
 
   private async edit(path: string, change: (bytes: Buffer) => Buffer, commit?: { message: string; trailers: GitTrailers }): Promise<void> {

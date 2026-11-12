@@ -39,7 +39,8 @@ test("collects public paper citations by filename and LaTeX key, deduplicates, a
 test("source references share show resolution and privacy; paper filenames and citekeys resolve independently", async () => {
   for (const ref of ["Report", "idea_00000000000000000000000030"]) expect((await collectCitations(vault, ref, { stateDir })).papers).toHaveLength(3);
   for (const ref of ["Alpha_2024_Paper", "pap_00000000000000000000000001"]) expect((await collectCitations(vault, ref, { stateDir })).papers).toHaveLength(0);
-  for (const ref of ["Private", "ast_00000000000000000000000007", "Card", "missing"]) {
+  expect((await collectCitations(vault, "Card", { stateDir })).papers).toHaveLength(0);
+  for (const ref of ["Private", "ast_00000000000000000000000007", "missing"]) {
     await expect(collectCitations(vault, ref, { stateDir })).rejects.toMatchObject({ code: "NOTE_NOT_FOUND" });
   }
   try { await collectCitations(vault, "Twin", { stateDir }); throw new Error("Expected ambiguity"); }

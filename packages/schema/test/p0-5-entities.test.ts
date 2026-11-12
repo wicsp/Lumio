@@ -5,7 +5,6 @@ import { parse } from "yaml";
 import { z } from "zod";
 import {
   Asset, CONTRACTS, Entity, Post, Source,
-  containsCardNumber, luhnValid, textContainsCardNumber,
 } from "../src/index.ts";
 
 // 与 packages/core 读取 frontmatter 时相同的 YAML 解析（eemeli/yaml，YAML 1.2）。
@@ -56,51 +55,6 @@ describe("defaults and empty fields (ADR 0008)", () => {
   test("unquoted last4 0123 keeps its leading zero", () => {
     const asset = Asset.parse(parse(`type: asset\nid: ast_01J9Z3K8M2N4P6Q8R0S2T4V6W8\ntitle: x\ncreated: ${base.created}\nupdated: ${base.updated}\nkind: card\nlast4: 0123`));
     expect(asset.last4).toBe("0123");
-  });
-});
-
-describe("card number detection (ADR 0012)", () => {
-  test.each([
-    "4111111111111111", "4111 1111 1111 1111", "4111-1111-1111-1111",
-    "5555555555554444", "378282246310005", "3782 822463 10005", "3782-822463-10005",
-    "6011111111111117", "卡号是4111111111111111，别外传",
-  ])("detects %s", (text) => expect(textContainsCardNumber(text)).toBe(true));
-
-  test.each([
-    ["Luhn 不通过", "4111111111111112"],
-    ["ISBN-13", "978-3-16-148410-0"],
-    ["日期区间", "2026-10-23 2026-11-23"],
-    ["手机号", "+86 138-0013-8000"],
-    ["ISO 时间", "2026-10-23T17:30:00+08:00"],
-    ["ULID", "pap_01J9Z3K8M2N4P6Q8R0S2T4V6W8"],
-    ["arXiv 号", "2403.14720"],
-    ["DOI", "10.48550/arXiv.2302.12173"],
-    ["后四位", "1111"],
-    ["超过 19 位", "41111111111111111111111"],
-    ["分组不一致", "4111 1111-1111 1111"],
-  ])("ignores %s", (_, text) => expect(textContainsCardNumber(text)).toBe(false));
-
-  test("checks YAML numbers, nested arrays, objects and keys", () => {
-    expect(containsCardNumber(4111111111111111)).toBe(true);
-    expect(containsCardNumber({ a: [{ b: "4111 1111 1111 1111" }] })).toBe(true);
-    expect(containsCardNumber({ "4111111111111111": "x" })).toBe(true);
-    expect(containsCardNumber({ cost: 20, last4: "1111", renews_on: "2026-11-15" })).toBe(false);
-  });
-
-  test("luhn", () => {
-    expect(luhnValid("79927398713")).toBe(true);
-    expect(luhnValid("79927398710")).toBe(false);
-  });
-
-  test("error output never echoes the number", () => {
-    const result = Asset.safeParse({
-      type: "asset", id: "ast_01J9Z3K8M2N4P6Q8R0S2T4V6W8", title: "x", kind: "card",
-      created: "2026-10-23T17:30:00+08:00", updated: "2026-10-23T17:30:00+08:00",
-      login: "4111 1111 1111 1111", card: 4111111111111111,
-    });
-    expect(result.success).toBe(false);
-    const dump = JSON.stringify(result.error) + z.prettifyError(result.error!) + result.error!.message;
-    expect(dump.replace(/\D/g, "")).not.toContain("411111111111");
   });
 });
 

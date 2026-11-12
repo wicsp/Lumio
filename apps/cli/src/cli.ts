@@ -13,7 +13,7 @@ import { createIdea, createPaper } from "@lumio/storage";
 import { generateCitekey, parseArxivMetadata, parseCrossrefMetadata, parsePaperInput, resolveVault } from "@lumio/knowledge";
 import { newId } from "@lumio/foundation";
 import { ApiClientError, createClient } from "@lumio/api-client";
-import { ApiError } from "@lumio/schema";
+import { ApiError, SecurityReviewRequest } from "@lumio/schema";
 import { runAgents, runSkillInstall } from "./agent-access.ts";
 import { runJobs } from "./jobs.ts";
 import { runTasks } from "./tasks.ts";
@@ -37,7 +37,7 @@ export interface CliOptions {
 export async function runCli(args: string[], options: CliOptions = {}): Promise<number> {
   try { if (printHelp(args, options.log ?? console.log)) return 0; return await executeCli(args, options); }
   catch (cause) {
-    if (!["targets", "agent", "ai-note", "capture", "original", "job", "task", "project", "plan-template", "attention", "chat", "routine", "proposals", "runtime"].includes(args[0] ?? "") || !args.includes("--json")) throw cause;
+    if (!["targets", "agent", "ai-note", "capture", "original", "security", "job", "task", "project", "plan-template", "attention", "chat", "routine", "proposals", "runtime"].includes(args[0] ?? "") || !args.includes("--json")) throw cause;
     const error = cause instanceof ApiClientError ? {
       code: cause.code, message: errorMessage(cause), operation: cause.operation, reason: cause.reason, proposal: cause.proposal,
     } : { code: "INVALID", message: cause instanceof Error ? errorMessage(cause) : msg("cli.could_not_execute_command") };
@@ -48,6 +48,30 @@ export async function runCli(args: string[], options: CliOptions = {}): Promise<
 
 async function executeCli(args: string[], options: CliOptions): Promise<number> {
   const log = options.log ?? console.log;
+  if (args[0] === "security") {
+    const { values, positionals } = parseArgs({
+      args: args.slice(2), allowPositionals: true,
+      options: { json: { type: "boolean" }, "include-private": { type: "boolean" } },
+    });
+    const [kind, ref] = positionals;
+    const input = SecurityReviewRequest.safeParse({
+      kind, ref, ...(values["include-private"] ? { include_private: true } : {}),
+    });
+    if (args[1] !== "review" || positionals.length !== 2 || !input.success) throw new Error(msg("security.usage"));
+    const client = createClient({ ...hubCredentials(readCliConfig({ warn: options.warn })), language: language() });
+    const result = await client.securityReview(input.data);
+    if (values.json) log(JSON.stringify(result));
+    else {
+      log(`${result.resource.kind} ${result.resource.ref}`);
+      for (const finding of result.findings) {
+        const location = finding.comment ? `${finding.field}/${finding.comment}` : finding.field;
+        log(`${location}:${finding.line}:${finding.column}  ${msg(`security.${finding.reason}`)}`);
+      }
+      if (!result.findings.length) log(msg("security.no_findings"));
+      if (result.truncated) log(msg("security.truncated"));
+    }
+    return 0;
+  }
   if (args[0] === "capture" || args[0] === "original") {
     const capture = args[0] === "capture";
     const { values, positionals } = parseArgs({

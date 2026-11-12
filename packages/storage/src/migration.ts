@@ -4,7 +4,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { MigrationPlan, MigrationEntry, Project, Task, Routine, WorkProject, WorkTask, WorkExecution, ExecutionRoutine,
-  Job, parseAssignee, textContainsCardNumber } from "@lumio/schema";
+  Job, parseAssignee } from "@lumio/schema";
 import { newId } from "@lumio/foundation";
 import { parseFrontmatter } from "@lumio/knowledge";
 import { migrateTurn, WorkService } from "@lumio/work";
@@ -105,7 +105,6 @@ export class LegacyMigration {
         const entry = MigrationEntry.parse({ id: fields.id, type: file.type, path: file.relativePath, sha256: sha(bytes), title: fields.title });
         if (ids.has(entry.id)) problems.push(this.msg("${0}: duplicate ID", entry.path)); ids.add(entry.id);
         if (targetExists(this.db, entry)) problems.push(this.msg("${0}: ID already exists in database", entry.path));
-        if (textContainsCardNumber(bytes.toString("utf8")) || /\b(?:sk-|gh[pousr]_|github_pat_|AKIA|xox[abprs]-|lumio_)[A-Za-z0-9_-]{16,}|-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(bytes.toString("utf8"))) problems.push(this.msg("${0}: possible sensitive information; resolve first", entry.path));
         const input = convert(entry, bytes, this.zone());
         if (input.routine?.status === "active") problems.push(this.msg("${0}: pause legacy routine and clear runtime plan cache first", entry.path));
         if (input.task && !["done", "cancelled", "paused"].includes(String(fields.status ?? "todo")) && (Object.hasOwn(fields, "turn") ? fields.turn === "agent" : owner(Task.parse(fields).assignee) !== "human")) problems.push(this.msg("${0}: legacy file still requests dispatch; return to human or pause first", entry.path));

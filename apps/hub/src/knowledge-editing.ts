@@ -3,7 +3,6 @@ import { Id, KnowledgeUpdateRequest, KnowledgeRelatedRequest, KnowledgeReference
 import { CoreError } from "@lumio/foundation";
 import { KnowledgeEditingStore, readKnowledgeDocument, relatedKnowledge, knowledgeReferences, updateIndex, openVaultGit } from "@lumio/storage";
 import { HubError } from "./errors.ts";
-import { containsSecret } from "./tasks.ts";
 import { text as msg } from "./messages.ts";
 import type { HubStore, Identity } from "./store.ts";
 import type { HubConfig } from "./config.ts";
@@ -41,8 +40,7 @@ export class KnowledgeEditing {
             const result = await this.exclusive(() => {
                 assertNoteVisible(this.store.db, id);
                 return this.edits.update(identity.actor.id, id, input, {
-                    now, validate: bytes => { if (containsSecret(bytes.toString("utf8")))
-                        throw new HubError("INVALID", { key: "knowledge.sensitive", args: [] }, { reason: "sensitive-content" }); },
+                    now,
                     finalize: async (note, bytes, writer) => { await updateIndex(this.config.vault, options); const git = await openVaultGit(this.config.vault); if (git)
                         try {
                             await git.add(note.note.path, bytes);

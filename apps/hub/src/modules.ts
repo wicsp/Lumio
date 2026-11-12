@@ -1,3 +1,4 @@
+import { reviewSecurity } from "./security-review.ts";
 import { Resources } from "./resources.ts";
 import { AssistantWorkbenchAnchors } from "./assistant-workbench-anchors.ts";
 import type { AiNotes } from "./ai-notes.ts";
@@ -86,6 +87,10 @@ export class BusinessModules {
   private readonly stopped = new AbortController();
   private readonly timer: ReturnType<typeof setInterval>;
   readonly signal = this.stopped.signal;
+  securityReview(request: Request) {
+    return reviewSecurity(request, this.config, this.work, this.store);
+  }
+
   constructor(private readonly config: HubConfig, private readonly store: HubStore, options: {
     authorize?: typeof authorize; now?: () => Date; assistantModel?: AssistantModel; assistantTools?: AssistantTool[]; pushFetch?: typeof fetch; quotaFetch?: typeof fetch; jevFetch?: JevFetch; funAsr?: FunAsrOptions;
   } = {}) {

@@ -3,7 +3,6 @@ import { link, lstat, mkdir, readFile, unlink } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { CoreError } from "@lumio/foundation";
 import { isVaultNotePath, parseFrontmatter } from "@lumio/knowledge";
-import { textContainsCardNumber } from "@lumio/schema";
 import { isOriginalPath, parseOriginal } from "./originals.ts";
 import { openVaultGit } from "./git.ts";
 import { showNote } from "./index/query.ts";
@@ -143,10 +142,8 @@ export class KnowledgeTrashFiles {
         const entry = await this.entry(move.to, false, move.original);
         if (entry?.isFile() && identityOf(entry) === move.file) {
           const bytes = await readFile(join(this.root, move.to));
-          if (!textContainsCardNumber(bytes.toString("utf8"))) {
-            await git.add(move.to, bytes, true);
-            paths.push(move.to);
-          }
+          await git.add(move.to, bytes, true);
+          paths.push(move.to);
         }
       }
     }

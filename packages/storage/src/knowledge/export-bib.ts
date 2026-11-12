@@ -1,6 +1,6 @@
 import { mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { Citekey, textContainsCardNumber, type NoteRef } from "@lumio/schema";
+import { Citekey, type NoteRef } from "@lumio/schema";
 import { rewriteBibtexKey } from "@lumio/knowledge";
 import { CoreError } from "@lumio/foundation";
 import { parseFrontmatter } from "@lumio/knowledge";
@@ -43,9 +43,6 @@ export async function buildBib(root: string, papers?: readonly NoteRef[], msg: (
     for (const file of await scanVault(root, ["paper"])) {
       if (file.private || (paths && !paths.has(file.relativePath))) continue;
       const raw = await readFile(file.path);
-      if (textContainsCardNumber(raw.toString("utf8"))) {
-        warnings.push(msg("Possible card number; skipped: ${0}", file.relativePath)); continue;
-      }
       try {
         const { data, body } = parseFrontmatter(raw);
         if (!Citekey.safeParse(data.citekey).success) {

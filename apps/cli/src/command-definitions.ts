@@ -18,6 +18,7 @@ export const COMMANDS: CommandDefinition[] = [
   def("search", "<query>", ["type", "limit", "include-private", "vault"], "knowledge.note.search"),
   def("show", "<ref>", ["include-private", "vault"], "knowledge.note.show"), def("links", "<ref>", ["include-private", "vault"], "knowledge.note.links"),
   def("capture", "<url>", write),
+  def("security review", "<note|original|task|job> <id>", ["include-private"]),
   def("original show", "<ref>", [], ORIGINAL_CAPABILITY_NAME),
   def("ai-note create", "<title>", ["file", "tags", "sources", "model", ...write], AI_NOTE_CAPABILITY_NAMES[0], { required: ["file"] }),
   def("ai-note update", "<id>", ["revision", "title", "file", "tags", "sources", ...write], AI_NOTE_CAPABILITY_NAMES[1], { required: ["revision"] }),
