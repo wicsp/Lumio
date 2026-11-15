@@ -38,6 +38,8 @@ export const ID_PREFIXES = {
   // ADR 0059（A1-1）：提醒与提前探索
   notice: "ntc",
   exploration: "xpl",
+  // ADR 0066（C1-1）：全局捕获键的所见
+  glance: "gln",
 } as const;
 
 const ULID = "[0-9A-HJKMNP-TV-Z]{26}";

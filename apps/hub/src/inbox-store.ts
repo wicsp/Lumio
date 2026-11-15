@@ -121,7 +121,7 @@ export class InboxStore {
 
   profileInUse(profile: string, nextEngine?: AIProfile["engine"]): boolean {
     const bindings = this.db.query<{ purpose: string }, [string]>("SELECT purpose FROM knowledge_ai_bindings WHERE profile=?").all(profile);
-    return bindings.some(({ purpose }) => nextEngine !== (purpose === "knowledge.summary" ? "lumio" : "embedding"));
+    return bindings.some(({ purpose }) => nextEngine !== (purpose === "knowledge.embedding" ? "embedding" : "lumio"));
   }
 
   binding(owner: string, purpose: KnowledgeAIBinding["purpose"]): KnowledgeAIBinding | undefined {

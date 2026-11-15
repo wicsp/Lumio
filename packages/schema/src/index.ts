@@ -65,6 +65,7 @@ import { KnowledgeTemplateRequest, KnowledgeTemplateResult, PaperResolveRequest,
 
 import { KnowledgeGraphArgs, KnowledgeGraph, KnowledgeGraphEdge } from "./knowledge-graph.ts";
 import { Capture, CaptureCommand, CaptureCreate, CaptureCreateResult, CaptureList, CaptureProxySettings, CaptureProxyUpdate, KnowledgeAIBinding, KnowledgeAIBindingUpdate, OriginalFrontmatter } from "./inbox.ts";
+import { CaptureGlanceToolArgs, CaptureGlanceToolResult, Glance, GlanceCreate, GlanceDeleteResult } from "./glance.ts";
 import { AssistantMain, AssistantMainEnsure, DecisionGateBinding, DecisionGateBindingUpdate, Exploration, ExplorationCommand, ExplorationList, FocusSnapshot, Notice, NoticeCommand, NoticeCommandResult, NoticeList, WorkbenchAction } from "./workbench.ts";
 import { SpeechClientMessage, SpeechServerMessage, SpeechVocabulary, SpeechVocabularyUpdate, SpeechBinding, SpeechBindingUpdate } from "./speech.ts";
 
@@ -237,6 +238,12 @@ export const CONTRACTS = {
   "exploration-command": ExplorationCommand,
   "decision-gate-binding": DecisionGateBinding,
   "decision-gate-binding-update": DecisionGateBindingUpdate,
+  // 全局捕获键（ADR 0066，C1-1）
+  "glance-create": GlanceCreate,
+  glance: Glance,
+  "glance-delete-result": GlanceDeleteResult,
+  "capture-glance-tool-args": CaptureGlanceToolArgs,
+  "capture-glance-tool-result": CaptureGlanceToolResult,
 } as const;
 
 export * from "./knowledge-authoring.ts";
@@ -250,3 +257,4 @@ export * from "./ai-usage.ts";
 export * from "./speech.ts";
 export * from "./inbox.ts";
 export * from "./workbench.ts";
+export * from "./glance.ts";

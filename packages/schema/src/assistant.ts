@@ -181,7 +181,8 @@ export const AssistantChatRequest = z.strictObject({
   effort: z.string().min(1).max(32).optional(),
   model: z.string().min(1).optional().describe("指定模型；缺省由应用决定"),
   focus: FocusSnapshot.optional().describe("人此刻在看什么；只接受主对话（ADR 0060 第 1 节）"),
-});
+  glance: idOf("gln").optional().describe("全局捕获键的所见；只接受主对话，与 focus 互斥，所见须属于发消息的人且未被使用（ADR 0066 第 4 节）"),
+}).refine(v => v.focus === undefined || v.glance === undefined, { message: "focus 与 glance 不能同时出现", path: ["glance"] });
 
 /** 完整对话：对话对象、消息、轮次。 */
 export const AssistantConversationDetail = z.strictObject({
