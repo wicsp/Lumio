@@ -56,7 +56,7 @@ Foundation 提供 ID 和错误；Platform 提供终端、诊断、下载与升�
 ## 2. 工程基础
 
 - **一个代码仓库**，数据（vault）不放在仓库里（ADR 0001）。
-- **全部 TypeScript，运行在 Bun 上**；开发、测试、CI、发布与人类的 Nix 环境统一使用 `package.json` 的 `packageManager` 指定的 Bun 1.4.4（ADR 0002，AGENTS.md；2026-11-08 人类批准 Bun 1.4 升级）。
+- **全部 TypeScript，运行在 Bun 上**；开发、测试、CI、发布与人类的 Nix 环境统一使用 `package.json` 的 `packageManager` 指定的 Bun 1.4.4（ADR 0002，AGENTS.md；2026-11-08 人类批准 Bun 1.4 升级）。唯一例外是 macOS 捕获小助手 `apps/desktop`，用 Swift，只做采集与 HTTP 调用（ADR 0066）。
 - 全部角色用 `bun build --compile` 编译成**一个程序** `lumio`，以子命令区分 `lumio hub …`、`lumio runtime …`；`lumio-hub`、`lumio-runtime` 是指向它的兼容链接（ADR 0002、0027）。
 - **界面语言**（ADR 0028）：面向人的输出默认英文，中文环境用中文。命令行按 `LUMIO_LANG`、`LC_ALL`、`LC_MESSAGES`、`LANG` 的第一个非空值判断（`zh` 开头用中文）；
   后台服务日志固定英文；Hub 的错误说明按请求 `Accept-Language` 选择，`code` 不变、客户端不依赖文字判断；Web 可切换并保存在浏览器。
@@ -81,6 +81,7 @@ Foundation 提供 ID 和错误；Platform 提供终端、诊断、下载与升�
 | `apps/hub` | API、模块组装、跨模块协调、身份与旧路径兼容 | 业务包、storage、foundation、platform、schema |
 | `apps/runtime` | 设备 daemon，与 Hub 只走 HTTP | execution 的纯计划能力、storage 的日志适配、foundation、platform、schema |
 | `apps/web` | 中文 GUI 与静态资源构建，入口 `src/entry.ts`；网页由 Hub 提供（ADR 0027） | api-client, schema |
+| `apps/desktop` | macOS 菜单栏捕获小助手（Swift，human 客户端，ADR 0066） | 只经 HTTP 调用 Hub；契约用样例文件校验 |
 | `apps/feishu-bot` 等 | 后续客户端 | api-client |
 
 依赖方向由 `bun run lint:deps` 强制：`packages` 不依赖 `apps`，`apps` 之间不互相依赖——唯一例外是 `apps/cli` 可以引用其他 app 的入口模块 `src/entry.ts`，hub、runtime、web 之间仍不互相引用（ADR 0027）；四个业务包不导入其他业务包实现或具体适配器，禁止文件/网络/SQLite/进程 I/O；应用不依赖 Core 兼容汇总入口（ADR 0025）。
