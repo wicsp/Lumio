@@ -69,7 +69,7 @@ export const CaptureProxyRecord = z.discriminatedUnion("mode", [
 export type CaptureProxyRecord = z.infer<typeof CaptureProxyRecord>;
 
 /** 捕获从哪里来。 */
-export const CaptureChannel = z.enum(["web", "cli", "extension", "share"]);
+export const CaptureChannel = z.enum(["web", "cli", "extension", "share", "desktop"]);
 
 /** 资料类型：由 Hub 判断。`text` 是只有粘贴正文、没有网址的资料。 */
 export const CaptureKind = z.enum(["paper", "web", "video", "podcast", "text"]);
@@ -108,8 +108,17 @@ export const CaptureCreate = z
     content: CaptureContent.optional(),
     /** 捕获时就分拣（例如插件上点了"存档"）；省略时进入 Inbox，状态为 to-read。 */
     triage: ReadingStatus.optional(),
+    /**
+     * 全局捕获键的所见（ADR 0066）：内容与网址都从所见取得，因此不能再带 `url` 或 `content`。
+     * 所见必须属于发请求的人且尚未被别的捕获使用；所见捕获不按网址去重（论文链接仍走论文路径）。
+     */
+    glance: idOf("gln").optional(),
   })
-  .refine(v => v.url !== undefined || v.content !== undefined, "Provide a URL or content");
+  .refine(v => v.url !== undefined || v.content !== undefined || v.glance !== undefined, "Provide a URL, content or glance")
+  .refine(v => v.glance === undefined || (v.url === undefined && v.content === undefined), {
+    message: "A glance capture takes its URL and content from the glance",
+    path: ["glance"],
+  });
 
 export const Capture = z.strictObject({
   id: idOf("cap"),
@@ -125,6 +134,7 @@ export const Capture = z.strictObject({
   card: CaptureCardState,
   entity: NoteRef.optional().describe("生成的 paper 或 source；ready 之前缺省"),
   ai_note: idOf("ain").optional(),
+  glance: idOf("gln").optional().describe("由全局捕获键的所见生成时（ADR 0066）"),
   original: z.string().optional().describe("原文文件相对 vault 根目录的路径"),
   triage: CaptureTriage.optional().describe("缺省表示未分拣，仍在 Inbox"),
   triaged: Timestamp.optional(),
@@ -191,9 +201,10 @@ export const OriginalFrontmatter = z.strictObject({
 
 /**
  * 摘要与向量的用途绑定（ADR 0057 第 4 节，扩展 ADR 0041）。没有工具、沙箱和工作区，与 Assistant / Job 的绑定分开。
- * Hub 校验：`knowledge.summary` 的 Profile 引擎为 `lumio`；`knowledge.embedding` 的 Profile 引擎为 `embedding`。
+ * Hub 校验：`knowledge.summary` 的 Profile 引擎为 `lumio`；`knowledge.embedding` 的 Profile 引擎为 `embedding`；
+ * `knowledge.vision`（ADR 0066 第 6 节，可选）的 Profile 引擎为 `lumio` 且模型支持图像输入，只用于把所见的截图整理成原文 Markdown。
  */
-export const KnowledgeAIPurpose = z.enum(["knowledge.summary", "knowledge.embedding"]);
+export const KnowledgeAIPurpose = z.enum(["knowledge.summary", "knowledge.embedding", "knowledge.vision"]);
 export const KnowledgeAIBinding = z.strictObject({ purpose: KnowledgeAIPurpose, profile: idOf("aip"), revision: Revision });
 export const KnowledgeAIBindingUpdate = z.strictObject({
   request_id: RequestId,

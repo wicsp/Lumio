@@ -73,7 +73,7 @@
 | [I1-0](I1-0-inbox-and-captured-sources.md) | Inbox 与外部资料入库：原文、AI 卡片、分拣、混合检索与关联建议（ADR 0057，Accepted；I1-1 契约 ✅ Claude，I1-2～I1-4、I1-6 后端 Codex，I1-5、I1-7 前端 Claude） | 见任务说明 | — |
 | [I2-0](I2-0-material-simplify.md) | 资料入库后的显示与入口收敛：AI 卡片由资料笔记代表、补嵌入、卡片四项提示词、Inbox 改为收藏夹、资料页突出原链接、取消深读（ADR 0065，Implemented；不改契约；I2-1～I2-3 ✅ Codex） | Codex | — |
 | [U1-0](U1-0-runtime-auto-update.md) | Runtime 跟随 Hub 自动更新：期望版本对账、发布签名、Hub 产物库、空闲切换与回退、Web 状态（ADR 0063，Accepted；U1-1 契约 ✅ Claude，U1-2～U1-5 后端 Codex，U1-6 Web Claude） | 见任务说明 | —
-| [C1-0](C1-0-global-capture-key.md) | 全局捕获键：macOS 菜单栏小助手，轻点收藏、按住对主对话说话，前台窗口截图 + 光标指点 + 本机识字（ADR 0066，Accepted；C1-1 契约 Claude 起草需人批准，C1-2～C1-4、C1-6 Codex，C1-5 Web Claude，C1-7 助手看图在后） | 见任务说明 | — |
+| [C1-0](C1-0-global-capture-key.md) | 全局捕获键：macOS 菜单栏小助手，轻点收藏、按住对主对话说话，前台窗口截图 + 光标指点 + 本机识字（ADR 0066，Accepted；C1-1 契约 ✅ Claude，C1-2～C1-4、C1-6 Codex，C1-5 Web Claude，C1-7 助手看图在后） | 见任务说明 | — |
 
 P1 的设计决定见 ADR 0014、0016、0017、0018；P2 见 ADR 0019、0020、0021、0022 与修订后的 ADR 0005；契约见 `packages/schema/src/` 中的 `query.ts`、`actor.ts`、`operation.ts`、`proposal.ts`、`api.ts`。
 

@@ -95,6 +95,7 @@ export class Inbox {
     if (operation === "inbox.create") {
       const input = CaptureCreate.safeParse(await this.json(request));
       if (!input.success) throw invalid();
+      if (input.data.glance) throw invalid(); // 所见捕获在 C1-2 实现（ADR 0066）
       const result = await this.exclusive(async () => this.create(owner, input.data));
       this.schedule();
       return respond(result, result.duplicate === "none" ? 202 : 200);
@@ -152,7 +153,7 @@ export class Inbox {
       if (replay) return KnowledgeAIBinding.array().parse(replay);
       if (input.profile) {
         const { profile, connection } = this.ai.get(owner, input.profile);
-        const engine = input.purpose === "knowledge.summary" ? "lumio" : "embedding";
+        const engine = input.purpose === "knowledge.embedding" ? "embedding" : "lumio"; // knowledge.vision 也用 lumio 引擎（ADR 0066）
         if (profile.engine !== engine || !connection.base_url) throw invalid("ai.engine_mismatch");
       }
       const result = this.state.bind(owner, input);

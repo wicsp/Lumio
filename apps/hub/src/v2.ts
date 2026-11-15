@@ -314,6 +314,7 @@ export async function handleV2(request: Request, server: Pick<Bun.Server<undefin
     const native = conversation ? conversation.native_session : undefined;
     const main = !!conversation && !native && modules.assistantMain.isMain(owner, conversation.id);
     if (parsed.data.focus && !main) throw new HubError("INVALID", { key: "v2.invalid_assistant_request_parameters", args: [] });
+    if (parsed.data.glance) throw new HubError("INVALID", { key: "v2.invalid_assistant_request_parameters", args: [] }); // 对话里的所见在 C1-2 实现（ADR 0066）
     const profile = parsed.data.profile ?? (conversation ? conversation.profile : undefined);
     if (main && profile) {
       const selected = modules.ai.get(owner, profile);
