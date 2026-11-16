@@ -259,7 +259,7 @@ test("status is authenticated, shares private authorization, and CLI prints its 
   expect(cli.code).toBe(0); expect(cli.stderr).toBe(""); expect(JSON.parse(cli.stdout)).toEqual(status);
   for (const remote of [false, true]) {
     const missing = await spawnCli(["hub", "status"], remote, { LUMIO_TOKEN: undefined });
-    expect(missing.code).toBe(1); expect(missing.stderr).toContain("lumio-hub setup"); expect(missing.stdout).toBe("");
+    expect(missing.code).toBe(1); expect(missing.stderr).toContain("lumio hub setup"); expect(missing.stdout).toBe("");
   }
   const denied = await spawnCli(["hub", "status"], true, { LUMIO_TOKEN: "invalid" });
   expect(denied.code).toBe(1); expect(denied.stderr).toContain("401");

@@ -7,7 +7,7 @@ describe("administrator helper visibility", () => {
     expect(helperState({ features: ["stage_permissions", "privileged_helper"] })).toBe("installed");
     expect(helperState({ features: ["stage_permissions"] })).toBe("missing");
     expect(helperState({})).toBe("unknown");
-    expect(INSTALL_HELPER_COMMAND).toBe("sudo lumio-runtime install-sudo-helper");
+    expect(INSTALL_HELPER_COMMAND).toBe("sudo lumio runtime install-sudo-helper");
   });
   test("the contract carries the feature and the refused program", () => {
     expect(RuntimeRegistration.safeParse({ protocol_version: 2, name: "server", engines: [], tags: [], max_concurrent: 1, features: ["privileged_helper"] }).success).toBe(true);

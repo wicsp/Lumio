@@ -4,24 +4,24 @@ import { chmod, lstat, readlink, stat, mkdir, mkdtemp, readFile, rm, symlink, wr
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { upgrade } from "../src/upgrade.ts";
-import { releaseShim } from "../src/release-shims.ts";
 import { signManifest } from "../src/release-manifest.ts";
 const signing = generateKeyPairSync("ed25519");
 const privateKey = signing.privateKey.export({ type: "pkcs8", format: "pem" }).toString();
 const publicKey = signing.publicKey.export({ type: "spki", format: "pem" }).toString();
 const roots: string[] = [];
 afterEach(async () => { for (const p of roots.splice(0)) await rm(p, { recursive: true, force: true }); });
-const names = ["lumio", "lumio-hub", "lumio-runtime"];
+const names = ["lumio"];
 async function fixture() {
   const home = await mkdtemp(join(tmpdir(), "lumio-upgrade-test-")); roots.push(home);
   const archiveDir = join(home, "archive"), bin = join(home, ".local/bin");
   await mkdir(archiveDir); await mkdir(bin, { recursive: true });
   for (const name of names) {
-    await writeFile(join(archiveDir, name), name === "lumio" ? '#!/bin/sh\nprintf "2.3.4\\n"\n' : releaseShim(name === "lumio-hub" ? "hub" : "runtime"), { mode: 0o755 });
+    await writeFile(join(archiveDir, name), '#!/bin/sh\nprintf "2.3.4\\n"\n', { mode: 0o755 });
     await writeFile(join(bin, name), '#!/bin/sh\nprintf "0.1.6\\n"\n', { mode: 0o755 });
   }
+  for (const role of ["hub", "runtime"]) await symlink("lumio", join(bin, `lumio-${role}`));
   const file = join(home, "release.tar.gz");
-  async function pack() { const child = Bun.spawn(["tar", "-czf", file, "-C", archiveDir, ...names]); expect(await child.exited).toBe(0); }
+  async function pack(entries = names) { const child = Bun.spawn(["tar", "-czf", file, "-C", archiveDir, ...entries]); expect(await child.exited).toBe(0); }
   await pack();
   let latest: string | undefined = "v2.3.4";
   let corrupt = false, duplicate = false, manifestMissing = false, health = "0.1.6", restarts = 0;
@@ -35,7 +35,6 @@ async function fixture() {
     const manifest = Buffer.from(JSON.stringify({ format: 1, version: "2.3.4", channel: "release", commit: "a".repeat(40), created: "2026-11-12T00:00:00Z", artifacts: ["linux-x64", "darwin-arm64"].map(platform => ({ platform, file: `lumio-${platform}.tar.gz`, size: bytes.length, sha256: corrupt ? "0".repeat(64) : hash })) }));
     if (path.endsWith("manifest.json")) return manifestMissing ? new Response(null, { status: 404 }) : new Response(manifest);
     if (path.endsWith("manifest.sig")) return new Response(duplicate ? "invalid" : signManifest(manifest, privateKey));
-    if (path.endsWith("SHA256SUMS")) return new Response(`${corrupt ? "0".repeat(64) : hash}  lumio-linux-x64.tar.gz\n`.repeat(duplicate ? 2 : 1));
     return new Response(bytes);
   } });
   const url = server.url.href.replace(/\/$/, "");
@@ -53,25 +52,26 @@ async function fixture() {
     } };
   return { home, bin, archiveDir, pack, server, options, commands, logs, requests, setManifestMissing: () => { manifestMissing = true; }, setLatest: (value: string | undefined) => { latest = value; }, setCorrupt: () => { corrupt = true; }, setDuplicate: () => { duplicate = true; }, restarts: () => restarts };
 }
-test("upgrade verifies a local HTTP Release, replaces old binaries with one program and links, restarts local services and waits for the new health version", async () => {
+test("upgrade verifies a local HTTP Release, replaces old binaries with one program, restarts local services and waits for the new health version", async () => {
   const f = await fixture();
   try {
     await upgrade({ ...f.options, version: "v2.3.4" });
     expect(f.requests).toContain("/download/v2.3.4/lumio-linux-x64.tar.gz"); expect(f.requests).toContain("/health");
     expect(f.commands).toContainEqual(["systemctl", "--user", "restart", "lumio-hub.service"]); expect(f.restarts()).toBe(3);
     for (const name of names) { expect(await readFile(join(f.bin, name), "utf8")).toContain("2.3.4"); expect((await stat(join(f.bin, name))).mode & 0o777).toBe(0o755); }
-    for (const name of ["lumio-hub", "lumio-runtime"]) expect(await readlink(join(f.bin, name))).toBe("lumio");
+    for (const name of ["lumio-hub", "lumio-runtime"]) await expect(lstat(join(f.bin, name))).rejects.toThrow();
     for (const role of ["hub", "runtime"]) expect(await readFile(join(f.home, `.config/systemd/user/lumio-${role}.service`), "utf8")).toContain(`ExecStart="${f.bin}/lumio" ${role} serve`);
     const before = f.restarts(); await upgrade(f.options); expect(f.restarts()).toBe(before); expect(f.logs.at(-1)).toContain("Already at latest version 2.3.4");
   } finally { await f.server.stop(true); }
 });
-test("upgrade leaves installed programs unchanged on checksum, duplicate sum, archive or version failures", async () => {
-  for (const mode of ["checksum", "duplicate", "symlink", "version"] as const) {
+test("upgrade leaves installed programs unchanged on checksum, signature, archive or version failures", async () => {
+  for (const mode of ["checksum", "duplicate", "symlink", "extra", "version"] as const) {
     const f = await fixture();
     try {
       if (mode === "checksum") f.setCorrupt();
       if (mode === "duplicate") f.setDuplicate();
       if (mode === "symlink") { await rm(join(f.archiveDir, "lumio")); await symlink("/etc/passwd", join(f.archiveDir, "lumio")); await f.pack(); }
+      if (mode === "extra") { await writeFile(join(f.archiveDir, "extra"), "unexpected"); await f.pack(["lumio", "extra"]); }
       await expect(upgrade({ ...f.options, ...(mode === "version" ? { version: "v9.9.9" } : {}) })).rejects.toThrow();
       expect(f.restarts()).toBe(0);
       for (const name of names) expect(await readFile(join(f.bin, name), "utf8")).toContain("0.1.6");
@@ -84,15 +84,11 @@ test("runtime-only upgrade restarts only runtime, supports launchd and reminds a
     await mkdir(join(f.home, ".config/lumio-runtime")); await writeFile(join(f.home, ".config/lumio-runtime/runtime.env"), 'LUMIO_RUNTIME_SUDO_COMMAND="/usr/bin/sudo -n /helper"');
     await upgrade({ ...f.options, runtimeOnly: true });
     expect(f.restarts()).toBe(2); expect(f.commands).not.toContainEqual(["systemctl", "--user", "restart", "lumio-hub.service"]);
-    expect(f.logs.at(-1)).toContain("sudo lumio-runtime install-sudo-helper");
+    expect(f.logs.at(-1)).toContain("sudo lumio runtime install-sudo-helper");
     // Same downloaded bytes stand in for the macOS build; only service orchestration changes.
     await writeFile(join(f.bin, "lumio-runtime"), '#!/bin/sh\nprintf "0.1.6\\n"'); await chmod(join(f.bin, "lumio-runtime"), 0o755);
     await mkdir(join(f.home, "Library/LaunchAgents"), { recursive: true }); await writeFile(join(f.home, "Library/LaunchAgents/io.lumio.runtime.plist"), `<plist><dict><key>ProgramArguments</key><array><string>${f.bin}/lumio-runtime</string></array></dict></plist>`);
-    const fetcher = (async (input, init) => {
-      const r = await fetch(String(input).replaceAll("darwin-arm64", "linux-x64"), init);
-      return String(input).endsWith("SHA256SUMS") ? new Response((await r.text()).replaceAll("linux-x64", "darwin-arm64")) : r;
-    }) as typeof fetch;
-    await upgrade({ ...f.options, platform: "darwin", arch: "arm64", uid: 501, runtimeOnly: true, fetch: fetcher });
+    await upgrade({ ...f.options, platform: "darwin", arch: "arm64", uid: 501, runtimeOnly: true });
     expect(f.commands).toContainEqual(["launchctl", "bootstrap", "gui/501", join(f.home, "Library/LaunchAgents/io.lumio.runtime.plist")]);
   } finally { await f.server.stop(true); }
 });
@@ -107,33 +103,6 @@ test("upgrade rejects unsupported platforms and options, and detects a Hub that 
     })).rejects.toThrow("UPGRADE_FAILED");
   } finally { await f.server.stop(true); }
 });
-
-test("upgrade checks every shim byte before replacement and refuses mismatched release wrappers", async () => {
-  for (const role of ["hub", "runtime"] as const) for (const suffix of ["\n", "\0"]) {
-    const f = await fixture();
-    try {
-      await writeFile(join(f.archiveDir, `lumio-${role}`), releaseShim(role) + suffix); await f.pack();
-      await expect(upgrade(f.options)).rejects.toThrow("UPGRADE_FAILED"); expect(f.restarts()).toBe(0);
-      for (const name of names) expect(await readFile(join(f.bin, name), "utf8")).toContain("0.1.6");
-    } finally { await f.server.stop(true); }
-  }
-});
-
-test("a second upgrade converts the v0.1.x-installed current-version shims into links and updates service commands", async () => {
-  const f = await fixture();
-  try {
-    // This is the installed layout left by the old upgrader after it copied the new release's three files.
-    for (const name of names) await writeFile(join(f.bin, name), await readFile(join(f.archiveDir, name)), { mode: 0o755 });
-    await upgrade(f.options);
-    for (const role of ["hub", "runtime"]) {
-      expect(await readlink(join(f.bin, `lumio-${role}`))).toBe("lumio");
-      expect(await readFile(join(f.home, `.config/systemd/user/lumio-${role}.service`), "utf8")).toContain(`ExecStart="${f.bin}/lumio" ${role} serve`);
-    }
-    expect(f.logs.some(line => line.includes("已是最新版本"))).toBe(false);
-    expect(f.logs).toContain("Run lumio login-code --name web to get a pairing code");
-  } finally { await f.server.stop(true); }
-});
-
 
 test("latest is resolved without following redirects; current installs make no asset requests", async () => {
   const f = await fixture();
@@ -173,25 +142,15 @@ test("an unreadable latest version falls back to verified downloads and compares
   }
 });
 
- test("modern releases never downgrade verification when the manifest is missing", async () => {
+test("every release requires a manifest, including an explicitly selected early release", async () => {
   const f = await fixture();
   try {
     f.setManifestMissing();
     await expect(upgrade(f.options)).rejects.toThrow();
+    await expect(upgrade({ ...f.options, version: "v0.2.2" })).rejects.toThrow();
     expect(f.requests.some(path => path.endsWith("SHA256SUMS"))).toBe(false);
     expect(f.requests.some(path => path.endsWith(".tar.gz"))).toBe(false);
     expect(f.restarts()).toBe(0);
-  } finally { await f.server.stop(true); }
-});
-
-test("explicit old releases can use checksums only on a manifest 404", async () => {
-  const f = await fixture();
-  try {
-    f.setManifestMissing();
-    await writeFile(join(f.archiveDir, "lumio"), '#!/bin/sh\nprintf "0.2.2\\n"\n', { mode: 0o755 }); await f.pack();
-    await upgrade({ ...f.options, runtimeOnly: true, version: "v0.2.2" });
-    expect(f.requests).toContain("/download/v0.2.2/SHA256SUMS");
-    expect(await readFile(join(f.bin, "lumio"), "utf8")).toContain("0.2.2");
   } finally { await f.server.stop(true); }
 });
 

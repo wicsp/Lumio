@@ -40,12 +40,14 @@ message() {
     en:latest) message_format='latest version' ;;
     zh:slow) message_format='下载太慢或卡住，请检查网络或代理（https_proxy）后重试；也请确认版本存在' ;;
     en:slow) message_format='Download stalled or too slow; check network or proxy (https_proxy), and confirm the version exists' ;;
-    zh:sums) message_format='下载 SHA256SUMS 失败，下载太慢或卡住，请检查网络或代理（https_proxy）后重试' ;;
-    en:sums) message_format='Could not download SHA256SUMS; check network or proxy (https_proxy) and retry' ;;
-    zh:sum_entries) message_format='SHA256SUMS 缺少或重复的校验记录' ;;
-    en:sum_entries) message_format='SHA256SUMS has missing or duplicate entries' ;;
-    zh:sum_format) message_format='SHA256SUMS 格式不合法' ;;
-    en:sum_format) message_format='Invalid SHA256SUMS format' ;;
+    zh:manifest) message_format='下载发布清单或签名失败，下载太慢或卡住，请检查网络或代理（https_proxy）后重试' ;;
+    en:manifest) message_format='Could not download release manifest or signature; check network or proxy (https_proxy) and retry' ;;
+    zh:verification_tools) message_format='需要 OpenSSL 3 和 jq 验证发布签名' ;;
+    en:verification_tools) message_format='OpenSSL 3 and jq are required to verify the release signature' ;;
+    zh:signature) message_format='发布清单签名无效' ;;
+    en:signature) message_format='Invalid release manifest signature' ;;
+    zh:manifest_data) message_format='发布清单不含有效的平台文件、版本或摘要' ;;
+    en:manifest_data) message_format='The release manifest lacks a valid platform asset, version or digest' ;;
     zh:hash) message_format='计算 SHA256' ;;
     en:hash) message_format='Compute SHA256' ;;
     zh:checksum) message_format='SHA256 校验失败，未安装任何程序' ;;
@@ -54,18 +56,12 @@ message() {
     en:read_archive) message_format='Read archive' ;;
     zh:archive) message_format='压缩包内容不合法' ;;
     en:archive) message_format='Invalid archive contents' ;;
-    zh:paths) message_format='压缩包缺少程序或含非预期路径' ;;
-    en:paths) message_format='Archive has missing programs or unexpected paths' ;;
     zh:read_types) message_format='读取压缩包类型' ;;
     en:read_types) message_format='Read archive types' ;;
-    zh:types) message_format='压缩包类型记录不合法' ;;
-    en:types) message_format='Invalid archive type records' ;;
     zh:regular) message_format='压缩包含非普通程序文件' ;;
     en:regular) message_format='Archive contains non-regular program files' ;;
     zh:extract) message_format='解压程序' ;;
     en:extract) message_format='Extract program' ;;
-    zh:shim) message_format='发布包转发垫片内容不匹配，未安装任何程序' ;;
-    en:shim) message_format='Release forwarding shim content mismatch; no programs were installed' ;;
     zh:mkdir) message_format='创建 ~/.local/bin' ;;
     en:mkdir) message_format='Create ~/.local/bin' ;;
     zh:copy) message_format='复制程序' ;;
@@ -74,10 +70,6 @@ message() {
     en:mode) message_format='Set program permissions' ;;
     zh:replace) message_format='替换程序' ;;
     en:replace) message_format='Replace program' ;;
-    zh:link) message_format='创建兼容链接' ;;
-    en:link) message_format='Create compatibility link' ;;
-    zh:replace_link) message_format='替换兼容链接' ;;
-    en:replace_link) message_format='Replace compatibility link' ;;
     zh:installed) message_format='已安装到 %s\n' ;;
     en:installed) message_format='Installed to %s\n' ;;
     zh:path) message_format='请将 ~/.local/bin 加入 PATH：export PATH="$HOME/.local/bin:$PATH"\n' ;;
@@ -137,6 +129,33 @@ umask 077
 tmp=$(mktemp -d) || fail "$(message temp)"
 trap 'rm -rf "$tmp"' EXIT
 trap 'exit 1' HUP INT TERM
+# The public Ed25519 key is the release trust anchor compiled by build-binary.ts.
+release_key=MCowBQYDK2VwAyEAQOGVb/iSKsKst7CYrE9xxSvcYolj5PQnOxJMP5NyJ94=
+openssl_cmd=
+for candidate in openssl /opt/homebrew/opt/openssl@3/bin/openssl; do
+  case "$("$candidate" version 2>/dev/null || true)" in
+    "OpenSSL 3."*) openssl_cmd=$candidate; break ;;
+  esac
+done
+[ -n "$openssl_cmd" ] || fail "$(message verification_tools)"
+command -v jq >/dev/null 2>&1 || fail "$(message verification_tools)"
+for artifact in manifest.json manifest.sig; do
+  curl -fsSL --connect-timeout 20 --max-time 60 --max-filesize 65536 "$base/$artifact" -o "$tmp/$artifact" || fail "$(message manifest)"
+done
+printf '%s' "$release_key" | "$openssl_cmd" base64 -d -A > "$tmp/public.der"
+tr -d '\r\n' < "$tmp/manifest.sig" | "$openssl_cmd" base64 -d -A > "$tmp/signature"
+[ "$(wc -c < "$tmp/signature" | tr -d ' ')" = 64 ] || fail "$(message signature)"
+"$openssl_cmd" pkeyutl -verify -pubin -keyform DER -inkey "$tmp/public.der" -rawin -in "$tmp/manifest.json" -sigfile "$tmp/signature" >/dev/null 2>&1 ||
+  fail "$(message signature)"
+target=$(jq -er 'select(.format == 1 and .channel == "release") | .version | select(type == "string" and test("^[0-9]+[.][0-9]+[.][0-9]+([.-][a-zA-Z0-9.-]+)?$"))' "$tmp/manifest.json") || fail "$(message manifest_data)"
+[ -z "$version" ] || [ "v$target" = "$version" ] || fail "$(message manifest_data)"
+asset=$(jq -ce --arg platform "$platform" --arg file "$archive" '
+  [.artifacts[] | select(.platform == $platform)] | select(length == 1) | .[0] |
+  select(.file == $file and (.size | type == "number" and . > 0 and . == floor) and
+    (.sha256 | type == "string" and test("^[a-f0-9]{64}$")))
+' "$tmp/manifest.json") || fail "$(message manifest_data)"
+expected=$(printf '%s' "$asset" | jq -r .sha256)
+expected_bytes=$(printf '%s' "$asset" | jq -r .size)
 # HEAD is optional: mirrors may omit Content-Length or reject HEAD entirely.
 size=$(curl -fsSLI --connect-timeout 20 --max-time 20 "$base/$archive" 2>/dev/null | awk '
   /^HTTP\// { size="" }
@@ -153,45 +172,27 @@ else
 fi
 # Progress belongs on stderr; redirected installation logs stay quiet.
 if [ -t 2 ]; then set -- -fL --progress-bar; else set -- -fsSL; fi
-curl "$@" --connect-timeout 20 --speed-limit 1024 --speed-time 60 "$base/$archive" -o "$tmp/$archive" || fail "$(message slow)"
-curl -fsSL --connect-timeout 20 --speed-limit 1024 --speed-time 60 "$base/SHA256SUMS" -o "$tmp/SHA256SUMS" || fail "$(message sums)"
-expected=$(awk -v file="$archive" '$2 == file { print $1; count++ } END { if (count != 1) exit 1 }' "$tmp/SHA256SUMS") || fail "$(message sum_entries)"
-[ "${#expected}" -eq 64 ] || fail "$(message sum_format)"
-case "$expected" in *[!0-9a-fA-F]*) fail "$(message sum_format)" ;; esac
+curl "$@" --connect-timeout 20 --speed-limit 1024 --speed-time 60 --max-filesize "$expected_bytes" "$base/$archive" -o "$tmp/$archive" || fail "$(message slow)"
 if [ "$os" = Darwin ]; then
   actual=$(shasum -a 256 "$tmp/$archive") || fail "$(message hash)"
 else
   actual=$(sha256sum "$tmp/$archive") || fail "$(message hash)"
 fi
-actual=${actual%% *}
-[ "$actual" = "$expected" ] || fail "$(message checksum)"
+[ "${actual%% *}" = "$expected" ] && [ "$(wc -c < "$tmp/$archive" | tr -d ' ')" = "$expected_bytes" ] || fail "$(message checksum)"
 tar -tzf "$tmp/$archive" > "$tmp/contents" || fail "$(message read_archive)"
-[ "$(wc -l < "$tmp/contents" | tr -d ' ')" = 3 ] || fail "$(message archive)"
-for binary in lumio lumio-hub lumio-runtime; do
-  [ "$(awk -v file="$binary" '$0 == file { n++ } END { print n+0 }' "$tmp/contents")" = 1 ] || fail "$(message paths)"
-done
+[ "$(cat "$tmp/contents")" = lumio ] && [ "$(wc -l < "$tmp/contents" | tr -d ' ')" = 1 ] || fail "$(message archive)"
 tar -tvzf "$tmp/$archive" > "$tmp/types" || fail "$(message read_types)"
-[ "$(wc -l < "$tmp/types" | tr -d ' ')" = 3 ] || fail "$(message types)"
-[ "$(cut -c1 "$tmp/types" | tr -d '\n')" = --- ] || fail "$(message regular)"
+[ "$(wc -l < "$tmp/types" | tr -d ' ')" = 1 ] && [ "$(cut -c1 "$tmp/types")" = - ] || fail "$(message regular)"
 mkdir "$tmp/extracted"
 tar -xzf "$tmp/$archive" -C "$tmp/extracted" || fail "$(message extract)"
-for binary in lumio lumio-hub lumio-runtime; do
-  if [ ! -f "$tmp/extracted/$binary" ] || [ -L "$tmp/extracted/$binary" ]; then fail "$(message regular)"; fi
-done
-for role in hub runtime; do
-  # shellcheck disable=SC2016 # Compare literal shim bytes; do not expand its shell variables here.
-  printf '#!/bin/sh\nexec "$(dirname "$0")/lumio" %s "$@"\n' "$role" > "$tmp/expected-$role"
-  cmp -s "$tmp/expected-$role" "$tmp/extracted/lumio-$role" || fail "$(message shim)"
-done
+[ -f "$tmp/extracted/lumio" ] && [ ! -L "$tmp/extracted/lumio" ] || fail "$(message regular)"
+chmod 755 "$tmp/extracted/lumio" || fail "$(message mode)"
+[ "$("$tmp/extracted/lumio" --version)" = "$target" ] || fail "$(message manifest_data)"
 bin=$HOME/.local/bin
 mkdir -p "$bin" || fail "$(message mkdir)"
 cp "$tmp/extracted/lumio" "$bin/.lumio.new.$$" || fail "$(message copy)"
 chmod 755 "$bin/.lumio.new.$$" || fail "$(message mode)"
 mv -f "$bin/.lumio.new.$$" "$bin/lumio" || fail "$(message replace)"
-for alias in lumio-hub lumio-runtime; do
-  ln -s lumio "$bin/.$alias.new.$$" || fail "$(message link)"
-  mv -f "$bin/.$alias.new.$$" "$bin/$alias" || fail "$(message replace_link)"
-done
 message installed "$bin"
 case ":${PATH-}:" in
   *":$bin:"*) ;;
@@ -201,7 +202,7 @@ case ":${PATH-}:" in
 esac
 [ "$setup" = yes ] || exit 0
 if [ "$mode" = runtime ]; then
-  "$bin/lumio" runtime join --hub "$hub" --code "$code" || fail 'lumio-runtime join'
+  "$bin/lumio" runtime join --hub "$hub" --code "$code" || fail 'lumio runtime join'
 else
   set -- "$bin/lumio" hub setup
   if [ "$server" = yes ]; then set -- "$@" --server; fi
@@ -209,8 +210,8 @@ else
   if [ -n "$public_url" ]; then set -- "$@" --public-url "$public_url"; fi
   # curl | sh owns stdin; reconnect setup to the controlling terminal if one exists.
   if [ ! -t 0 ] && ( : < /dev/tty ) 2>/dev/null; then
-    "$@" < /dev/tty || fail 'lumio-hub setup'
+    "$@" < /dev/tty || fail 'lumio hub setup'
   else
-    "$@" || fail 'lumio-hub setup'
+    "$@" || fail 'lumio hub setup'
   fi
 fi

@@ -6,25 +6,22 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { chmod, copyFile, cp, lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildBinary, writeReleaseShims } from "../src/build-binary.ts";
+import { buildBinary } from "../src/build-binary.ts";
 import { invocation } from "../src/main.ts";
 let root: string, binary: string;
 beforeAll(async () => {
   root = await mkdtemp(join(tmpdir(), "lumio-unified-bin-")); binary = join(root, "lumio");
   await buildBinary({ outfile: binary, version: "9.8.7" });
-  await symlink("lumio", join(root, "lumio-hub")); await symlink("lumio", join(root, "lumio-runtime"));
 }, 120_000);
 afterAll(async () => { if (root) await rm(root, { recursive: true, force: true }); });
 test("all names and role forms report one compiled version; internal helpers and existing runtime commands dispatch correctly", async () => {
-  for (const [name, args] of [["lumio", ["--version"]], ["lumio", ["hub", "--version"]], ["lumio", ["runtime", "--version"]], ["lumio-hub", ["--version"]], ["lumio-runtime", ["--version"]]] as const) {
+  for (const [name, args] of [["lumio", ["--version"]], ["lumio", ["hub", "--version"]], ["lumio", ["runtime", "--version"]]] as const) {
     const child = Bun.spawn([join(root, name), ...args], { cwd: root, env: { LUMIO_LANG: "zh", HOME: root, PATH: "" }, stdout: "pipe", stderr: "pipe" });
     expect((await new Response(child.stdout).text()).trim()).toBe("9.8.7"); expect(await child.exited).toBe(0);
   }
-  expect(invocation(["actor", "list"], "lumio-hub").role).toBe("hub");
-  expect(invocation(["hub", "status"], "lumio").role).toBe("cli");
-  expect(invocation(["doctor"], "lumio-runtime").role).toBe("runtime");
-  for (const action of ["add", "remove", "list"]) expect(invocation(["runtime", action], "lumio").role).toBe("cli");
-  for (const helper of ["--job-worker", "--sudo-helper", "--configure-sudo-helper"]) expect(invocation([helper], "lumio").role).toBe("runtime");
+  expect(invocation(["hub", "status"]).role).toBe("cli");
+  for (const action of ["add", "remove", "list"]) expect(invocation(["runtime", action]).role).toBe("cli");
+  for (const helper of ["--job-worker", "--sudo-helper", "--configure-sudo-helper"]) expect(invocation([helper]).role).toBe("runtime");
 });
 async function start(name: string, args: string[]) {
   const child = Bun.spawn([join(root, name), ...args], { cwd: root, env: { LUMIO_LANG: "zh", HOME: root, PATH: process.env.PATH, LUMIO_STATE_DIR: join(root, "state"), LUMIO_HUB_LISTEN: "127.0.0.1:0" }, stdout: "pipe", stderr: "pipe", timeout: 20_000 });
@@ -36,7 +33,7 @@ async function start(name: string, args: string[]) {
   finally { reader.releaseLock(); }
 }
 test("compiled program serves embedded Web/PWA from an empty directory through both Hub invocations", async () => {
-  for (const [name, args] of [["lumio", ["hub", "serve"]], ["lumio-hub", []]] as const) {
+  for (const [name, args] of [["lumio", ["hub", "serve"]]] as const) {
     const { child, url } = await start(name, [...args]);
     try {
       const page = await fetch(url); expect(page.status).toBe(200); expect(await page.text()).toContain('name="lumio-api-base" content=""');
@@ -90,37 +87,7 @@ test("source invocation builds Web assets on demand in a synthetic state directo
   } finally { reader.releaseLock(); child.kill("SIGTERM"); await child.exited; }
 });
 
-test("release archive passes v0.1.6 archive, regular-file and executable-version checks", async () => {
-  const directory = join(root, "release with spaces"), extracted = join(root, "old upgrader extraction"), archive = join(root, "release.tar.gz");
-  await mkdir(directory); await mkdir(extracted); await copyFile(binary, join(directory, "lumio")); await writeReleaseShims(directory);
-  async function command(argv: string[]) {
-    const child = Bun.spawn(argv, { cwd: root, env: { LUMIO_LANG: "zh", HOME: root, PATH: process.env.PATH }, stdout: "pipe", stderr: "pipe" });
-    const [code, output, error] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
-    if (code) throw new Error(error); return output;
-  }
-  await command(["tar", "-czf", archive, "-C", directory, "lumio", "lumio-hub", "lumio-runtime"]);
-  // These are the archive and executable checks from v0.1.6 apps/{cli,runtime}/src/upgrade.ts.
-  const binaries = ["lumio", "lumio-hub", "lumio-runtime"] as const;
-  const entries = (await command(["tar", "-tzf", archive])).trim().split("\n");
-  const types = (await command(["tar", "-tvzf", archive])).trim().split("\n");
-  if (entries.length !== 3 || binaries.some(name => entries.filter(entry => entry === name).length !== 1)
-    || types.length !== 3 || types.some(line => !line.startsWith("-"))) throw new Error("v0.1.6 rejected release paths or file types");
-  await command(["tar", "-xzf", archive, "-C", extracted]);
-  let target: string | undefined;
-  for (const name of binaries) {
-    const path = join(extracted, name), stat = await lstat(path);
-    if (!stat.isFile() || stat.nlink !== 1) throw new Error("v0.1.6 requires ordinary files");
-    await chmod(path, 0o755);
-    const version = /^(?:v)?(\d+\.\d+\.\d+(?:[.-][a-zA-Z0-9.-]+)?)$/.exec((await command([path, "--version"])).trim())?.[1];
-    if (!version || (target && version !== target)) throw new Error("v0.1.6 requires matching versions");
-    target = version;
-  }
-  expect(target).toBe("9.8.7");
-  expect(await readFile(join(extracted, "lumio-hub"), "utf8")).toContain('exec "$(dirname "$0")/lumio" hub "$@"');
-});
-
-
-test("both compiled runtime upgrade invocations share the terminal flow and skip current releases", async () => {
+test("compiled runtime upgrade uses the terminal flow and skips current releases", async () => {
   const bin = join(root, ".local/bin"); await mkdir(bin, { recursive: true });
   await symlink(binary, join(bin, "lumio"));
   for (const role of ["hub", "runtime"]) await symlink("lumio", join(bin, `lumio-${role}`));
@@ -130,12 +97,12 @@ test("both compiled runtime upgrade invocations share the terminal flow and skip
     return new Response(null, { status: 302, headers: { Location: "/tag/v9.8.7" } });
   } });
   try {
-    for (const [name, args] of [["lumio", ["runtime", "upgrade"]], ["lumio-runtime", ["upgrade"]]] as const) {
+    for (const [name, args] of [["lumio", ["runtime", "upgrade"]]] as const) {
       const child = Bun.spawn([join(root, name), ...args], { env: { LUMIO_LANG: "zh", HOME: root, PATH: "", LUMIO_RELEASE_BASE_URL: server.url.href.replace(/\/$/, "") }, stdout: "pipe", stderr: "pipe" });
       const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
       expect(code).toBe(0); expect(out.trim()).toBe("已是最新版本 9.8.7"); expect(err).toBe("");
     }
-    expect(requests).toEqual(["/latest", "/latest"]);
+    expect(requests).toEqual(["/latest"]);
     const child = Bun.spawn([binary, "doctor"], { env: { LUMIO_LANG: "zh", HOME: root, PATH: "", FORCE_COLOR: "1" }, stdout: "pipe", stderr: "pipe" });
     const [code, out] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
     expect(code).toBe(1); expect(out).toContain("\x1b[31m✗\x1b[0m"); expect(out).toMatch(/\d+ 项通过，\d+ 项提醒，\d+ 项失败/);

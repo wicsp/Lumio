@@ -9,6 +9,6 @@ export async function upgrade(options: UpgradeOptions = {}): Promise<void> {
 }
 export async function runUpgrade(args: string[], runtimeOnly: boolean, log = console.log): Promise<number> {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { version: { type: "string" } } });
-  if (positionals.length) throw new UpgradeError({ key: "upgrade.usage_upgrade_version_vx_y_z", args: [runtimeOnly ? "lumio-runtime" : "lumio"] });
+  if (positionals.length) throw new UpgradeError({ key: "upgrade.usage_upgrade_version_vx_y_z", args: [runtimeOnly ? "lumio runtime" : "lumio"] });
   await upgrade({ version: values.version, runtimeOnly, log }); return 0;
 }

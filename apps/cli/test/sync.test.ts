@@ -110,7 +110,7 @@ test("LUMIO_VAULT is used, explicit --vault wins, missing vault explains setup",
   expect(explicit.stdout).toBe("完成：扫描 0 个，补全 0 个，问题 0 个，跳过 0 个\n");
   const missing = await run(["sync"]);
   expect(missing.code).toBe(1);
-  expect(missing.stderr).toContain("lumio-hub setup");
+  expect(missing.stderr).toContain("lumio hub setup");
   expect(missing.stderr).toContain("install.sh");
   expect(await snapshot()).toEqual(before);
 });

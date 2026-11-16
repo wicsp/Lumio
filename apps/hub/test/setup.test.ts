@@ -153,7 +153,7 @@ test("noninteractive setup explains selected defaults and how to change them wit
     find: () => "/synthetic/tailscale", ask: async () => { throw new Error("must not prompt"); },
   });
   const output = f.logs.join("\n");
-  for (const text of ["没有交互终端", "采用默认值", "lumio-hub setup --vault <路径>", "lumio-hub setup --server", `vault=${f.home}/.config/lumio/vault`, "监听=0.0.0.0:7420", "对外地址=未设置", "Tailscale 不自动启用"]) expect(output).toContain(text);
+  for (const text of ["没有交互终端", "采用默认值", "lumio hub setup --vault <路径>", "lumio hub setup --server", `vault=${f.home}/.config/lumio/vault`, "监听=0.0.0.0:7420", "对外地址=未设置", "Tailscale 不自动启用"]) expect(output).toContain(text);
   expect(f.commands.some((argv) => argv[0]?.includes("tailscale"))).toBe(false);
 });
 

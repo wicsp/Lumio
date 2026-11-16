@@ -1,6 +1,5 @@
 import { language } from "@lumio/platform";
 import { text as msg } from "./messages.ts";
-import { realpath } from "node:fs/promises";
 import { extraServices, healthVersion, publicHubChecks } from "./hub-checks.ts";
 import { join } from "node:path";
 import { createClient } from "@lumio/api-client";
@@ -20,7 +19,7 @@ export function supported(engine: keyof typeof verifiedVersions, value: string):
   };
   return compare(verifiedVersions[engine][0]) >= 0 && compare(verifiedVersions[engine][1]) < 0;
 }
-export interface DoctorOptions extends DiagnosticOptions { realpath?: (path: string) => Promise<string> }
+export type DoctorOptions = DiagnosticOptions;
 export async function doctor(options: DoctorOptions = {}): Promise<Check[]> {
   const io = diagnosticIO(options), checks: Check[] = [];
   const check = async (name: string, fix: string, action: () => Promise<void>) => {
@@ -63,14 +62,9 @@ export async function doctor(options: DoctorOptions = {}): Promise<Check[]> {
     const response = await io.fetch(`${base}/assets/app.js`);
     if (!response.ok || !response.headers.get("content-type")?.includes("javascript") || !(await response.text()).trim()) throw new Error();
   });
-  await check(msg("doctor.local_program_and_compatibility_links"), msg("doctor.run_lumio_upgrade_again_to_repair_compatibility_links_and_versions"), async () => {
-    const bin = join(io.home, ".local/bin"), resolve = options.realpath ?? realpath;
-    const program = await resolve(join(bin, "lumio"));
-    for (const name of ["lumio", "lumio-hub", "lumio-runtime"]) {
-      if (await resolve(join(bin, name)) !== program) throw new Error();
-      const result = await io.run([join(bin, name), "--version"]);
-      if (result.code || result.stdout.trim().replace(/^v/, "") !== version) throw new Error();
-    }
+  await check(msg("doctor.local_program"), msg("doctor.run_lumio_upgrade"), async () => {
+    const result = await io.run([join(io.home, ".local/bin/lumio"), "--version"]);
+    if (result.code || result.stdout.trim().replace(/^v/, "") !== version) throw new Error();
   });
   await check(msg("doctor.hub_token"), msg("doctor.run_lumio_login_again_or_lumio_hub_setup"), async () => { if (!base) throw new Error(); await client.actors(); });
   await check(msg("doctor.vault_status"), msg("doctor.check_hub_read_write_permissions_on_vault_and_see_hub_logs"), async () => {

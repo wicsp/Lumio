@@ -1,13 +1,11 @@
 import { type Text, untranslated } from "./language.ts";
 import { downloadRelease, DownloadError } from "./download.ts";
-import { createHash } from "node:crypto";
-import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readlink, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, copyFile, lstat, mkdir, mkdtemp, readlink, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { diagnosticIO, environment, httpURL, localAddress, serviceCommand, type DiagnosticOptions } from "./diagnostics.ts";
 import { createProgressLine } from "./terminal.ts";
-import { releaseShim } from "./release-shims.ts";
-import { manifestArtifact, permitsUnsignedRelease, verifyArtifact, verifyManifest, ReleaseVerificationError, type releasePublicKeys } from "./release-manifest.ts";
+import { manifestArtifact, verifyArtifact, verifyManifest, ReleaseVerificationError, type releasePublicKeys } from "./release-manifest.ts";
 import { RuntimeRegistered, type RuntimePlatform } from "@lumio/schema";
 
 export class UpgradeError extends Error {
@@ -20,7 +18,6 @@ export interface UpgradeOptions extends DiagnosticOptions {
   releaseKeys?: typeof releasePublicKeys;
   log?: (line: string) => void; now?: () => number; sleep?: (ms: number) => Promise<void>;
 }
-const binaries = ["lumio", "lumio-hub", "lumio-runtime"] as const;
 const releaseVersion = /^(?:v)?(\d+\.\d+\.\d+(?:[.-][a-zA-Z0-9.-]+)?)$/;
 const xml = (value: string) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
 export function unifiedService(content: string, binary: string, role: "hub" | "runtime", platform: string): string {
@@ -34,7 +31,18 @@ export function unifiedService(content: string, binary: string, role: "hub" | "r
   return content.replace(/^ExecStart=.+$/m, () => `ExecStart=${quoted} ${role} serve`);
 }
 
-/** Single-program upgrade with compatibility links and a reversible replacement transaction. */
+async function removeCompatibilityLinks(bin: string): Promise<void> {
+  for (const role of ["hub", "runtime"]) {
+    const path = join(bin, `lumio-${role}`);
+    try {
+      if ((await lstat(path)).isSymbolicLink() && await readlink(path) === "lumio") await rm(path);
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause;
+    }
+  }
+}
+
+/** Install one verified program and update its service commands. */
 export async function upgrade(options: UpgradeOptions = {}): Promise<void> {
   const msg = options.text ?? untranslated;
   const io = diagnosticIO(options), log = options.log ?? (() => {}), arch = options.arch ?? process.arch;
@@ -47,13 +55,10 @@ export async function upgrade(options: UpgradeOptions = {}): Promise<void> {
   const command = async (argv: string[]) => { const r = await io.run(argv); if (r.code) throw new UpgradeError({ key: "upgrade.upgrade_command_failed_check_program_permissions_and_service_logs_if", args: [] }); return r.stdout; };
   const installation = async (target: string | undefined) => {
     let current = Boolean(target);
-    for (const name of binaries) {
-      try {
-        const r = await io.run([join(bin, name), "--version"]);
-        if (r.code || r.stdout.trim().replace(/^v/, "") !== target) current = false;
-        if (name !== "lumio" && resolve(bin, await readlink(join(bin, name))) !== binary) current = false;
-      } catch { current = false; }
-    }
+    try {
+      const r = await io.run([binary, "--version"]);
+      current &&= !r.code && r.stdout.trim().replace(/^v/, "") === target;
+    } catch { current = false; }
     let hubUrl: string | undefined;
     if (!options.runtimeOnly) {
       try { hubUrl = io.env.LUMIO_HUB_URL ?? (JSON.parse(await io.read(join(io.home, ".config/lumio/config.json"))) as { hub_url?: string }).hub_url; } catch { /* CLI may not be configured */ }
@@ -94,67 +99,48 @@ export async function upgrade(options: UpgradeOptions = {}): Promise<void> {
     }
     const initial = requested ? await installation(requested.slice(1)) : undefined;
     if (initial?.current && initial.services.every(service => service.old === service.content)) {
+      await removeCompatibilityLinks(bin);
       log(msg("Already at ${0} version ${1}", options.version ? msg("specified") : msg("latest"), requested!.slice(1))); return;
     }
     const download = `${base.replace(/\/+$/, "")}/${requested ? `download/${requested}` : "latest/download"}`;
     const onProgress = createProgressLine({ text: msg, label: msg("Downloading Lumio ${0} (${1})", requested?.slice(1) ?? msg("latest version"), platform),
       tty: options.tty ?? false, columns: options.columns, write: options.progress ?? (() => {}) });
-    // A missing signature or an invalid manifest never falls back to unsigned checksums.
-    const manifestResponse = await io.fetch(`${download}/manifest.json`, { signal: AbortSignal.timeout(20_000) });
-    let signedVersion: string | undefined;
-    let artifact: ReturnType<typeof manifestArtifact> | undefined;
-    if (manifestResponse.ok) {
-      const manifestBytes = await downloadRelease(`${download}/manifest.json`, { fetch: (async (_input: string | URL | Request) => manifestResponse) as typeof fetch, maxBytes: 64 * 1024 });
-      const signature = (await downloadRelease(`${download}/manifest.sig`, { fetch: io.fetch, maxBytes: 256 })).toString("utf8");
-      const manifest = verifyManifest(manifestBytes, signature, options.releaseKeys, requested?.slice(1));
-      signedVersion = manifest.version;
-      artifact = manifestArtifact(manifest, platform as RuntimePlatform);
-    } else {
-      await manifestResponse.body?.cancel();
-      if (manifestResponse.status !== 404 || !requested || !permitsUnsignedRelease(requested.slice(1))) throw new UpgradeError({ key: "upgrade.signed_manifest_required", args: [] });
-    }
-    const bytes = await downloadRelease(`${download}/${archive}`, { fetch: io.fetch, onProgress, maxBytes: artifact?.size });
-    if (artifact) verifyArtifact(bytes, artifact);
-    else {
-      const sums = (await downloadRelease(`${download}/SHA256SUMS`, { fetch: options.fetch ?? globalThis.fetch, tty: false })).toString("utf8");
-      const matches = sums.split(/\r?\n/).map(line => line.trim().split(/\s+/)).filter(parts => parts[1] === archive);
-      if (matches.length !== 1 || matches[0]!.length !== 2 || !/^[0-9a-fA-F]{64}$/.test(matches[0]![0]!)) throw new UpgradeError({ key: "upgrade.sha256sums_has_missing_or_duplicate_entries_program_was_not_replaced", args: [] });
-      if (createHash("sha256").update(bytes).digest("hex") !== matches[0]![0]!.toLowerCase()) throw new UpgradeError({ key: "upgrade.sha256_verification_failed_no_programs_were_replaced", args: [] });
-    }
+    const manifestBytes = await downloadRelease(`${download}/manifest.json`, { fetch: io.fetch, maxBytes: 64 * 1024 });
+    const signature = (await downloadRelease(`${download}/manifest.sig`, { fetch: io.fetch, maxBytes: 256 })).toString("utf8");
+    const manifest = verifyManifest(manifestBytes, signature, options.releaseKeys, requested?.slice(1));
+    const artifact = manifestArtifact(manifest, platform as RuntimePlatform);
+    const bytes = await downloadRelease(`${download}/${artifact.file}`, { fetch: io.fetch, onProgress, maxBytes: artifact.size });
+    verifyArtifact(bytes, artifact);
     const tar = join(temp, archive), extracted = join(temp, "extracted");
     await writeFile(tar, bytes, { mode: 0o600 }); await mkdir(extracted, { mode: 0o700 });
-    const entries = (await command(["tar", "-tzf", tar])).trim().split("\n"), types = (await command(["tar", "-tvzf", tar])).trim().split("\n");
-    if (entries.length !== 3 || binaries.some(name => entries.filter(entry => entry === name).length !== 1)
-      || types.length !== 3 || types.some(line => !line.startsWith("-"))) throw new UpgradeError({ key: "upgrade.archive_must_contain_lumio_and_two_regular_forwarding_shims_program", args: [] });
+    const entry = (await command(["tar", "-tzf", tar])).trim(), type = (await command(["tar", "-tvzf", tar])).trim();
+    if (entry !== "lumio" || type.includes("\n") || !type.startsWith("-")) throw new UpgradeError({ key: "upgrade.invalid_release_archive", args: [] });
     await command(["tar", "-xzf", tar, "-C", extracted]);
-    for (const name of binaries) {
-      const info = await lstat(join(extracted, name));
-      if (!info.isFile() || info.nlink !== 1) throw new UpgradeError({ key: "upgrade.archive_must_contain_three_regular_files", args: [] });
-    }
-    for (const role of ["hub", "runtime"] as const) {
-      const bytes = await readFile(join(extracted, `lumio-${role}`));
-      if (!bytes.equals(Buffer.from(releaseShim(role)))) throw new UpgradeError({ key: "upgrade.release_forwarding_shim_content_mismatch_program_was_not_replaced", args: [] });
-    }
     const source = join(extracted, "lumio");
+    const sourceInfo = await lstat(source);
+    if (!sourceInfo.isFile() || sourceInfo.nlink !== 1) throw new UpgradeError({ key: "upgrade.invalid_release_archive", args: [] });
     await chmod(source, 0o755);
     const target = releaseVersion.exec((await command([source, "--version"])).trim())?.[1];
-    if (!target || (requested && target !== requested.slice(1)) || (signedVersion && target !== signedVersion)) throw new UpgradeError({ key: "upgrade.downloaded_program_version_mismatch_program_was_not_replaced", args: [] });
+    if (!target || (requested && target !== requested.slice(1)) || target !== manifest.version) throw new UpgradeError({ key: "upgrade.downloaded_program_version_mismatch_program_was_not_replaced", args: [] });
     const { current, services, localHub, hubUrl, runtimeSelfUpdates } = initial ?? await installation(target);
-    if (current && services.every(service => service.old === service.content)) { log(msg("Already at ${0} version ${1}", options.version ? msg("specified") : msg("latest"), target)); return; }
+    if (current && services.every(service => service.old === service.content)) { await removeCompatibilityLinks(bin); log(msg("Already at ${0} version ${1}", options.version ? msg("specified") : msg("latest"), target)); return; }
     await mkdir(bin, { recursive: true });
     const changes: { path: string; stage: string; restore?: string; link?: string; mode?: number }[] = [];
-    for (const name of binaries) {
-      const path = join(bin, name), stage = join(bin, `.${name}.${crypto.randomUUID()}.new`); stages.push(stage);
-      const change: typeof changes[number] = { path, stage };
-      try {
-        const previous = await lstat(path);
-        if (previous.isSymbolicLink()) change.link = await readlink(path);
-        else if (previous.isFile()) { change.restore = join(temp, `${name}.backup`); change.mode = previous.mode & 0o777; await copyFile(path, change.restore); }
-        else throw new UpgradeError({ key: "upgrade.program_destination_is_not_a_regular_file_or_compatibility_link_prog", args: [] });
-      } catch (cause) { if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause; }
-      if (name === "lumio") { await copyFile(source, stage); await chmod(stage, 0o755); } else await symlink("lumio", stage);
-      changes.push(change);
-    }
+    const stage = join(bin, `.lumio.${crypto.randomUUID()}.new`);
+    stages.push(stage);
+    const change: typeof changes[number] = { path: binary, stage };
+    try {
+      const previous = await lstat(binary);
+      if (previous.isSymbolicLink()) change.link = await readlink(binary);
+      else if (previous.isFile()) {
+        change.restore = join(temp, "lumio.backup");
+        change.mode = previous.mode & 0o777;
+        await copyFile(binary, change.restore);
+      } else throw new UpgradeError({ key: "upgrade.program_destination_is_not_a_regular_file_or_compatibility_link_prog", args: [] });
+    } catch (cause) { if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause; }
+    await copyFile(source, stage);
+    await chmod(stage, 0o755);
+    changes.push(change);
     for (const service of services) if (service.old !== service.content) {
       const stage = `${service.path}.${crypto.randomUUID()}.new`, restore = join(temp, `${service.role}.service.backup`); stages.push(stage);
       await writeFile(stage, service.content, { mode: service.mode, flag: "wx" }); await chmod(stage, service.mode); await writeFile(restore, service.old, { mode: service.mode });
@@ -192,6 +178,7 @@ export async function upgrade(options: UpgradeOptions = {}): Promise<void> {
       }
       if (!healthy) throw new UpgradeError({ key: "upgrade.program_upgraded_but_hub_did_not_report_new_version_within_30_second", args: [] });
     }
+    await removeCompatibilityLinks(bin);
     log(msg("Upgraded to ${0}", target));
     if (localHub) {
       log(msg("Web: ${0}", hubUrl));
@@ -200,7 +187,7 @@ export async function upgrade(options: UpgradeOptions = {}): Promise<void> {
     }
     let sudoConfigured = Boolean(io.env.LUMIO_RUNTIME_SUDO_COMMAND);
     try { sudoConfigured ||= Boolean(environment(await io.read(join(io.home, ".config/lumio-runtime/runtime.env"))).LUMIO_RUNTIME_SUDO_COMMAND); } catch { /* no helper */ }
-    if (sudoConfigured) log(msg("Run `sudo lumio-runtime install-sudo-helper` to update the helper program"));
+    if (sudoConfigured) log(msg("Run `sudo lumio runtime install-sudo-helper` to update the helper program"));
   } catch (cause) {
     if (cause instanceof UpgradeError) throw cause;
     if (cause instanceof DownloadError) throw new UpgradeError(cause.params);

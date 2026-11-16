@@ -116,7 +116,7 @@ test("fake agents run implementation → review (one send-back) → checkpoint c
     expect(prompt).toContain(engine === "codex" ? "Git metadata is protected" : "without an OS sandbox");
     expect(prompt).toContain("no stage-specific secrets");
     expect(prompt).toContain("<lumio-permission>git</lumio-permission>");
-    expect(prompt).toContain("For system commands that require root, use `lumio-runtime sudo --");
+    expect(prompt).toContain("For system commands that require root, use `lumio runtime sudo --");
   }
   expect(invocations[2].prompt).toContain("Fix the synthetic edge case");
   const system = hub.store.workActor();

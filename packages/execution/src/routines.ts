@@ -77,7 +77,7 @@ export class ExecutionRoutines {
     const previous = this.jobs.list(undefined, undefined, routine.id).filter((job) => job.result).at(-1);
     const raw = previous?.result?.report;
     const report = routine.context === "previous" ? raw?.slice(0, 3000) : undefined;
-    const prompt = this.msg("You are running an independent routine. Work only in the working directory; do not access the Lumio knowledge directory. Request privileged approval through lumio-runtime sudo.\nReport results clearly; if a user decision is needed, use <lumio-question>Question</lumio-question> and end the round.\n\n# ${0}\n\n${1}${2}", routine.title, routine.description, report ? this.msg("\n\n## Previous report\n\n${0}", report) : "");
+    const prompt = this.msg("You are running an independent routine. Work only in the working directory; do not access the Lumio knowledge directory. Request privileged approval through lumio runtime sudo.\nReport results clearly; if a user decision is needed, use <lumio-question>Question</lumio-question> and end the round.\n\n# ${0}\n\n${1}${2}", routine.title, routine.description, report ? this.msg("\n\n## Previous report\n\n${0}", report) : "");
     const template: RoutineSpec["template"] = { run: { kind: "agent", engine, prompt, ...(routine.model ? { model: routine.model } : {}) },
       workdir: routine.workdir ?? "~", timeout_seconds: (routine.timeout_minutes ?? 120) * 60, ...(routine.gpus ? { gpus: routine.gpus } : {}) };
     const fingerprint = this.context.fingerprint(JSON.stringify({ revision: routine.revision, runtime: runtime.actor, template, schedule: routine.schedule, timezone: routine.timezone }));
