@@ -59,7 +59,7 @@ async function startRuntime() {
     LUMIO_RUNTIME_NAME: "mac", LUMIO_RUNTIME_STATE_DIR: join(temp, "runtime"), LUMIO_RUNTIME_POLL_SECONDS: "0.05",
     SYNTHETIC_AGENT_LOG: join(temp, "agent-log.jsonl"), SYNTHETIC_REVIEW_COUNT: join(temp, "review-count"),
   }, stdout: "pipe", stderr: "pipe" });
-  await eventually(async () => RuntimeInfo.array().parse(await (await request("/v1/runtimes")).json()).some(value => value.registration.name === "mac" && value.registration.features?.includes("permission_request")));
+  await eventually(async () => RuntimeInfo.array().parse(await (await request("/v2/execution/runtimes")).json()).some(value => value.registration.name === "mac" && value.registration.features?.includes("permission_request")));
 }
 async function cli(args: string[], language = "en", token = human) {
   const child = Bun.spawn([process.execPath, new URL("../../cli/src/main.ts", import.meta.url).pathname, ...args], {
@@ -198,7 +198,7 @@ test("automatic plan handoff, execution, result application and system audit rol
   const failed = hub.modules.work.detail(task);
   expect(failed.executions).toHaveLength(1); expect(failed.executions[0]?.applied).toBe(false);
   expect(failed.comments).toEqual([]); expect(failed.task.plan?.rounds).toBe(1);
-  expect(Job.array().parse(await (await request(`/v1/jobs?task=${task}`)).json())).toHaveLength(1);
+  expect(Job.array().parse(await (await request(`/v2/execution/jobs?task=${task}`)).json())).toHaveLength(1);
   hub.store.db.exec("DROP TRIGGER fail_plan_audit"); hub.modules.reconcile();
   expect(hub.modules.work.detail(task).executions).toHaveLength(2);
   expect(hub.modules.work.task(task).plan?.rounds).toBe(2);
@@ -230,7 +230,7 @@ test("an agent proposes saving a plan template and only human approval persists 
   if (result.kind !== "proposal") throw new Error("proposal expected");
   expect(await (await request("/v2/work/commands", input, agent)).json()).toEqual(result);
   expect(await client().workPlanTemplates()).toEqual([]);
-  const accept = `/v1/proposals/${result.proposal}/accept`;
+  const accept = `/v2/approval/proposals/${result.proposal}/accept`;
   expect((await request(accept, {}, agent)).status).toBe(403);
   expect((await request(accept, {})).status).toBe(200);
   expect(await client().workPlanTemplates()).toMatchObject([{ name: "Synthetic proposed plan", plan }]);
@@ -247,7 +247,7 @@ test("Hub persists parallel turns, resumes the interrupted branch and cancels ac
   const task = await createTask(graph);
   await command("work.task.dispatch", { task });
   const [first, second] = (await client().workTask(task)).task.turn.parallel!;
-  const jobs = Job.array().parse(await (await request(`/v1/jobs?task=${task}`)).json());
+  const jobs = Job.array().parse(await (await request(`/v2/execution/jobs?task=${task}`)).json());
   expect(jobs.map(job => job.spec.source?.previous)).toEqual([undefined, undefined]);
   await request("/v1/runtime/ack", { accepted: [first!.job, second!.job] }, runtime);
   const result = async (id: string, status: "done" | "waiting_for_human") => {
@@ -272,6 +272,6 @@ test("Hub persists parallel turns, resumes the interrupted branch and cancels ac
   await command("work.task.dispatch", { task: cancelled });
   const current = (await client().workTask(cancelled)).task;
   await command("work.task.finish", { task: cancelled, expected_revision: current.revision, outcome: "cancelled" });
-  expect(Job.array().parse(await (await request(`/v1/jobs?task=${cancelled}`)).json()).map(job => job.status)).toEqual(["cancelled", "cancelled"]);
+  expect(Job.array().parse(await (await request(`/v2/execution/jobs?task=${cancelled}`)).json()).map(job => job.status)).toEqual(["cancelled", "cancelled"]);
   expect((await client().workTask(cancelled)).task.plan?.active).toBeUndefined();
 });

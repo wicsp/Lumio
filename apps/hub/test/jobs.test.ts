@@ -26,9 +26,9 @@ const boot = (listen = 0) => startHub({ ...readConfig({ LUMIO_VAULT: vault, LUMI
 async function request(path: string, token = human, body?: unknown) {
   return fetch(`${base()}${path}`, { method: body === undefined ? "GET" : "POST", headers: { "Accept-Language": "zh", Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 }
-async function get(id: string) { return Job.parse(await (await request(`/v1/jobs/${id}`)).json()); }
+async function get(id: string) { return Job.parse(await (await request(`/v2/execution/jobs/${id}`)).json()); }
 async function submit(mode = "quiet", path = join(temp, "calls"), delay = 0, fields: object = {}, extra = "literal") {
-  const response = await request("/v1/jobs", human, { runtime: "server", run: { kind: "command", argv: [process.execPath, fixture, mode, path, String(delay), extra] }, ...fields });
+  const response = await request("/v2/execution/jobs", human, { runtime: "server", run: { kind: "command", argv: [process.execPath, fixture, mode, path, String(delay), extra] }, ...fields });
   expect(response.status).toBe(200); return Job.parse(await response.json());
 }
 async function eventually(check: () => boolean | Promise<boolean>, timeout = 8000) {
@@ -48,7 +48,7 @@ async function startRuntime(url = base(), binary?: string) {
   daemons.push(child); output.push(new Response(child.stdout).text()); errors.push(new Response(child.stderr).text());
   await eventually(async () => {
     if (child.exitCode !== null || child.signalCode) throw new Error(`Synthetic runtime exited ${child.exitCode ?? child.signalCode}: ${await errors.at(-1)}`);
-    return RuntimeInfo.array().parse(await (await request("/v1/runtimes")).json()).length === 1;
+    return RuntimeInfo.array().parse(await (await request("/v2/execution/runtimes")).json()).length === 1;
   }).catch(async (cause) => {
     await stop(child);
     throw new Error(`${cause}: ${await output.at(-1)} ${await errors.at(-1)}`);
@@ -77,14 +77,14 @@ test("job API validates inputs, authorizes all endpoints, tracks ownership/lease
   const job = await submit();
   expect(job).toMatchObject({ status: "queued", spec: { workdir: "~", timeout_seconds: 7200 } });
   expect(Buffer.from(job.spec.lease, "base64url").length).toBeGreaterThanOrEqual(32);
-  for (const token of [agent, runtime]) for (const [path, body] of [["/v1/jobs", {}], [`/v1/jobs/${job.spec.id}/cancel`, {}], ["/v1/jobs", undefined], [`/v1/jobs/${job.spec.id}`, undefined]] as const) {
+  for (const token of [agent, runtime]) for (const [path, body] of [["/v2/execution/jobs", {}], [`/v2/execution/jobs/${job.spec.id}/cancel`, {}], ["/v2/execution/jobs", undefined], [`/v2/execution/jobs/${job.spec.id}`, undefined]] as const) {
     const response = await request(path, token, body);
     const allowed = token === agent && body === undefined;
     expect(response.status).toBe(allowed ? 200 : 403); if (!allowed) ApiError.parse(await response.json());
   }
   for (const body of [{ runtime: "missing", run: job.spec.run }, { runtime: "server", run: job.spec.run, unknown: true }, { runtime: "server", run: { kind: "agent", engine: "codex", prompt: "no" } }])
-    expect((await request("/v1/jobs", human, body)).status).toBe(400);
-  expect((await request("/v1/jobs?status=bad")).status).toBe(400);
+    expect((await request("/v2/execution/jobs", human, body)).status).toBe(400);
+  expect((await request("/v2/execution/jobs?status=bad")).status).toBe(400);
   const sync = RuntimeSync.parse(await (await request("/v1/runtime/sync", runtime, heartbeat)).json());
   expect(sync.jobs).toEqual([job.spec]);
   const result = JobResult.parse({ job: job.spec.id, lease: job.spec.lease, status: "done", exit_code: 0, finished: new Date().toISOString() });
@@ -101,8 +101,8 @@ test("job API validates inputs, authorizes all endpoints, tracks ownership/lease
   expect((await request("/v1/runtime/results", runtime, result)).status).toBe(200);
   expect((await request("/v1/runtime/results", runtime, result)).status).toBe(200);
   expect((await request("/v1/runtime/results", runtime, { ...result, exit_code: 1 })).status).toBe(409);
-  expect(Job.array().parse(await (await request("/v1/jobs?status=done")).json())).toHaveLength(1);
-  const queued = await submit(); await request(`/v1/jobs/${queued.spec.id}/cancel`, human, {});
+  expect(Job.array().parse(await (await request("/v2/execution/jobs?status=done")).json())).toHaveLength(1);
+  const queued = await submit(); await request(`/v2/execution/jobs/${queued.spec.id}/cancel`, human, {});
   expect((await get(queued.spec.id)).status).toBe("cancelled");
   const audit = hub!.store.db.query<{ actor_id: string; operation: string; execution_result: string }, []>("SELECT * FROM audit WHERE operation IN ('job.submit','job.cancel')").all();
   expect(audit.filter((r) => r.execution_result === "applied").map((r) => r.operation)).toEqual(["job.submit", "job.submit", "job.cancel"]);
@@ -235,7 +235,7 @@ for (const mode of ["restart", "timeout", "cancel"] as const) test(`${mode} kill
   const pid = Number((await readFile(calls, "utf8")).split(" ")[1]!.trim()), grandchild = Number(await readFile(`${calls}.child`, "utf8"));
   expect(alive(pid)).toBe(true); expect(alive(grandchild)).toBe(true);
   if (mode === "restart") { await stop(daemon, "SIGKILL"); daemon = await startRuntime(); }
-  if (mode === "cancel") expect((await request(`/v1/jobs/${job.spec.id}/cancel`, human, {})).status).toBe(200);
+  if (mode === "cancel") expect((await request(`/v2/execution/jobs/${job.spec.id}/cancel`, human, {})).status).toBe(200);
   const final = mode === "restart" ? "unknown" : mode === "cancel" ? "cancelled" : "failed";
   await eventually(async () => (await get(job.spec.id)).status === final, 15_000);
   await eventually(() => !alive(pid) && !alive(grandchild));
@@ -249,7 +249,7 @@ test("cancel racing receipt/ack cancels locally queued work without starting it"
     if (path === "/v1/runtime/ack" && cancelBeforeAck) {
       cancelBeforeAck = false;
       const ack = RuntimeAck.parse(JSON.parse(body));
-      for (const id of ack.accepted) await request(`/v1/jobs/${id}/cancel`, human, {});
+      for (const id of ack.accepted) await request(`/v2/execution/jobs/${id}/cancel`, human, {});
     }
     return fetch(`${base()}${path}`, { method: req.method, headers: req.headers, body });
   } });

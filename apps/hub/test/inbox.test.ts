@@ -92,7 +92,7 @@ async function fixture(language = "Chinese") {
     })).json());
     return api("/v2/ai/knowledge-bindings", "PUT", { request_id: randomUUID(), purpose, profile: profile.id });
   };
-  const note = async (id: string) => NoteDetail.parse(await (await api(`/v1/notes/${id}`)).json());
+  const note = async (id: string) => NoteDetail.parse(await (await api(`/v2/knowledge/notes/${id}`)).json());
   return { hub, owner, agent, other, runtime, api, create, get, wait, command, original, bind, note, requests, calls, vault,
     replacePage(body: string) { webpage = body; },
     modelAttemptsTool() { failure = true; },
@@ -118,7 +118,7 @@ test("captures without a model, deduplicates, searches the original, then genera
     expect(original.body).toContain("[reference method](https://articles.example/methods)");
     expect(original.body).toContain("![specimen](https://articles.example/images/sample.png)");
     expect(original.body).not.toMatch(/Navigation chatter|Footer chatter|javascript:/);
-    const matches = SearchResult.parse(await (await f.api("/v1/search?q=xenolithmarker", "GET", undefined, f.agent.token)).json());
+    const matches = SearchResult.parse(await (await f.api("/v2/knowledge/search?q=xenolithmarker", "GET", undefined, f.agent.token)).json());
     expect(matches.hits[0]).toMatchObject({ matched_in: "original", note: { id } });
     expect((await f.api(captures, "GET", undefined, f.agent.token)).status).toBe(403);
     expect((await f.api(captures, "POST", {}, f.agent.token)).status).toBe(403);

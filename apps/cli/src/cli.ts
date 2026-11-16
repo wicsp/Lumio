@@ -153,7 +153,7 @@ async function executeCli(args: string[], options: CliOptions): Promise<number> 
     const { url, token } = hubCredentials(readCliConfig({ warn: options.warn }));
     const endpoint = new URL(url);
     if (!["http:", "https:"].includes(endpoint.protocol) || endpoint.username || endpoint.password) throw new Error(msg("cli.lumio_hub_url_must_be_an_http_s_url"));
-    endpoint.pathname = `${endpoint.pathname.replace(/\/$/, "")}/v1/status`;
+    endpoint.pathname = `${endpoint.pathname.replace(/\/$/, "")}/v2/system/status`;
     endpoint.search = ""; endpoint.hash = "";
     let response: Response;
     try { response = await fetch(endpoint, { headers: { "Accept-Language": language(), Authorization: `Bearer ${token}` }, redirect: "error" }); }

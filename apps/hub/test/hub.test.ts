@@ -52,11 +52,11 @@ test("default binding is loopback; public health and every registered route call
   expect(hub!.server.hostname).toBe("127.0.0.1");
   const first = hub!.store.createProposal({ op: "exec.privileged", args: { runtime: "act_00000000000000000000000001", job: "job_00000000000000000000000012", argv: ["/bin/true"] } }, "fixture", hub!.store.actors()[0]!.id);
   const second = hub!.store.createProposal({ op: "exec.privileged", args: { runtime: "act_00000000000000000000000001", job: "job_00000000000000000000000013", argv: ["/bin/true"] } }, "fixture", hub!.store.actors()[0]!.id);
-  const paths = { "knowledge.document": "/v2/knowledge/notes/missing/document", "knowledge.update": "/v2/knowledge/notes/missing/document", "knowledge.related": "/v2/knowledge/related", "knowledge.references": "/v2/knowledge/references", "knowledge.template": "/v2/knowledge/templates", "knowledge.resolve": "/v2/knowledge/papers/resolve", "knowledge.create": "/v2/knowledge/notes", "runtime.invite": "/v1/runtime-invites", "client.invite": "/v1/client-invites", "runtime.join": "/v1/runtime/join", "client.join": "/v1/client/join", "runtime.signing-key": "/v1/runtime/signing-key", "runtime.remove": "/v1/runtimes/missing", check: "/v1/check", actors: "/v1/actors", proposals: "/v1/proposals", operations: "/v1/operations", "proposal.accept": `/v1/proposals/${first.id}/accept`, "proposal.reject": `/v1/proposals/${second.id}/reject`, status: "/v1/status", health: "/health", search: "/v1/search?q=index", show: "/v1/notes/Main", links: "/v1/notes/Main/links", routines: "/v1/routines" };
+  const paths = { "knowledge.document": "/v2/knowledge/notes/missing/document", "knowledge.update": "/v2/knowledge/notes/missing/document", "knowledge.related": "/v2/knowledge/related", "knowledge.references": "/v2/knowledge/references", "knowledge.template": "/v2/knowledge/templates", "knowledge.resolve": "/v2/knowledge/papers/resolve", "knowledge.create": "/v2/knowledge/notes", "runtime.invite": "/v2/setup/runtime-invites", "client.invite": "/v2/setup/client-invites", "runtime.join": "/v2/setup/runtime/join", "client.join": "/v2/setup/client/join", "runtime.signing-key": "/v2/setup/runtime/signing-key", "runtime.remove": "/v2/execution/runtimes/missing", check: "/v2/knowledge/check", actors: "/v2/system/actors", proposals: "/v2/approval/proposals", operations: "/v2/approval/privileged", "proposal.accept": `/v2/approval/proposals/${first.id}/accept`, "proposal.reject": `/v2/approval/proposals/${second.id}/reject`, status: "/v2/system/status", health: "/health", search: "/v2/knowledge/search?q=index", show: "/v2/knowledge/notes/Main", links: "/v2/knowledge/notes/Main/links", routines: "/v2/execution/routines" };
   const existingRoutes = ROUTES.filter((route) => !([...RUNTIME_OPERATIONS, ...JOB_OPERATIONS] as readonly string[]).includes(route.operation));
   for (const route of existingRoutes) {
     const response = route.operation === "operations"
-      ? await fetch(`${base()}/v1/operations`, { method: "POST", headers: { "Accept-Language": "zh", Authorization: `Bearer ${human}`, "Content-Type": "application/json" }, body: JSON.stringify({ operation: { op: "exec.privileged", args: { runtime: "act_00000000000000000000000001", job: "job_00000000000000000000000012", argv: ["/bin/true"] } } }) })
+      ? await fetch(`${base()}/v2/approval/privileged`, { method: "POST", headers: { "Accept-Language": "zh", Authorization: `Bearer ${human}`, "Content-Type": "application/json" }, body: JSON.stringify({ operation: { op: "exec.privileged", args: { runtime: "act_00000000000000000000000001", job: "job_00000000000000000000000012", argv: ["/bin/true"] } } }) })
       : await request(paths[route.operation as keyof typeof paths], (route.operation === "health" || route.operation.endsWith(".join")) ? undefined : human, {}, "method" in route ? route.method : "GET");
     const pairingStatus = { "knowledge.document": 400, "knowledge.update": 400, "knowledge.related": 400, "knowledge.references": 400, "knowledge.template": 400, "knowledge.resolve": 400, "knowledge.create": 400, "runtime.invite": 400, "client.invite": 400, "runtime.join": 401, "client.join": 401, "runtime.signing-key": 403, "runtime.remove": 404 };
     expect(response.status).toBe(pairingStatus[route.operation as keyof typeof pairingStatus] ?? (route.operation === "operations" ? 403 : route.operation === "proposal.accept" ? 409 : 200));
@@ -67,10 +67,10 @@ test("default binding is loopback; public health and every registered route call
 });
 
 test("authentication is required for queries and unknown routes", async () => {
-  for (const path of ["/v1/check", "/v1/search?q=index", "/v1/notes/Main", "/v1/notes/Main/links", "/missing"]) {
+  for (const path of ["/v2/knowledge/check", "/v2/knowledge/search?q=index", "/v2/knowledge/notes/Main", "/v2/knowledge/notes/Main/links", "/missing"]) {
     for (const token of [undefined, "wrong", `lumio_${"x".repeat(43)}`, revoked]) await error(path, token, 401, "UNAUTHENTICATED");
   }
-  const invalid = await fetch(`${base()}/v1/search?q=index`, { headers: { "Accept-Language": "zh", Authorization: `Basic ${human}` } });
+  const invalid = await fetch(`${base()}/v2/knowledge/search?q=index`, { headers: { "Accept-Language": "zh", Authorization: `Basic ${human}` } });
   expect(invalid.status).toBe(401); ApiError.parse(await invalid.json());
   await error("/missing", human, 404, "NOT_FOUND");
   const post = await request("/health", undefined, {}, "POST");
@@ -78,48 +78,48 @@ test("authentication is required for queries and unknown routes", async () => {
 });
 
 test("query endpoints validate against schemas and URL-encoded Unicode references work", async () => {
-  const search = SearchResult.parse(await (await request("/v1/search?q=index&type=paper&limit=1", human)).json());
+  const search = SearchResult.parse(await (await request("/v2/knowledge/search?q=index&type=paper&limit=1", human)).json());
   expect(search.hits).toHaveLength(1); expect(search.hits[0]!.note.type).toBe("paper");
-  NoteDetail.parse(await (await request("/v1/notes/Main", human)).json());
-  LinksResult.parse(await (await request("/v1/notes/Main/links", human)).json());
-  expect(NoteDetail.parse(await (await request(`/v1/notes/${encodeURIComponent("来源笔记")}`, human)).json()).note.type).toBe("source");
-  const noId = NoteDetail.parse(await (await request("/v1/notes/NoID", human)).json()); expect("id" in noId.note).toBe(true);
-  expect(SearchResult.parse(await (await request("/v1/search?q=cardonlymarker", human)).json()).total).toBe(1);
-  const card = NoteDetail.parse(await (await request("/v1/notes/Card", human)).json());
+  NoteDetail.parse(await (await request("/v2/knowledge/notes/Main", human)).json());
+  LinksResult.parse(await (await request("/v2/knowledge/notes/Main/links", human)).json());
+  expect(NoteDetail.parse(await (await request(`/v2/knowledge/notes/${encodeURIComponent("来源笔记")}`, human)).json()).note.type).toBe("source");
+  const noId = NoteDetail.parse(await (await request("/v2/knowledge/notes/NoID", human)).json()); expect("id" in noId.note).toBe(true);
+  expect(SearchResult.parse(await (await request("/v2/knowledge/search?q=cardonlymarker", human)).json()).total).toBe(1);
+  const card = NoteDetail.parse(await (await request("/v2/knowledge/notes/Card", human)).json());
   expect(card.body).toContain("cardonlymarker");
 });
 
 test("private notes are hidden from agents, and only explicit human requests reveal them", async () => {
   for (const token of [human, agent]) {
-    expect(SearchResult.parse(await (await request("/v1/search?q=privateonly", token)).json()).total).toBe(0);
-    for (const suffix of ["", "/links"]) await error(`/v1/notes/Private${suffix}`, token, 404, "NOT_FOUND");
-    const links = LinksResult.parse(await (await request("/v1/notes/Main/links", token)).json());
+    expect(SearchResult.parse(await (await request("/v2/knowledge/search?q=privateonly", token)).json()).total).toBe(0);
+    for (const suffix of ["", "/links"]) await error(`/v2/knowledge/notes/Private${suffix}`, token, 404, "NOT_FOUND");
+    const links = LinksResult.parse(await (await request("/v2/knowledge/notes/Main/links", token)).json());
     expect(links.outgoing.find((l) => l.target === "Private")?.dangling).toBe(true);
   }
-  for (const path of ["/v1/search?q=privateonly", "/v1/notes/Private", "/v1/notes/Private/links"]) {
+  for (const path of ["/v2/knowledge/search?q=privateonly", "/v2/knowledge/notes/Private", "/v2/knowledge/notes/Private/links"]) {
     expect((await error(`${path}${path.includes("?") ? "&" : "?"}include_private=true`, agent, 403, "FORBIDDEN")).reason).toBe("agent-cannot-read-private");
   }
-  expect(SearchResult.parse(await (await request("/v1/search?q=privateonly&include_private=true", human)).json()).total).toBe(1);
-  NoteDetail.parse(await (await request("/v1/notes/Private?include_private=true", human)).json());
-  LinksResult.parse(await (await request("/v1/notes/Private/links?include_private=true", human)).json());
+  expect(SearchResult.parse(await (await request("/v2/knowledge/search?q=privateonly&include_private=true", human)).json()).total).toBe(1);
+  NoteDetail.parse(await (await request("/v2/knowledge/notes/Private?include_private=true", human)).json());
+  LinksResult.parse(await (await request("/v2/knowledge/notes/Private/links?include_private=true", human)).json());
   expect(hub!.store.db.query("SELECT * FROM audit").all()).toHaveLength(3);
   expect(hub!.store.db.query<{ operation: string }, []>("SELECT * FROM audit").all().map((r) => r.operation)).toEqual(["search", "show", "links"]);
 });
 
 test("all invalid inputs return ApiError and ambiguous references are INVALID with candidates", async () => {
-  for (const path of ["/v1/search?q=%20", "/v1/search?q=x&type=bad", "/v1/search?q=x&limit=0",
-    "/v1/search?q=x&limit=1.5", "/v1/search?q=x&limit=9007199254740992", "/v1/notes/%ZZ", "/v1/notes/Main?include_private=yes"]) {
+  for (const path of ["/v2/knowledge/search?q=%20", "/v2/knowledge/search?q=x&type=bad", "/v2/knowledge/search?q=x&limit=0",
+    "/v2/knowledge/search?q=x&limit=1.5", "/v2/knowledge/search?q=x&limit=9007199254740992", "/v2/knowledge/notes/%ZZ", "/v2/knowledge/notes/Main?include_private=yes"]) {
     await error(path, human, 400, "INVALID");
   }
-  const ambiguous = await error("/v1/notes/Twin", human, 400, "INVALID");
+  const ambiguous = await error("/v2/knowledge/notes/Twin", human, 400, "INVALID");
   expect(ambiguous.message).toContain("library/sources/b/Twin.md");
   expect(ambiguous.message).toContain("research/ideas/a/Twin.md");
 });
 
 test("one actor can use two tokens, revoking one is persistent and leaves the other working", async () => {
-  for (const token of [human, human2]) expect((await request("/v1/notes/Main", token)).status).toBe(200);
-  hub!.store.revokeToken("mac"); await error("/v1/notes/Main", human, 401, "UNAUTHENTICATED");
-  expect((await request("/v1/notes/Main", human2)).status).toBe(200);
+  for (const token of [human, human2]) expect((await request("/v2/knowledge/notes/Main", token)).status).toBe(200);
+  hub!.store.revokeToken("mac"); await error("/v2/knowledge/notes/Main", human, 401, "UNAUTHENTICATED");
+  expect((await request("/v2/knowledge/notes/Main", human2)).status).toBe(200);
   await hub!.stop(); hub = undefined;
   const reopened = await HubStore.open(state);
   try {
@@ -132,12 +132,12 @@ test("one actor can use two tokens, revoking one is persistent and leaves the ot
 });
 
 test("logs omit tokens and query contents, ignore untrusted forwarding; denials are audited without secrets", async () => {
-  await request(`/v1/search?q=${agent}&include_private=true`, agent, { "X-Forwarded-For": "203.0.113.4" });
-  await request(`/v1/notes/${human}`, human);
+  await request(`/v2/knowledge/search?q=${agent}&include_private=true`, agent, { "X-Forwarded-For": "203.0.113.4" });
+  await request(`/v2/knowledge/notes/${human}`, human);
   await request(`/unknown/${human}`, human);
   expect(logs).toHaveLength(3);
   const line = JSON.parse(logs[0]!);
-  expect(line.client_ip).toBe("127.0.0.1"); expect(line.path).toBe("/v1/search"); expect(line.status).toBe(403);
+  expect(line.client_ip).toBe("127.0.0.1"); expect(line.path).toBe("/v2/knowledge/search"); expect(line.status).toBe(403);
   expect(line.token_label).toBe("codex-mac"); expect(line.actor_id).toBe(hub!.store.actors().find((a) => a.name === "codex")!.id);
   Timestamp.parse(line.time); expect(line.duration_ms).toBeGreaterThanOrEqual(0);
   const records = hub!.store.db.query("SELECT * FROM audit").all(); expect(records).toHaveLength(1);
@@ -232,7 +232,7 @@ test("every route obeys a denial from the shared authorization entry point", asy
   hub = await startHub({ ...readConfig({ LUMIO_VAULT: vault, LUMIO_STATE_DIR: state }), port: 0 }, {
     log: (line) => logs.push(line), authorize: () => ({ result: "deny", reason: "Test denial" }),
   });
-  for (const path of ["/health", "/v1/check", "/v1/search?q=index", "/v1/notes/Main", "/v1/notes/Main/links"]) {
+  for (const path of ["/health", "/v2/knowledge/check", "/v2/knowledge/search?q=index", "/v2/knowledge/notes/Main", "/v2/knowledge/notes/Main/links"]) {
     expect((await error(path, human, 403, "FORBIDDEN")).reason).toBe("Test denial");
   }
 });
@@ -240,21 +240,21 @@ test("every route obeys a denial from the shared authorization entry point", asy
 test("internal query failures return a validated, sanitized INTERNAL response", async () => {
   await rename(vault, `${vault}-saved`);
   await writeFile(vault, "synthetic inaccessible vault");
-  const failure = await error("/v1/notes/Main", human, 500, "INTERNAL");
+  const failure = await error("/v2/knowledge/notes/Main", human, 500, "INTERNAL");
   expect(failure.message).not.toContain(temp);
 });
 
 test("status is authenticated, shares private authorization, and CLI prints its JSON", async () => {
-  await error("/v1/status", undefined, 401, "UNAUTHENTICATED");
-  const response = await request("/v1/status", human);
+  await error("/v2/system/status", undefined, 401, "UNAUTHENTICATED");
+  const response = await request("/v2/system/status", human);
   expect(response.status).toBe(200);
   const status = await response.json() as HubStatus;
   expect(status).toMatchObject({ watching: true, pending_files: 0 }); Timestamp.parse(status.last_full_sync);
   expect(Array.isArray(status.issues)).toBe(true);
   expect(JSON.stringify(status)).not.toContain("life/assets");
-  expect((await request("/v1/status", agent)).status).toBe(200);
-  expect((await error("/v1/status?include_private=true", agent, 403, "FORBIDDEN")).reason).toBe("agent-cannot-read-private");
-  await error("/v1/status?include_private=invalid", human, 400, "INVALID");
+  expect((await request("/v2/system/status", agent)).status).toBe(200);
+  expect((await error("/v2/system/status?include_private=true", agent, 403, "FORBIDDEN")).reason).toBe("agent-cannot-read-private");
+  await error("/v2/system/status?include_private=invalid", human, 400, "INVALID");
   const cli = await spawnCli(["hub", "status"], true);
   expect(cli.code).toBe(0); expect(cli.stderr).toBe(""); expect(JSON.parse(cli.stdout)).toEqual(status);
   for (const remote of [false, true]) {
@@ -276,16 +276,16 @@ test("autosave idle defaults to 300 seconds and rejects invalid timer values", (
 
 test("check validates CheckResult, hides private targets, and authorizes and audits private requests", async () => {
   for (const token of [human, agent]) {
-    const response = await request("/v1/check", token); expect(response.status).toBe(200);
+    const response = await request("/v2/knowledge/check", token); expect(response.status).toBe(200);
     const result = CheckResult.parse(await response.json()); expect(result.total).toBeGreaterThan(0);
     expect(result.dangling.every((l) => l.target !== "Private" && !l.target.startsWith("ast_"))).toBe(true);
   }
-  const included = CheckResult.parse(await (await request("/v1/check?include_private=true", human)).json());
+  const included = CheckResult.parse(await (await request("/v2/knowledge/check?include_private=true", human)).json());
   expect(included.dangling.some((l) => l.target === "Private")).toBe(false);
-  expect((await error("/v1/check?include_private=true", agent, 403, "FORBIDDEN")).reason).toBe("agent-cannot-read-private");
+  expect((await error("/v2/knowledge/check?include_private=true", agent, 403, "FORBIDDEN")).reason).toBe("agent-cannot-read-private");
   expect(hub!.store.db.query("SELECT operation FROM audit").all()).toEqual([{ operation: "check" }]);
-  await error("/v1/check?include_private=yes", human, 400, "INVALID");
-  expect(JSON.parse(logs.at(-1)!).path).toBe("/v1/check");
+  await error("/v2/knowledge/check?include_private=yes", human, 400, "INVALID");
+  expect(JSON.parse(logs.at(-1)!).path).toBe("/v2/knowledge/check");
 });
 
 test("live Hub backup preserves all tables and WAL data, uses 0600, refuses existing targets and hides credentials", async () => {
@@ -328,5 +328,18 @@ test("live Hub backup preserves all tables and WAL data, uses 0600, refuses exis
   const output = [result, repeated, missing].map((r) => r.stdout + r.stderr).join("\n") + logs.join("\n");
   const hashes = hub!.store.db.query<{ hash: string }, []>("SELECT hash FROM tokens").all();
   for (const secret of [human, human2, agent, revoked, ...hashes.map((r) => r.hash)]) expect(output).not.toContain(secret);
-  expect((await request("/v1/check", human)).status).toBe(200);
+  expect((await request("/v2/knowledge/check", human)).status).toBe(200);
+});
+
+test("operations removed from v1 are only reachable in their v2 namespaces", async () => {
+  for (const path of ["/v1/search", "/v1/status", "/v1/check", "/v1/notes/Main", "/v1/notes/Main/links",
+    "/v1/jobs", "/v1/routines", "/v1/runtimes", "/v1/actors", "/v1/proposals", "/v1/runtime/signing-key"]) {
+    expect((await request(path, human)).status).toBe(404);
+  }
+  for (const path of ["/v1/jobs", "/v1/proposals/missing/accept", "/v1/proposals/missing/reject",
+    "/v1/runtime-invites", "/v1/client-invites", "/v1/runtime/join", "/v1/client/join"]) {
+    expect((await request(path, human, {}, "POST")).status).toBe(404);
+  }
+  expect((await request("/v1/runtimes/mac", human, {}, "DELETE")).status).toBe(404);
+  expect((await request("/v1/operations", human, {}, "POST")).status).toBe(400);
 });

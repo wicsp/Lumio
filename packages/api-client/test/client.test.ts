@@ -18,7 +18,7 @@ test("client encodes references/options and validates all success schemas", asyn
       expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer synthetic-token"); expect(init?.redirect).toBe("error");
       expect(url.searchParams.get("include_private")).toBe("true");
       if (row.method === "search") { expect(url.searchParams.get("q")).toBe(row.argument); expect(url.searchParams.get("type")).toBe("idea"); expect(url.searchParams.get("limit")).toBe("2"); }
-      else expect(url.pathname).toBe(`/v1/notes/${encodeURIComponent(row.argument)}${row.method === "links" ? "/links" : ""}`);
+      else expect(url.pathname).toBe(`/v2/knowledge/notes/${encodeURIComponent(row.argument)}${row.method === "links" ? "/links" : ""}`);
     }) });
     const result = await client[row.method](row.argument, { includePrivate: true, type: "idea", limit: 2 });
     expect(result).toEqual(row.schema.parse(row.body));
@@ -53,7 +53,7 @@ const proposal = { id: "prop_00000000000000000000000001", operation, reason: "Di
 test("check encodes visibility, validates CheckResult and propagates authorization errors", async () => {
   const body = CheckResult.parse({ unsupported_work_notes: [], dangling: [{ from: note, source: "wikilink", target: "Missing" }], total: 1 });
   const client = createClient({ url: "http://localhost/", token: "synthetic-token", fetch: mock(body, 200, (url, init) => {
-    expect(url.pathname).toBe("/v1/check"); expect(url.searchParams.get("include_private")).toBe("true");
+    expect(url.pathname).toBe("/v2/knowledge/check"); expect(url.searchParams.get("include_private")).toBe("true");
     expect(init?.method).toBe("GET"); expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer synthetic-token");
   }) });
   expect(await client.check({ includePrivate: true })).toEqual(body);
@@ -67,14 +67,14 @@ test("check encodes visibility, validates CheckResult and propagates authorizati
 
 test("operation/proposal/actors methods use their endpoints, methods, request bodies and success schemas", async () => {
   const cases = [
-    { path: "/v1/runtimes", body: [{ actor: proposal.author, update: null, registration: { version: null, platform: null, install: null, protocol_version: 2, name: "server", engines: [], tags: [], max_concurrent: 1 }, last_seen: proposal.created, online: true }], call: (client: ReturnType<typeof createClient>) => client.runtimes() },
-    { path: "/v1/actors", body: [{ id: proposal.author, name: "codex", role: "agent", created: proposal.created }], call: (client: ReturnType<typeof createClient>) => client.actors() },
-    { path: "/v1/proposals?status=pending", body: [proposal], call: (client: ReturnType<typeof createClient>) => client.proposals() },
-    { path: "/v1/proposals?status=rejected", body: [{ ...proposal, status: "rejected" }], call: (client: ReturnType<typeof createClient>) => client.proposals("rejected") },
-    { path: "/v1/operations", body: { status: "pending_approval", proposal }, payload: { operation, reason: proposal.reason }, status: 202, call: (client: ReturnType<typeof createClient>) => client.operation({ operation, reason: proposal.reason }) },
-    { path: "/v1/operations", body: { status: "applied", operation }, payload: { operation }, call: (client: ReturnType<typeof createClient>) => client.operation({ operation }) },
-    { path: `/v1/proposals/${proposal.id}/accept`, body: { ...proposal, status: "accepted" }, payload: {}, call: (client: ReturnType<typeof createClient>) => client.acceptProposal(proposal.id) },
-    { path: `/v1/proposals/${proposal.id}/reject`, body: { ...proposal, status: "rejected" }, payload: {}, call: (client: ReturnType<typeof createClient>) => client.rejectProposal(proposal.id) },
+    { path: "/v2/execution/runtimes", body: [{ actor: proposal.author, update: null, registration: { version: null, platform: null, install: null, protocol_version: 2, name: "server", engines: [], tags: [], max_concurrent: 1 }, last_seen: proposal.created, online: true }], call: (client: ReturnType<typeof createClient>) => client.runtimes() },
+    { path: "/v2/system/actors", body: [{ id: proposal.author, name: "codex", role: "agent", created: proposal.created }], call: (client: ReturnType<typeof createClient>) => client.actors() },
+    { path: "/v2/approval/proposals?status=pending", body: [proposal], call: (client: ReturnType<typeof createClient>) => client.proposals() },
+    { path: "/v2/approval/proposals?status=rejected", body: [{ ...proposal, status: "rejected" }], call: (client: ReturnType<typeof createClient>) => client.proposals("rejected") },
+    { path: "/v2/approval/privileged", body: { status: "pending_approval", proposal }, payload: { operation, reason: proposal.reason }, status: 202, call: (client: ReturnType<typeof createClient>) => client.operation({ operation, reason: proposal.reason }) },
+    { path: "/v2/approval/privileged", body: { status: "applied", operation }, payload: { operation }, call: (client: ReturnType<typeof createClient>) => client.operation({ operation }) },
+    { path: `/v2/approval/proposals/${proposal.id}/accept`, body: { ...proposal, status: "accepted" }, payload: {}, call: (client: ReturnType<typeof createClient>) => client.acceptProposal(proposal.id) },
+    { path: `/v2/approval/proposals/${proposal.id}/reject`, body: { ...proposal, status: "rejected" }, payload: {}, call: (client: ReturnType<typeof createClient>) => client.rejectProposal(proposal.id) },
   ];
   for (const row of cases) {
     const client = createClient({ url: "http://localhost", token: "synthetic-token", fetch: mock(row.body, "status" in row ? row.status : 200, (url, init) => {
@@ -96,10 +96,10 @@ test("job client validates request defaults, Job output and errors at all four e
   const { Job } = await import("@lumio/schema");
   const job = Job.parse({ spec: { protocol_version: 2, id: "job_00000000000000000000000001", runtime: "act_00000000000000000000000001", lease: "synthetic_lease_123456", run: { kind: "command", argv: ["/bin/echo"] }, workdir: "~", timeout_seconds: 7200, created: "2026-01-01T00:00:00Z" }, status: "queued" });
   const cases = [
-    { path: "/v1/jobs", payload: { runtime: "server", run: job.spec.run, workdir: "~", timeout_seconds: 7200 }, body: job, call: (c: ReturnType<typeof createClient>) => c.submitJob({ runtime: "server", run: { kind: "command", argv: ["/bin/echo"] } }) },
-    { path: "/v1/jobs?status=queued", body: [job], call: (c: ReturnType<typeof createClient>) => c.jobs("queued") },
-    { path: `/v1/jobs/${job.spec.id}`, body: job, call: (c: ReturnType<typeof createClient>) => c.job(job.spec.id) },
-    { path: `/v1/jobs/${job.spec.id}/cancel`, payload: {}, body: job, call: (c: ReturnType<typeof createClient>) => c.cancelJob(job.spec.id) },
+    { path: "/v2/execution/jobs", payload: { runtime: "server", run: job.spec.run, workdir: "~", timeout_seconds: 7200 }, body: job, call: (c: ReturnType<typeof createClient>) => c.submitJob({ runtime: "server", run: { kind: "command", argv: ["/bin/echo"] } }) },
+    { path: "/v2/execution/jobs?status=queued", body: [job], call: (c: ReturnType<typeof createClient>) => c.jobs("queued") },
+    { path: `/v2/execution/jobs/${job.spec.id}`, body: job, call: (c: ReturnType<typeof createClient>) => c.job(job.spec.id) },
+    { path: `/v2/execution/jobs/${job.spec.id}/cancel`, payload: {}, body: job, call: (c: ReturnType<typeof createClient>) => c.cancelJob(job.spec.id) },
   ];
   for (const row of cases) {
     const client = createClient({ url: "http://localhost", token: "synthetic", fetch: mock(row.body, 200, (url, init) => {
@@ -119,9 +119,9 @@ test("pairing client validates invites and join, omits anonymous authorization, 
   const actor = "act_00000000000000000000000001", code = "a".repeat(26);
   const invite = { name: "server", actor, code, expires: "2026-10-28T00:10:00Z", hub_url: "https://synthetic.example", command: "synthetic-command" };
   const cases = [
-    { path: "/v1/runtime-invites", body: invite, payload: { name: "server" }, call: (c: ReturnType<typeof createClient>) => c.runtimeInvite("server") },
-    { path: "/v1/client-invites", body: { name: "cli@synthetic", code, expires: invite.expires, hub_url: invite.hub_url, command: "synthetic-command" }, payload: { name: "cli@synthetic" }, call: (c: ReturnType<typeof createClient>) => c.clientInvite("cli@synthetic") },
-    { path: "/v1/client/join", body: { actor, token: "synthetic-token" }, payload: { code }, call: (c: ReturnType<typeof createClient>) => c.clientJoin(code) },
+    { path: "/v2/setup/runtime-invites", body: invite, payload: { name: "server" }, call: (c: ReturnType<typeof createClient>) => c.runtimeInvite("server") },
+    { path: "/v2/setup/client-invites", body: { name: "cli@synthetic", code, expires: invite.expires, hub_url: invite.hub_url, command: "synthetic-command" }, payload: { name: "cli@synthetic" }, call: (c: ReturnType<typeof createClient>) => c.clientInvite("cli@synthetic") },
+    { path: "/v2/setup/client/join", body: { actor, token: "synthetic-token" }, payload: { code }, call: (c: ReturnType<typeof createClient>) => c.clientJoin(code) },
   ];
   for (const row of cases) {
     const client = createClient({ url: "https://synthetic.example", fetch: mock(row.body, 200, (url, init) => {
@@ -132,7 +132,7 @@ test("pairing client validates invites and join, omits anonymous authorization, 
     await expect(row.call(createClient({ url: "https://synthetic.example", fetch: mock({ error: { code: "UNAUTHENTICATED", message: "pairing failed" } }, 401) }))).rejects.toMatchObject({ code: "UNAUTHENTICATED", status: 401 });
   }
   const client = createClient({ url: "https://synthetic.example", token: "synthetic", fetch: (async (url: URL, init: RequestInit) => {
-    expect(url.pathname).toBe("/v1/runtimes/server"); expect(init.method).toBe("DELETE"); expect(new Headers(init.headers).get("Authorization")).toBe("Bearer synthetic"); return new Response(null, { status: 204 });
+    expect(url.pathname).toBe("/v2/execution/runtimes/server"); expect(init.method).toBe("DELETE"); expect(new Headers(init.headers).get("Authorization")).toBe("Bearer synthetic"); return new Response(null, { status: 204 });
   }) as unknown as typeof fetch });
   expect(await client.removeRuntime("server")).toBeUndefined();
 });

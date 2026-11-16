@@ -22,14 +22,14 @@ test("runtime join succeeds across versions, warns once on mismatch and installs
     const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(req) {
       const path = new URL(req.url).pathname; paths.push(path);
       if (path === "/health") return Response.json({ ok: true, version: hubVersion });
-      expect(path).toBe("/v1/runtime/join");
+      expect(path).toBe("/v2/setup/runtime/join");
       expect(JoinRequest.parse(await req.json())).toEqual({ code });
       return Response.json(joined);
     } });
     try {
       await joinRuntime(["--hub", server.url.href, "--code", code], { home, env: {}, log: (l) => logs.push(l), warn: (l) => warnings.push(l), install: async () => { installed = true; } });
       expect(installed).toBe(true);
-      expect(paths).toEqual(["/health", "/v1/runtime/join"]);
+      expect(paths).toEqual(["/health", "/v2/setup/runtime/join"]);
       expect(parseEnvironment(await readFile(join(home, ".config/lumio-runtime/runtime.env"), "utf8")).LUMIO_TOKEN).toBe(joined.token);
       expect(warnings).toEqual(hubVersion === "0.0.0-dev" ? [] : [`警告：Hub 是 ${hubVersion}，本程序是 0.0.0-dev，建议保持一致`]);
       expect([...logs, ...warnings].join("\n")).not.toContain(secret);
@@ -62,7 +62,7 @@ test("pairing diagnoses HTTP failures regardless of version and requests an upgr
       const error = await attempt(server.url.href.replace(/\/$/, ""));
       expect(paths[0]).toBe("/health");
       expect(error.includes("请先升级 Hub")).toBe(scenario === "missing-join");
-      expect(paths).toEqual(scenario === "missing-health" ? ["/health"] : ["/health", "/v1/runtime/join"]);
+      expect(paths).toEqual(scenario === "missing-health" ? ["/health"] : ["/health", "/v2/setup/runtime/join"]);
       if (scenario === "missing-health") expect(error).toContain("/health HTTP 404");
       if (scenario === "unauthorized") { expect(error).toContain("配对码无效、过期或已用"); expect(error).toContain("lumio runtime add <名称>"); }
       if (scenario === "other") expect(error).toContain("HTTP 503");

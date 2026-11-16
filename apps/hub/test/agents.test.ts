@@ -22,14 +22,14 @@ const base = () => `http://127.0.0.1:${hub!.server.port}`;
 async function request(path: string, body?: unknown) {
   return fetch(`${base()}${path}`, { method: body === undefined ? "GET" : "POST", headers: { "Accept-Language": "zh", Authorization: `Bearer ${human}`, "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 }
-async function get(id: string) { return Job.parse(await (await request(`/v1/jobs/${id}`)).json()); }
+async function get(id: string) { return Job.parse(await (await request(`/v2/execution/jobs/${id}`)).json()); }
 async function eventually(check: () => boolean | Promise<boolean>, timeout = 15_000) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) { if (await check()) return; await Bun.sleep(30); }
   throw new Error("timed out");
 }
 async function submit(run: object, fields: object = {}) {
-  const response = await request("/v1/jobs", { runtime: "server", workdir: repo, run: { kind: "agent", ...run }, ...fields });
+  const response = await request("/v2/execution/jobs", { runtime: "server", workdir: repo, run: { kind: "agent", ...run }, ...fields });
   return { response, job: response.status === 200 ? Job.parse(await response.json()) : undefined };
 }
 async function done(id: string) { await eventually(async () => (await get(id)).result !== undefined); return get(id); }
@@ -40,7 +40,7 @@ async function startRuntime(env: Record<string, string> = {}) {
     LUMIO_RUNTIME_POLL_SECONDS: "0.03", LUMIO_RUNTIME_STATE_DIR: join(temp, "runtime"), FAKE_LOG: fakeLog, ...env,
   }, stdout: "pipe", stderr: "pipe" });
   daemons.push(child);
-  await eventually(async () => RuntimeInfo.array().parse(await (await request("/v1/runtimes")).json()).length === 1);
+  await eventually(async () => RuntimeInfo.array().parse(await (await request("/v2/execution/runtimes")).json()).length === 1);
 }
 beforeEach(async () => {
   temp = await mkdtemp(join(tmpdir(), "lumio-agents-")); bin = join(temp, "bin"); repo = join(temp, "repo"); fakeLog = join(temp, "calls.jsonl");
@@ -65,7 +65,7 @@ afterEach(async () => {
 
 test("registers fake agents; three engines run non-interactively and return report, session and engine info", async () => {
   await startRuntime();
-  const engines = RuntimeInfo.array().parse(await (await request("/v1/runtimes")).json())[0]!.registration.engines;
+  const engines = RuntimeInfo.array().parse(await (await request("/v2/execution/runtimes")).json())[0]!.registration.engines;
   expect(engines.map((e) => [e.name, e.version, e.sandbox])).toEqual([["codex", "0.163.0", "os"], ["claude-code", "2.1.310", "none"], ["pi", "1.4.0", "none"]]);
   for (const engine of ["codex", "claude-code", "pi"] as const) {
     const { job } = await submit({ engine, prompt: `你好 ${engine}`, session: { id: "s-1", resume: false } });
@@ -119,7 +119,7 @@ test("versions outside the verified range fail without running; Hub rejects engi
   daemons = [];
   await rm(join(bin, "codex"));
   await startRuntime();
-  await eventually(async () => !RuntimeInfo.array().parse(await (await request("/v1/runtimes")).json())[0]!.registration.engines.some((e) => e.name === "codex"));
+  await eventually(async () => !RuntimeInfo.array().parse(await (await request("/v2/execution/runtimes")).json())[0]!.registration.engines.some((e) => e.name === "codex"));
   expect((await submit({ engine: "codex", prompt: "x" })).response.status).toBe(400);
   const slow = (await done((await submit({ engine: "pi", prompt: "SLEEP" }, { timeout_seconds: 1 })).job!.spec.id)).result!;
   expect(slow.status).toBe("failed"); expect(slow.error).toBe("timeout");

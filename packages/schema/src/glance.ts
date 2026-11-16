@@ -9,7 +9,7 @@ import { ResourceRef } from "./work.ts";
  * 本机识字块、App 与窗口标题、已知浏览器的网址。所见记录存在 `hub.sqlite`，属于 Hub 的跨模块协调数据（与捕获 `cap_` 同级），
  * 截图存为 Hub 托管文件（`art_`），不进 vault。所见不是 ResourceRef：它通过 `used_by` 与捕获或消息关联。
  *
- * 小助手是 human 客户端：用 `POST /v1/client-invites` 生成配对码（令牌标签如 `desktop@macbook`）、`POST /v1/client/join` 换取 human 令牌，
+ * 小助手是 human 客户端：用 `POST /v2/setup/client-invites` 生成配对码（令牌标签如 `desktop@macbook`）、`POST /v2/setup/client/join` 换取 human 令牌，
  * 不需要新的配对接口。只有人按下物理按键时才采集；Hub 没有任何接口能让小助手截屏或录音。
  *
  * 坐标一律是**截图像素坐标**（原点在左上角），小助手负责从屏幕坐标换算（Retina 缩放、多显示器）。

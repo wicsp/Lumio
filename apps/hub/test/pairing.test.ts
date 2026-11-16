@@ -23,7 +23,7 @@ function request(path: string, token?: string, body?: unknown, method?: string) 
   return fetch(base() + path, { method: method ?? (body === undefined ? "GET" : "POST"), headers: { "Accept-Language": "zh", ...(token ? { Authorization: `Bearer ${token}` } : {}), "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: typeof body === "string" ? body : JSON.stringify(body) }) });
 }
 const invite = async (kind: "runtime" | "client" = "runtime", name = kind === "runtime" ? "server" : "cli@mac") => {
-  const response = await request(`/v1/${kind}-invites`, human, { name }); expect(response.status).toBe(200);
+  const response = await request(`/v2/setup/${kind}-invites`, human, { name }); expect(response.status).toBe(200);
   return (kind === "runtime" ? RuntimeInvite : ClientInvite).parse(await response.json());
 };
 beforeEach(async () => {
@@ -53,11 +53,11 @@ test("explicit authorization table permits only public join, human invites/remov
     expect(authorize(actor, { operation }).result).toBe((operation.endsWith(".join") ? role === null : operation === "runtime.signing-key" ? role === "runtime" : role === "human") ? "allow" : "deny");
   }
   for (const kind of ["runtime", "client"]) for (const token of [undefined, agent, runtime]) {
-    expect((await request(`/v1/${kind}-invites`, token, "{")).status).toBe(token ? 403 : 401);
+    expect((await request(`/v2/setup/${kind}-invites`, token, "{")).status).toBe(token ? 403 : 401);
   }
-  for (const token of [human, agent]) expect((await request("/v1/runtime/signing-key", token)).status).toBe(403);
-  const key = HubSigningKey.parse(await (await request("/v1/runtime/signing-key", runtime)).json()); expect(key.fingerprint).toMatch(/^[a-f0-9]{4}(-[a-f0-9]{4}){3}$/);
-  for (const token of [agent, runtime]) expect((await request("/v1/runtimes/server", token, undefined, "DELETE")).status).toBe(403);
+  for (const token of [human, agent]) expect((await request("/v2/setup/runtime/signing-key", token)).status).toBe(403);
+  const key = HubSigningKey.parse(await (await request("/v2/setup/runtime/signing-key", runtime)).json()); expect(key.fingerprint).toMatch(/^[a-f0-9]{4}(-[a-f0-9]{4}){3}$/);
+  for (const token of [agent, runtime]) expect((await request("/v2/execution/runtimes/server", token, undefined, "DELETE")).status).toBe(403);
 });
 
 test("new invite invalidates old codes, persists only hashes, expires exactly at ten minutes and returns identical 401", async () => {
@@ -66,10 +66,10 @@ test("new invite invalidates old codes, persists only hashes, expires exactly at
     expect(first.code).toHaveLength(26); expect(next.code).not.toBe(first.code);
     expect(next.command).toContain("--code " + next.code); expect(next.hub_url).toBe("https://synthetic.example");
     expect(Date.parse(next.expires) - now).toBe(600_000);
-    const failure = await request(`/v1/${kind}/join`, undefined, { code: first.code }); expect(failure.status).toBe(401); const error = await failure.json();
+    const failure = await request(`/v2/setup/${kind}/join`, undefined, { code: first.code }); expect(failure.status).toBe(401); const error = await failure.json();
     now += 600_000;
     for (const body of [{ code: next.code }, { code: "z".repeat(26) }, "{", { code: next.code, extra: true }]) {
-      const res = await request(`/v1/${kind}/join`, undefined, body); expect(res.status).toBe(401); expect(await res.json()).toEqual(error);
+      const res = await request(`/v2/setup/${kind}/join`, undefined, body); expect(res.status).toBe(401); expect(await res.json()).toEqual(error);
     }
     now += 60_001;
     const stored = JSON.stringify(hub.store.db.query("SELECT * FROM pairing_codes").all()); expect(stored).not.toContain(first.code); expect(stored).not.toContain(next.code);
@@ -79,34 +79,34 @@ test("new invite invalidates old codes, persists only hashes, expires exactly at
 test("join is atomic and single-use, revokes every old runtime token, client token belongs to inviting human; kinds cannot mix", async () => {
   const secondOld = hub.store.createToken("second-old", "server");
   const r = await invite(), c = await invite("client");
-  for (const [kind, code] of [["client", r.code], ["runtime", c.code]]) expect((await request(`/v1/${kind}/join`, undefined, { code })).status).toBe(401);
-  const responses = await Promise.all([request("/v1/runtime/join", undefined, { code: r.code }), request("/v1/runtime/join", undefined, { code: r.code })]);
+  for (const [kind, code] of [["client", r.code], ["runtime", c.code]]) expect((await request(`/v2/setup/${kind}/join`, undefined, { code })).status).toBe(401);
+  const responses = await Promise.all([request("/v2/setup/runtime/join", undefined, { code: r.code }), request("/v2/setup/runtime/join", undefined, { code: r.code })]);
   expect(responses.map((r) => r.status).sort()).toEqual([200, 401]);
   const joined = RuntimeJoin.parse(await responses.find((r) => r.status === 200)!.json());
   expect(hub.store.authenticate(`Bearer ${runtime}`)).toBeNull(); expect(hub.store.authenticate(`Bearer ${secondOld}`)).toBeNull();
   const registration = RuntimeRegistration.parse({ protocol_version: 2, name: "server", engines: [], tags: [], max_concurrent: 1 });
   const info = RuntimeRegistered.parse(await (await request("/v1/runtime/register", joined.token, registration)).json()); expect(info.actor).toBe(joined.actor);
-  const client = ClientJoin.parse(await (await request("/v1/client/join", undefined, { code: c.code })).json());
+  const client = ClientJoin.parse(await (await request("/v2/setup/client/join", undefined, { code: c.code })).json());
   expect(hub.store.authenticate(`Bearer ${client.token}`)!.actor.id).toBe(hub.store.authenticate(`Bearer ${human}`)!.actor.id);
-  expect((await request("/v1/runtime-invites", human, { name: "owner" })).status).toBe(409);
+  expect((await request("/v2/setup/runtime-invites", human, { name: "owner" })).status).toBe(409);
   const audit = JSON.stringify(hub.store.db.query("SELECT * FROM audit").all());
   for (const secret of [r.code, c.code, human, agent, runtime, secondOld, joined.token, client.token]) expect(logs.join("\n") + audit).not.toContain(secret);
   expect(audit).toContain('server'); expect(audit).toContain(joined.actor);
-  const history = Job.parse(await (await request("/v1/jobs", human, { runtime: "server", run: { kind: "command", argv: ["/bin/echo", "synthetic"] } })).json());
+  const history = Job.parse(await (await request("/v2/execution/jobs", human, { runtime: "server", run: { kind: "command", argv: ["/bin/echo", "synthetic"] } })).json());
   const fresh = await invite();
-  expect((await request("/v1/runtimes/server", human, undefined, "DELETE")).status).toBe(204);
+  expect((await request("/v2/execution/runtimes/server", human, undefined, "DELETE")).status).toBe(204);
   expect(hub.store.authenticate(`Bearer ${joined.token}`)).toBeNull(); expect(hub.store.runtimes(new Date(now))).toHaveLength(1);
-  expect((await request(`/v1/jobs/${history.spec.id}`, human)).status).toBe(200);
-  expect((await request("/v1/runtime/join", undefined, { code: fresh.code })).status).toBe(401);
+  expect((await request(`/v2/execution/jobs/${history.spec.id}`, human)).status).toBe(200);
+  expect((await request("/v2/setup/runtime/join", undefined, { code: fresh.code })).status).toBe(401);
 });
 
 test("global failure budget is shared across both joins, blocks even valid codes for one minute, and invites survive Hub restart", async () => {
   const r = await invite();
   await hub.stop(); hub = await boot();
-  for (let i = 0; i < 10; i++) expect((await request(`/v1/${i % 2 ? "client" : "runtime"}/join`, undefined, { code: "z".repeat(26) })).status).toBe(401);
-  expect((await request("/v1/runtime/join", undefined, { code: r.code })).status).toBe(401);
-  now += 59_999; expect((await request("/v1/runtime/join", undefined, { code: r.code })).status).toBe(401);
-  now += 1; expect((await request("/v1/runtime/join", undefined, { code: r.code })).status).toBe(200);
+  for (let i = 0; i < 10; i++) expect((await request(`/v2/setup/${i % 2 ? "client" : "runtime"}/join`, undefined, { code: "z".repeat(26) })).status).toBe(401);
+  expect((await request("/v2/setup/runtime/join", undefined, { code: r.code })).status).toBe(401);
+  now += 59_999; expect((await request("/v2/setup/runtime/join", undefined, { code: r.code })).status).toBe(401);
+  now += 1; expect((await request("/v2/setup/runtime/join", undefined, { code: r.code })).status).toBe(200);
 });
 
 test("real Hub + CLI runtime add + join with temporary HOME connects a foreground runtime without system services", async () => {
@@ -134,14 +134,14 @@ test("real Hub + CLI runtime add + join with temporary HOME connects a foregroun
 }, 15_000);
 
 test("logging in again from the same machine revokes the previous CLI token; a label held by another identity is refused (P2-11)", async () => {
-  const first = ClientJoin.parse(await (await request("/v1/client/join", undefined, { code: (await invite("client", "cli@mac")).code })).json());
-  const second = ClientJoin.parse(await (await request("/v1/client/join", undefined, { code: (await invite("client", "cli@mac")).code })).json());
+  const first = ClientJoin.parse(await (await request("/v2/setup/client/join", undefined, { code: (await invite("client", "cli@mac")).code })).json());
+  const second = ClientJoin.parse(await (await request("/v2/setup/client/join", undefined, { code: (await invite("client", "cli@mac")).code })).json());
   expect(hub.store.authenticate(`Bearer ${first.token}`)).toBeNull();
   expect(hub.store.authenticate(`Bearer ${second.token}`)).not.toBeNull();
   expect(hub.store.tokens().filter((t) => t.label === "cli@mac")).toHaveLength(1);
   // 别的身份（agent）已有同名令牌：不能为它顶掉。
   hub.store.createToken("cli@shared", "agent");
-  const refused = await request("/v1/client-invites", human, { name: "cli@shared" });
+  const refused = await request("/v2/setup/client-invites", human, { name: "cli@shared" });
   expect(refused.status).toBe(409);
   expect(ApiError.parse(await refused.json()).error.message).toContain("--name");
 });
@@ -151,7 +151,7 @@ test("without a public URL clients can pair using the bound local address", asyn
   const invitation = ClientInvite.parse(await invite("client", "extension"));
   expect(invitation.hub_url).toBe(base());
   expect(invitation.command).toBe(`lumio login ${base()} --code ${invitation.code}`);
-  const response = await fetch(new URL("/v1/client/join", invitation.hub_url), {
+  const response = await fetch(new URL("/v2/setup/client/join", invitation.hub_url), {
     method: "POST",
     headers: { Origin: "chrome-extension://abcdefghijklmnopabcdefghijklmnop", "Content-Type": "application/json" },
     body: JSON.stringify({ code: invitation.code }),
@@ -164,7 +164,7 @@ test("without a public URL clients can pair using the bound local address", asyn
 
 test("without a public URL the runtime pairing hint names --public-url and --server", async () => {
   await hub.stop(); hub = await boot("");
-  const response = await request("/v1/runtime-invites", human, { name: "server" });
+  const response = await request("/v2/setup/runtime-invites", human, { name: "server" });
   expect(response.status).toBe(400);
   const message = ApiError.parse(await response.json()).error.message;
   expect(message).toContain("Hub 还没有对外地址");

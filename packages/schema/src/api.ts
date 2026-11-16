@@ -7,7 +7,7 @@ import { Proposal } from "./proposal.ts";
  * Hub API 的通用请求与响应（ADR 0016 第 2–4 节）。
  */
 
-/** `POST /v1/operations` 的请求体。 */
+/** `POST /v2/approval/privileged` 的请求体。 */
 export const OperationRequest = z.strictObject({
   operation: Operation,
   reason: z
@@ -19,7 +19,7 @@ export const OperationRequest = z.strictObject({
 });
 
 /**
- * `POST /v1/operations` 的成功响应。授权结果为"允许"时立即执行（applied）；
+ * `POST /v2/approval/privileged` 的成功响应。授权结果为"允许"时立即执行（applied）；
  * 为"需要批准"时生成一条提议（pending_approval，HTTP 202）。"拒绝"走 ApiError。
  */
 export const OperationResult = z.discriminatedUnion("status", [

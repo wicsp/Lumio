@@ -140,7 +140,7 @@ test("setup connects a real synthetic Hub and local runtime through HTTP without
       },
     });
     const config = await f.config();
-    const response = await fetch(`${config.hub_url}/v1/runtimes`, { headers: { "Accept-Language": "zh", Authorization: `Bearer ${config.token}` } });
+    const response = await fetch(`${config.hub_url}/v2/execution/runtimes`, { headers: { "Accept-Language": "zh", Authorization: `Bearer ${config.token}` } });
     const runtimes = await response.json() as { online: boolean; registration: { name: string } }[];
     expect(runtimes).toHaveLength(1); expect(runtimes[0]).toMatchObject({ online: true, registration: { name: "my-mac.local" } });
   } finally { if (child) { child.kill(); await child.exited; } await hub?.stop(); }

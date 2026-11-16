@@ -20,13 +20,13 @@ test("login succeeds across versions, warns once on mismatch and saves the valid
     const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(req) {
       const path = new URL(req.url).pathname; paths.push(path);
       if (path === "/health") return Response.json({ ok: true, version: hubVersion });
-      expect(path).toBe("/v1/client/join");
+      expect(path).toBe("/v2/setup/client/join");
       expect(JoinRequest.parse(await req.json())).toEqual({ code });
       return Response.json(joined);
     } });
     try {
       expect(await runPairing(["login", server.url.href, "--code", code], { home, log: (l) => logs.push(l), warn: (l) => warnings.push(l) })).toBe(0);
-      expect(paths).toEqual(["/health", "/v1/client/join"]);
+      expect(paths).toEqual(["/health", "/v2/setup/client/join"]);
       expect(CliConfig.parse(JSON.parse(await readFile(join(home, ".config/lumio/config.json"), "utf8"))).token).toBe(joined.token);
       expect(warnings).toEqual(hubVersion === "0.0.0-dev" ? [] : [`警告：Hub 是 ${hubVersion}，本程序是 0.0.0-dev，建议保持一致`]);
       expect(logs).toEqual(["CLI 已登录"]);
@@ -60,7 +60,7 @@ test("pairing diagnoses HTTP failures regardless of version and requests an upgr
       const error = await attempt(server.url.href.replace(/\/$/, ""));
       expect(paths[0]).toBe("/health");
       expect(error.includes("请先升级 Hub")).toBe(scenario === "missing-join");
-      expect(paths).toEqual(scenario === "missing-health" ? ["/health"] : ["/health", "/v1/client/join"]);
+      expect(paths).toEqual(scenario === "missing-health" ? ["/health"] : ["/health", "/v2/setup/client/join"]);
       if (scenario === "missing-health") expect(error).toContain("/health HTTP 404");
       if (scenario === "unauthorized") { expect(error).toContain("配对码无效、过期或已用"); expect(error).toContain("lumio login-code"); }
       if (scenario === "other") expect(error).toContain("HTTP 503");

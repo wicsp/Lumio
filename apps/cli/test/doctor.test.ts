@@ -12,7 +12,7 @@ const routine = { routine: { schema_version: 2, revision: 1, id: "rtn_0000000000
 function fixture() {
   const files: Record<string, string> = { "/synthetic/.config/lumio/config.json": JSON.stringify({ hub_url: "http://127.0.0.1:7420", token }), "/synthetic/.config/lumio/hub.env": 'LUMIO_PUBLIC_URL="http://remote.synthetic"' };
   const modes: Record<string, number> = {};
-  const bodies: Record<string, unknown> = { "/health": { ok: true, version: "0.0.0-dev" }, "/v1/actors": [], "/v1/status": { watching: true, issues: [] }, "/v1/runtimes": [runtime], "/v2/execution/routines": [routine], "/v1/proposals": [] };
+  const bodies: Record<string, unknown> = { "/health": { ok: true, version: "0.0.0-dev" }, "/v2/system/actors": [], "/v2/system/status": { watching: true, issues: [] }, "/v2/execution/runtimes": [runtime], "/v2/execution/routines": [routine], "/v2/approval/proposals": [] };
   const fail = new Set<string>(), commands: string[][] = [], urls: string[] = [];
   const options: DoctorOptions = { home: "/synthetic", env: {}, uid: 501, find: () => null, platform: "darwin",
     realpath: async () => "/synthetic/.local/bin/lumio",
@@ -35,7 +35,7 @@ test("CLI doctor reports every item, HTTP warning and pending proposals without 
   expect(checks.some((c) => c.name === "对外地址警告")).toBe(true);
   expect(f.commands).toEqual([["/synthetic/.local/bin/lumio", "--version"], ["/synthetic/.local/bin/lumio-hub", "--version"], ["/synthetic/.local/bin/lumio-runtime", "--version"], ["launchctl", "list"], ["launchctl", "print", "gui/501/io.lumio.hub"], ["launchctl", "print", "gui/501/io.lumio.runtime"]]);
   const output: string[] = []; expect(printChecks(checks, false, (l) => output.push(l))).toBe(0); expect(output.at(-1)).toMatch(/项通过/);
-  f.bodies["/v1/proposals"] = [{ id: "prop_00000000000000000000000001", author: runtime.actor, reason: "synthetic", status: "pending", created: runtime.last_seen,
+  f.bodies["/v2/approval/proposals"] = [{ id: "prop_00000000000000000000000001", author: runtime.actor, reason: "synthetic", status: "pending", created: runtime.last_seen,
     operation: { op: "exec.privileged", args: { runtime: runtime.actor, job: "job_00000000000000000000000001", argv: ["/bin/true"] } } }];
   checks = await doctor(f.options); expect(checks.find((c) => c.name === "提议提醒")!.problem).toContain("1 项待批准");
   expect(JSON.stringify(checks)).not.toContain(token);
@@ -44,7 +44,7 @@ test("CLI doctor reports every item, HTTP warning and pending proposals without 
   checks = await doctor(f.options); expect(f.commands.every(command => command.includes("--version"))).toBe(true); expect(checks.every((c) => c.ok)).toBe(true);
 });
 test("CLI doctor isolates config, permissions, health, auth, vault, services, runtime, routine and public URL failures", async () => {
-  for (const route of ["/", "/assets/app.js", "/health", "/v1/actors", "/v1/status", "/v1/runtimes", "/v2/execution/routines", "/v1/proposals", "service"]) {
+  for (const route of ["/", "/assets/app.js", "/health", "/v2/system/actors", "/v2/system/status", "/v2/execution/runtimes", "/v2/execution/routines", "/v2/approval/proposals", "service"]) {
     const f = fixture(); f.fail.add(route); const checks = await doctor(f.options);
     expect(checks.some((c) => !c.ok)).toBe(true); expect(checks.at(-1)!.name).toBe("待批准提议");
     expect(JSON.stringify(checks)).not.toContain(token); expect(checks.filter((c) => !c.ok).every((c) => c.fix)).toBe(true);
@@ -57,8 +57,8 @@ test("CLI doctor isolates config, permissions, health, auth, vault, services, ru
     if (kind === "url") f.options.env = { LUMIO_HUB_URL: `http://user:${token}@localhost` };
     const checks = await doctor(f.options); expect(checks.some((c) => !c.ok)).toBe(true); expect(JSON.stringify(checks)).not.toContain(token);
   }
-  const f = fixture(); f.bodies["/health"] = { ok: true, version: "9.0.0" }; f.bodies["/v1/status"] = { watching: true, issues: ["合成笔记缺少标题", "合成目录不可写"] };
-  f.bodies["/v1/runtimes"] = [{ ...runtime, online: false, registration: { ...runtime.registration, engines: [{ name: "codex", version: "0.999.0", sandbox: "os" }] } }];
+  const f = fixture(); f.bodies["/health"] = { ok: true, version: "9.0.0" }; f.bodies["/v2/system/status"] = { watching: true, issues: ["合成笔记缺少标题", "合成目录不可写"] };
+  f.bodies["/v2/execution/runtimes"] = [{ ...runtime, online: false, registration: { ...runtime.registration, engines: [{ name: "codex", version: "0.999.0", sandbox: "os" }] } }];
   f.bodies["/v2/execution/routines"] = [{ ...routine, problem: "缺少 workdir" }];
   let checks = await doctor(f.options);
   expect(checks.filter((c) => c.name === "Hub 问题")).toHaveLength(2);
@@ -68,8 +68,8 @@ test("CLI doctor isolates config, permissions, health, auth, vault, services, ru
   expect(checks.find((c) => c.name === "例行任务 fixture")!.ok).toBe(false);
   f.options.env = { LUMIO_PUBLIC_URL: "ftp://invalid" }; checks = await doctor(f.options);
   expect(checks.find((c) => c.name === "对外地址 /health")!.ok).toBe(false);
-  f.bodies["/v1/runtimes"] = []; checks = await doctor(f.options); expect(checks.find((c) => c.name === "执行器")!.ok).toBe(false);
-  f.bodies["/v1/runtimes"] = [{ ...runtime, registration: { ...runtime.registration, engines: [] } }]; checks = await doctor(f.options); expect(checks.find((c) => c.name === "server agent")!.ok).toBe(false);
+  f.bodies["/v2/execution/runtimes"] = []; checks = await doctor(f.options); expect(checks.find((c) => c.name === "执行器")!.ok).toBe(false);
+  f.bodies["/v2/execution/runtimes"] = [{ ...runtime, registration: { ...runtime.registration, engines: [] } }]; checks = await doctor(f.options); expect(checks.find((c) => c.name === "server agent")!.ok).toBe(false);
   const output: string[] = []; expect(printChecks(checks, true, (l) => output.push(l))).toBe(1); expect(JSON.parse(output[0]!)).toEqual(checks);
 });
 test("CLI version ranges stay aligned with runtime adapters without cross-app imports", async () => {

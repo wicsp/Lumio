@@ -29,7 +29,7 @@ return async function pair<T>(base: string, code: string, kind: "client" | "runt
     hubVersion = body.version;
   } catch { throw new PairingError({ key: "pairing-feedback.hub_returned_an_invalid_response_health", args: [label] }); }
   if (hubVersion !== version) warn(msg("Warning: Hub is ${0}, this program is ${1}; keep versions consistent", hubVersion, version));
-  const response = await request(`/v1/${kind}/join`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) });
+  const response = await request(`/v2/setup/${kind}/join`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) });
   if (response.status === 404) throw upgradeRequired(hubVersion);
   if (response.status === 401) throw new PairingError({ key: "pairing-feedback.pairing_code_invalid_expired_or_used_run_again", args: [label, kind === "runtime" ? { key: "pairing-feedback.lumio_runtime_add_name", args: [] } : "lumio login-code"] });
   if (!response.ok) throw new PairingError({ key: "pairing-feedback.http", args: [label, response.status] });

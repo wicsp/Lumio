@@ -16,7 +16,7 @@ export const ExecPrivileged = z.strictObject({
  * agent 发起、需要人批准的 Work 命令（ADR 0031 第 2 节、ADR 0032 第 5 节）：委派一轮、设置交接计划，
  * 或保存计划模板（ADR 0049 第 6 节：一句话生成计划后由人预览保存）。
  * 提议里存完整的命令；人批准后 Hub 以原 request_id 执行，任务 revision 已变或命令已不适用时失败并说明。
- * 它只出现在提议里（ProposalOperation），不加入 v1 的 Operation，`POST /v1/operations` 不接受它。
+ * 它只出现在提议里（ProposalOperation），不加入 v1 的 Operation，`POST /v2/approval/privileged` 不接受它。
  */
 export const WorkCommandProposal = z.strictObject({
   op: z.literal("work.command"),

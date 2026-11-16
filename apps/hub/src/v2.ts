@@ -1,3 +1,4 @@
+import { JobSpec } from "@lumio/schema";
 import { text as msg } from "./messages.ts";
 import { Id, KnowledgeAiNoteCommand, KnowledgeAiNoteResult, ResourceSummary, KnowledgeGraph, KnowledgeGraphArgs, AgentInfo, AgentTokenRequest, AgentRevokeRequest, AssistantChatRequest, WorkCommandRequest, ExecutionRoutineCommandRequest, RequestId, AssistantToolCall, capability, ExecutionRoutine, PlanTemplate, WorkCommandResult, AssistantEvent, KnowledgeDeleteRequest, AssistantConversationDeleteRequest, TrashListArgs, TrashPurgeRequest, TrashRestoreRequest } from "@lumio/schema";
 import { AssistantConversation, AssistantMain, AssistantMainEnsure } from "@lumio/schema";
@@ -58,7 +59,7 @@ export const V2_ROUTES = [
   { operation: "work.read", method: "GET", pattern: /^\/v2\/work\/projects\/(prj_[0-9A-HJKMNP-TV-Z]{26})$/, path: "/v2/work/projects/<id>" },
   { operation: "work.command", method: "POST", pattern: /^\/v2\/work\/commands$/, path: "/v2/work/commands" },
   { operation: "execution.read", method: "GET", pattern: /^\/v2\/execution\/jobs$/, path: "/v2/execution/jobs" },
-  { operation: "execution.read", method: "GET", pattern: /^\/v2\/execution\/jobs\/(job_[0-9A-HJKMNP-TV-Z]{26})$/, path: "/v2/execution/jobs/<job>" },
+  { operation: "execution.read", method: "GET", pattern: /^\/v2\/execution\/jobs\/([^/]+)$/, path: "/v2/execution/jobs/<job>" },
   { operation: "execution.read", method: "GET", pattern: /^\/v2\/execution\/routines$/, path: "/v2/execution/routines" },
   { operation: "execution.read", method: "GET", pattern: /^\/v2\/execution\/routines\/(rtn_[0-9A-HJKMNP-TV-Z]{26})$/, path: "/v2/execution/routines/<id>" },
   { operation: "execution.command", method: "POST", pattern: /^\/v2\/execution\/commands$/, path: "/v2/execution/commands" },
@@ -268,7 +269,10 @@ export async function handleV2(request: Request, server: Pick<Bun.Server<undefin
     }
     const read = async (name: string, args: Record<string, unknown>) => Response.json((await modules.capabilities.execute(name, args, identity)).result);
     if (route.operation === "execution.read" && url.pathname.startsWith("/v2/execution/jobs")) {
-      return await read(id ? "execution.job.show" : "execution.job.list", id ? { job: id } : Object.fromEntries([...url.searchParams].map(([key, value]) => [key, key === "limit" ? Number(value) : value])));
+      if (id && !JobSpec.shape.id.safeParse(id).success) throw new HubError("NOT_FOUND", { key: "jobs.job_not_found", args: [] });
+      const filters = Object.fromEntries([...url.searchParams].map(([key, value]) => [key, key === "limit" ? Number(value) : value]));
+      return Response.json((await modules.capabilities.execute(id ? "execution.job.show" : "execution.job.list",
+        id ? { job: id } : filters, identity, undefined, { chronologicalJobs: !url.searchParams.has("limit") })).result);
     }
     if (route.operation === "execution.read") return id ? Response.json(ExecutionRoutine.parse(modules.routines.get(id))) : await read("execution.routine.list", {});
     if (route.operation === "work.read") {

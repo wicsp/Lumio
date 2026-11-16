@@ -16,7 +16,7 @@ export const CliConfig = z.strictObject({
 /** 一次性配对码：base32（无填充、小写），128 位以上。 */
 export const PairingCode = z.string().regex(/^[a-z2-7]{26,}$/, "配对码格式不对");
 
-/** `POST /v1/runtime-invites`（human）：为一台执行器生成配对码。 */
+/** `POST /v2/setup/runtime-invites`（human）：为一台执行器生成配对码。 */
 export const RuntimeInviteRequest = z.strictObject({ name: RuntimeName });
 
 export const RuntimeInvite = z.strictObject({
@@ -28,7 +28,7 @@ export const RuntimeInvite = z.strictObject({
   command: z.string().min(1).describe("在服务器上运行的那一行命令"),
 });
 
-/** `POST /v1/runtime/join`（不需要令牌，只认配对码）：执行器用配对码换取令牌。 */
+/** `POST /v2/setup/runtime/join`（不需要令牌，只认配对码）：执行器用配对码换取令牌。 */
 export const RuntimeJoinRequest = z.strictObject({ code: PairingCode });
 
 export const RuntimeJoin = z.strictObject({
@@ -37,7 +37,7 @@ export const RuntimeJoin = z.strictObject({
   token: z.string().min(1).describe("只在这一次响应里出现；同名的旧令牌已吊销"),
 });
 
-/** `POST /v1/client-invites`（human）：为另一台机器上的 CLI 生成配对码（`lumio login`）。 */
+/** `POST /v2/setup/client-invites`（human）：为另一台机器上的 CLI 生成配对码（`lumio login`）。 */
 export const ClientInviteRequest = z.strictObject({
   name: z.string().regex(/^[a-z0-9][a-z0-9@._-]{0,63}$/).describe("令牌标签，如 cli@macbook"),
 });
@@ -50,7 +50,7 @@ export const ClientInvite = z.strictObject({
   command: z.string().min(1).describe("在那台机器上运行的命令，如 lumio login <地址> --code <配对码>"),
 });
 
-/** `POST /v1/client/join`（不需要令牌，只认配对码）：换取一个 human 身份的令牌，写进那台机器的 CLI 配置文件。 */
+/** `POST /v2/setup/client/join`（不需要令牌，只认配对码）：换取一个 human 身份的令牌，写进那台机器的 CLI 配置文件。 */
 export const ClientJoinRequest = z.strictObject({ code: PairingCode });
 
 export const ClientJoin = z.strictObject({
@@ -58,7 +58,7 @@ export const ClientJoin = z.strictObject({
   token: z.string().min(1).describe("只在这一次响应里出现"),
 });
 
-/** `GET /v1/runtime/signing-key`（runtime）：Hub 的 Ed25519 公钥，安装提权助手时用（ADR 0020、0021）。 */
+/** `GET /v2/setup/runtime/signing-key`（runtime）：Hub 的 Ed25519 公钥，安装提权助手时用（ADR 0020、0021）。 */
 export const HubSigningKey = z.strictObject({
   public_key: z.string().regex(/^[A-Za-z0-9_-]{43}$/).describe("32 字节原始公钥，base64url"),
   fingerprint: z.string().regex(/^[0-9a-f]{4}(-[0-9a-f]{4}){3}$/).describe("公钥 SHA-256 的前 8 字节，给人核对用"),

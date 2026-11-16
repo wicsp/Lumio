@@ -84,7 +84,7 @@ export class Capabilities {
     const args = parsed.data as Record<string, unknown>;
     const aiNote = isAiNoteCapability(name);
     const operation = aiNote ? "knowledge.ai-note" : def.kind === "write" ? "work.command" : name.startsWith("knowledge.") ? name.split(".")[2]!
-      : name.startsWith("work.") ? "work.read" : name === "execution.job.list" ? "jobs" : name === "execution.job.show" ? "job.show" : name === "approval.proposal.list" ? "proposals" : "execution.read";
+      : name.startsWith("work.") ? "work.read" : name === "approval.proposal.list" ? "proposals" : "execution.read";
     const decision = this.decide(identity.actor, { operation, ...(def.kind === "write" ? { command: name, args } : {}), includePrivate });
     const taskProposal = isTaskProposalCapability(name);
     if (decision.result === "deny" || (decision.result === "needs_approval" && !taskProposal)) {
@@ -173,7 +173,7 @@ export class Capabilities {
         case "execution.target.list": result = executionTargets(this.store).filter(target => args.online !== true || target.online); break;
         case "execution.job.list": {
           const list = jobs.list(args.status as string | undefined, args.task as string | undefined, args.routine as string | undefined);
-          // The v1 compatibility route keeps its unbounded chronological presentation.
+          // HTTP history without a limit is chronological; capabilities and bounded views list the newest first.
           result = chronologicalJobs ? list : list.slice().reverse().slice(0, (args.limit as number | undefined) ?? 20); break;
         }
         case "execution.job.show": result = jobs.get(String(args.job)); break;

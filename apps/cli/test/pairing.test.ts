@@ -19,7 +19,7 @@ test("login validates join, writes private config with local vault, and asks bef
   let calls = 0;
   const fetcher = (async (url: URL, init: RequestInit) => {
     if (String(url).endsWith("/health")) return Response.json({ ok: true, version: "0.0.0-dev" });
-    calls++; expect(url.href).toBe("https://synthetic.example/v1/client/join"); expect(new Headers(init.headers).has("Authorization")).toBe(false); expect(init.redirect).toBe("error"); expect(JSON.parse(String(init.body))).toEqual({ code }); return Response.json(joined);
+    calls++; expect(url.href).toBe("https://synthetic.example/v2/setup/client/join"); expect(new Headers(init.headers).has("Authorization")).toBe(false); expect(init.redirect).toBe("error"); expect(JSON.parse(String(init.body))).toEqual({ code }); return Response.json(joined);
   }) as unknown as typeof fetch;
   await runPairing(["login", "https://synthetic.example/", "--code", code, "--vault", join(home, "local-vault")], { home, fetch: fetcher, log: (line) => logs.push(line) });
   const content = await readFile(path, "utf8");
@@ -37,7 +37,7 @@ test("runtime add supports human text and strict JSON; login-code uses a label; 
   const requests: string[] = [];
   const fetcher = (async (url: URL, init: RequestInit) => {
     requests.push(url.pathname); expect(new Headers(init.headers).get("Authorization")).toBe("Bearer synthetic-human");
-    if (init.method === "DELETE") { expect(url.pathname).toBe("/v1/runtimes/server"); return new Response(null, { status: 204 }); }
+    if (init.method === "DELETE") { expect(url.pathname).toBe("/v2/execution/runtimes/server"); return new Response(null, { status: 204 }); }
     expect(JSON.parse(String(init.body))).toEqual({ name: url.pathname.includes("runtime") ? "server" : "cli@synthetic" }); return Response.json(url.pathname.includes("runtime") ? runtime : client);
   }) as unknown as typeof fetch;
   const logs: string[] = [], options = { home, fetch: fetcher, log: (l: string) => logs.push(l) };
@@ -45,7 +45,7 @@ test("runtime add supports human text and strict JSON; login-code uses a label; 
   await runPairing(["runtime", "add", "server", "--json"], options); expect(RuntimeInvite.parse(JSON.parse(logs.shift()!))).toEqual(runtime);
   await runPairing(["login-code", "--name", "cli@synthetic"], options); expect(logs.shift()).toBe(client.command);
   await runPairing(["runtime", "remove", "server"], options); expect(logs.shift()).toContain("吊销");
-  expect(requests).toEqual(["/v1/runtime-invites", "/v1/runtime-invites", "/v1/client-invites", "/v1/runtimes/server"]);
+  expect(requests).toEqual(["/v2/setup/runtime-invites", "/v2/setup/runtime-invites", "/v2/setup/client-invites", "/v2/execution/runtimes/server"]);
 });
 test("login failures keep existing config and hide untrusted response data", async () => {
   const { home, path } = await fixture(); await mkdir(dirname(path), { recursive: true }); const old = '{"hub_url":"https://synthetic.example","token":"old-token"}'; await writeFile(path, old);
