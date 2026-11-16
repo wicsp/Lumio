@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import AVFoundation
 import LumioCaptureCore
+import ServiceManagement
 
 @MainActor final class CaptureApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     static let defaultExclusions: Set<String> = [
@@ -42,6 +43,9 @@ import LumioCaptureCore
         hotKey.onRelease = { [weak self] in self?.finish() }
         hotKey.onCancel = { [weak self] in self?.cancel() }
         refresh()
+        if Bundle.main.bundleIdentifier == "io.lumio.capture", !settings.bool(forKey: "loginConfigured") {
+            changeLogin(start: true)
+        }
         permissionObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in _ = self?.hotKey.start() }
         }
@@ -64,6 +68,13 @@ import LumioCaptureCore
         add("排除的 App…", #selector(editExclusions))
         add("权限检查", #selector(permissions))
         add(sound ? "关闭声音" : "打开声音", #selector(toggleSound))
+        if Bundle.main.bundleIdentifier == "io.lumio.capture" {
+            switch SMAppService.mainApp.status {
+            case .enabled: add("关闭登录时启动", #selector(toggleLogin))
+            case .requiresApproval: add("在系统设置允许登录时启动", #selector(openLoginSettings))
+            default: add("登录时启动", #selector(toggleLogin))
+            }
+        }
         menu.addItem(.separator())
         add("退出", #selector(quit))
         refresh()
@@ -277,6 +288,22 @@ import LumioCaptureCore
         refresh()
     }
 
+    private func changeLogin(start: Bool) {
+        do {
+            if start {
+                if SMAppService.mainApp.status == .notRegistered || SMAppService.mainApp.status == .notFound {
+                    try SMAppService.mainApp.register()
+                }
+            } else {
+                try SMAppService.mainApp.unregister()
+            }
+            settings.set(true, forKey: "loginConfigured")
+            if SMAppService.mainApp.status == .requiresApproval { panel.show("请在系统设置允许 Lumio 登录时启动") }
+        } catch { panel.show(error.localizedDescription) }
+    }
+
+    @objc private func toggleLogin() { changeLogin(start: SMAppService.mainApp.status != .enabled) }
+    @objc private func openLoginSettings() { SMAppService.openSystemSettingsLoginItems() }
     @objc private func toggleSound() { settings.set(sound, forKey: "mute") }
     @objc private func quit() { NSApp.terminate(nil) }
 }
