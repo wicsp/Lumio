@@ -7,19 +7,22 @@
     "build": "bun build --compile src/main.ts --outfile dist/lumio-hub"
   },
   "dependencies": {
-    "@lumio/schema": "workspace:*",
-    "@lumio/work": "workspace:*",
     "@lumio/assistant": "workspace:*",
-    "@lumio/storage": "workspace:*",
     "@lumio/execution": "workspace:*",
-    "@lumio/platform": "workspace:*",
-    "@lumio/knowledge": "workspace:*",
     "@lumio/foundation": "workspace:*",
+    "@lumio/knowledge": "workspace:*",
+    "@lumio/platform": "workspace:*",
+    "@lumio/schema": "workspace:*",
+    "@lumio/storage": "workspace:*",
+    "@lumio/work": "workspace:*",
     "@mozilla/readability": "^0.6.0",
+    "jpeg-js": "0.4.4",
     "linkedom": "^0.18.15",
+    "pngjs": "7.0.0",
     "turndown": "^7.2.5"
   },
   "devDependencies": {
+    "@types/pngjs": "6.0.5",
     "@types/turndown": "^5.0.6"
   }
 }

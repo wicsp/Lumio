@@ -8,6 +8,7 @@ import { HubError } from "./errors.ts";
 
 export interface StoredCapture {
   capture: Capture;
+  glanceReason?: string;
   input: CaptureCreate;
   plan?: CapturePlan;
   cardId?: string;
@@ -99,7 +100,7 @@ export class InboxStore {
     const capture = Capture.parse(value.capture);
     this.db.transaction(() => {
       this.db.query(`INSERT INTO inbox_captures VALUES (?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET record=excluded.record`)
-        .run(capture.id, capture.owner, capture.url ?? null, capture.created, JSON.stringify({ ...value, capture }));
+        .run(capture.id, capture.owner, capture.glance ? null : capture.url ?? null, capture.created, JSON.stringify({ ...value, capture }));
       this.db.query(`INSERT INTO inbox_attempts VALUES (?,?,?) ON CONFLICT(capture,attempt) DO UPDATE SET record=excluded.record`)
         .run(capture.id, capture.attempt, JSON.stringify(capture));
     })();

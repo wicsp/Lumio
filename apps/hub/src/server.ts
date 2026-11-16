@@ -33,6 +33,7 @@ import { InboxProxySettings } from "./inbox-proxy-settings.ts";
 import { configuredModel } from "./assistant-model.ts";
 import { V2_ROUTES, handleV2 } from "./v2.ts";
 import { Inbox, type InboxOptions } from "./inbox.ts";
+import { Glances } from "./glances.ts";
 import { Trash } from "./trash.ts";
 import { WriteCoordinator } from "./coordinator.ts";
 import type { AssistantModel, AssistantTool } from "@lumio/assistant";
@@ -126,9 +127,10 @@ async function startHubInstance(config: HubConfig, options: {
       action => watch.exclusive(action), (path, message) => watch.issue(path, message), options.now ?? (() => new Date()));
     const now = options.now ?? (() => new Date());
     const inboxProxy = await InboxProxySettings.open(config.stateDir);
+    modules.glances = new Glances(config, store, modules.artifacts, action => watch.exclusive(action), () => server.port!, now);
     const inbox = modules.inbox = new Inbox(config, store, modules.ai, () => modules!.trash,
       action => watch.exclusive(action), now, (path, message) => watch.issue(path, message), inboxProxy, options.inbox,
-      capture => modules!.notices.capture(capture));
+      capture => modules!.notices.capture(capture), modules.glances);
     modules.trash = new Trash(config, store, modules, action => watch.exclusive(action), now, (path, message) => watch.issue(path, message), inbox);
     await modules.trash.sweep();
     modules.trash.start();
@@ -303,8 +305,9 @@ async function startHubInstance(config: HubConfig, options: {
     });
     modules.native.setPort(server.port!);
     modules.inbox.start();
-  } catch (cause) { modules?.stop(); await modules?.inbox?.stop(); await modules?.trash?.stop(); await modules?.notices.stop(); await modules?.explorations.stop(); await modules?.notifications.stop(); await vaultWatch?.stop(); store.close(); throw cause; }
-  return { server, store, modules: modules!, async stop() { modules?.stop(); await modules?.native.stop(); await server.stop(true); await modules?.inbox.stop(); await modules?.speech.drain(); await modules?.trash?.stop(); await modules?.notices.stop(); await modules?.explorations.stop(); await modules?.notifications.stop(); await modules?.artifacts.drain(); await vaultWatch?.stop(); store.close(); } };
+    modules.glances.start();
+  } catch (cause) { modules?.stop(); await modules?.glances?.stop(); await modules?.inbox?.stop(); await modules?.trash?.stop(); await modules?.notices.stop(); await modules?.explorations.stop(); await modules?.notifications.stop(); await vaultWatch?.stop(); store.close(); throw cause; }
+  return { server, store, modules: modules!, async stop() { modules?.stop(); await modules?.native.stop(); await server.stop(true); await modules?.glances?.stop(); await modules?.inbox.stop(); await modules?.speech.drain(); await modules?.trash?.stop(); await modules?.notices.stop(); await modules?.explorations.stop(); await modules?.notifications.stop(); await modules?.artifacts.drain(); await vaultWatch?.stop(); store.close(); } };
 }
 
 /** One Hub or offline migration owns a state directory. OS locks disappear on crashes, without deleting lock files. */

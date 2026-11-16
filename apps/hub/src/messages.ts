@@ -4,6 +4,14 @@ const locale = new AsyncLocalStorage<Language>();
 export const withLanguage = <T>(lang: Language, action: () => T): T => locale.run(lang, action);
 
 export const en = {
+  "glance.invalid": "Invalid screen capture request",
+  "glance.invalid_image": "Screenshot format, size or dimensions do not match the request",
+  "glance.invalid_retention": "Screenshot retention must be an integer number of days from 1 to 3650",
+  "glance.not_found": "Screen capture or screenshot not found",
+  "glance.conflict": "This screen capture is already in use or the request was reused with different data",
+  "glance.already_in_lumio": "This object is already in Lumio",
+  "glance.pointed_paragraph": "Pointed paragraph",
+  "glance.window_text": "Window text",
   "update.current": "Current",
   "update.downloading": "Downloading",
   "update.staged": "Staged",
@@ -957,6 +965,14 @@ ${String(p0)}${String(p1)}`,
   "Run tailscale serve status to check": "Run tailscale serve status to check",
 };
 export const zh: typeof en = {
+  "glance.invalid": "无效的所见请求",
+  "glance.invalid_image": "截图格式、大小或尺寸与声明不符",
+  "glance.invalid_retention": "截图保留天数须是 1 到 3650 之间的整数",
+  "glance.not_found": "找不到所见或截图",
+  "glance.conflict": "所见已被使用，或请求编号与原内容不符",
+  "glance.already_in_lumio": "Lumio 内的对象无需收藏",
+  "glance.pointed_paragraph": "指向的段落",
+  "glance.window_text": "窗口文字",
   "update.current": "已是期望版本",
   "update.downloading": "下载中",
   "update.staged": "已暂存",

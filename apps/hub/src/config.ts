@@ -3,7 +3,7 @@ import { browserOrigins } from "./web.ts";
 import { isIP } from "node:net";
 import { randomUUID } from "node:crypto";
 import { readFile, mkdir, writeFile, rename, rm } from "node:fs/promises";
-import { CAPTURE_LIMITS, DECISION_GATE_DEFAULTS, EXPLORATION_DEFAULTS, RuntimeName } from "@lumio/schema";
+import { CAPTURE_LIMITS, GLANCE_LIMITS, DECISION_GATE_DEFAULTS, EXPLORATION_DEFAULTS, RuntimeName } from "@lumio/schema";
 import { homedir, hostname } from "node:os";
 import { join, resolve } from "node:path";
 import { modelConfiguration } from "./assistant-model.ts";
@@ -52,8 +52,12 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env) {
       !Number.isSafeInteger(explorationMaxMinutes) || explorationMaxMinutes < 1 || explorationMaxMinutes > 720) {
     throw new HubError("INVALID", { key: "config.invalid_workbench", args: [] });
   }
+  const glanceRetentionDays = Number(env.LUMIO_GLANCE_RETENTION_DAYS ?? GLANCE_LIMITS.default_retention_days);
+  if (!Number.isSafeInteger(glanceRetentionDays) || glanceRetentionDays < 1 || glanceRetentionDays > 3650) {
+    throw new HubError("INVALID", { key: "glance.invalid_retention", args: [] });
+  }
   return {
-    captureCardInputTokens, captureSummaryLanguage, decisionGateTimeoutMs, decisionGateMinConfidence,
+    glanceRetentionDays, captureCardInputTokens, captureSummaryLanguage, decisionGateTimeoutMs, decisionGateMinConfidence,
     watchdogIntervalMinutes, explorationMaxTokens, explorationMaxMs: explorationMaxMinutes * 60_000,
     assistantModel: env.LUMIO_ASSISTANT_MANAGED === "1" ? undefined : modelConfiguration(env),
     assistantHome: env.HOME ?? (env === process.env ? homedir() : stateDirectory(env)),

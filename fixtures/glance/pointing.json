@@ -1,0 +1,6 @@
+[
+  {"text":"A separate paragraph","box":{"x":10,"y":104,"w":105,"h":10}},
+  {"text":"Second line of the pointed paragraph.","box":{"x":10,"y":27,"w":125,"h":10}},
+  {"text":"First line of the pointed paragraph.","box":{"x":10,"y":13,"w":125,"h":10}},
+  {"text":"An adjacent column.","box":{"x":169,"y":18,"w":78,"h":12}}
+]
