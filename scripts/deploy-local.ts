@@ -182,7 +182,7 @@ function reportRuntimeUpdates(hubDb: string) {
   }
 }
 
-async function deploy() {
+async function deploy(desktop: boolean) {
   if (process.platform !== "darwin" || process.getuid?.() === 0) throw new Error("Run this on macsp as the Lumio LaunchAgent owner.");
   const repo = output(["git", "rev-parse", "--show-toplevel"], { cwd: import.meta.dir });
   const git = (args: string[]) => output(["git", ...args], { cwd: repo });
@@ -292,6 +292,10 @@ async function deploy() {
     }
     console.log(`Verified ${version} on ${hubUrl}; Runtime updates continue in the background.`);
     reportRuntimeUpdates(hubDb);
+    if (desktop) {
+      const result = Bun.spawnSync([process.execPath, "run", "desktop:build", "--install"], { cwd: build, stdout: "inherit", stderr: "inherit" });
+      if (!result.success) throw new Error("Hub was deployed and verified. Lumio Capture installation failed.");
+    }
   } finally {
     if (build) rmSync(build, { recursive: true, force: true });
     rmdirSync(lock);
@@ -300,14 +304,17 @@ async function deploy() {
 
 if (import.meta.main) {
   const args = Bun.argv.slice(2);
+  const usage = "Usage: bun run scripts/deploy-local.ts [--desktop] [--allow-active]";
   if (args.length === 1 && args[0] === "--help") {
-    console.log("Usage: bun run scripts/deploy-local.ts [--allow-active]");
-  } else if (args.length > 1 || (args.length === 1 && args[0] !== "--allow-active")) {
-    console.error("Usage: bun run scripts/deploy-local.ts [--allow-active]");
+    console.log(usage);
+  } else if (new Set(args).size !== args.length || args.some(arg => !["--desktop", "--allow-active"].includes(arg))) {
+    console.error(usage);
     process.exitCode = 2;
   } else {
     process.umask(0o077);
-    try { if (args.length) console.log("--allow-active is no longer needed: deployment always leaves Runtime running."); await deploy(); }
-    catch (error) { console.error(error); process.exitCode = 1; }
+    try {
+      if (args.includes("--allow-active")) console.log("--allow-active is no longer needed: deployment always leaves Runtime running.");
+      await deploy(args.includes("--desktop"));
+    } catch (error) { console.error(error); process.exitCode = 1; }
   }
 }

@@ -12,7 +12,9 @@
     "schema:export": "bun run packages/schema/scripts/export-json-schema.ts",
     "check": "bun run typecheck && bun run lint:deps && bun test --timeout 30000",
     "gen:skill": "bun run scripts/gen-skill.ts",
-    "demo:web": "bun run scripts/web-demo.ts"
+    "demo:web": "bun run scripts/web-demo.ts",
+    "desktop:build": "bun run scripts/desktop.ts build",
+    "desktop:check": "bun run scripts/desktop.ts check"
   },
   "devDependencies": {
     "@types/bun": "^1.4.3",

@@ -45,3 +45,24 @@ glance to your main conversation. **展开** shows the full answer and
 **在 Lumio 中打开** opens the conversation, where any required approval can be
 handled. Press Esc while holding the trigger to cancel. An empty utterance or
 unavailable speech service leaves the gesture as a save.
+## Sign and install
+
+Build and test with Xcode available. If the standalone Command Line Tools are
+selected, set `DEVELOPER_DIR` to your installed Xcode's `Contents/Developer`
+directory for the build. Run `bun run desktop:check` to compile and test without
+signing or installing.
+
+For a persistent local signing identity, run
+`bun run scripts/desktop.ts create-identity` and approve the code-signing trust
+dialog. This creates one development certificate in your login Keychain. On
+later builds the script reuses it. To use an existing valid certificate, set
+`LUMIO_DESKTOP_SIGN_IDENTITY` to its exact name or SHA-1 fingerprint from
+`security find-identity -v -p codesigning`. Reuse the same identity so macOS
+can recognize the app's privacy grants across updates.
+
+Run `bun run desktop:build` to assemble the app under `apps/desktop/.build/`.
+On the machine running Hub port 7420, run
+`bun run scripts/deploy-local.ts --desktop` to deploy committed main and install
+the signed helper in `~/Applications`. The helper registers as a login item
+on its first launch. Its menu can toggle startup or open System Settings if
+macOS requests authorization.
