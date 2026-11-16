@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { Id, idOf, RequestId, Revision, Sha256, Timestamp } from "./common.ts";
-import { READING_STATUSES, ReadingStatus } from "./entities.ts";
+import { READING_STATUSES, ReadingStatus, SOURCE_KINDS } from "./entities.ts";
+import { GlanceApp, GLANCE_LIMITS, GlancePointing } from "./glance.ts";
 import { NoteRef } from "./query.ts";
 
 /**
@@ -72,7 +73,7 @@ export type CaptureProxyRecord = z.infer<typeof CaptureProxyRecord>;
 export const CaptureChannel = z.enum(["web", "cli", "extension", "share", "desktop"]);
 
 /** 资料类型：由 Hub 判断。`text` 是只有粘贴正文、没有网址的资料。 */
-export const CaptureKind = z.enum(["paper", "web", "video", "podcast", "text"]);
+export const CaptureKind = z.enum(["paper", ...SOURCE_KINDS]);
 
 /**
  * 处理状态。`ready` 指实体与原文已经生成；卡片单独记在 `card`，没有卡片不影响资料入库。
@@ -197,6 +198,13 @@ export const OriginalFrontmatter = z.strictObject({
   sha256: Sha256,
   /** 论文 PDF 存为 Hub 托管文件时的文件 ID（ADR 0057 第 1 节）。 */
   pdf: idOf("art").optional(),
+  glance: z.strictObject({
+    id: idOf("gln"),
+    app: GlanceApp,
+    window: z.string().max(GLANCE_LIMITS.max_window_title_chars).optional(),
+    screenshot: idOf("art").optional(),
+    pointing: GlancePointing.shape.method,
+  }).optional(),
 });
 
 /**

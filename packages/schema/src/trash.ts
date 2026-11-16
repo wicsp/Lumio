@@ -37,7 +37,7 @@ export const TrashItem = z.strictObject({
 export const TrashListArgs = z.strictObject({ kind: TrashKind.optional() });
 export const TrashListResult = z.strictObject({ items: z.array(TrashItem) });
 
-/** `DELETE /v2/knowledge/notes/<id>`：只限有稳定 ID 的知识笔记；`life/` 与旧格式笔记拒绝（ADR 0038 第 2 节）。 */
+/** `DELETE /v2/knowledge/notes/<id>`：只限有稳定 ID 的知识笔记；私密资产拒绝（ADR 0038 第 2 节）。 */
 export const KnowledgeDeleteRequest = z.strictObject({ request_id: RequestId, expected_revision: KnowledgeRevision });
 
 /** `DELETE /v2/assistant/conversations/<id>`：正在生成回复时先停止生成。不删除从对话保存的记忆。 */

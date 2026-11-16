@@ -8,7 +8,7 @@ import {
 const TASK = "task_01JABCDEFGHJKMNPQRSTVWXYZ0", ACT = "act_01JABCDEFGHJKMNPQRSTVWXYZ0", JOB = "job_01JABCDEFGHJKMNPQRSTVWXYZ0";
 const NOW = "2026-11-04T21:00:00+08:00";
 const turn = (holder: string, reason: string, extra: object = {}) => ({ holder, reason, since: NOW, ...extra });
-const task = (extra: object = {}) => ({ schema_version: 3, type: "task", id: TASK, title: "Renew domain", description: "", revision: 1,
+const task = (extra: object = {}) => ({ schema_version: 3, type: "task", created_by: "act_00000000000000000000000001", updated_by: "act_00000000000000000000000001", id: TASK, title: "Renew domain", description: "", revision: 1,
   outcome: "open", turn: turn("human", "todo"), created: NOW, updated: NOW, tags: [], dependencies: [], references: [], ...extra });
 
 /** 作者的开发方式（ADR 0032 第 5 节）。 */
@@ -65,8 +65,8 @@ describe("moving the turn (ADR 0032 §3)", () => {
 describe("handoff plans (ADR 0032 §5)", () => {
   test("the author's development flow", () => {
     expect(HandoffPlan.safeParse(develop).success).toBe(true);
-    expect(PlanRun.safeParse({ plan: develop, approved: { at: NOW, by: ACT }, stage: "review", rounds: 1 }).success).toBe(true);
-    expect(WorkTask.safeParse(task({ plan: { plan: develop, approved: { at: NOW, by: ACT }, stage: "end", rounds: 4 } })).success).toBe(true);
+    expect(PlanRun.safeParse({ plan: develop, approved: { at: NOW, by: ACT }, stage: "review", done: ["implement"], rounds: 1 }).success).toBe(true);
+    expect(WorkTask.safeParse(task({ plan: { plan: develop, approved: { at: NOW, by: ACT }, stage: "end", done: develop.stages.map(stage => stage.id), rounds: 4 } })).success).toBe(true);
   });
   test("send-back must target an agent stage; ids unique; at least one agent stage", () => {
     expect(HandoffPlan.safeParse({ stages: [{ kind: "agent", id: "a", agent: "codex", instruction: "x", back_to: "merge" }, { kind: "checkpoint", id: "merge", prompt: "?" }] }).success).toBe(false);

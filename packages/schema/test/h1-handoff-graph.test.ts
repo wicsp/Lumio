@@ -72,7 +72,7 @@ describe("ADR 0049 runs, turns and grants", () => {
     expect(PlanRun.safeParse(run).success).toBe(true);
     expect(PlanRun.safeParse({ ...run, active: ["r1"] }).success).toBe(false);
     const { active: _active, done: _done, ...legacy } = run;
-    expect(PlanRun.safeParse(legacy).success).toBe(true);
+    expect(PlanRun.safeParse(legacy).success).toBe(false);
   });
 
   test("agents holder carries parallel branches and only then", () => {
@@ -98,7 +98,7 @@ describe("ADR 0049 runs, turns and grants", () => {
   });
 
   test("projects can name a default plan template", () => {
-    const project = { schema_version: 2, type: "project", id: `prj_${U}`, title: "P", description: "", revision: 1, status: "active", created: now, updated: now, tags: [] };
+    const project = { schema_version: 2, type: "project", created_by: "act_00000000000000000000000001", updated_by: "act_00000000000000000000000001", id: `prj_${U}`, title: "P", description: "", revision: 1, status: "active", created: now, updated: now, tags: [] };
     expect(WorkProject.parse({ ...project, default_plan: `wft_${U}` }).default_plan).toBe(`wft_${U}`);
     expect(WorkProjectPatch.parse({ default_plan: null }).default_plan).toBeNull();
     expect(WorkProject.safeParse({ ...project, default_plan: "codex@macsp" }).success).toBe(false);

@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { AGENTS, AgentTarget, Timestamp, RuntimeName, idOf } from "./common.ts";
-import { NoteRef } from "./query.ts";
 import { JobAccess } from "./access.ts";
 import { PlanHook, StagePermissions } from "./plan.ts";
 import { LumioVersion, RuntimeInstall, RuntimePlatform, RuntimeUpdateDirective, RuntimeUpdateReport, RuntimeUpdateView } from "./runtime-update.ts";
@@ -127,8 +126,7 @@ export const RUNTIME_FEATURES = ["stage_permissions", "hooks", "permission_reque
 
 /**
  * 执行器启动时登记自己的能力。
- * 新执行器遇到旧 Hub（例如 Hub 回退了版本）时，登记可能因未知字段被拒绝（400）；
- * 这时执行器去掉 version、platform、install 与 Hub 不认识的 features 再登记一次（ADR 0063 第 6 节）。
+ * 版本、平台与安装方式在现行 Runtime 中一并登记；Hub 也接受上一正式版本的登记。
  */
 export const RuntimeRegistration = z.strictObject({
   protocol_version: z.literal(JOB_PROTOCOL_VERSION),
@@ -145,13 +143,24 @@ export const RuntimeRegistration = z.strictObject({
   || (registration.version !== undefined && registration.platform !== undefined && registration.install !== undefined),
 { path: ["features"], message: "声明 self_update 时必须登记 version、platform 与 install" });
 
-/** `lumio runtime list` / `GET /v1/runtimes` 的一项：Hub 记录的执行器。 */
-export const RuntimeInfo = z.strictObject({
+/** Runtime 登记接口的回执，属于 Job 2 协议。 */
+export const RuntimeRegistered = z.strictObject({
   actor: idOf("act"),
   registration: RuntimeRegistration,
   last_seen: Timestamp,
+  online: z.boolean(),
+});
+
+/** Hub 返回给客户端的执行器信息。未知版本、平台或安装方式以 null 表示。 */
+export const RuntimeInfo = RuntimeRegistered.extend({
+  registration: z.strictObject({
+    ...RuntimeRegistration.shape,
+    version: LumioVersion.nullable(),
+    platform: RuntimePlatform.nullable(),
+    install: RuntimeInstall.nullable(),
+  }),
   online: z.boolean().describe("最近 3 分钟内轮询过 Hub；否则显示为失联"),
-  update: RuntimeUpdateView.optional().describe("版本与自动更新情况（ADR 0063）；旧 Hub 没有"),
+  update: RuntimeUpdateView.nullable().describe("自动更新情况（ADR 0063）；不支持时为 null"),
 });
 
 /**
@@ -170,7 +179,7 @@ export const ExecutionTargetListArgs = z.strictObject({ online: z.boolean().opti
 /** 例行任务交给执行器的计划（ADR 0019 第 6 节）。Hub 离线时执行器照此自行触发。 */
 export const RoutineSpec = z.strictObject({
   routine: idOf("rtn"),
-  revision: z.string().min(1).describe("例行任务笔记的版本；变了就替换"),
+  revision: z.string().min(1).describe("例行任务的版本；变了就替换"),
   schedule: z.string().min(1),
   timezone: z.string().min(1),
   lease: z.string().min(16).describe("这份计划的凭据；由它触发的每一轮回报都带上它"),
@@ -180,18 +189,6 @@ export const RoutineSpec = z.strictObject({
     gpus: z.array(z.number().int().nonnegative()).optional(),
     timeout_seconds: z.number().int().positive(),
   }),
-});
-
-/** `lumio routine list` / `GET /v1/routines` 的一项：Hub 眼中的例行任务（P2-5）。 */
-export const RoutineInfo = z.strictObject({
-  routine: NoteRef,
-  schedule: z.string(),
-  timezone: z.string(),
-  status: z.enum(["active", "paused"]),
-  runtime: RuntimeName.optional().describe("计划交给了哪个执行器；没有生效时缺失"),
-  next: Timestamp.optional().describe("下一次计划触发时间（暂停或计划没有生效时缺失）"),
-  last: z.strictObject({ job: idOf("job"), fired_at: Timestamp, status: JobStatus }).optional().describe("最近一次"),
-  problem: z.string().optional().describe("计划没有生效的原因，如缺少 workdir、没有可用的执行器"),
 });
 
 /** 执行器每次轮询时报告的状态（同时也是心跳）。 */
@@ -229,11 +226,11 @@ export type JobStatus = z.infer<typeof JobStatus>;
 export type JobResult = z.infer<typeof JobResult>;
 export type Job = z.infer<typeof Job>;
 export type RuntimeRegistration = z.infer<typeof RuntimeRegistration>;
+export type RuntimeRegistered = z.infer<typeof RuntimeRegistered>;
 export type RuntimeInfo = z.infer<typeof RuntimeInfo>;
 export type ExecutionTarget = z.infer<typeof ExecutionTarget>;
 export type ExecutionTargetListArgs = z.infer<typeof ExecutionTargetListArgs>;
 export type RoutineSpec = z.infer<typeof RoutineSpec>;
-export type RoutineInfo = z.infer<typeof RoutineInfo>;
 export type RuntimeHeartbeat = z.infer<typeof RuntimeHeartbeat>;
 export type RuntimeSync = z.infer<typeof RuntimeSync>;
 export type RuntimeAck = z.infer<typeof RuntimeAck>;

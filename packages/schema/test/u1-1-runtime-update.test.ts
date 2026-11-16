@@ -60,7 +60,7 @@ describe("U1-1 directive and view", () => {
     expect(RuntimeUpdateDirective.safeParse({ version: "0.4.0", hold: false, url: "https://example.com/lumio.tgz" }).success).toBe(false);
   });
   test("runtime info exposes the update view", () => {
-    const info = { actor: "act_01JCZZZZZZZZZZZZZZZZZZZZZZ", registration: base, last_seen: now, online: true };
+    const info = { actor: "act_01JCZZZZZZZZZZZZZZZZZZZZZZ", registration: { ...base, version: null, platform: null, install: null }, last_seen: now, online: true, update: null };
     expect(RuntimeInfo.safeParse(info).success).toBe(true);
     expect(RuntimeInfo.safeParse({ ...info, update: { policy: "follow", desired: "0.4.0", hold: false,
       report: { state: "downloading", target: "0.4.0", since: now } } }).success).toBe(true);

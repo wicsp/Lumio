@@ -8,7 +8,7 @@ test("global graph is a strict human-only contract, independent of the agent cat
   expect(KnowledgeGraph.parse({ ...graph, edges: [] }).nodes).toHaveLength(2);
   expect(CONTRACTS["knowledge-graph"]).toBe(KnowledgeGraph);
   expect(CAPABILITIES.some(c => c.name === ("knowledge.graph" as string))).toBe(false);
-  expect(KnowledgeGraphArgs.parse({ include_private: true, include_legacy: false, type: "idea" })).toEqual({ include_private: true, include_legacy: false, type: "idea" });
+  expect(KnowledgeGraphArgs.parse({ include_private: true, type: "idea" })).toEqual({ include_private: true, type: "idea" });
   for (const value of [{ unknown: true }, { include_private: "true" }, { include_legacy: 1 }, { type: "unknown" }]) expect(KnowledgeGraphArgs.safeParse(value).success).toBe(false);
 });
 test("graph endpoints exist, pairs are unique, paths are unique and counts are positive", () => {
