@@ -138,14 +138,14 @@ export const HandoffPlan = z
 
 /**
  * 任务上的计划与进度。stage 是正在进行或刚停下的节点（并行时为 active 中的第一个）；end 表示计划已走完。
- * active：同时在执行的 agent 阶段（只在并行时出现，至少两个）；done：已交付的节点（缺省视为 stage 之前的线性前缀，兼容 ADR 0049 之前的数据）。
+ * active：同时在执行的 agent 阶段（只在并行时出现，至少两个）；done：已交付的节点。
  */
 export const PlanRun = z.strictObject({
   plan: HandoffPlan,
   approved: z.strictObject({ at: Timestamp, by: idOf("act"), proposal: idOf("prop").optional() }),
   stage: z.union([PlanStageId, z.literal("end")]),
   active: z.array(PlanStageId).min(2).optional(),
-  done: z.array(PlanStageId).optional(),
+  done: z.array(PlanStageId),
   rounds: z.number().int().nonnegative().describe("计划内已委派的 agent 轮数"),
 });
 

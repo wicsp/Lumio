@@ -7,7 +7,7 @@ import { Citekey, ReadingStatus } from "./entities.ts";
  * AI 通过 skill 依赖这些结构，修改即为契约变更。
  */
 
-export const NOTE_TYPES = ["paper", "idea", "project", "task", "routine", "experiment", "source", "post", "asset", "ai-note"] as const;
+export const NOTE_TYPES = ["paper", "idea", "experiment", "source", "post", "asset", "ai-note"] as const;
 
 /** 一篇笔记的简要信息，出现在搜索结果和链接列表中。 */
 export const NoteRef = z.strictObject({
@@ -23,10 +23,9 @@ export const NoteRef = z.strictObject({
 export const SearchHit = z.strictObject({
   note: NoteRef,
   snippet: z.string().describe("命中位置附近的一段纯文本，不超过 200 个字符"),
-  // ADR 0057：命中位置、阅读状态与入库时间，缺失表示不适用或未知（旧 Hub 不返回）。
-  matched_in: z.enum(["body", "original", "semantic"]).optional().describe("body：笔记正文或标题；original：资料原文；semantic：只按意思相近（向量）命中"),
-  status: ReadingStatus.optional().describe("论文与资料的阅读状态"),
-  created: Timestamp.optional().describe("笔记的 created，资料即入库时间"),
+  matched_in: z.enum(["body", "original", "semantic"]).nullable().describe("body：笔记正文或标题；original：资料原文；semantic：只按意思相近（向量）命中"),
+  status: ReadingStatus.nullable().describe("论文与资料的阅读状态；不适用时为 null"),
+  created: Timestamp.nullable().describe("笔记的 created；缺失时为 null"),
 });
 
 export const SearchResult = z.strictObject({
@@ -62,6 +61,7 @@ export const LinksResult = z.strictObject({
  * 私密笔记中的链接，以及指向私密笔记的链接是否可见，规则与 `links` 相同。
  */
 export const CheckResult = z.strictObject({
+  unsupported_work_notes: z.array(z.string()).describe("不再支持的旧工作笔记的相对路径"),
   dangling: z.array(
     z.strictObject({
       from: NoteRef.describe("链接所在的笔记"),

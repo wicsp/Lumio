@@ -14,8 +14,8 @@ import {
   ExecutionRoutineInfo,
   ID_PREFIXES,
   Job,
-  MigrationEntry,
-  MigrationPlan,
+
+
   RequestId,
   ResourceRef,
   RunLogEvent,
@@ -86,7 +86,7 @@ describe("Work contracts", () => {
   test("WorkProject is strict v2 object", () => {
     const prj = WorkProject.parse({
       schema_version: 2,
-      type: "project",
+      type: "project", created_by: "act_00000000000000000000000001", updated_by: "act_00000000000000000000000001",
       id: `${ID_PREFIXES.project}_${U}`,
       title: "Refactor",
       description: "Four-module architecture.",
@@ -106,7 +106,7 @@ describe("Work contracts", () => {
   test("WorkTask requires task_… id and validates self-references", () => {
     const task = WorkTask.parse({
       schema_version: 3,
-      type: "task",
+      type: "task", created_by: "act_00000000000000000000000001", updated_by: "act_00000000000000000000000001",
       id: `task_${U}`,
       title: "Write schemas",
       description: "Contracts for v2.",
@@ -176,7 +176,7 @@ describe("Work contracts", () => {
       dependents: [], children: [],
       task: {
         schema_version: 3,
-        type: "task",
+        type: "task", created_by: "act_00000000000000000000000001", updated_by: "act_00000000000000000000000001",
         id: `task_${U}`,
         title: "Test",
         description: "",
@@ -218,7 +218,7 @@ describe("Work contracts", () => {
       kind: "project",
       project: {
         schema_version: 2,
-        type: "project",
+        type: "project", created_by: "act_00000000000000000000000001", updated_by: "act_00000000000000000000000001",
         id: `prj_${U}`,
         title: "Test",
         description: "",
@@ -438,38 +438,7 @@ describe("Storage contracts", () => {
     expect(manifest.files).toHaveLength(1);
   });
 
-  test("MigrationEntry validates id prefix matches type", () => {
-    const entry = MigrationEntry.parse({
-      id: `task_${U}`,
-      type: "task",
-      path: "plan/tasks/old-task.md",
-      sha256: "c".repeat(64),
-      title: "Old task",
-    });
-    expect(entry.type).toBe("task");
-    // id 前缀不匹配 type 拒绝
-    expect(MigrationEntry.safeParse({ ...entry, type: "project" }).success).toBe(false);
-  });
 
-  test("MigrationPlan has entries and problems", () => {
-    const plan = MigrationPlan.parse({
-      schema_version: 1,
-      id: `mig_${U}`,
-      created: now,
-      source_hash: "d".repeat(64),
-      entries: [
-        {
-          id: `task_01J0A0A0A0A0A0A0A0A0A0A0A0`,
-          type: "task",
-          path: "plan/tasks/t1.md",
-          sha256: "e".repeat(64),
-          title: "T1",
-        },
-      ],
-      problems: ["Task task_abc123... has running Job, cannot migrate until completed."],
-    });
-    expect(plan.problems).toHaveLength(1);
-  });
 });
 
 describe("JSON Schema export", () => {
@@ -483,7 +452,7 @@ describe("JSON Schema export", () => {
       AssistantMessage,
       RunLogEvent,
       StoredArtifact,
-      MigrationPlan,
+
     ];
     for (const schema of schemas) {
       expect(() => z.toJSONSchema(schema, { io: "input" })).not.toThrow();

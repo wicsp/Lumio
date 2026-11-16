@@ -7,12 +7,12 @@ import { Citekey, DerivedFrom, Id, type NoteRef } from "@lumio/schema";
 import { CoreError } from "@lumio/foundation";
 import { parseFrontmatter } from "@lumio/knowledge";
 import { originalBytes, parseOriginal, scanOriginals } from "../originals.ts";
-import { scanVault } from "../vault.ts";
+import { isUnsupportedWorkNote, scanVault } from "../vault.ts";
 import { extractKnowledgeLinks, plainText, resolveMarkdownPath } from "@lumio/knowledge";
 
 import { embeddedLinks } from "./hosts.ts";
 
-const VERSION = 7; // ADR 0065: rebuild derived host relationships; no business-data migration.
+const VERSION = 8; // B0-2: rebuild the derived index without old work notes.
 export interface IndexOptions {
   text?: (key: string, ...args: unknown[]) => string;
   stateDir?: string;
@@ -113,21 +113,8 @@ async function openStore(path: string, root: string): Promise<Database> {
       ? db.query<{ version: number; vault: string }, []>("SELECT * FROM metadata").get() : null;
     const healthy = Object.values(db.query("PRAGMA quick_check").get() ?? {})[0] === "ok";
     if (healthy && metadata?.version === VERSION && metadata.vault === root
-      && ["files", "notes", "fulltext", "links", "derived_from", "resource_links", "ai_links", "embedded_links"].every((name) => tables.some((t) => t.name === name))) {
+      && ["files", "notes", "fulltext", "links", "derived_from", "resource_links", "ai_links", "embedded_links", "original_files", "originals_fts"].every((name) => tables.some((t) => t.name === name))) {
       db.exec("INSERT INTO fulltext(fulltext) VALUES ('integrity-check')");
-      // Additive derived metadata remains readable by older clients; no business migration.
-      if (!db.query<{ name: string }, []>("PRAGMA table_info(metadata)").all().some(column => column.name === "updated_at")) {
-        db.transaction(() => {
-          if (!db!.query<{ name: string }, []>("PRAGMA table_info(metadata)").all().some(column => column.name === "updated_at")) {
-            db!.exec("ALTER TABLE metadata ADD COLUMN updated_at TEXT NOT NULL DEFAULT '1970-01-01T00:00:00.000Z'");
-            db!.query("UPDATE metadata SET updated_at=?").run(new Date().toISOString());
-          }
-        }).immediate();
-      }
-      // Originals extend the derived index in place so older local clients can still use it.
-      if (!tables.some(table => table.name === "original_files")) {
-        db.transaction(() => db!.exec(ORIGINALS_TABLES)).immediate();
-      }
       db.exec("INSERT INTO originals_fts(originals_fts) VALUES ('integrity-check')");
       return db;
     }
@@ -170,6 +157,7 @@ export async function withIndex<T>(root: string, options: IndexOptions, query: (
       let fm: Record<string, unknown> = {}, body = source.toString("utf8");
       try { const parsed = (options.parse ?? parseFrontmatter)(source); fm = parsed.data; body = parsed.body.toString("utf8"); }
       catch (cause) { if (!(cause instanceof CoreError) || cause.code !== "INVALID_FRONTMATTER") throw cause; }
+      if (isUnsupportedWorkNote(fm.type)) { current.delete(file.relativePath); continue; }
       const title = strings(fm.title) || basename(file.path, ".md");
       const citekey = file.type === "paper" && Citekey.safeParse(fm.citekey).success ? fm.citekey as string : null;
       const authors = [strings(fm.authors), strings(fm.author)].filter(Boolean).join(" ");

@@ -6,7 +6,6 @@ import { NOTE_TYPES, NoteRef } from "./query.ts";
 export const KnowledgeGraphArgs = z.strictObject({
   include_private: z.boolean().optional(),
   type: z.enum(NOTE_TYPES).optional(),
-  include_legacy: z.boolean().optional(),
 });
 export const KnowledgeGraphEdge = z.strictObject({ from: z.string(), to: z.string(), count: z.number().int().positive() });
 export const KnowledgeGraph = z.strictObject({

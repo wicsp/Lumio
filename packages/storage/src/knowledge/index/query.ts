@@ -5,7 +5,7 @@ import { CheckResult, KnowledgeGraph, KnowledgeOriginal, LinksResult, NoteDetail
 import { CoreError } from "@lumio/foundation";
 import { extractCitations, parseFrontmatter, resolveMarkdownPath } from "@lumio/knowledge";
 import { readOriginalFile } from "../originals.ts";
-import { vaultFileAt } from "../vault.ts";
+import { unsupportedWorkNotes, vaultFileAt } from "../vault.ts";
 import { noteRef, snippet, withIndex, readIndex, type IndexOptions, type NoteRow } from "./store.ts";
 
 export interface QueryOptions extends IndexOptions { includePrivate?: boolean }
@@ -59,7 +59,7 @@ export async function searchNotes(root: string, query: string, options: SearchOp
       const created = Timestamp.safeParse(fm.created).data;
       const status = row.type === "paper" || row.type === "source" ? ReadingStatus.safeParse(fm.status ?? "to-read").data : undefined;
       return { note: noteRef(row), snippet: snippet(row.text, query),
-        ...(query ? { matched_in: row.priority === 0 ? "body" : "original" } : {}), status, created };
+        matched_in: query ? (row.priority === 0 ? "body" : "original") : null, status: status ?? null, created: created ?? null };
     }) });
   });
 }
@@ -155,6 +155,7 @@ export async function collectCitations(root: string, reference: string, options:
 }
 
 export async function checkLinks(root: string, options: QueryOptions = {}): Promise<CheckResult> {
+  const unsupported = await unsupportedWorkNotes(root, options.includePrivate);
   return withIndex(root, options, (db) => {
     type Edge = { from_path: string; source: Link["source"]; target: string };
     const edges = db.query<Edge, [number, number]>(`
@@ -168,7 +169,7 @@ export async function checkLinks(root: string, options: QueryOptions = {}): Prom
       from: noteRef(db.query<NoteRow, [string]>("SELECT * FROM notes WHERE path=?").get(edge.from_path)!),
       source: edge.source, target: edge.target,
     }));
-    return CheckResult.parse({ dangling, total: dangling.length });
+    return CheckResult.parse({ unsupported_work_notes: unsupported, dangling, total: dangling.length });
   });
 }
 
@@ -187,11 +188,11 @@ export async function countKnowledgeReferences(root: string, targets: readonly s
 }
 
 /** Whole graph comes from one consistent index snapshot, never a per-note query loop. */
-export async function knowledgeGraph(root: string, options: SearchOptions & { includeLegacy?: boolean } = {}): Promise<KnowledgeGraph> {
+export async function knowledgeGraph(root: string, options: SearchOptions = {}): Promise<KnowledgeGraph> {
   return readIndex(root, options, db => {
-    const params = { private: Number(options.includePrivate ?? false), type: options.type ?? null, legacy: Number(options.includeLegacy ?? false) };
+    const params = { private: Number(options.includePrivate ?? false), type: options.type ?? null };
     const rows = db.query<NoteRow, typeof params>(`SELECT * FROM notes WHERE (private=0 OR $private=1)
-      AND ($type IS NULL OR type=$type) AND ($legacy=1 OR type NOT IN ('task','project','routine'))
+      AND ($type IS NULL OR type=$type)
       AND host_path IS NULL AND path NOT LIKE '.trash/%' AND path NOT LIKE '%/.trash/%' ORDER BY path`).all(params);
     const shown = new Set(rows.map(row => row.path)), edges = new Map<string, { from: string; to: string; count: number }>();
     let dangling = 0;

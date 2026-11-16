@@ -80,16 +80,16 @@ describe("drafts become valid plans", () => {
 
 describe("progress and turns", () => {
   const plan = HandoffPlan.parse({ stages: [agent("impl"), agent("r1", { access: "read", after: ["impl"] }), agent("r2", { access: "read", after: ["impl"] }), { kind: "checkpoint", id: "trial", prompt: "?", after: ["r1", "r2"] }] });
-  const run = (extra: Partial<PlanRun>): PlanRun => ({ plan, approved: { at, by: ACT }, stage: "impl", rounds: 1, ...extra });
-  test("done and active stages come from the run, with a linear fallback", () => {
+  const run = (extra: Partial<PlanRun>): PlanRun => ({ plan, approved: { at, by: ACT }, stage: "impl", done: [], rounds: 1, ...extra });
+  test("done and active stages come from the run", () => {
     expect([...stageStates(run({ stage: "r1", active: ["r1", "r2"], done: ["impl"] }))]).toEqual([["impl", "done"], ["r1", "current"], ["r2", "current"], ["trial", "next"]]);
-    expect(stageStates(run({ stage: "r2" })).get("impl")).toBe("done");
+    expect(stageStates(run({ stage: "r2" })).get("impl")).toBe("next");
     expect(stageStates(run({ stage: "end", done: ["impl", "r1", "r2", "trial"] })).get("trial")).toBe("done");
   });
   test("parallel turns name every agent and pick the right branch", () => {
     const parallel = { holder: "agents" as const, reason: "working" as const, since: at, stage: "r1",
       parallel: [{ stage: "r1", agent: "claude-code@macsp", job: job(1), round: 2 }, { stage: "r2", agent: "codex@macsp", job: job(2), round: 3 }] };
-    const task = { schema_version: 3, type: "task", id: ID, title: "T", description: "", revision: 4, outcome: "open", turn: parallel, created: at, updated: at, tags: [], dependencies: [], references: [] } as WorkTask;
+    const task = { schema_version: 3, type: "task", created_by: "act_00000000000000000000000001", updated_by: "act_00000000000000000000000001", id: ID, title: "T", description: "", revision: 4, outcome: "open", turn: parallel, created: at, updated: at, tags: [], dependencies: [], references: [] } as WorkTask;
     expect(turnText(task)).toBe("2 agents are working in parallel: claude-code@macsp, codex@macsp");
     expect(workingAgent(parallel, "r2")).toBe("codex@macsp");
     expect(describeTurn({ task: ID, at, by: ACT, from: parallel, to: { holder: "human", reason: "answer", since: at, stage: "r2" } })).toEqual(["help", "codex@macsp asked a question"]);

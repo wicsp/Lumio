@@ -35,7 +35,7 @@ afterEach(() => restore());
 
 const first = WorkTaskDetail.parse({ task: WorkTask.parse(seed), comments: [], executions: [], turns: [], children: [], dependents: [] });
 const second = WorkTaskDetail.parse({ ...first, task: { ...first.task, id: "task_00000000000000000000000002", title: "Synthetic second task" } });
-const project = WorkProject.parse({ schema_version: 2, type: "project", id: "prj_00000000000000000000000001", title: "Synthetic project",
+const project = WorkProject.parse({ schema_version: 2, type: "project", created_by: "act_00000000000000000000000001", updated_by: "act_00000000000000000000000001", id: "prj_00000000000000000000000001", title: "Synthetic project",
   description: "", revision: 3, status: "active", created: seed.created, updated: seed.updated, tags: [] });
 
 function setup(mode: "tasks" | "projects" = "tasks", hash = "#work/tasks") {

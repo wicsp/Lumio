@@ -7,7 +7,7 @@ import {
 const task = JSON.parse(readFileSync(new URL("../../../fixtures/work/readiness.json", import.meta.url), "utf8"));
 const now = "2026-11-09T00:00:00Z";
 const project = {
-  schema_version: 2, type: "project", id: "prj_00000000000000000000000001", title: "Synthetic project",
+  schema_version: 2, type: "project", created_by: "act_00000000000000000000000001", updated_by: "act_00000000000000000000000001", id: "prj_00000000000000000000000001", title: "Synthetic project",
   description: "", revision: 1, status: "active", created: now, updated: now, tags: [],
 };
 

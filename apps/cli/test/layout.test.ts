@@ -30,13 +30,13 @@ async function sync(): Promise<{ code: number; lines: string[] }> {
 
 const NOT_SCANNED = [
   "research/ideas/草图.excalidraw.md", "create/posts/嵌入的画板.md", "research/reports/报告.md",
-  "files/attachments/note.md", "files/drawings/画板.md", "files/templates/paper.md", ".obsidian/ignored.md", "根目录.md",
+  "plan/tasks/任务.md", "plan/projects/项目.md", "files/attachments/note.md", "files/drawings/画板.md", "files/templates/paper.md", ".obsidian/ignored.md", "根目录.md",
 ];
 
 test("sync completes every type directory of the ADR 0012 layout and leaves non-entities untouched", async () => {
   const untouched = await Promise.all(NOT_SCANNED.map((p) => readFile(join(vault, p))));
   const { code, lines } = await sync();
-  expect(lines.at(-1)).toBe("完成：扫描 8 个，补全 8 个，问题 0 个，跳过 0 个");
+  expect(lines.at(-1)).toBe("完成：扫描 6 个，补全 6 个，问题 0 个，跳过 0 个");
   expect(code).toBe(0);
   expect(lines.some((l) => l.includes("library/sources/obsidian/Excalidraw Essentials.md"))).toBe(true);
   for (const path of NOT_SCANNED) expect(lines.join("\n")).not.toContain(path);
@@ -52,7 +52,7 @@ test("sync completes every type directory of the ADR 0012 layout and leaves non-
     expect(String(data.id).startsWith(prefix)).toBe(true);
     expect(Entity.safeParse(data).success).toBe(true);
   }
-  expect((await sync()).lines).toEqual(["完成：扫描 8 个，补全 0 个，问题 0 个，跳过 0 个"]);
+  expect((await sync()).lines).toEqual(["完成：扫描 6 个，补全 0 个，问题 0 个，跳过 0 个"]);
 });
 
 test("private assets are reported by path only, never by field content", async () => {

@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { HubSigningKey, RuntimeInfo, signingKeyFingerprint } from "@lumio/schema";
+import { HubSigningKey, RuntimeRegistered, signingKeyFingerprint } from "@lumio/schema";
 import { configureSudoEnvironment, installSudoHelper, type SudoPaths } from "../src/sudo-install.ts";
 import { environmentText } from "../src/pairing.ts";
 import { parseEnvironment, type RunCommand } from "../src/service.ts";
@@ -21,7 +21,7 @@ async function fixture() {
   await writeFile(file, environmentText({ LUMIO_HUB_URL: "https://synthetic.example", LUMIO_TOKEN: "synthetic-token", LUMIO_RUNTIME_NAME: "synthetic", LUMIO_RUNTIME_TAGS: "lab", LUMIO_RUNTIME_STATE_DIR: join(root, "runtime-state") }));
   const public_key = Buffer.alloc(32, 3).toString("base64url");
   const key = HubSigningKey.parse({ public_key, fingerprint: signingKeyFingerprint(createHash("sha256").update(Buffer.from(public_key, "base64url")).digest("hex")) });
-  const info = RuntimeInfo.parse({ actor: "act_00000000000000000000000001", registration: { protocol_version: 2, name: "synthetic", engines: [], tags: ["lab"], max_concurrent: 1 }, last_seen: new Date().toISOString(), online: true });
+  const info = RuntimeRegistered.parse({ actor: "act_00000000000000000000000001", registration: { protocol_version: 2, name: "synthetic", engines: [], tags: ["lab"], max_concurrent: 1 }, last_seen: new Date().toISOString(), online: true });
   const commands: string[][] = [], logs: string[] = [];
   let visudo = 0, restart = 0;
   const run: RunCommand = async (argv) => {

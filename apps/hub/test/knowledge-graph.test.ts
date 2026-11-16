@@ -19,8 +19,8 @@ test("human graph endpoint validates strict filters, private edges and role rest
     const publicGraph = KnowledgeGraph.parse(await response.json());
     expect(publicGraph.nodes.some(n => n.title === "Synthetic graph hub")).toBe(true);
     expect(publicGraph.nodes.some(n => ["asset", "task", "project", "routine"].includes(n.type))).toBe(false);
-    const all = KnowledgeGraph.parse(await (await call("?include_private=true&include_legacy=true")).json());
-    expect(all.nodes.some(n => n.type === "asset")).toBe(true); expect(all.nodes.some(n => n.type === "task")).toBe(true);
+    const all = KnowledgeGraph.parse(await (await call("?include_private=true")).json());
+    expect(all.nodes.some(n => n.type === "asset")).toBe(true);
     const ideas = KnowledgeGraph.parse(await (await call("?type=idea")).json());
     expect(ideas.nodes.every(n => n.type === "idea")).toBe(true);
     expect(ideas.edges.every(e => ideas.nodes.some(n => n.path === e.from) && ideas.nodes.some(n => n.path === e.to))).toBe(true);

@@ -23,10 +23,10 @@ describe("lumio: links", () => {
 });
 
 describe("AI note embeds", () => {
-  test("AI notes are recognised from their ID file name", () => {
-    expect(aiNoteIdOf(ain)).toBe(ain);
-    expect(aiNoteIdOf(`ai/notes/${ain}.md`)).toBe(ain);
-    expect(aiNoteIdOf(`../../ai/notes/${ain}.md`)).toBe(ain);
+  test("AI notes are recognized from title and ID in the file name", () => {
+    expect(aiNoteIdOf(ain)).toBeUndefined();
+    expect(aiNoteIdOf(`ai/notes/${ain}.md`)).toBeUndefined();
+    expect(aiNoteIdOf(`../../ai/notes/${ain}.md`)).toBeUndefined();
     expect(aiNoteIdOf("research/ideas/ain_summary.md")).toBeUndefined();
     // ADR 0053：新文件名为 "<标题> <ID>"
     expect(aiNoteIdOf(`LightGCN 摘要 ${ain}`)).toBe(ain);
@@ -35,13 +35,13 @@ describe("AI note embeds", () => {
     expect(aiNoteIdOf(`idea_${ULID}`)).toBeUndefined();
   });
   test("only a link alone on its own line becomes a card", () => {
-    expect(aiNoteLine(`[[${ain}]]`)).toEqual({ id: ain, label: "" });
-    expect(aiNoteLine(`  [[${ain}|AI 摘要]]  `)).toEqual({ id: ain, label: "AI 摘要" });
-    expect(aiNoteLine(`[AI 摘要](../../ai/notes/${ain}.md)`)).toEqual({ id: ain, label: "AI 摘要" });
+    expect(aiNoteLine(`[[${ain}]]`)).toBeUndefined();
+    expect(aiNoteLine(`  [[Title ${ain}|AI 摘要]]  `)).toEqual({ id: ain, label: "AI 摘要" });
+    expect(aiNoteLine(`[AI 摘要](../../ai/notes/Title%20${ain}.md)`)).toEqual({ id: ain, label: "AI 摘要" });
     expect(aiNoteLine(`[[LightGCN 摘要 ${ain}]]`)).toEqual({ id: ain, label: "" });
     expect(aiNoteLine(`[摘要](../../ai/notes/LightGCN%20%E6%91%98%E8%A6%81%20${ain}.md)`)).toEqual({ id: ain, label: "摘要" });
-    expect(aiNoteLine(`见 [[${ain}]]`)).toBeUndefined();
-    expect(aiNoteLine(`[[${ain}]] 之后的话`)).toBeUndefined();
+    expect(aiNoteLine(`见 [[Title ${ain}]]`)).toBeUndefined();
+    expect(aiNoteLine(`[[Title ${ain}]] 之后的话`)).toBeUndefined();
     expect(aiNoteLine(`![img](ai/notes/${ain}.md)`)).toBeUndefined();
     expect(aiNoteLine(`[x](lumio:${ain})`)).toBeUndefined();
   });

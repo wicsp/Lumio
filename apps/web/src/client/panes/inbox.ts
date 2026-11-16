@@ -57,8 +57,8 @@ export function captureInput(value: string, channel: CaptureCreate["channel"], t
 
 const busy = (capture: Capture) => capture.state === "queued" || capture.state === "extracting" || capture.card === "pending";
 
-const KIND_LABEL = translated({ paper: "Paper", web: "Web page", video: "Video", podcast: "Podcast", text: "Pasted text" });
-const KIND_ICON: Record<string, string> = { paper: "file", web: "globe", video: "play", podcast: "mic", text: "edit" };
+const KIND_LABEL = translated({ paper: "Paper", web: "Web page", video: "Video", podcast: "Podcast", course: "Course", book: "Book", text: "Pasted text" });
+const KIND_ICON: Record<string, string> = { paper: "file", web: "globe", video: "play", podcast: "mic", course: "file", book: "file", text: "edit" };
 const ERROR_TEXT = translated({
   blocked: "This address isn't allowed: it points to this computer or a private network.",
   fetch_failed: "Couldn't download the page.",

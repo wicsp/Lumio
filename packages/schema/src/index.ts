@@ -46,13 +46,13 @@ import { CapabilityChange, KnowledgeAiNoteCommand } from "./capabilities.ts";
 import { HandoffPlan, PlanRun, PlanTemplate } from "./plan.ts";
 import { NotificationEvent, PushDevice, PushDeviceUpdate, PushPublicKey, PushSubscriptionInput, PushTestResult } from "./notifications.ts";
 import { ExecutionRoutine, ExecutionRoutineCommandRequest, ExecutionRoutineInfo } from "./execution.ts";
-import { BackupManifest, MigrationPlan, RunLogEvent, StoredArtifact } from "./storage.ts";
+import { ArtifactOwner, BackupManifest, HubRef, RunLogEvent, StoredArtifact } from "./storage.ts";
 import {
   ResourceRef, TaskTurnChange, Turn, WorkAttention, WorkComment, WorkCommandRequest, WorkCommandResult, WorkExecution, WorkProject, WorkTask, WorkTaskDetail,
 } from "./work.ts";
 import { ApiError, OperationRequest, OperationResult } from "./api.ts";
-import { AiNote, Asset, Experiment, Idea, Paper, Post, Project, Routine, Source, Task } from "./entities.ts";
-import { ExecutionTarget, Job, JobResult, JobSpec, RoutineInfo, RuntimeAck, RuntimeHeartbeat, RuntimeInfo, RuntimeRegistration, RuntimeSync } from "./job.ts";
+import { AiNote, Asset, Experiment, Idea, Paper, Post, Source } from "./entities.ts";
+import { ExecutionTarget, Job, JobResult, JobSpec, RuntimeAck, RuntimeHeartbeat, RuntimeInfo, RuntimeRegistered, RuntimeRegistration, RuntimeSync } from "./job.ts";
 import { ExecutionRuntimeUpdateCommandRequest, ReleaseManifest, RuntimeUpdateDirective, RuntimeUpdateReport } from "./runtime-update.ts";
 import { Operation } from "./operation.ts";
 import { PrivilegedApproval, PrivilegedReport, PrivilegedStatus } from "./privileged.ts";
@@ -96,9 +96,6 @@ export const CONTRACTS = {
   "knowledge-create-result": KnowledgeCreateResult,
   paper: Paper,
   idea: Idea,
-  project: Project,
-  task: Task,
-  routine: Routine,
   experiment: Experiment,
   source: Source,
   post: Post,
@@ -110,6 +107,7 @@ export const CONTRACTS = {
   "job-spec": JobSpec,
   "job-result": JobResult,
   "runtime-registration": RuntimeRegistration,
+  "runtime-registered": RuntimeRegistered,
   "runtime-info": RuntimeInfo,
   "execution-target": ExecutionTarget,
   "runtime-heartbeat": RuntimeHeartbeat,
@@ -119,7 +117,6 @@ export const CONTRACTS = {
   "runtime-update-directive": RuntimeUpdateDirective,
   "runtime-update-command-request": ExecutionRuntimeUpdateCommandRequest,
   "release-manifest": ReleaseManifest,
-  "routine-info": RoutineInfo,
   "privileged-approval": PrivilegedApproval,
   "privileged-status": PrivilegedStatus,
   "privileged-report": PrivilegedReport,
@@ -173,7 +170,8 @@ export const CONTRACTS = {
   "run-log-event": RunLogEvent,
   "stored-artifact": StoredArtifact,
   "backup-manifest": BackupManifest,
-  "migration-plan": MigrationPlan,
+  "artifact-owner": ArtifactOwner,
+  "hub-ref": HubRef,
   // 能力目录与 agent 访问（ADR 0029，R3-1）；各能力的参数与结果 schema 由 CAPABILITIES 导出
   "capability-change": CapabilityChange,
   "work-attention": WorkAttention,

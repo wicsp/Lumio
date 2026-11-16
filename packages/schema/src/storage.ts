@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { ID_PREFIXES, Id, SafeRelativePath, Sha256, Timestamp, idOf } from "./common.ts";
+import { Id, SafeRelativePath, Sha256, Timestamp, idOf } from "./common.ts";
 import { ResourceRef } from "./work.ts";
 
 /**
- * 存储格式契约（ADR 0025 第 3、5、6、8 节，R0-1）：JSONL 运行日志、托管文件、备份清单、迁移计划。
+ * 存储格式契约（ADR 0025 第 3、5、6、8 节，R0-1）：JSONL 运行日志、托管文件、备份清单。
  * 这些是文件格式而不是业务对象，各自独立的 schema_version 从 1 开始。
  */
 
@@ -21,13 +21,17 @@ export const RunLogEvent = z.strictObject({
   payload: z.record(z.string(), z.unknown()).describe("按 type 校验的负载"),
 });
 
+/** Hub 的跨模块协调数据。 */
+export const HubRef = z.strictObject({ module: z.literal("hub"), id: z.union([idOf("cap"), idOf("gln")]) });
+export const ArtifactOwner = z.union([ResourceRef, HubRef]);
+
 /**
  * 托管文件（ADR 0025 第 5 节）：先写 staged，校验 sha256/size 后才改为 ready；
  * 数据库只把 ready 当作可用产物，staged 可重试登记或清理。
  */
 export const StoredArtifact = z.strictObject({
   id: idOf("art"),
-  owner: ResourceRef.describe("文件属于哪个对象"),
+  owner: ArtifactOwner.describe("文件属于哪个对象"),
   key: SafeRelativePath.describe("相对 Hub 托管文件目录的路径"),
   sha256: Sha256,
   size: z.number().int().nonnegative(),
@@ -47,31 +51,8 @@ export const BackupManifest = z.strictObject({
   files: z.array(FileDigest),
 });
 
-const MIGRATION_PREFIX = { project: ID_PREFIXES.project, task: ID_PREFIXES.task, routine: ID_PREFIXES.routine } as const;
-
-/** 迁移计划的一项：旧笔记 → v2 对象。id 沿用旧笔记的稳定 ID，前缀必须与 type 一致。 */
-export const MigrationEntry = z
-  .strictObject({
-    id: Id,
-    type: z.enum(["project", "task", "routine"]),
-    path: SafeRelativePath.describe("旧笔记相对 vault 根目录的路径"),
-    sha256: Sha256.describe("dry-run 时旧笔记原始字节的摘要；apply 时不一致就拒绝"),
-    title: z.string().min(1),
-  })
-  .refine((e) => e.id.startsWith(`${MIGRATION_PREFIX[e.type]}_`), { message: "id 前缀与 type 不一致", path: ["id"] });
-
-/** dry-run 的结果。problems 非空时不能 apply（ADR 0025 第 8 节）。 */
-export const MigrationPlan = z.strictObject({
-  schema_version: z.literal(1),
-  id: idOf("mig"),
-  created: Timestamp,
-  source_hash: Sha256.describe("全部 entries 源内容的总摘要"),
-  entries: z.array(MigrationEntry),
-  problems: z.array(z.string().min(1)).describe("需要在 apply 前处理的问题，如运行中的 Job、ID 冲突、无法保留的链接"),
-});
-
 export type RunLogEvent = z.infer<typeof RunLogEvent>;
 export type StoredArtifact = z.infer<typeof StoredArtifact>;
 export type BackupManifest = z.infer<typeof BackupManifest>;
-export type MigrationEntry = z.infer<typeof MigrationEntry>;
-export type MigrationPlan = z.infer<typeof MigrationPlan>;
+export type HubRef = z.infer<typeof HubRef>;
+export type ArtifactOwner = z.infer<typeof ArtifactOwner>;

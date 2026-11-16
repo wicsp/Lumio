@@ -6,7 +6,7 @@ export type PairingOperation = typeof PAIRING_OPERATIONS[number];
 
 export const QUERY_OPERATIONS = ["search", "show", "links", "check", "status"] as const;
 export type QueryOperation = (typeof QUERY_OPERATIONS)[number];
-export const EXISTING_OPERATIONS = [...QUERY_OPERATIONS, "health", "operations", "actors", "proposals", "proposal.accept", "proposal.reject", "task.dispatch", "routine.followup", "routines", "exec.privileged"] as const;
+export const EXISTING_OPERATIONS = [...QUERY_OPERATIONS, "health", "operations", "actors", "proposals", "proposal.accept", "proposal.reject", "exec.privileged"] as const;
 export const RUNTIME_OPERATIONS = ["runtime.register", "runtime.sync", "runtime.ack", "runtime.results", "runtimes", "runtime.privileged.status", "runtime.privileged.report"] as const;
 export const JOB_OPERATIONS = ["job.submit", "jobs", "job.show", "job.cancel"] as const;
 export const V2_OPERATIONS = ["security.review", "inbox.create", "inbox.read", "inbox.command", "inbox.bindings", "inbox.proxy-settings", "resource.read", "knowledge.ai-note", "knowledge.graph", "knowledge.delete", "assistant.delete", "trash.list", "trash.restore", "trash.purge", "knowledge.document", "knowledge.update", "knowledge.related", "knowledge.references", "knowledge.template", "knowledge.resolve", "knowledge.create", "notifications.push", "notices.read", "notices.command", "explorations.read", "explorations.command", "agents.manage", "work.plan_templates.read", "work.read", "work.command", "execution.read", "execution.command", "execution.archive", "assistant.read", "assistant.main", "assistant.chat", "assistant.memory.read", "assistant.memory.command", "assistant.config", "assistant.undo"] as const;
@@ -40,13 +40,6 @@ export const AUTHORIZATION_RULES = [
   ...(["human", "agent"] as const).flatMap((role) => [
     { role, operation: "actors", includePrivate: false, decision: { result: "allow" } },
     { role, operation: "proposals", includePrivate: false, decision: { result: "allow" } },
-    { role, operation: "routines", includePrivate: false, decision: { result: "allow" } },
-    // 派出任务只能由人发起（ADR 0019）：AI 的汇报不能派新活。
-    { role, operation: "task.dispatch", includePrivate: false,
-      decision: role === "human" ? { result: "allow" as const } : { result: "deny" as const, reason: "agent-cannot-dispatch-tasks" } },
-    // 从例行任务开出追问任务：新建笔记，同样只能由人发起。
-    { role, operation: "routine.followup", includePrivate: false,
-      decision: role === "human" ? { result: "allow" as const } : { result: "deny" as const, reason: "agent-cannot-create-tasks" } },
     // 高权限命令只能由执行器发起，人和 agent 只能查看或解释。
     { role, operation: "exec.privileged", includePrivate: false, decision: { result: "deny" as const, reason: "only-runtimes-request-privileged" } },
     ...(["proposal.accept", "proposal.reject"] as const).map((operation) => ({ role, operation, includePrivate: false,

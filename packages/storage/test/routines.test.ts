@@ -10,7 +10,7 @@ function fixture() {
   const db = new Database(":memory:", { strict: true });
   db.exec("PRAGMA foreign_keys=ON");
   let now = new Date("2026-11-01T00:00:00Z"), sequence = 0;
-  const runtime = RuntimeInfo.parse({ actor, registration: { protocol_version: 2, name: "server", engines: [{ name: "pi", version: "0.50.1", sandbox: "none" }], tags: [], max_concurrent: 1 }, last_seen: now.toISOString(), online: true });
+  const runtime = RuntimeInfo.parse({ actor, update: null, registration: { version: null, platform: null, install: null, protocol_version: 2, name: "server", engines: [{ name: "pi", version: "0.50.1", sandbox: "none" }], tags: [], max_concurrent: 1 }, last_seen: now.toISOString(), online: true });
   const registry = { runtimes: () => [runtime], syncRuntime() {} };
   let routines: ExecutionRoutines;
   const jobs = new ExecutionJobs(new SqliteExecutionStore(db, registry), { now: () => now,

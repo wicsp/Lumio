@@ -126,7 +126,7 @@ test("HTTP agents can read and write low-risk fields but cannot dispatch, approv
     const response = await api("/v2/work/commands", { request_id: requestId(), operation: { op, args } }, agent);
     expect(response.status).toBe(403); expect(ApiError.parse(await response.json()).error.reason).toMatch(/^agent-/);
   }
-  const proposal = hub.store.createProposal({ op: "task.dispatch", args: { task: created.task.id, trigger: "cli" } }, "synthetic", hub.store.authenticate(`Bearer ${human}`)!.actor.id);
+  const proposal = hub.store.createProposal({ op: "exec.privileged", args: { runtime: "act_00000000000000000000000001", job: "job_00000000000000000000000001", argv: ["/bin/true"] } }, "synthetic", hub.store.authenticate(`Bearer ${human}`)!.actor.id);
   const denied = await api(`/v1/proposals/${proposal.id}/accept`, {}, agent); expect(denied.status).toBe(403);
   expect(ApiError.parse(await denied.json()).error.reason).toBe("agent-cannot-decide-proposals");
   for (const path of ["/v2/work/tasks", "/v2/work/projects", "/v2/work/attention", "/v2/execution/routines", "/v1/jobs"]) expect((await api(path, undefined, agent)).status).toBe(200);

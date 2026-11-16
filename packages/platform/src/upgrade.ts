@@ -8,7 +8,7 @@ import { diagnosticIO, environment, httpURL, localAddress, serviceCommand, type 
 import { createProgressLine } from "./terminal.ts";
 import { releaseShim } from "./release-shims.ts";
 import { manifestArtifact, permitsUnsignedRelease, verifyArtifact, verifyManifest, ReleaseVerificationError, type releasePublicKeys } from "./release-manifest.ts";
-import { RuntimeInfo, type RuntimePlatform } from "@lumio/schema";
+import { RuntimeRegistered, type RuntimePlatform } from "@lumio/schema";
 
 export class UpgradeError extends Error {
   readonly code = "UPGRADE_FAILED";
@@ -73,7 +73,7 @@ export async function upgrade(options: UpgradeOptions = {}): Promise<void> {
       try {
         const env = environment(await io.read(join(io.home, ".config/lumio-runtime/runtime.env")));
         const state = io.env.LUMIO_RUNTIME_STATE_DIR ?? env.LUMIO_RUNTIME_STATE_DIR ?? join(io.home, ".local/share/lumio-runtime");
-        const runtime = RuntimeInfo.parse(JSON.parse(await io.read(join(state, "registered.json"))));
+        const runtime = RuntimeRegistered.parse(JSON.parse(await io.read(join(state, "registered.json"))));
         runtimeSelfUpdates = runtime.registration.install === "hub-shared" && !!runtime.registration.features?.includes("self_update");
       } catch { /* Older Runtime registrations retain the previous restart behavior. */ }
     }

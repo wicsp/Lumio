@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { createClient } from "../src/index.ts";
 import { ExecutionTarget, Proposal } from "@lumio/schema";
 const id = "prop_00000000000000000000000001";
-const proposal = Proposal.parse({ id, operation: { op: "task.dispatch", args: { task: "task_00000000000000000000000001", trigger: "cli" } }, reason: "Synthetic", author: "act_00000000000000000000000001", status: "withdrawn", created: "2026-11-05T00:00:00Z" });
+const proposal = Proposal.parse({ id, operation: { op: "work.command", args: { request_id: "synthetic-dispatch", operation: { op: "work.task.dispatch", args: { task: "task_00000000000000000000000001" } } } }, reason: "Synthetic", author: "act_00000000000000000000000001", status: "withdrawn", created: "2026-11-05T00:00:00Z" });
 test("target and withdrawal methods validate their inputs, endpoints, responses and offline notes", async () => {
   const seen: string[] = [], warnings: string[][] = [];
   const target = ExecutionTarget.parse({ target: "codex@mac", runtime: "mac", engine: "codex", version: "synthetic", online: false });

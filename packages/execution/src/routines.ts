@@ -1,5 +1,5 @@
 import { ExecutionRoutine, ExecutionRoutineCommandRequest, ExecutionRoutineInfo, RoutineSpec, Job,
-  JOB_PROTOCOL_VERSION, parseAssignee, type RuntimeInfo } from "@lumio/schema";
+  JOB_PROTOCOL_VERSION, type RuntimeInfo } from "@lumio/schema";
 import { idTime } from "@lumio/foundation";
 import { parseCron, nextFire, validTimeZone } from "./cron.ts";
 import { routineJobId } from "./ids.ts";
@@ -33,19 +33,6 @@ export class ExecutionRoutines {
     if (!routine) throw new ExecutionError("NOT_FOUND", { key: "routines.routine_not_found", args: [] });
     return ExecutionRoutine.parse(routine);
   }
-  /** An offline import never sends a plan; schedules must have been explicitly paused before migration. */
-  importPaused(input: ExecutionRoutine[]): void {
-    const parsed = ExecutionRoutine.array().safeParse(input);
-    if (!parsed.success) throw new ExecutionError("INVALID", { key: "routines.invalid_legacy_routine_format", args: [] });
-    this.store.transaction(() => {
-      const seen = new Set<string>();
-      for (const routine of parsed.data) {
-        if (routine.status !== "paused") throw new ExecutionError("CONFLICT", { key: "routines.pause_legacy_routine_before_importing", args: [] });
-        if (seen.has(routine.id) || this.store.get(routine.id)) throw new ExecutionError("CONFLICT", { key: "routines.routine_id_already_exists_or_is_duplicated", args: [] });
-        seen.add(routine.id); this.validate(routine); this.store.save(routine); this.store.setCurrent(routine.id);
-      }
-    });
-  }
   private validate(routine: ExecutionRoutine): void {
     try { if (!validTimeZone(routine.timezone) || !nextFire(parseCron(routine.schedule), routine.timezone, this.context.now())) throw new Error(); }
     catch { throw new ExecutionError("INVALID", { key: "routines.invalid_routine_cron_or_time_zone", args: [] }); }
@@ -76,23 +63,22 @@ export class ExecutionRoutines {
       this.store.putReceipt(actor, request.request_id, serialized, routine); return routine;
     });
   }
-  private runtime(routine: ExecutionRoutine): RuntimeInfo {
-    const assignee = parseAssignee(routine.assignee);
-    if (assignee === "human") throw new ExecutionError("INVALID", { key: "routines.routine_must_be_assigned_to_an_agent", args: [] });
-    const runtime = this.context.runtimes(this.context.now()).find((value) => value.registration.name === (assignee.device ?? this.context.localRuntime));
+  private runtime(routine: ExecutionRoutine) {
+    const [agent, device = this.context.localRuntime] = routine.assignee.split("@");
+    const runtime = this.context.runtimes(this.context.now()).find((value) => value.registration.name === device);
     if (!runtime) throw new ExecutionError("INVALID", { key: "routines.no_runtime_available_pair_the_device_specified_by_the_routine_first", args: [] });
-    if (!runtime.registration.engines.some((engine) => engine.name === assignee.agent)) throw new ExecutionError("INVALID", { key: "modules.selected_agent_is_not_registered_on_runtime", args: [] });
+    const engine = runtime.registration.engines.find(engine => engine.name === agent);
+    if (!engine) throw new ExecutionError("INVALID", { key: "modules.selected_agent_is_not_registered_on_runtime", args: [] });
     this.context.validateWorkdir?.(runtime, routine.workdir ?? "~");
-    return runtime;
+    return { runtime, engine: engine.name };
   }
   private plan(routine: ExecutionRoutine): RoutinePlanRecord {
-    const runtime = this.runtime(routine), target = parseAssignee(routine.assignee);
-    if (target === "human") throw new ExecutionError("INVALID", { key: "routines.routine_must_be_assigned_to_an_agent", args: [] });
+    const { runtime, engine } = this.runtime(routine);
     const previous = this.jobs.list(undefined, undefined, routine.id).filter((job) => job.result).at(-1);
     const raw = previous?.result?.report;
     const report = routine.context === "previous" ? raw?.slice(0, 3000) : undefined;
     const prompt = this.msg("You are running an independent routine. Work only in the working directory; do not access the Lumio knowledge directory. Request privileged approval through lumio-runtime sudo.\nReport results clearly; if a user decision is needed, use <lumio-question>Question</lumio-question> and end the round.\n\n# ${0}\n\n${1}${2}", routine.title, routine.description, report ? this.msg("\n\n## Previous report\n\n${0}", report) : "");
-    const template: RoutineSpec["template"] = { run: { kind: "agent", engine: target.agent, prompt, ...(routine.model ? { model: routine.model } : {}) },
+    const template: RoutineSpec["template"] = { run: { kind: "agent", engine, prompt, ...(routine.model ? { model: routine.model } : {}) },
       workdir: routine.workdir ?? "~", timeout_seconds: (routine.timeout_minutes ?? 120) * 60, ...(routine.gpus ? { gpus: routine.gpus } : {}) };
     const fingerprint = this.context.fingerprint(JSON.stringify({ revision: routine.revision, runtime: runtime.actor, template, schedule: routine.schedule, timezone: routine.timezone }));
     const current = this.store.currentPlan(routine.id);
@@ -134,7 +120,7 @@ export class ExecutionRoutines {
       const lastJob = this.jobs.list(undefined, undefined, routine.id).at(-1);
       const last = lastJob?.spec.source?.fired_at ? { job: lastJob.spec.id, status: lastJob.status, fired_at: lastJob.spec.source.fired_at } : undefined;
       let runtime: RuntimeInfo | undefined, problem: string | undefined;
-      try { runtime = this.runtime(routine); } catch (cause) { problem = cause instanceof ExecutionError ? this.msg(cause.params.key, ...cause.params.args) : this.msg("Could not generate plan"); }
+      try { ({ runtime } = this.runtime(routine)); } catch (cause) { problem = cause instanceof ExecutionError ? this.msg(cause.params.key, ...cause.params.args) : this.msg("Could not generate plan"); }
       return ExecutionRoutineInfo.parse({ routine, ...(runtime ? { runtime: runtime.registration.name } : {}),
         ...(routine.status === "active" && runtime ? { next: nextFire(parseCron(routine.schedule), routine.timezone, this.context.now())?.toISOString() } : {}),
         ...(last ? { last } : {}), ...(problem ? { problem } : {}) });

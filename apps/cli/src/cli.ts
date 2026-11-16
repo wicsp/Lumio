@@ -16,10 +16,8 @@ import { ApiClientError, createClient } from "@lumio/api-client";
 import { ApiError, SecurityReviewRequest } from "@lumio/schema";
 import { runAgents, runSkillInstall } from "./agent-access.ts";
 import { runJobs } from "./jobs.ts";
-import { runTasks } from "./tasks.ts";
 import { runWork, runAttention, runPlanTemplates } from "./work.ts";
 import { runAssistant } from "./assistant.ts";
-import { runRoutines } from "./routines.ts";
 import { runExecutionRoutines } from "./execution-routines.ts";
 import { runOperations } from "./operations.ts";
 import { version } from "./version.ts";
@@ -115,12 +113,12 @@ async function executeCli(args: string[], options: CliOptions): Promise<number> 
   if (args[0] === "task") {
     const taskArgs = args.slice(1);
     if (taskArgs[0] === "dispatch") taskArgs[0] = "continue";
-    return (await runWork("task", taskArgs, log)) ?? runTasks(taskArgs.filter((arg) => arg !== "--legacy"), log);
+    return runWork("task", taskArgs, log);
   }
   if (args[0] === "project") return (await runWork("project", args.slice(1), log))!;
   if (args[0] === "ai-note") return runAiNote(args.slice(1), log);
   if (args[0] === "chat") return runAssistant(args.slice(1), log);
-  if (args[0] === "routine") return (await runExecutionRoutines(args.slice(1), log)) ?? runRoutines(args.slice(1).filter((arg) => arg !== "--legacy"), log);
+  if (args[0] === "routine") return runExecutionRoutines(args.slice(1), log);
   const { values, positionals } = parseArgs({
     args, allowPositionals: true, strict: true,
     options: {

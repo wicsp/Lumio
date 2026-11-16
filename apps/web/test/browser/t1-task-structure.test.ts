@@ -7,7 +7,7 @@ import { taskCreateCommand, workPatchCommand } from "../../src/client/commands.t
 const at = "2026-11-08T00:00:00Z";
 const id = (n: number) => `task_01JABCDEFGHJKMNPQRSTVWXY${String(n).padStart(2, "0")}`;
 const task = (n: number, extra: Partial<WorkTask> = {}): WorkTask => ({
-  schema_version: 3, type: "task", id: id(n), title: `T${n}`, description: "", revision: 1, outcome: "open",
+  schema_version: 3, type: "task", created_by: "act_00000000000000000000000001", updated_by: "act_00000000000000000000000001", id: id(n), title: `T${n}`, description: "", revision: 1, outcome: "open",
   turn: { holder: "human", reason: "todo", since: at }, created: at, updated: at, tags: [], dependencies: [], references: [], ...extra,
 });
 

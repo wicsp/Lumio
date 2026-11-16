@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { WorkProject, WorkTask, WorkComment, WorkExecution, TaskTurnChange, WorkCommandResult, PlanTemplate, TrashItem, StagePermissions } from "@lumio/schema";
-import { WorkError, type PendingStageGrant, type WorkStore } from "@lumio/work";
+import { type PendingStageGrant, type WorkStore } from "@lumio/work";
 
 
 /** Each adapter owns only its module's tables; no Knowledge, Execution or actor-table joins. */
@@ -8,17 +8,19 @@ export class SqliteWorkStore implements WorkStore {
   constructor(private readonly db: Database) {
     db.exec("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;");
     db.transaction(() => db.exec(`
-      CREATE TABLE IF NOT EXISTS platform_migrations (name TEXT PRIMARY KEY, applied TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS work_projects (
         id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL,
         revision INTEGER NOT NULL CHECK(revision>0), status TEXT NOT NULL CHECK(status IN ('planning','active','paused','done')),
-        created TEXT NOT NULL, updated TEXT NOT NULL, tags TEXT NOT NULL CHECK(json_valid(tags)), goal TEXT, repo TEXT, deadline TEXT);
+        created TEXT NOT NULL, updated TEXT NOT NULL, tags TEXT NOT NULL CHECK(json_valid(tags)), goal TEXT, repo TEXT, deadline TEXT,
+        created_by TEXT NOT NULL, updated_by TEXT NOT NULL, workdir TEXT, default_target TEXT, default_plan TEXT);
       CREATE TABLE IF NOT EXISTS work_tasks (
         id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL,
-        revision INTEGER NOT NULL CHECK(revision>0), status TEXT NOT NULL CHECK(status IN ('todo','active','waiting','paused','done','cancelled')),
-        assignee TEXT NOT NULL, project TEXT REFERENCES work_projects(id), parent TEXT REFERENCES work_tasks(id), due TEXT,
+        revision INTEGER NOT NULL CHECK(revision>0), outcome TEXT NOT NULL CHECK(outcome IN ('open','done','cancelled')),
+        turn TEXT NOT NULL CHECK(json_valid(turn)), plan TEXT CHECK(plan IS NULL OR json_valid(plan)),
+        grants TEXT CHECK(grants IS NULL OR json_valid(grants)), project TEXT REFERENCES work_projects(id), parent TEXT REFERENCES work_tasks(id), due TEXT,
         created TEXT NOT NULL, updated TEXT NOT NULL, tags TEXT NOT NULL CHECK(json_valid(tags)),
-        refs TEXT NOT NULL CHECK(json_valid(refs)), workdir TEXT, model TEXT, gpus TEXT, timeout_minutes INTEGER);
+        refs TEXT NOT NULL CHECK(json_valid(refs)), workdir TEXT, model TEXT, gpus TEXT, timeout_minutes INTEGER,
+        created_by TEXT, updated_by TEXT);
       CREATE INDEX IF NOT EXISTS work_tasks_project ON work_tasks(project);
       CREATE TABLE IF NOT EXISTS work_dependencies (task TEXT NOT NULL REFERENCES work_tasks(id), dependency TEXT NOT NULL REFERENCES work_tasks(id),
         PRIMARY KEY(task,dependency), CHECK(task<>dependency));
@@ -33,30 +35,12 @@ export class SqliteWorkStore implements WorkStore {
       CREATE TABLE IF NOT EXISTS work_purged_tasks (id TEXT PRIMARY KEY REFERENCES work_tasks(id));
       CREATE TABLE IF NOT EXISTS work_requests (actor TEXT NOT NULL, request TEXT NOT NULL, operation TEXT NOT NULL,
         result TEXT NOT NULL CHECK(json_valid(result)), PRIMARY KEY(actor,request));
-      INSERT OR IGNORE INTO platform_migrations(name,applied) VALUES ('work-1',strftime('%Y-%m-%dT%H:%M:%fZ','now'));
-    `))();
-    db.transaction(() => {
-      if (db.query("SELECT 1 FROM platform_migrations WHERE name='work-2'").get()) return;
-      for (const table of ["work_projects", "work_tasks"]) {
-        db.exec(`ALTER TABLE ${table} ADD COLUMN created_by TEXT; ALTER TABLE ${table} ADD COLUMN updated_by TEXT;`);
-      }
-      db.exec("ALTER TABLE work_executions ADD COLUMN acknowledged TEXT CHECK(acknowledged IS NULL OR json_valid(acknowledged)); INSERT INTO platform_migrations(name,applied) VALUES('work-2',strftime('%Y-%m-%dT%H:%M:%fZ','now'));");
-    })();
-    if (!db.query("SELECT 1 FROM platform_migrations WHERE name='work-3'").get()) {
-      if (db.query("SELECT 1 FROM work_tasks LIMIT 1").get()) throw new WorkError("CONFLICT", { key: "work.migration_required", args: [] });
-      upgradeWorkTables(db);
-    }
-    db.transaction(() => {
-      const columns = db.query<{ name: string }, []>("PRAGMA table_info(work_projects)").all();
-      if (!columns.some(column => column.name === "workdir")) db.exec("ALTER TABLE work_projects ADD COLUMN workdir TEXT");
-      if (!columns.some(column => column.name === "default_target")) db.exec("ALTER TABLE work_projects ADD COLUMN default_target TEXT");
-      if (!columns.some(column => column.name === "default_plan")) db.exec("ALTER TABLE work_projects ADD COLUMN default_plan TEXT");
-      const taskColumns = db.query<{ name: string }, []>("PRAGMA table_info(work_tasks)").all();
-      if (!taskColumns.some(column => column.name === "grants")) db.exec("ALTER TABLE work_tasks ADD COLUMN grants TEXT CHECK(grants IS NULL OR json_valid(grants))");
-      db.exec(`CREATE TABLE IF NOT EXISTS work_pending_grants (
+      CREATE TABLE IF NOT EXISTS work_turns(task TEXT NOT NULL REFERENCES work_tasks(id),record TEXT NOT NULL CHECK(json_valid(record)));
+      CREATE INDEX IF NOT EXISTS work_turns_task ON work_turns(task);
+      CREATE TABLE IF NOT EXISTS work_pending_grants (
         task TEXT PRIMARY KEY REFERENCES work_tasks(id), job TEXT NOT NULL, stage TEXT,
-        permissions TEXT NOT NULL CHECK(json_valid(permissions)))`);
-    }).immediate();
+        permissions TEXT NOT NULL CHECK(json_valid(permissions)));
+    `)).immediate();
   }
   transaction<T>(action: () => T): T { return this.db.transaction(action)(); }
   private readProject(row: Record<string, unknown> | null): WorkProject | undefined {
@@ -77,7 +61,7 @@ export class SqliteWorkStore implements WorkStore {
       ON CONFLICT(id) DO UPDATE SET title=excluded.title,description=excluded.description,revision=excluded.revision,
       status=excluded.status,updated=excluded.updated,tags=excluded.tags,goal=excluded.goal,repo=excluded.repo,workdir=excluded.workdir,default_target=excluded.default_target,default_plan=excluded.default_plan,deadline=excluded.deadline,updated_by=excluded.updated_by`).run(
       value.id, value.title, value.description, value.revision, value.status, value.created, value.updated,
-      JSON.stringify(value.tags), value.goal ?? null, value.repo ?? null, value.deadline ?? null, value.created_by ?? null, value.updated_by ?? null, value.workdir ?? null, value.default_target ?? null, value.default_plan ?? null);
+      JSON.stringify(value.tags), value.goal ?? null, value.repo ?? null, value.deadline ?? null, value.created_by, value.updated_by, value.workdir ?? null, value.default_target ?? null, value.default_plan ?? null);
   }
 
   private readTask(row: Record<string, unknown> | null, batchDependencies?: Map<string, string[]>): WorkTask | undefined {
@@ -110,7 +94,7 @@ export class SqliteWorkStore implements WorkStore {
         refs=excluded.refs,workdir=excluded.workdir,model=excluded.model,gpus=excluded.gpus,timeout_minutes=excluded.timeout_minutes,updated_by=excluded.updated_by`).run(
         value.id, value.title, value.description, value.revision, value.outcome, JSON.stringify(value.turn), value.plan ? JSON.stringify(value.plan) : null, value.grants ? JSON.stringify(value.grants) : null, value.project ?? null, value.parent ?? null,
         value.due ?? null, value.created, value.updated, JSON.stringify(value.tags), JSON.stringify(value.references),
-        value.workdir ?? null, value.model ?? null, value.gpus === undefined ? null : JSON.stringify(value.gpus), value.timeout_minutes ?? null, value.created_by ?? null, value.updated_by ?? null);
+        value.workdir ?? null, value.model ?? null, value.gpus === undefined ? null : JSON.stringify(value.gpus), value.timeout_minutes ?? null, value.created_by, value.updated_by);
       this.db.query("DELETE FROM work_dependencies WHERE task=?").run(value.id);
       const insert = this.db.query("INSERT INTO work_dependencies(task,dependency) VALUES (?,?)");
       for (const dependency of value.dependencies) insert.run(value.id, dependency);
@@ -217,20 +201,4 @@ export class SqliteWorkStore implements WorkStore {
     }
     this.db.query("INSERT INTO work_requests(actor,request,operation,result) VALUES (?,?,?,?)").run(actor, request, operation, JSON.stringify(parsed));
   }
-}
-
-/** Called only for an empty store or after the offline migration's verified full backup. */
-export function upgradeWorkTables(db: Database): void {
-  db.transaction(() => {
-    db.exec(`DROP INDEX IF EXISTS work_tasks_status;
-      ALTER TABLE work_tasks ADD COLUMN outcome TEXT NOT NULL DEFAULT 'open' CHECK(outcome IN ('open','done','cancelled'));
-      ALTER TABLE work_tasks ADD COLUMN turn TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(turn));
-      ALTER TABLE work_tasks ADD COLUMN plan TEXT CHECK(plan IS NULL OR json_valid(plan));
-      ALTER TABLE work_tasks DROP COLUMN status;
-      ALTER TABLE work_tasks DROP COLUMN assignee;
-      ALTER TABLE work_executions DROP COLUMN acknowledged;
-      CREATE TABLE work_turns(task TEXT NOT NULL REFERENCES work_tasks(id),record TEXT NOT NULL CHECK(json_valid(record)));
-      CREATE INDEX work_turns_task ON work_turns(task);
-      INSERT INTO platform_migrations(name,applied) VALUES('work-3',strftime('%Y-%m-%dT%H:%M:%fZ','now'));`);
-  })();
 }

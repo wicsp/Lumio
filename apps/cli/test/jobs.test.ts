@@ -18,7 +18,7 @@ test("all job CLI commands validate JSON and preserve argv; show renders offline
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(req) {
     const url = new URL(req.url); expect(req.headers.get("Authorization")).toBe("Bearer synthetic-token");
     seen.push({ path: url.pathname + url.search, method: req.method, ...(req.method === "POST" ? { body: await req.json() } : {}) });
-    if (url.pathname === "/v1/runtimes") return Response.json([{ actor: job.spec.runtime, registration: { protocol_version: 2, name: "server", engines: [], tags: [], max_concurrent: 1 }, last_seen: job.spec.created, online: false }]);
+    if (url.pathname === "/v1/runtimes") return Response.json([{ actor: job.spec.runtime, update: null, registration: { version: null, platform: null, install: null, protocol_version: 2, name: "server", engines: [], tags: [], max_concurrent: 1 }, last_seen: job.spec.created, online: false }]);
     return Response.json(req.method === "GET" && url.pathname === "/v2/execution/jobs" ? [job] : job);
   } });
   const url = `http://127.0.0.1:${server.port}`;

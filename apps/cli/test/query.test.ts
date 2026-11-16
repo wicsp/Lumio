@@ -156,7 +156,7 @@ test("check reports sorted paths and count, ignores legacy related, and returns 
   const result = CheckResult.parse(json(["check"]));
   expect(result.total).toBeGreaterThan(0);
   const human = cli(["check"]); expect(human.code).toBe(0); expect(human.stderr).toBe("");
-  expect(human.stdout).toBe(result.dangling.map((l) => `${l.from.path}  →  [[${l.target}]]\n`).join("") + `共 ${result.total} 条悬空链接\n`);
+  expect(human.stdout).toBe(result.unsupported_work_notes.map(path => `已不支持的旧工作笔记：${path}\n`).join("") + result.dangling.map((l) => `${l.from.path}  →  [[${l.target}]]\n`).join("") + `共 ${result.total} 条悬空链接\n`);
   expect(result.dangling.some((l) => l.target === "idea_00000000000000000000000099")).toBe(false);
   expect(result.dangling.some((l) => l.target === "Private" || l.target.startsWith("ast_"))).toBe(false);
   CheckResult.parse(json(["check", "--include-private"]));
@@ -179,13 +179,14 @@ test("check lists all old wikilinks after rename and reports no dangling links a
 });
 
 
-test("check warns about old object assignee and turn without errors, JSON changes or note rewrites", async () => {
+test("check lists unsupported work notes without editing or indexing them", async () => {
   const path = join(vault, "plan/tasks/Task.md");
   const original = (await readFile(path, "utf8")).replace("type: task", "type: task\nassignee:\n  agent: pi\n  device: server\nturn: agent");
   await Bun.write(path, original);
   const result = cli(["check", "--json"]);
-  expect(result.code).toBe(0); CheckResult.parse(JSON.parse(result.stdout));
-  expect(result.stderr).toContain("assignee: pi@server");
-  expect(result.stderr).toContain("turn 已不再使用，可以删掉");
+  expect(result.code).toBe(0);
+  expect(CheckResult.parse(JSON.parse(result.stdout)).unsupported_work_notes).toContain("plan/tasks/Task.md");
+  expect(SearchResult.parse(json(["search", "Task"])).hits.some(hit => hit.note.path === "plan/tasks/Task.md")).toBe(false);
+  expect(result.stderr).toBe("");
   expect(await readFile(path, "utf8")).toBe(original);
 });

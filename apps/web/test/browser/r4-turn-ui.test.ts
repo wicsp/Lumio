@@ -8,7 +8,7 @@ import { SERVICE_WORKER } from "../../src/sw.ts";
 
 const ID = "task_01JABCDEFGHJKMNPQRSTVWXYZ0", JOB = "job_01JABCDEFGHJKMNPQRSTVWXYZ0", at = "2026-11-05T00:00:00Z";
 const task = (turn: WorkTask["turn"], outcome: WorkTask["outcome"] = "open"): WorkTask => ({
-  schema_version: 3, type: "task", id: ID, title: "T", description: "", revision: 5, outcome, turn,
+  schema_version: 3, type: "task", created_by: "act_00000000000000000000000001", updated_by: "act_00000000000000000000000001", id: ID, title: "T", description: "", revision: 5, outcome, turn,
   created: at, updated: at, tags: [], dependencies: [], references: [],
 });
 const valid = (request: WorkCommandRequest) => expect(WorkCommandRequest.parse(request)).toEqual(request);
@@ -95,7 +95,7 @@ describe("R4-8", () => {
     const turns = [{ task: ID, at, by: "act_01JABCDEFGHJKMNPQRSTVWXYZ0", from: base.turn, to: { holder: "codex@macsp", reason: "working" as const, since: at, round: 1, job: JOB } }];
     expect(continueTarget({ task: base, dependents: [], children: [], comments: [], executions: [], turns })).toBe("codex@macsp");
     expect(continueTarget({ task: { ...base, turn: { holder: "nobody", reason: "on_hold", since: at } }, dependents: [], children: [], comments: [], executions: [], turns })).toBeUndefined();
-    const plan = { plan: { stages: [{ kind: "agent" as const, id: "review", agent: "claude-code@macsp", instruction: "Review" }] }, approved: { at, by: "act_01JABCDEFGHJKMNPQRSTVWXYZ0" }, stage: "review", rounds: 1 };
+    const plan = { plan: { stages: [{ kind: "agent" as const, id: "review", agent: "claude-code@macsp", instruction: "Review" }] }, approved: { at, by: "act_01JABCDEFGHJKMNPQRSTVWXYZ0" }, stage: "review", done: [], rounds: 1 };
     expect(continueTarget({ task: { ...base, plan }, dependents: [], children: [], comments: [], executions: [], turns })).toBe("claude-code@macsp");
     expect(continueTarget({ task: { ...base, plan: { ...plan, stage: "end" } }, dependents: [], children: [], comments: [], executions: [], turns })).toBeUndefined();
   });

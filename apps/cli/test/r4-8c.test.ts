@@ -54,7 +54,7 @@ test("skill command rows include every shared Work flag and delegation retry ins
 
 test("task new and update send every execution field; continue sends its comment and revision", async () => {
   const id = "task_00000000000000000000000001", at = "2026-11-05T00:00:00Z";
-  const task = { schema_version: 3, type: "task", id, title: "Synthetic", description: "", revision: 1, outcome: "open", turn: { holder: "human", reason: "todo", since: at }, tags: [], dependencies: [], references: [], created: at, updated: at };
+  const task = { schema_version: 3, type: "task", created_by: "act_00000000000000000000000001", updated_by: "act_00000000000000000000000001", id, title: "Synthetic", description: "", revision: 1, outcome: "open", turn: { holder: "human", reason: "todo", since: at }, tags: [], dependencies: [], references: [], created: at, updated: at };
   const requests: { operation: { op: string; args: Record<string, unknown> } }[] = [];
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
     if (request.method === "GET") return Response.json({ task, dependents: [], children: [], comments: [], executions: [], turns: [] });
@@ -74,9 +74,9 @@ test("task new and update send every execution field; continue sends its comment
 
 test("default-target flags, next-target output and implicit dispatch work through the CLI", async () => {
   const at = "2026-11-09T00:00:00Z", runtime = "act_00000000000000000000000001";
-  const project = WorkProject.parse({ schema_version: 2, type: "project", id: "prj_00000000000000000000000001",
+  const project = WorkProject.parse({ schema_version: 2, type: "project", created_by: "act_00000000000000000000000001", updated_by: "act_00000000000000000000000001", id: "prj_00000000000000000000000001",
     title: "Synthetic", description: "", revision: 1, status: "active", tags: [], created: at, updated: at });
-  const task = WorkTask.parse({ schema_version: 3, type: "task", id: "task_00000000000000000000000001", title: "Synthetic task",
+  const task = WorkTask.parse({ schema_version: 3, type: "task", created_by: "act_00000000000000000000000001", updated_by: "act_00000000000000000000000001", id: "task_00000000000000000000000001", title: "Synthetic task",
     description: "", revision: 1, outcome: "open", turn: { holder: "human", reason: "todo", since: at }, tags: [],
     dependencies: [], references: [], created: at, updated: at, next_target: { target: "codex@synthetic", source: "project" } });
   const detail = WorkTaskDetail.parse({ task, dependents: [], children: [], comments: [], executions: [], turns: [] });
@@ -118,7 +118,7 @@ test("default-target flags, next-target output and implicit dispatch work throug
 
 test("project update sets and clears the default plan using the observed revision", async () => {
   const at = "2026-11-10T00:00:00Z", template = "wft_00000000000000000000000001";
-  const project = WorkProject.parse({ schema_version: 2, type: "project", id: "prj_00000000000000000000000001",
+  const project = WorkProject.parse({ schema_version: 2, type: "project", created_by: "act_00000000000000000000000001", updated_by: "act_00000000000000000000000001", id: "prj_00000000000000000000000001",
     title: "Synthetic project", description: "", revision: 3, status: "active", tags: [], created: at, updated: at });
   const requests: WorkCommandRequest[] = [];
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
@@ -153,7 +153,7 @@ test("project update sets and clears the default plan using the observed revisio
 test("graph plan files round-trip through task updates and template proposals with advisory warnings", async () => {
   const at = "2026-11-10T00:00:00Z", path = new URL("./fixtures/h1-handoff-plan.json", import.meta.url).pathname;
   const plan = HandoffPlan.parse(await Bun.file(path).json()), target = "claude-code@synthetic";
-  const task = WorkTask.parse({ schema_version: 3, type: "task", id: "task_00000000000000000000000001", title: "Synthetic task",
+  const task = WorkTask.parse({ schema_version: 3, type: "task", created_by: "act_00000000000000000000000001", updated_by: "act_00000000000000000000000001", id: "task_00000000000000000000000001", title: "Synthetic task",
     description: "", revision: 1, outcome: "open", turn: { holder: "human", reason: "todo", since: at }, tags: [],
     dependencies: [], references: [], created: at, updated: at });
   const detail = WorkTaskDetail.parse({ task, dependents: [], children: [], comments: [], executions: [], turns: [] });

@@ -1,4 +1,4 @@
-import { ExecutionTarget, parseAssignee, DISPATCH_TARGET_SOURCES, type AgentRun, type RuntimeInfo, type StagePermissions } from "@lumio/schema";
+import { AgentTarget, ExecutionTarget, DISPATCH_TARGET_SOURCES, type AgentRun, type RuntimeInfo, type StagePermissions } from "@lumio/schema";
 import type { HubStore } from "./store.ts";
 import { PlanDispatchUnavailable } from "@lumio/work";
 import { HubError } from "./errors.ts";
@@ -10,8 +10,10 @@ export function executionTargets(store: HubStore, now = new Date()): ExecutionTa
   }))));
 }
 export function validateTarget(store: HubStore, localRuntime: string | undefined, target: string, now = new Date(), source?: (typeof DISPATCH_TARGET_SOURCES)[number]): ExecutionTarget {
-  const targets = executionTargets(store, now), parsed = parseAssignee(target);
-  const found = parsed === "human" ? undefined : targets.find(value => value.runtime === (parsed.device ?? localRuntime) && value.engine === parsed.agent);
+  const targets = executionTargets(store, now);
+  const parsed = AgentTarget.safeParse(target);
+  const [engine, device] = parsed.success ? parsed.data.split("@") : [];
+  const found = targets.find(value => value.runtime === (device ?? localRuntime) && value.engine === engine);
   if (!found) throw new HubError("INVALID", { key: source === "project" ? "target.invalid_project_default" : "target.invalid", args: [target, targets.map(value => value.target).join(", ")] });
   return found;
 }

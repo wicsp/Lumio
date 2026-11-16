@@ -7,7 +7,7 @@ import { expect, test } from "bun:test";
 import { Proposal } from "@lumio/schema";
 const cliHome = isolatedHome();
 
-const proposal = Proposal.parse({ id: "prop_00000000000000000000000001", operation: { op: "task.dispatch", args: { task: "task_00000000000000000000000012", trigger: "cli" } }, reason: "合成提议", author: "act_00000000000000000000000001", status: "accepted", created: "2026-01-01T00:00:00Z", decided: "2026-01-01T00:00:01Z", decided_by: "act_00000000000000000000000002" });
+const proposal = Proposal.parse({ id: "prop_00000000000000000000000001", operation: { op: "exec.privileged", args: { runtime: "act_00000000000000000000000001", job: "job_00000000000000000000000012", argv: ["/bin/true"] } }, reason: "合成提议", author: "act_00000000000000000000000001", status: "accepted", created: "2026-01-01T00:00:00Z", decided: "2026-01-01T00:00:01Z", decided_by: "act_00000000000000000000000002" });
 
 test("proposal rendering uses actors for author/decider names and falls back to IDs when absent", async () => {
   for (const known of [false, true]) {
@@ -30,7 +30,7 @@ test("proposal rendering uses actors for author/decider names and falls back to 
       expect(stdout).toContain(`提交者：${known ? "codex" : proposal.author}`);
       expect(stdout).toContain(`决定者：${known ? "owner" : proposal.decided_by}`);
       const op = proposal.operation;
-      if (op.op === "task.dispatch") expect(stdout).toContain(op.args.task);
+      if (op.op === "exec.privileged") expect(stdout).toContain(op.args.job);
     } finally { await server.stop(true); }
   }
 });
@@ -43,7 +43,12 @@ test("privileged proposal renders the command, runtime, task title, round and re
     if (path === "/v1/proposals") return Response.json([p]);
     if (path.startsWith("/v1/jobs/")) return Response.json({ spec: { protocol_version: 2, id: "job_00000000000000000000000001", lease: "1234567890123456", runtime: p.author,
       source: { task: "task_00000000000000000000000001", round: 2 }, run: { kind: "command", argv: ["/bin/true"] }, workdir: "/", timeout_seconds: 30, created: p.created }, status: "running" });
-    return Response.json({ note: { id: "task_00000000000000000000000001", type: "task", title: "安装软件", path: "plan/tasks/install.md" }, frontmatter: {}, body: "" });
+    return Response.json({
+      task: { id: "task_00000000000000000000000001", schema_version: 3, type: "task", title: "安装软件", description: "",
+        created_by: p.author, updated_by: p.author, created: p.created, updated: p.created, revision: 1, outcome: "open",
+        turn: { holder: "human", reason: "todo", since: p.created }, tags: [], references: [], dependencies: [] },
+      dependents: [], children: [], executions: [], comments: [], turns: [],
+    });
   } });
   try {
     const child = Bun.spawn([process.execPath, new URL("../src/main.ts", import.meta.url).pathname, "proposals"], { env: { ...process.env, HOME: cliHome, LUMIO_HUB_URL: `http://127.0.0.1:${server.port}`, LUMIO_TOKEN: "fixture" }, stdout: "pipe", stderr: "pipe" });

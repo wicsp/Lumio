@@ -32,7 +32,7 @@ describe("markdown", () => {
   test("code blocks are escaped", () => expect(renderMarkdown("```\n<b>[[x]]</b>\n```")).toContain("&lt;b&gt;[[x]]&lt;/b&gt;"));
 });
 
-const task: WorkTask = { schema_version: 3, type: "task", id: "task_01JABCDEFGHJKMNPQRSTVWXYZ0", title: "T", description: "old", revision: 3, outcome: "open", turn: { holder: "human", reason: "todo", since: "2026-11-01T00:00:00Z" }, created: "2026-11-01T00:00:00+08:00", updated: "2026-11-01T00:00:00+08:00", tags: [], dependencies: [], references: [] };
+const task: WorkTask = { schema_version: 3, type: "task", created_by: "act_00000000000000000000000001", updated_by: "act_00000000000000000000000001", id: "task_01JABCDEFGHJKMNPQRSTVWXYZ0", title: "T", description: "old", revision: 3, outcome: "open", turn: { holder: "human", reason: "todo", since: "2026-11-01T00:00:00Z" }, created: "2026-11-01T00:00:00+08:00", updated: "2026-11-01T00:00:00+08:00", tags: [], dependencies: [], references: [] };
 
 describe("work commands", () => {
   test("structural patch excludes description and carries revision", () => {

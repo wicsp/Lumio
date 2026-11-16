@@ -11,7 +11,7 @@ import type { Navigate, Section } from "./navigation.ts";
 const KNOWLEDGE = new Set(["pap", "idea", "src", "exp", "post", "ast", "rpt", "ain"]);
 const ULID = "[0-9A-HJKMNP-TV-Z]{26}";
 /** 文件名为 `ain_<ULID>` 或 `<标题> ain_<ULID>`（ADR 0051、0053）。 */
-const AI_NOTE_NAME = new RegExp(`(?:^|\\s)(ain_${ULID})$`);
+const AI_NOTE_NAME = new RegExp(`\\s(ain_${ULID})$`);
 
 export const prefixOf = (id: string): string => id.slice(0, id.indexOf("_"));
 
@@ -65,8 +65,7 @@ export function resourceLinks(root: HTMLElement, client: Client, navigate: Navig
 }
 
 /**
- * 指向 AI 笔记的链接目标：AI 笔记的文件名以它的 ID 结尾（`ai/notes/<标题> ain_….md`，旧文件为 `ain_….md`），
- * 所以 `[[<标题> ain_…]]`、`ain_…`、`…/ain_….md` 都能直接认出来，不需要先查询。
+ * 从 `<标题> ain_…` 格式的 AI 笔记文件名中取出 ID。
  */
 export function aiNoteIdOf(target: string): string | undefined {
   return AI_NOTE_NAME.exec(target.split("/").pop()!.replace(/\.md$/, ""))?.[1];

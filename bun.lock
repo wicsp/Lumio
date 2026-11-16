@@ -103,18 +103,6 @@
         "@lumio/schema": "workspace:*",
       },
     },
-    "packages/core": {
-      "name": "@lumio/core",
-      "version": "0.0.0",
-      "dependencies": {
-        "@lumio/execution": "workspace:*",
-        "@lumio/foundation": "workspace:*",
-        "@lumio/knowledge": "workspace:*",
-        "@lumio/platform": "workspace:*",
-        "@lumio/schema": "workspace:*",
-        "@lumio/storage": "workspace:*",
-      },
-    },
     "packages/execution": {
       "name": "@lumio/execution",
       "version": "0.0.0",
@@ -221,8 +209,6 @@
     "@lumio/chrome-ext": ["@lumio/chrome-ext@workspace:apps/chrome-ext"],
 
     "@lumio/cli": ["@lumio/cli@workspace:apps/cli"],
-
-    "@lumio/core": ["@lumio/core@workspace:packages/core"],
 
     "@lumio/execution": ["@lumio/execution@workspace:packages/execution"],
 

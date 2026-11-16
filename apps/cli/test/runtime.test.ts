@@ -8,7 +8,7 @@ import { RuntimeInfo } from "@lumio/schema";
 const cliHome = isolatedHome();
 
 const main = new URL("../src/main.ts", import.meta.url).pathname;
-const info = RuntimeInfo.parse({ actor: "act_00000000000000000000000001", registration: {
+const info = RuntimeInfo.parse({ actor: "act_00000000000000000000000001", update: null, registration: { version: null, platform: null, install: null,
   protocol_version: 2, name: "server", engines: [{ name: "codex", version: "0.42.0", sandbox: "os" }], tags: ["gpu:4", "lab"], max_concurrent: 1,
 }, online: true, last_seen: "2026-01-01T00:00:00Z" });
 

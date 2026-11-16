@@ -27,7 +27,6 @@ import { SideRail, type RailEntry } from "../side-rail.ts";
 import { refOf } from "../workbench-assist.ts";
 
 const TYPE_LABEL: Record<string, string> = translated({ paper: "Paper", idea: "Idea", experiment: "Experiment", source: "Source", post: "Post", asset: "Asset", "ai-note": "AI", project: "Old project", task: "Old task", routine: "Old routine" });
-const LEGACY = new Set(["project", "task", "routine"]);
 const EDITABLE = new Set(["paper", "source", "idea", "experiment", "post", "ai-note"]);
 
 function editableId(note: NoteDetail["note"]): string | undefined {
@@ -181,11 +180,9 @@ export class KnowledgePane {
   }
 
   private pickType(): void {
-    const current = NOTE_TYPES.filter(t => !LEGACY.has(t)), legacy = NOTE_TYPES.filter(t => LEGACY.has(t));
     openMenu(this.typeButton, [
       { value: "", label: t("All types"), selected: !this.type },
-      ...current.map(type => ({ value: type, label: TYPE_LABEL[type] ?? type, selected: this.type === type })),
-      ...legacy.map(type => ({ value: type, label: TYPE_LABEL[type] ?? type, hint: t("pre-migration"), selected: this.type === type })),
+      ...NOTE_TYPES.map(type => ({ value: type, label: TYPE_LABEL[type] ?? type, selected: this.type === type })),
     ], value => { this.type = value; this.renderFilters(); void this.search(); });
   }
 
@@ -208,7 +205,7 @@ export class KnowledgePane {
   private async search(quiet = false): Promise<void> {
     if (this.graphMode) {
       this.searchGeneration++;
-      await this.graphView?.load({ include_private: this.includePrivate, ...(this.type ? { type: this.type as (typeof NOTE_TYPES)[number] } : {}), include_legacy: LEGACY.has(this.type) }, quiet);
+      await this.graphView?.load({ include_private: this.includePrivate, ...(this.type ? { type: this.type as (typeof NOTE_TYPES)[number] } : {}) }, quiet);
       return;
     }
     const generation = ++this.searchGeneration;
@@ -217,7 +214,7 @@ export class KnowledgePane {
     try {
       const result = await this.client.search(this.query.value.trim(), { includePrivate, limit: 60, ...(this.type ? { type: this.type as (typeof NOTE_TYPES)[number] } : {}) });
       if (!this.active || generation !== this.searchGeneration || includePrivate !== this.includePrivate) return;
-      const hits = this.type ? result.hits : result.hits.filter(hit => !LEGACY.has(hit.note.type));
+      const hits = result.hits;
       if (!hits.length) { clear(this.results, empty(this.query.value.trim() ? t("No matching notes.") : t("No notes yet."))); return; }
       const terms = matchTerms(result.query);
       clear(this.results, ...hits.map(hit => this.row(hit, terms)));

@@ -51,7 +51,7 @@ test("Hub manages Work without a Knowledge directory, uses explicit dispatch and
   expect(hub.store.db.query("SELECT * FROM jobs").all()).toEqual([]);
   expect("path" in created.task).toBe(false);
   const old = await request("/v1/operations", { operation: { op: "task.dispatch", args: { task: created.task.id, trigger: "cli" } } });
-  expect(old.status).toBe(409); expect(ApiError.parse(await old.json()).error.message).toContain("新版");
+  expect(old.status).toBe(400); expect(ApiError.parse(await old.json()).error.code).toBe("INVALID");
   const first = await command("work.task.dispatch", { to: "pi@server", task: created.task.id }, "synthetic-dispatch-0001");
   const repeated = await command("work.task.dispatch", { to: "pi@server", task: created.task.id }, "synthetic-dispatch-0001");
   expect(repeated).toEqual(first); expect(hub.store.db.query("SELECT * FROM jobs").all()).toHaveLength(1);
@@ -122,7 +122,7 @@ test("v2 Routine plans and historical results work without Knowledge or Task, pr
   expect(Job.parse(await (await request(`/v1/jobs/${id}`)).json()).spec.run).toEqual(old.template.run);
   const list = ExecutionRoutineInfo.array().parse(await (await request("/v2/execution/routines")).json());
   expect(list[0]!.last?.job).toBe(id); expect(hub.modules.work.tasks()).toEqual([]);
-  expect((await request("/v1/operations", { operation: { op: "routine.followup", args: { routine: created.id, job: id } } })).status).toBe(409);
+  expect((await request("/v1/operations", { operation: { op: "routine.followup", args: { routine: created.id, job: id } } })).status).toBe(400);
   await hub.stop(); hub = await startHub({ ...readConfig({ LUMIO_STATE_DIR: temp }), localRuntime: "server", port: 0 }, { log() {} });
   expect(hub.modules.routines.get(created.id).description).toBe("第二版");
 });

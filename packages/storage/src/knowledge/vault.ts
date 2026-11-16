@@ -1,7 +1,7 @@
-import { lstat, open, readdir, stat } from "node:fs/promises";
+import { lstat, open, readFile, readdir, stat } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { CoreError } from "@lumio/foundation";
-import { VAULT_LAYOUT, EXCALIDRAW_SUFFIX, isVaultNotePath, entityTypeOfPath, isPrivateType, type VaultFile, type LayoutEntry, type EntityType } from "@lumio/knowledge";
+import { VAULT_LAYOUT, EXCALIDRAW_SUFFIX, parseFrontmatter, isVaultNotePath, entityTypeOfPath, isPrivateType, type VaultFile, type LayoutEntry, type EntityType } from "@lumio/knowledge";
 export type { VaultFile } from "@lumio/knowledge";
 
 const HEAD_BYTES = 4096;
@@ -74,4 +74,30 @@ export async function scanVault(root: string, types?: readonly EntityType[]): Pr
   } catch (cause) {
     throw new CoreError("VAULT_READ_FAILED", { key: "vault.could_not_scan_vault", args: [root] }, { cause });
   }
+}
+
+export function isUnsupportedWorkNote(type: unknown): boolean {
+  return type === "task" || type === "project" || type === "routine";
+}
+
+/** Only check reads old notes. Their paths and bodies never enter the index. */
+export async function unsupportedWorkNotes(root: string, includePrivate = false): Promise<string[]> {
+  const paths: string[] = [];
+  async function walk(dir: string): Promise<void> {
+    for (const item of await readdir(dir, { withFileTypes: true })) {
+      if (item.name.startsWith(".")) continue;
+      const path = join(dir, item.name), relativePath = relative(root, path);
+      if (!includePrivate && (relativePath === "life" || relativePath.startsWith(`life${sep}`))) continue;
+      if (item.isDirectory()) await walk(path);
+      if (!item.isFile() || !item.name.endsWith(".md") || item.name.toLowerCase().endsWith(EXCALIDRAW_SUFFIX)) continue;
+      try {
+        if (isUnsupportedWorkNote(parseFrontmatter(await readFile(path)).data.type)) paths.push(relativePath);
+      } catch (cause) {
+        if (!(cause instanceof CoreError && cause.code === "INVALID_FRONTMATTER") &&
+          (cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause;
+      }
+    }
+  }
+  await walk(root);
+  return paths.sort();
 }

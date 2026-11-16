@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { AgentTarget, RequestId, Revision, RuntimeName, Timestamp, idOf } from "./common.ts";
-import { CRON_PATTERN } from "./entities.ts";
 import { JobStatus } from "./job.ts";
 
 /**
@@ -10,6 +9,7 @@ import { JobStatus } from "./job.ts";
  * Hub ↔ Runtime 的 Job 协议（job.ts，protocol_version=2）不变；RoutineSpec 仍由 Hub 从这里组装。
  */
 
+export const CRON_PATTERN = /^\s*[0-9*,\/-]+(\s+[0-9*,\/-]+){4}\s*$/;
 const Cron = z.string().regex(CRON_PATTERN, "schedule 必须是 5 段 cron 表达式，例如 0 9 * * 1");
 export const RoutineStatus = z.enum(["active", "paused"]);
 export const RoutineContext = z.enum(["none", "previous"]);
@@ -38,7 +38,7 @@ export const ExecutionRoutine = z.strictObject({
   ...RunConfigShape,
 });
 
-/** v2 的 `routine list` 一项：与 v1 RoutineInfo 同义，但 routine 是完整对象而不是 NoteRef。 */
+/** `routine list` 的一项。 */
 export const ExecutionRoutineInfo = z.strictObject({
   routine: ExecutionRoutine,
   runtime: RuntimeName.optional().describe("计划交给了哪个执行器；没有生效时缺失"),

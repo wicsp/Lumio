@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ApiError, JOB_PROTOCOL_VERSION, RuntimeHeartbeat, RuntimeInfo, RuntimeRegistration, RuntimeSync } from "@lumio/schema";
+import { ApiError, JOB_PROTOCOL_VERSION, RuntimeHeartbeat, RuntimeInfo, RuntimeRegistered, RuntimeRegistration, RuntimeSync } from "@lumio/schema";
 import { authorize, EXISTING_OPERATIONS, RUNTIME_OPERATIONS, PAIRING_OPERATIONS } from "../src/authorize.ts";
 import { readConfig } from "../src/config.ts";
 import { ROUTES, startHub } from "../src/server.ts";
@@ -48,12 +48,12 @@ test("register and sync validate contracts, persist capabilities, sort names and
   expect(response.status).toBe(404); expect(ApiError.parse(await response.json()).error.code).toBe("NOT_FOUND");
   response = await request("/v1/runtime/register", runtime, registration);
   expect(response.status).toBe(200);
-  const info = RuntimeInfo.parse(await response.json()); expect(info.registration).toEqual(registration);
+  const info = RuntimeRegistered.parse(await response.json()); expect(info.registration).toEqual(registration);
   expect(info.actor).toBe(hub!.store.actors().find((actor) => actor.name === "server")!.id);
-  expect(await list()).toEqual([info]);
+  expect(await list()).toEqual([{ ...info, registration: { ...registration, version: null, platform: null, install: null }, update: null }]);
   const updated = { ...registration, tags: ["changed"], max_concurrent: 3 };
   response = await request("/v1/runtime/register", runtime, updated);
-  expect(RuntimeInfo.parse(await response.json()).registration).toEqual(updated);
+  expect(RuntimeRegistered.parse(await response.json()).registration).toEqual(updated);
   await request("/v1/runtime/register", other, { ...registration, name: "alpha" });
   expect((await list()).map((info) => info.registration.name)).toEqual(["alpha", "server"]);
   clock += 180_000; expect((await list()).every((info) => info.online)).toBe(true);
@@ -62,7 +62,7 @@ test("register and sync validate contracts, persist capabilities, sort names and
   expect(response.status).toBe(200); expect(RuntimeSync.parse(await response.json())).toEqual({ jobs: [], cancel: [], routines: [] });
   expect((await list())[1]).toMatchObject({ online: true, last_seen: new Date(clock).toISOString() });
   await hub!.stop(); hub = await boot();
-  expect((await list())[1]!.registration).toEqual(updated);
+  expect((await list())[1]!.registration).toMatchObject(updated);
   const audit = hub!.store.db.query<{ operation: string; authorization: string; execution_result: string }, []>("SELECT * FROM audit").all();
   expect(audit).toContainEqual(expect.objectContaining({ operation: "runtime.sync", authorization: "allow", execution_result: "NOT_FOUND" }));
   expect(audit).toContainEqual(expect.objectContaining({ operation: "runtime.register", authorization: "allow", execution_result: "applied" }));
@@ -76,7 +76,7 @@ test("different runtime identities cannot claim one name, and one identity canno
     const response = await request("/v1/runtime/register", token, body);
     expect(response.status).toBe(409); expect(ApiError.parse(await response.json()).error.code).toBe("CONFLICT");
   }
-  expect((await list()).map((info) => info.registration)).toEqual([registration]);
+  expect((await list()).map((info) => info.registration)).toMatchObject([registration]);
 });
 
 test("malformed JSON, wrong protocol and unknown fields return INVALID without changing last_seen", async () => {
@@ -140,7 +140,7 @@ test("real daemon with fake PATH survives Hub restart, detects agents once and b
   daemon = child;
   const output = new Response(child.stdout).text(), errors = new Response(child.stderr).text();
   await eventually(async () => (await list()).length === 1);
-  expect((await list())[0]!.registration).toEqual(RuntimeRegistration.parse({ ...registration, version: "0.0.0-dev", platform: `${process.platform}-${process.arch}`, install: "external", features: ["stage_permissions", "hooks", "permission_request", "self_update"], engines: [
+  expect((await list())[0]!.registration).toMatchObject(RuntimeRegistration.parse({ ...registration, version: "0.0.0-dev", platform: `${process.platform}-${process.arch}`, install: "external", features: ["stage_permissions", "hooks", "permission_request", "self_update"], engines: [
     { name: "codex", version: "0.42.0", sandbox: "os" }, { name: "claude-code", version: "2.0.1", sandbox: "none" },
   ] }));
   const port = hub!.server.port!;

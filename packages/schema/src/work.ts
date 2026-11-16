@@ -1,7 +1,6 @@
 import { KnowledgeReferenceCount } from "./query.ts";
 import { z } from "zod";
 import { AgentTarget, ID_PREFIXES, Id, RequestId, Revision, Timestamp, idOf } from "./common.ts";
-import { TASK_STATUSES } from "./entities.ts";
 import { Job } from "./job.ts";
 import { HandoffPlan, PlanRun, PlanStageId, PlanTemplate, StagePermissions } from "./plan.ts";
 import { TrashItem } from "./trash.ts";
@@ -9,7 +8,7 @@ import { TrashItem } from "./trash.ts";
 /**
  * Work 模块契约（Project v2 / Task v3）（ADR 0025 第 1、3、4、8 节，R0-1）。
  *
- * - Project/Task 是数据库里的业务对象，不是笔记：没有 path，不用 NoteRef 表达；v1 的 entities.ts 只用于旧笔记解码。
+ * - Project/Task 是数据库里的业务对象，不是笔记：没有 path，不用 NoteRef 表达。
  * - 全部是严格对象（未知字段拒绝）；可选字段用"缺失"表示未填，不接受 null。只有 patch 里用 null 表示清空。
  * - revision 是正整数，每次修改加一；update 必须带 expected_revision，不相等时 Hub 返回 CONFLICT。
  * - Task 的 outcome 与 turn 由独立命令改变；委派必须用 work.task.dispatch（ADR 0032）。
@@ -44,6 +43,7 @@ export const ResourceRef = z
 
 export const PROJECT_STATUSES = ["planning", "active", "paused", "done"] as const;
 export const ProjectStatus = z.enum(PROJECT_STATUSES);
+export const TASK_STATUSES = ["todo", "active", "waiting", "paused", "done", "cancelled"] as const;
 export const TaskStatus = z.enum(TASK_STATUSES);
 
 /** 派活时的执行配置（与 v1 任务笔记的平铺字段同名同义）。 */
@@ -65,8 +65,8 @@ export const WorkProject = z.strictObject({
   status: ProjectStatus,
   created: Timestamp,
   updated: Timestamp,
-  created_by: idOf("act").optional().describe("创建者身份；R3 之前的数据缺失"),
-  updated_by: idOf("act").optional().describe("最近一次修改者身份（人或 agent，ADR 0029）；R3 之前的数据缺失"),
+  created_by: idOf("act").describe("创建者身份"),
+  updated_by: idOf("act").describe("最近一次修改者身份（人或 agent，ADR 0029）"),
   tags: z.array(z.string()),
   goal: z.string().min(1).optional(),
   repo: z.string().min(1).optional().describe("关联代码仓库的 URL 或路径，只供参考；写进每一轮的输入（ADR 0033）"),
@@ -165,8 +165,8 @@ export const WorkTask = z
     grants: StagePermissions.optional().describe("没有计划的任务上人已批准的权限（ADR 0049 第 3 节）；有计划时权限记在阶段上"),
     created: Timestamp,
     updated: Timestamp,
-    created_by: idOf("act").optional(),
-    updated_by: idOf("act").optional(),
+    created_by: idOf("act"),
+    updated_by: idOf("act"),
     tags: z.array(z.string()),
     project: idOf("prj").optional(),
     parent: idOf("task").optional(),

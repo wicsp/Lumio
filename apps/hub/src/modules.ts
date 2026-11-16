@@ -21,7 +21,7 @@ import { text as msg } from "./messages.ts";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { CoreError, newId } from "@lumio/foundation";
-import { parseAssignee, RESPONSE_REASONS, type Job, type WorkCommandResult, type AgentRun, type WorkTask } from "@lumio/schema";
+import { AgentTarget, RESPONSE_REASONS, type Job, type WorkCommandResult, type AgentRun, type WorkTask } from "@lumio/schema";
 import { mergeStageGrant, PlanDispatchUnavailable, WorkService } from "@lumio/work";
 import type { AssistantContext, AssistantModel, AssistantTool } from "@lumio/assistant";
 import { AssistantMainConversations } from "./assistant-main.ts";
@@ -120,7 +120,7 @@ export class BusinessModules {
     }(store.db);
     store.proposalCreated = proposal => {
       const operation = proposal.operation;
-      const taskId = operation.op === "work.command" ? ("task" in operation.args.operation.args ? operation.args.operation.args.task : undefined) : operation.op === "task.dispatch" ? operation.args.task : undefined;
+      const taskId = operation.op === "work.command" ? ("task" in operation.args.operation.args ? operation.args.operation.args.task : undefined) : undefined;
       notifications.proposal(proposal, taskId ? this.workStore.task(taskId)?.title : undefined);
       this.notices.proposal(proposal, taskId);
     };
@@ -218,20 +218,20 @@ export class BusinessModules {
     return outcome.result as WorkCommandResult;
   }
   private dispatch(task: WorkTask, input: string, round: number, to: string | undefined, now: Date, previousJob?: string | null, grant?: AgentRun["permissions"]) {
-    const target = parseAssignee(to ?? "human");
-    if (target === "human") throw new HubError("INVALID", { key: "modules.specify_an_agent_e_g_pi_server", args: [] });
+    const target = AgentTarget.safeParse(to);
+    if (!target.success) throw new HubError("INVALID", { key: "modules.specify_an_agent_e_g_pi_server", args: [] });
     const stage = task.plan?.plan.stages.find(stage => stage.id === task.plan?.stage);
     const agentStage = stage?.kind === "agent" ? stage : undefined;
     const restrictedRound = Boolean(agentStage || grant || task.grants);
-    const device = target.device ?? this.config.localRuntime;
+    const [agent, device = this.config.localRuntime] = target.data.split("@");
     const runtime = this.store.runtimes(now).find(value => value.registration.name === device);
     if (!runtime) {
       if (restrictedRound) throw new PlanDispatchUnavailable({ key: "target.stage_runtime_missing", args: [to] });
       throw new HubError("INVALID", { key: "modules.the_specified_runtime_is_not_registered_pair_it_first", args: [] });
     }
-    const engine = runtime.registration.engines.find(value => value.name === target.agent);
+    const engine = runtime.registration.engines.find(value => value.name === agent);
     if (!engine) {
-      if (restrictedRound) throw new PlanDispatchUnavailable({ key: "target.stage_engine_missing", args: [target.agent, device] });
+      if (restrictedRound) throw new PlanDispatchUnavailable({ key: "target.stage_engine_missing", args: [agent, device] });
       throw new HubError("INVALID", { key: "modules.selected_agent_is_not_registered_on_runtime", args: [] });
     }
     const base = agentStage ?? task.grants;
@@ -248,17 +248,17 @@ export class BusinessModules {
     const jobs = new Jobs(this.store);
     const previous = previousJob === undefined ? jobs.list(undefined, task.id).at(-1) : previousJob ? jobs.get(previousJob) : undefined;
     if (grant && (!previous || previous.spec.runtime !== runtime.actor || previous.spec.run.kind !== "agent"
-      || previous.spec.run.engine !== target.agent || previous.spec.workdir !== workdir)) {
+      || previous.spec.run.engine !== engine.name || previous.spec.workdir !== workdir)) {
       throw new PlanDispatchUnavailable({ key: "work.permission_context_changed", args: [] });
     }
     let session: AgentRun["session"];
-    if (previous?.spec.run.kind === "agent" && previous.spec.run.engine === target.agent && previous.spec.runtime === runtime.actor && previous.result?.session_id) {
+    if (previous?.spec.run.kind === "agent" && previous.spec.run.engine === engine.name && previous.spec.runtime === runtime.actor && previous.result?.session_id) {
       session = { id: previous.result.session_id, resume: true };
-    } else if (target.agent === "pi" || target.agent === "claude-code") session = { id: randomUUID(), resume: false };
+    } else if (engine.name === "pi" || engine.name === "claude-code") session = { id: randomUUID(), resume: false };
     const prefix = stage?.kind === "agent" ? `Lumio stage ID: ${stage.id}\n` : "";
     return jobs.create({ runtime: runtime.actor, workdir, timeout_seconds: (task.timeout_minutes ?? 120) * 60,
       ...(task.gpus ? { gpus: task.gpus } : {}), source: { task: task.id, round, ...(previous ? { previous: previous.spec.id } : {}) },
-      run: { kind: "agent", engine: target.agent, ...(task.model ? { model: task.model } : {}), ...(session ? { session } : {}), ...options,
+      run: { kind: "agent", engine: engine.name, ...(task.model ? { model: task.model } : {}), ...(session ? { session } : {}), ...options,
         prompt: prefix + msg("modules.you_are_completing_round_of_a_user_task_work_only_in_the_working_dir", round, roundScope, input, requestHint) },
     }, now);
   }

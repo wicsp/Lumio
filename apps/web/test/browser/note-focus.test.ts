@@ -98,7 +98,7 @@ test("internal link/graph navigation overrides a stale direct URL and ignores la
   expect(f.snapshot().selected[0]?.id).toBe(second.note.id!);
 });
 
-test("all current knowledge types share focus; idless and legacy notes do not fabricate refs", async () => {
+test("all current knowledge types share focus; ID-less notes do not fabricate refs", async () => {
   for (const [type, prefix] of [["paper", "pap"], ["source", "src"], ["idea", "idea"], ["experiment", "exp"], ["post", "post"], ["asset", "ast"], ["ai-note", "ain"]] as const) {
     const f = setup();
     const note = NoteDetail.parse({ ...fixture, note: { ...fixture.note, type, id: `${prefix}_01JA0000000000000000000000` } });
@@ -107,7 +107,6 @@ test("all current knowledge types share focus; idless and legacy notes do not fa
   }
   for (const note of [
     NoteDetail.parse({ ...fixture, note: { ...fixture.note, id: undefined } }),
-    NoteDetail.parse({ ...fixture, note: { ...fixture.note, type: "task", id: "task_01JA0000000000000000000000" } }),
   ]) {
     const f = setup(`#knowledge/${note.note.id ?? note.note.path}`);
     f.load(note); await f.pane.open(note.note.id ?? note.note.path);

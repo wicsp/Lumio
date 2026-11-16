@@ -43,7 +43,7 @@ test("directory precedence, repo snapshots, changed project directory, clear, an
   }
   const t = await task({ project: p.id });
   const mac = hub.store.runtimes(new Date())[0]!;
-  hub.store.registerRuntime(mac.actor, mac.registration, new Date());
+  hub.store.registerRuntime(mac.actor, { ...mac.registration, version: undefined, platform: undefined, install: undefined }, new Date());
   await applied("work.task.plan.set", { task: t.id, expected_revision: t.revision, plan: { stages: [{ kind: "agent", id: "one", agent: "codex@mac", instruction: "Synthetic one" }, { kind: "agent", id: "two", agent: "codex@mac", instruction: "Synthetic two" }] } });
   const first = await applied("work.task.dispatch", { task: t.id }); if (first.kind !== "job") throw Error();
   await applied("work.project.update", { project: p.id, expected_revision: p.revision, patch: { workdir: "/synthetic/new" } });
@@ -133,7 +133,7 @@ test("inherited directories pass the existing local vault guard", async () => {
 test("implicit dispatch and task reads share plan, last round, and project precedence", async () => {
   const p = await project({ default_target: "codex" });
   const mac = hub.store.runtimes(new Date())[0]!;
-  hub.store.registerRuntime(mac.actor, { ...mac.registration, engines: [...mac.registration.engines,
+  hub.store.registerRuntime(mac.actor, { ...mac.registration, version: undefined, platform: undefined, install: undefined, engines: [...mac.registration.engines,
     { name: "claude-code", version: "synthetic", sandbox: "os" }] }, new Date(0));
   const projectDefault = { target: "codex@mac", source: "project" } as const;
   const t = await task({ project: p.id });
@@ -179,7 +179,7 @@ test("implicit dispatch and task reads share plan, last round, and project prece
   expect(done.status).toBe(200);
   hub.modules.reconcile();
   const current = hub.store.runtimes(new Date())[0]!;
-  hub.store.registerRuntime(current.actor, current.registration, new Date());
+  hub.store.registerRuntime(current.actor, { ...current.registration, version: undefined, platform: undefined, install: undefined }, new Date());
   const plan = { stages: [{ kind: "agent", id: "first", agent: "codex", instruction: "Synthetic plan" }] };
   const planned = await applied("work.task.plan.set", { task: t.id, expected_revision: (await show(t.id)).task.revision, plan });
   expect(planned).toMatchObject({ task: { next_target: { target: "codex@mac", source: "plan" } } });
@@ -194,7 +194,7 @@ test("project defaults are validated, cleared and detached while blocked or unav
   expect(badCreate.status).toBe(400);
   expect(ApiError.parse(await badCreate.json()).error).toMatchObject({ code: "INVALID" });
   const mac = hub.store.runtimes(new Date())[0]!;
-  hub.store.registerRuntime(mac.actor, { ...mac.registration, engines: [...mac.registration.engines,
+  hub.store.registerRuntime(mac.actor, { ...mac.registration, version: undefined, platform: undefined, install: undefined, engines: [...mac.registration.engines,
     { name: "claude-code", version: "synthetic", sandbox: "os" }] }, new Date(0));
   const p = await project({ default_target: "claude-code@mac" });
   const blocked = await task({ project: p.id, dependencies: [(await task()).id] });
@@ -204,7 +204,7 @@ test("project defaults are validated, cleared and detached while blocked or unav
   expect(badUpdate.status).toBe(400);
   expect((await client().workProject(p.id)).revision).toBe(p.revision);
 
-  hub.store.registerRuntime(mac.actor, mac.registration, new Date(0));
+  hub.store.registerRuntime(mac.actor, { ...mac.registration, version: undefined, platform: undefined, install: undefined }, new Date(0));
   const unavailable = await command("work.task.dispatch", { task: t.id });
   expect(unavailable.status).toBe(400);
   const error = ApiError.parse(await unavailable.json()).error;
@@ -246,7 +246,7 @@ test("an agent's implicit proposal preserves its shown target and source through
 const stage = (id: string, fields: Record<string, unknown> = {}) => ({ kind: "agent", id, agent: "codex@mac", instruction: `Synthetic ${id}`, ...fields });
 function register(changes: Partial<RuntimeRegistration> = {}, now = new Date()) {
   const mac = hub.store.runtimes(new Date())[0]!;
-  return hub.store.registerRuntime(mac.actor, RuntimeRegistration.parse({ ...mac.registration, ...changes }), now);
+  return hub.store.registerRuntime(mac.actor, RuntimeRegistration.parse({ ...mac.registration, version: undefined, platform: undefined, install: undefined, ...changes }), now);
 }
 async function setPlan(t: WorkTask, value: unknown) {
   const plan = HandoffPlan.parse(value);

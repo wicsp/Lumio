@@ -115,9 +115,9 @@ export const ReleaseManifest = z.strictObject({
 /** RuntimeInfo.update：Hub 眼中这台 Runtime 的更新情况。 */
 export const RuntimeUpdateView = z.strictObject({
   policy: RuntimeUpdatePolicy,
-  desired: LumioVersion.optional().describe("Hub 当前下发的期望版本；manual 或不支持自更新时缺失"),
+  desired: LumioVersion.nullable().describe("Hub 当前下发的期望版本；未下发时为 null"),
   hold: z.boolean().describe("人是否暂缓了当前期望版本"),
-  report: RuntimeUpdateReport.optional().describe("最近一次心跳报告的状态；旧 Runtime 没有"),
+  report: RuntimeUpdateReport.nullable().describe("最近一次心跳报告的状态；未上报时为 null"),
 });
 
 const RuntimeVersionArgs = { runtime: RuntimeName, version: LumioVersion.describe("人看到的目标版本；与 Hub 当前期望版本不一致时 CONFLICT") };

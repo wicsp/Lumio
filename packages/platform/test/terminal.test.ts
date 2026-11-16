@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { askTerminal, openTerminal } from "../src/terminal.ts";
+import { askTerminal, openTerminal } from "../src/index.ts";
 
 // P2-11：在真实伪终端里问答。`curl … | sh` 时标准输入是管道，问题必须经 /dev/tty 读写。
 const script = Bun.which("script");

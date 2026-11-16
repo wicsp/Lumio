@@ -54,7 +54,6 @@ test("v3 store persists actors and append-only turns across reopen", () => {
     expect(store.task(created.task.id)?.turn.holder).toBe("external");
     expect(store.turns(created.task.id)).toHaveLength(2);
     expect(store.turns(created.task.id)[1]!.by).toBe(actor);
-    expect(db.query("SELECT * FROM platform_migrations WHERE name='work-3'").all()).toHaveLength(1);
   } finally { db.close(); }
 });
 
@@ -105,13 +104,12 @@ test("derived readiness is never persisted; SQLite purge preserves dangling depe
   } finally { db.close(); }
 });
 
-test("existing projects gain a nullable default and derived targets stay out of tasks and receipts", () => {
+test("projects have a nullable default and derived targets stay out of tasks and receipts", () => {
   const db = new Database(":memory:");
   try {
     const f = fixture(db);
     const project = f.command("work.project.create", { title: "Synthetic existing project" });
     if (project.kind !== "project") throw Error("Expected a project");
-    db.exec("ALTER TABLE work_projects DROP COLUMN default_target");
     const store = new SqliteWorkStore(db);
     expect(store.project(project.project.id)).toEqual(project.project);
     store.putProject({ ...project.project, default_target: "codex@mac" });
@@ -132,7 +130,6 @@ test("project defaults persist across adapter reopen and existing projects remai
     const f = fixture(db);
     const project = f.command("work.project.create", { title: "Synthetic project" });
     if (project.kind !== "project") throw Error("Expected a project");
-    db.exec("ALTER TABLE work_projects DROP COLUMN default_plan");
     const store = new SqliteWorkStore(db);
     expect(store.project(project.project.id)).toEqual(project.project);
     const saved = f.command("work.plan_template.save", { name: "Synthetic default", plan: {

@@ -12,10 +12,8 @@ import {
   JobSpec,
   OPERATION_NAMES,
   OperationResult,
-  RoutineInfo,
   RunLogEvent,
   StoredArtifact,
-  Task,
   WORK_COMMAND_NAMES,
   WorkCommandRequest,
   WorkProject,
@@ -30,11 +28,11 @@ const V = "01J9Z3K8M2N4P6Q8R0S2T4V6W9";
 const now = "2026-10-31T16:30:00+08:00";
 
 const task = {
-  schema_version: 3, type: "task", id: `task_${U}`, title: "合成任务", description: "", revision: 1,
+  schema_version: 3, type: "task", created_by: "act_00000000000000000000000001", updated_by: "act_00000000000000000000000001", id: `task_${U}`, title: "合成任务", description: "", revision: 1,
   outcome: "open", turn: { holder: "human", reason: "todo", since: now }, created: now, updated: now, tags: [], dependencies: [], references: [],
 } as const;
 const project = {
-  schema_version: 2, type: "project", id: `prj_${U}`, title: "合成项目", description: "", revision: 1,
+  schema_version: 2, type: "project", created_by: "act_00000000000000000000000001", updated_by: "act_00000000000000000000000001", id: `prj_${U}`, title: "合成项目", description: "", revision: 1,
   status: "planning", created: now, updated: now, tags: [],
 } as const;
 const routine = {
@@ -46,7 +44,7 @@ describe("ID 前缀", () => {
   test("新增前缀唯一，Id 与 idOf 接受它们", () => {
     const values = Object.values(ID_PREFIXES);
     expect(new Set(values).size).toBe(values.length);
-    for (const p of ["wmsg", "conv", "amsg", "turn", "tool", "mem", "evt", "art", "mig"] as const) {
+    for (const p of ["wmsg", "conv", "amsg", "turn", "tool", "mem", "evt", "art"] as const) {
       expect(Id.parse(`${p}_${U}`)).toBe(`${p}_${U}`);
       expect(idOf(p).safeParse(`${p}_${U}`).success).toBe(true);
     }
@@ -177,17 +175,11 @@ describe("v1 不变", () => {
     expect(JobSpec.safeParse({ ...spec, input_revision: 1 }).success).toBe(false);
   });
 
-  test("v1 任务笔记仍可解码旧对象负责人与 null 字段", () => {
-    const note = Task.parse({ id: `task_${U}`, type: "task", title: "旧笔记", created: now, updated: now, assignee: { agent: "pi", device: "server" }, due: null, extra: 1 });
-    expect(note.assignee).toEqual({ agent: "pi", device: "server" });
-    expect((note as Record<string, unknown>).extra).toBe(1);
-  });
 
   test("v1 strict 响应不接受新字段，操作列表不变", () => {
-    expect(OPERATION_NAMES).toEqual(["task.dispatch", "routine.followup", "exec.privileged"]);
+    expect(OPERATION_NAMES).toEqual(["exec.privileged"]);
     expect(WORK_COMMAND_NAMES.some((n) => (OPERATION_NAMES as string[]).includes(n))).toBe(false);
     expect(OperationResult.safeParse({ status: "applied", operation: { op: "routine.followup", args: { routine: `rtn_${U}`, job: `job_${U}` } }, task: task }).success).toBe(false);
-    expect(RoutineInfo.safeParse({ routine: routine, schedule: "0 9 * * 1", timezone: "UTC", status: "active" }).success).toBe(false);
   });
 });
 

@@ -239,7 +239,7 @@ test("an agent proposes saving a plan template and only human approval persists 
 
 test("Hub persists parallel turns, resumes the interrupted branch and cancels active siblings", async () => {
   const registered = hub.store.runtimes(new Date()).find(value => value.actor === runtimeActor)!;
-  hub.store.registerRuntime(runtimeActor, { ...registered.registration, features: ["stage_permissions"] }, new Date());
+  hub.store.registerRuntime(runtimeActor, { ...registered.registration, version: undefined, platform: undefined, install: undefined, features: ["stage_permissions"] }, new Date());
   const graph = HandoffPlan.parse({ stages: [
     { kind: "agent", id: "first", agent: "codex@mac", instruction: "First", access: "read" },
     { kind: "agent", id: "second", agent: "codex@mac", instruction: "Second", access: "read", after: [] },

@@ -25,7 +25,7 @@ export class RuntimeUpdates {
   }
   view(runtime: RuntimeInfo): RuntimeUpdateView {
     const value = this.store.get(runtime.actor) ?? initial(), desired = this.desired(runtime, value);
-    return RuntimeUpdateView.parse({ policy: value.policy, desired, hold: value.version === desired && value.hold, report: value.report });
+    return RuntimeUpdateView.parse({ policy: value.policy, desired: desired ?? null, hold: value.version === desired && value.hold, report: value.report ?? null });
   }
   directive(runtime: RuntimeInfo): RuntimeUpdateDirective | undefined {
     const value = this.store.get(runtime.actor) ?? initial(), version = this.desired(runtime, value);

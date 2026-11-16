@@ -27,7 +27,6 @@ export const ID_PREFIXES = {
   memory: "mem",
   log_event: "evt",
   artifact: "art",
-  migration: "mig",
   // ADR 0031（R4-1）：流程模板、推送设备
   workflow_template: "wft",
   push_device: "pdev",
@@ -107,7 +106,6 @@ export const Base = z.looseObject({
   updated: Timestamp,
   tags: withDefault(z.array(z.string()), []),
   derived_from: optional(z.array(DerivedFrom)).describe("来源：Lumio ID 或 URL（ADR 0051）；不计入链接图"),
-  // related 已删除（ADR 0018）：链接写在正文的 [[ ]] 里。旧笔记里的 related 作为未知字段原样保留，不再计入链接图。
 });
 
 export const AGENTS = ["claude-code", "codex", "pi"] as const;
@@ -116,20 +114,10 @@ export const AGENTS = ["claude-code", "codex", "pi"] as const;
 export const RuntimeName = z.string().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/, "执行器名称只能用小写字母、数字和 . _ -");
 
 const ASSIGNEE_MESSAGE = "负责人必须是 human、agent 或 agent@执行器，例如 pi@server";
-export const AgentAssignee = z.union([
-  z.string().regex(new RegExp(`^(${AGENTS.join("|")})(@[a-z0-9][a-z0-9._-]{0,31})?$`), ASSIGNEE_MESSAGE),
-  z.strictObject({ agent: z.enum(AGENTS), device: RuntimeName.optional() }),
-]);
-export const Assignee = z.union([z.literal("human"), AgentAssignee]);
-
-/**
- * v2 业务对象使用的负责人写法（ADR 0025 第 8 节）：只接受字符串 `agent` 或 `agent@执行器`，
- * 不接受旧的 `{agent, device}` 对象；对象写法只用于旧笔记解码。
- */
 export const AgentTarget = z
   .string()
   .regex(new RegExp(`^(${AGENTS.join("|")})(@[a-z0-9][a-z0-9._-]{0,31})?$`), ASSIGNEE_MESSAGE);
-/** v2 任务负责人：`human` 或 AgentTarget。 */
+/** 任务负责人：`human` 或 AgentTarget。 */
 export const TaskAssignee = z.union([z.literal("human"), AgentTarget]);
 export type AgentTarget = z.infer<typeof AgentTarget>;
 export type TaskAssignee = z.infer<typeof TaskAssignee>;
@@ -153,16 +141,3 @@ export const SafeRelativePath = z
 
 /** SHA-256 十六进制摘要（小写 64 位）。 */
 export const Sha256 = z.string().regex(/^[0-9a-f]{64}$/, "sha256 必须是 64 位小写十六进制");
-
-export class AssigneeError extends Error {
-  readonly code = "INVALID_ASSIGNEE";
-  constructor() { super(ASSIGNEE_MESSAGE); this.name = "AssigneeError"; }
-}
-/** 集中解析字符串与兼容的旧对象写法（ADR 0024）。 */
-export function parseAssignee(value: unknown): "human" | { agent: typeof AGENTS[number]; device?: string } {
-  const parsed = Assignee.safeParse(value);
-  if (!parsed.success) throw new AssigneeError();
-  if (parsed.data === "human" || typeof parsed.data === "object") return parsed.data;
-  const [agent, device] = parsed.data.split("@");
-  return { agent: agent as typeof AGENTS[number], ...(device ? { device } : {}) };
-}

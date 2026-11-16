@@ -12,7 +12,7 @@ function run(n: number, status: Job["status"], task?: number, round = 1): Job {
   }, status });
 }
 function task(n: number, turn: WorkTask["turn"], outcome: WorkTask["outcome"] = "open"): WorkTask {
-  return WorkTask.parse({ schema_version: 3, type: "task", id: id("task", n), title: "Synthetic task", description: "",
+  return WorkTask.parse({ schema_version: 3, type: "task", created_by: "act_00000000000000000000000001", updated_by: "act_00000000000000000000000001", id: id("task", n), title: "Synthetic task", description: "",
     revision: 1, outcome, turn, created: at, updated: at, tags: [], dependencies: [], references: [] });
 }
 function attention(job: Job, kind: WorkAttention["kind"] = "review"): WorkAttention {

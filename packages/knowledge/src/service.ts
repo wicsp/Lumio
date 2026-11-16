@@ -8,7 +8,7 @@ import { parsePaperInput } from "./paper-input.ts";
 import { isPrivateType } from "./layout.ts";
 
 export interface KnowledgeQueryOptions { includePrivate?: boolean; type?: NoteRef["type"]; limit?: number }
-export interface KnowledgeGraphOptions extends KnowledgeQueryOptions { includeLegacy?: boolean }
+export type KnowledgeGraphOptions = KnowledgeQueryOptions;
 export interface KnowledgeRepository {
   graph(options: KnowledgeGraphOptions): Promise<KnowledgeGraph>;
   search(query: string, options: KnowledgeQueryOptions): Promise<SearchResult>;
@@ -51,7 +51,7 @@ export class KnowledgeService {
   async graph(options: KnowledgeGraphOptions = {}): Promise<KnowledgeGraph> {
     const result = KnowledgeGraph.parse(await this.repository.graph(options));
     this.visible(result.nodes, options);
-    if (result.nodes.some(note => (options.type && note.type !== options.type) || (!options.includeLegacy && ["task", "project", "routine"].includes(note.type)))) {
+    if (result.nodes.some(note => options.type && note.type !== options.type)) {
       throw new CoreError("INVALID_QUERY_RESULT", { key: "service.query_returned_an_invisible_knowledge_entry", args: [] });
     }
     return result;

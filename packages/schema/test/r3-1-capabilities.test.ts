@@ -102,7 +102,7 @@ describe("agent access (ADR 0029 §5–6)", () => {
 
 describe("compatibility", () => {
   test("tasks and tool calls stored before R3 still parse; new fields are accepted", () => {
-    const task = { schema_version: 3, type: "task", id: TASK, title: "T", description: "", revision: 1, outcome: "open", turn: { holder: "human", reason: "todo", since: NOW },
+    const task = { schema_version: 3, type: "task", created_by: "act_00000000000000000000000001", updated_by: "act_00000000000000000000000001", id: TASK, title: "T", description: "", revision: 1, outcome: "open", turn: { holder: "human", reason: "todo", since: NOW },
       created: NOW, updated: NOW, tags: [], dependencies: [], references: [] };
     expect(WorkTask.safeParse(task).success).toBe(true);
     expect(WorkTask.safeParse({ ...task, created_by: ACT, updated_by: ACT }).success).toBe(true);

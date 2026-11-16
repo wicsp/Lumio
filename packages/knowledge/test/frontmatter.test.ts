@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { CoreError, parseFrontmatter } from "../src/index.ts";
+import { CoreError } from "@lumio/foundation";
+import { parseFrontmatter } from "../src/index.ts";
 
 test.each(["\n", "\r\n"])("body bytes, old formatting, comments and key order survive %j", (nl) => {
   const header = ["---", "# 注释", "title: '保持引号' # inline", "aliases: &a [甲, 乙]", "custom: *a", "related: [pap_01J9Z3K8M2N4P6Q8R0S2T4V6W8]", ""].join(nl);

@@ -2,7 +2,7 @@ import { mergeStageGrant, withinRequest, type PendingStageGrant } from "./stage-
 export { mergeStageGrant, type PendingStageGrant } from "./stage-grants.ts";
 import { nextTurn, type TurnAction, type PlannedDelivery } from "./turn.ts";
 import { completedStages, graphPlan, graphProgress, readyStages, resetStages, workingBranches, type PlanBranch } from "./plan-progress.ts";
-export { nextTurn, migrateTurn, type LegacyTurnFacts, type PlannedDelivery } from "./turn.ts";
+export { nextTurn, type PlannedDelivery } from "./turn.ts";
 import {
   WorkProject, WorkTask, WorkComment, WorkExecution, WorkTaskDetail,
   WorkCommandRequest, WorkCommandResult, TaskTurnChange, Turn, StagePermissions, PlanTemplate, DEFAULT_PLAN_MAX_ROUNDS,
@@ -70,6 +70,11 @@ type NextTarget = NonNullable<WorkTask["next_target"]>;
 type TargetSource = (typeof DISPATCH_TARGET_SOURCES)[number];
 type DispatchTarget = { target: string; source: TargetSource };
 type DispatchedRound = { job: Job; target: string; target_source: TargetSource };
+function planPrefix(plan: HandoffPlan, stage: string): string[] {
+  const index = stage === "end" ? plan.stages.length : plan.stages.findIndex(node => node.id === stage);
+  return plan.stages.slice(0, Math.max(0, index)).map(node => node.id);
+}
+
 type GraphStep = { turn: Turn; plan: PlanRun; outcome?: "done"; dispatched?: DispatchedRound };
 type CheckpointDecision = { stage: string; action: "continue" | "send_back" | "finish" | "hold"; by: string };
 type GraphDispatch = { to?: string; approvedSource?: TargetSource; only?: string; comment?: string };
@@ -121,7 +126,7 @@ export class WorkService {
     const visible = WorkTask.array().parse(this.store.tasks()).filter(task => !hidden.has(task.id));
     const byId = new Map(visible.map(task => [task.id, task]));
     const tasks = visible.map(task => this.withReadiness(task, id => byId.get(id))).filter(task =>
-      (!filter.project || task.project === filter.project) && (!filter.status || legacyTaskStatus(task) === filter.status)
+      (!filter.project || task.project === filter.project) && (!filter.status || taskListStatus(task) === filter.status)
       && (!filter.tag || task.tags.includes(filter.tag)) && (!filter.parent || task.parent === filter.parent)
       && (!filter.readiness || (task.outcome === "open" && (filter.readiness === "blocked" ? task.blocked_by!.length > 0 : task.blocked_by!.length === 0)))
       && (!query || `${task.title}\n${task.description}\n${task.tags.join(" ")}`.toLocaleLowerCase().includes(query)));
@@ -164,30 +169,13 @@ export class WorkService {
   }
   planTemplates(): PlanTemplate[] { return PlanTemplate.array().parse(this.store.planTemplates()); }
 
-  /** Import historical facts without transitions, generated IDs or execution side effects. The caller archives provenance. */
-  importSettled(input: { projects: WorkProject[]; tasks: WorkTask[]; executions?: WorkExecution[] }): void {
-    const projects = WorkProject.array().safeParse(input.projects), tasks = WorkTask.array().safeParse(input.tasks), executions = WorkExecution.array().safeParse(input.executions ?? []);
-    if (!projects.success || !tasks.success || !executions.success) throw new WorkError("INVALID", { key: "index.invalid_legacy_work_object_format", args: [] });
-    this.store.transaction(() => {
-      const ids = [...projects.data.map((value) => value.id), ...tasks.data.map((value) => value.id)];
-      if (new Set(ids).size !== ids.length || projects.data.some((value) => this.store.project(value.id)) || tasks.data.some((value) => this.store.task(value.id))) throw new WorkError("CONFLICT", { key: "index.legacy_object_id_already_exists_or_is_duplicated", args: [] });
-      const taskIds = new Set(tasks.data.map((value) => value.id)), oldJobs = new Set(this.store.executions().map((value) => value.job));
-      if (executions.data.some((value) => !value.applied || !taskIds.has(value.task) || oldJobs.has(value.job))) throw new WorkError("CONFLICT", { key: "index.only_processed_historical_executions_belonging_to_this_task_batch_ca", args: [] });
-      for (const value of projects.data) this.store.putProject(value);
-      // Reserve all task IDs first so parent/dependency ordering cannot create a partial import.
-      for (const value of tasks.data) this.store.putTask(WorkTask.parse({ ...value, parent: undefined, dependencies: [] }));
-      for (const value of tasks.data) { this.store.putTask(value); this.initialTurn(value, this.context.systemActor ?? value.created_by!); }
-      for (const value of tasks.data) this.checkTask(value);
-      for (const value of executions.data) this.store.putExecution(value);
-    });
-  }
-
   private initialTurn(task: WorkTask, by: string): void {
     this.store.putTurn(TaskTurnChange.parse({ task: task.id, at: task.updated, by, from: task.turn, to: task.turn, outcome: task.outcome }));
   }
   private transition(task: WorkTask, action: TurnAction, by: string, at: string): WorkTask {
     const change = nextTurn(action, at, task, this.plannedDelivery);
     const plan = task.plan && change.turn.stage ? { ...task.plan, stage: change.turn.stage,
+      done: graphPlan(task.plan.plan) ? task.plan.done : planPrefix(task.plan.plan, change.turn.stage),
       rounds: task.plan.rounds + Number(change.turn.reason === "working" && change.turn.job !== task.turn.job) } : task.plan;
     return this.recordTransition(task, change, by, at, change.turn.reason === "working" || !plan?.active
       ? plan : { ...plan, active: undefined });
@@ -326,7 +314,7 @@ export class WorkService {
   }
 
   private initialPlan(plan: HandoffPlan, approved: PlanRun["approved"], from?: string): PlanRun {
-    const run: PlanRun = { plan, approved, stage: from ?? plan.stages[0]!.id, rounds: 0 };
+    const run: PlanRun = { plan, approved, stage: from ?? plan.stages[0]!.id, done: from ? planPrefix(plan, from) : [], rounds: 0 };
     if (!graphPlan(plan)) return run;
     const done = from ? planAncestors(plan.stages).get(from)! : new Set<string>();
     if (plan.finish === "auto" && plan.stages.some(stage => stage.kind === "checkpoint" && done.has(stage.id))) {
@@ -846,6 +834,6 @@ export class WorkService {
 }
 
 /** Compatibility projection for existing read filters and the R4-5 Web transition. */
-export function legacyTaskStatus(task: WorkTask): string {
+export function taskListStatus(task: WorkTask): string {
   return task.outcome !== "open" ? task.outcome : task.turn.holder === "nobody" ? "paused" : task.turn.holder === "external" ? "waiting" : task.turn.reason === "todo" ? "todo" : "active";
 }

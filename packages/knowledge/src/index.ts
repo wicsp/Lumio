@@ -5,7 +5,6 @@ export * from "./paper-input.ts";
 export * from "./citekey.ts";
 export * from "./bibtex.ts";
 export * from "./fill.ts";
-export * from "./blocks.ts";
 export * from "./links.ts";
 export * from "./layout.ts";
 export * from "./create.ts";

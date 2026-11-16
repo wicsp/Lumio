@@ -72,9 +72,9 @@ test("original frontmatter belongs to a paper or source", () => {
   expect(ORIGINALS_DIRECTORY.startsWith("files/")).toBe(true);
 });
 
-test("search hits may say where they matched", () => {
+test("search hits state explicitly where they matched", () => {
   const note = { type: "source", title: "T", path: "library/sources/T.md" };
-  expect(SearchHit.safeParse({ note, snippet: "x" }).success).toBe(true);
+  expect(SearchHit.safeParse({ note, snippet: "x" }).success).toBe(false);
   expect(SearchHit.safeParse({ note, snippet: "x", matched_in: "original", status: "to-read", created: now }).success).toBe(true);
   expect(SearchHit.safeParse({ note, snippet: "x", matched_in: "chunk" }).success).toBe(false);
 });

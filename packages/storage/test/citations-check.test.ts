@@ -4,8 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CheckResult, NoteRef } from "@lumio/schema";
-import { buildBib, checkLinks, collectCitations, entityDirectory, exportBib } from "../src/index.ts";
-import { extractCitations } from "../src/index/links.ts";
+import { buildBib, checkLinks, collectCitations, exportBib } from "../src/index.ts";
+import { entityDirectory } from "@lumio/knowledge";
+import { extractCitations } from "@lumio/knowledge";
 
 const fixture = fileURLToPath(new URL("../../../fixtures/query-vault", import.meta.url));
 const citations = fileURLToPath(new URL("../../../fixtures/citations", import.meta.url));
@@ -69,7 +70,7 @@ test("renames list every broken wikilink, restore empties the list, and private 
   await cp(join(citations, "Check.md"), join(root, entityDirectory("idea"), "Check.md"));
   // The fixture's private backlink targets Main; supply that source from a fixture as well.
   await cp(join(citations, "Check.md"), join(root, entityDirectory("idea"), "Main.md"));
-  for (const includePrivate of [false, true]) expect(CheckResult.parse(await checkLinks(root, { stateDir, includePrivate }))).toEqual({ dangling: [], total: 0 });
+  for (const includePrivate of [false, true]) expect(CheckResult.parse(await checkLinks(root, { stateDir, includePrivate }))).toEqual({ unsupported_work_notes: [], dangling: [], total: 0 });
   const oldPath = join(root, entityDirectory("paper"), "Alpha_2024_Paper.md"), newPath = join(root, entityDirectory("paper"), "Renamed.md");
   await rename(oldPath, newPath);
   const broken = CheckResult.parse(await checkLinks(root, { stateDir }));
