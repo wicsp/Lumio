@@ -8,15 +8,14 @@
 | 四模块重构的目标与实施顺序 | [ADR 0025](adr/0025-four-module-architecture.md)（Accepted，大部分已实现）、[R0-0](tasks/R0-0-four-module-refactor.md) |
 | Web GUI 启动、配置与功能 | [工作台说明](../apps/web/README.md)、[P4-1](tasks/P4-1-web-workbench.md) |
 | 助手模型配置、显式记忆与工具权限 | [助手使用](assistant.md) |
-| 旧任务笔记切换数据库、备份与回退 | [迁移与回退](migration-v2.md) |
 | 某条规则**为什么**这样定 | 设计文档里标注的 ADR、任务或 PR 编号 |
 | 数据格式的精确定义 | `packages/schema` |
 
-## 现在在哪一步（2026-11-02）
+## 现在在哪一步（2026-11-16）
 
-P0、P1、P2 全部完成（P2-1 至 P2-13，最新发布 v0.1.6），Mac 单机安装与实验室服务器执行器已人工验收。
-ADR 0025 的四模块重构已合入：业务库、显式委派、Routine、助手对话与显式记忆、可配置模型适配、JSONL/产物和完整业务备份，以及可核查的旧数据迁移。
-实现证据与交叉 review 见 [R0-0](tasks/R0-0-four-module-refactor.md)。真实数据迁移、已安装服务升级和发布单独安排；未排期的待办见 [`tasks/README.md`](tasks/README.md)，阶段表也在 [`tasks/README.md`](tasks/README.md)。
+P0、P1、P2 全部完成（P2-1 至 P2-13），Mac 单机安装与实验室服务器执行器已人工验收。
+ADR 0025 的四模块重构已合入：业务库、显式委派、Routine、助手对话与显式记忆、可配置模型适配、JSONL/产物和完整业务备份。
+实现证据与交叉 review 见 [R0-0](tasks/R0-0-four-module-refactor.md)。当前主线的开发期基线见 [B0-0](tasks/B0-0-dev-baseline.md)；未排期的待办见 [`tasks/README.md`](tasks/README.md)，阶段表也在 [`tasks/README.md`](tasks/README.md)。
 
 ## 文档各管什么
 

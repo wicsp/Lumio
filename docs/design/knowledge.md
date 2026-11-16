@@ -4,12 +4,9 @@
 
 ## vault 目录（ADR 0012）
 
-下列 Task/Project/Routine 目录保留旧笔记兼容与显式迁移来源；新版业务对象在数据库中，不要求在这些目录里有文件（ADR 0025）。
-
 ```
 library/   papers/ → paper     sources/ → source     refs.bib（生成物）
 research/  ideas/ → idea       experiments/ → experiment     reports/（暂不扫描）
-plan/      projects/ → project tasks/ → task  routines/ → routine
 create/    posts/ → post
 ai/        notes/ → ai-note（AI 写的知识，ADR 0051）
 life/      assets/ → asset（私密）
@@ -18,23 +15,20 @@ files/     attachments/  drawings/（Excalidraw）  templates/  originals/（资
 
 - **类型由所在的类型目录决定**；映射表 `VAULT_LAYOUT`（`packages/knowledge`）是唯一来源，其他代码不得写死路径。
 - 类型目录下可以自由建子文件夹，只用于浏览，不影响类型。每个实体只对应一个 `.md` 文件。
-- 扫描时跳过隐藏文件、`*.excalidraw.md` 和 frontmatter 含 `excalidraw-plugin` 的文件。
+- 扫描时跳过隐藏文件、Excalidraw 文件与 `type: task|project|routine` 的旧工作笔记。后者由 `lumio check` 报告，文件保留供人处理（ADR 0068）。
 - 大文件（视频原片等）不进 vault，用 `media://<相对路径>` 引用，由各设备配置媒体根目录。
 
 ## 实体类型
 
-本表描述知识目录中的文件格式；Project/Task/Routine 保留旧格式兼容，新业务对象与数据库规则见 [work.md](work.md)。
+项目、任务和例行任务由 [Work](work.md) 与 [Execution](execution.md) 使用数据库管理。
 
-所有实体共有：`id`（`<前缀>_<ULID>`）、`type`、`title`、`created`、`updated`（ISO 8601 带时区）、`tags`，以及可选的 `derived_from`（来源：Lumio ID 或 URL，ADR 0051）。（`related` 已删除，ADR 0018。）
+所有实体共有：`id`（`<前缀>_<ULID>`）、`type`、`title`、`created`、`updated`（ISO 8601 带时区）、`tags`，以及可选的 `derived_from`（来源：Lumio ID 或 URL，ADR 0051）。
 
 | 类型 | 前缀 | 要点 |
 |---|---|---|
 | paper | `pap` | `citekey`、`authors`、`year` 必填；`arxiv`、`doi`、`venue`、`url`；正文末尾有 BibTeX 一节 |
 | source | `src` | 网页、视频、播客、课程、书、无网址文字；`kind`（含 `text`，ADR 0067）、`url`、`author`、`site` |
 | idea | `idea` | `status`；可关联 `project` |
-| project | `prj` | `status`、`goal`、`repo`、`deadline` |
-| task | `task` | `status`（todo/active/waiting/paused/done/cancelled，只由人改）、`assignee`（`human` / `pi` / `pi@server`，同时是"现在轮到谁"）、`due`；派给 AI 时可选的 `workdir`（缺省 `~`）、`model`、`gpus`、`timeout_minutes`（ADR 0019、0024） |
-| routine | `rtn` | 例行任务：`schedule`（5 段 cron）、`assignee`（agent）、`context`（none/previous）与执行配置；每次结果追加在笔记里（ADR 0019） |
 | experiment | `exp` | `project` 必填；`hypothesis`、`metrics`、`artifacts` |
 | post | `post` | `format` 必填（无默认值）；`media` 按角色命名；`targets` 每个平台一个，发布结果由程序写入 |
 | ai-note | `ain` | AI 写的知识；`generated_by`（写入者 `act_…`，Hub 填）、`model`；见下文「来源与 AI 笔记」（ADR 0051） |
@@ -52,7 +46,7 @@ files/     attachments/  drawings/（Excalidraw）  templates/  originals/（资
 - 唯一例外是 **schema 中声明的"程序字段"**（如 post 的发布结果、asset 顺延的 `renews_on`），程序可以更新；
   这类更新必须经过 Hub（ADR 0009、0014）。
 - 可选字段留空视为没填，带默认值的字段留空取默认值，必填字段留空报错；协议（job）不适用这条（ADR 0008）。
-- 默认值不写进文件，读取时由 schema 补上。例外是需要人拨动的开关：任务与例行任务的 `status`、任务的 `assignee`（`human`），缺失时补全器写上默认值（ADR 0023、0024）。
+- 默认值不写进文件，读取时由 schema 补上。
 
 ## 论文 citekey（ADR 0004）
 
@@ -72,7 +66,7 @@ files/     attachments/  drawings/（Excalidraw）  templates/  originals/（资
 - 解析不到的标为悬空链接，不报错；代码块里的 `[[ ]]` 忽略。
 - 导出参考文献时从正文找引用：`lumio export bib --from <笔记>` 只导出该笔记里 `[[citekey]]`、指向论文笔记的 Markdown 链接或 `\cite{citekey}` 引用到的论文（ADR 0018）。
 - 知识笔记不再新增 `<!-- lumio:ai -->` 区块（ADR 0051 取代 ADR 0012 第 3 节对知识笔记的规则）；解析器继续识别已有区块，
-  **区块内的链接不计入链接图、不参与引用导出**。旧任务/例行任务笔记的兼容写回不变。
+  **区块内的链接不计入链接图、不参与引用导出**。
 
 ## 来源与 AI 笔记（ADR 0051，K4）
 
@@ -80,7 +74,7 @@ files/     attachments/  drawings/（Excalidraw）  templates/  originals/（资
 - **`derived_from`**：任何知识都可填，元素是 Lumio ID（前缀全局唯一，可推出模块，粒度可到消息 `amsg_`、Job、日志事件）或 URL；
   AI 写入时由 Lumio 填写。不计入链接图；索引保存反向关系（可重建）。post 原有同名字段含义不变，放宽为 ID 或 URL。
 - **正文引用非知识资源**：`[文字](lumio:<ID>)`。Web 经权限检查后打开；进入跨模块引用表，不进链接图与全库图谱。知识之间仍用 `[[ ]]` 或相对路径链接。
-- **AI 笔记**（`ai/notes/`，类型 `ai-note`）：AI 写的知识一律放这里，一份一件事，重新生成即更新同一份。文件名为 `<标题> <ID>`（标题去掉路径与链接字符，最多 60 字，改标题不改文件名；旧的纯 ID 文件名照常识别，ADR 0053）。
+- **AI 笔记**（`ai/notes/`，类型 `ai-note`）：AI 写的知识一律放这里，一份一件事，重新生成即更新同一份。文件名为 `<标题> <ID>`（标题去掉路径与链接字符，最多 60 字，改标题不改文件名，ADR 0053、0068）。
   人的笔记用**单独成段的普通链接**嵌入 AI 笔记，Web 渲染为标明 AI 的可折叠卡片，不新增语法；人正文里的文字归人，嵌入的不归人。
   人指向 AI 笔记的链接计入链接图；AI 笔记正文里的链接不计入人的链接图，引用导出不取 AI 笔记。AI 笔记的链接存在单独的索引表，`links` 结果以可选的 `ai_outgoing` / `ai_incoming` 列出（"AI 笔记提到"，ADR 0053）。
 - 人可在 Web 修改 AI 笔记，作者不变；AI 更新须带读到的版本，人改过则冲突。搜索与相关推荐包含 AI 笔记并标明。
@@ -105,7 +99,7 @@ files/     attachments/  drawings/（Excalidraw）  templates/  originals/（资
 
 ## 全库知识图谱（ADR 0040，K3）
 
-- `GET /v2/knowledge/graph` 只读且只对 human 开放，不进入 agent 能力目录；默认隐藏私密和旧工作笔记，可显式包含私密 / 旧笔记或按类型筛选。
+- `GET /v2/knowledge/graph` 只读且只对 human 开放，不进入 agent 能力目录；默认隐藏私密笔记。human 可显式包含私密笔记或按知识类型筛选。
 - 图节点以索引路径为标识；笔记查询和链接查询可用该完整相对路径打开节点，兼容无 ID 或同名笔记。
 - 从索引的同一只读快照返回全部可见节点（含孤立笔记）、有向路径边及重复次数、真实悬空链接数和索引更新时间；请求不扫描或重新解析 vault。
   边两端都须可见，自环不返回，同向边合并；回收站、AI 区块、代码块和 `related` 不产生节点或边。
@@ -114,14 +108,14 @@ files/     attachments/  drawings/（Excalidraw）  templates/  originals/（资
 ## 在 Lumio 里新建与编辑笔记（ADR 0034 §1–5、0035 §1–8；本地验收中）
 
 - **只对 human 开放**：新建与编辑接口不授予 agent / runtime。human 可新建论文、视频、网页、想法。
-- **可编辑范围**：合法、公开的 paper / source / idea / experiment / post 可在 Web 里直接编辑标题与正文；私密笔记、旧工作笔记和元数据不合法的笔记保持只读。
+- **可编辑范围**：合法、公开的 paper / source / idea / experiment / post 可在 Web 里直接编辑标题与正文；私密笔记和元数据不合法的笔记保持只读。
 - **不覆盖外部修改**：保存带 SHA-256 版本检查与可恢复的幂等回执；检测到外部更新时冲突，保留草稿并提供比较。保留未知元数据，保存后更新索引与链接。
 - **原文就是 Markdown**：编辑器保留原始 Markdown；`[[` 候选插入的链接统一保存为标准 Markdown 链接，脚注保存为 Markdown 上标脚注，文末编号按首次出现排列。
 - **相关推荐**：词法匹配，最多 5 篇、默认 3 篇，附命中片段；`[[` 空查询使用所在段落作上下文，输入后搜索标题与正文。
 - 界面与交互细节见 [`apps/web/README.md`](../../apps/web/README.md)。
 
 ## 删除（ADR 0038，D1）
-- 只有人能删除有稳定 ID 的知识笔记（`life/` 与旧格式笔记除外）。删除把文件移到 vault 根目录的 `.trash/`（保留原相对路径，冲突加后缀），由自动提交记录；隐藏目录不参与索引与链接图，指向它的链接悬空，恢复即复原。
+- 只有人能删除有稳定 ID 的知识笔记（`life/` 下的私密记录除外）。删除把文件移到 vault 根目录的 `.trash/`（保留原相对路径，冲突加后缀），由自动提交记录；隐藏目录不参与索引与链接图，指向它的链接悬空，恢复即复原。
 - 回收站 30 天后、或人在回收站里彻底删除时，删除 `.trash/` 中的文件。恢复回原路径，被占用时加后缀并告诉人。回收站规则见 [work.md](work.md)「删除与回收站」。
 
 ## 自动提交（ADR 0014）
@@ -130,7 +124,7 @@ files/     attachments/  drawings/（Excalidraw）  templates/  originals/（资
 
 ## 搜索（ADR 0014）
 - SQLite FTS5 + trigram 分词；**少于 3 个字符的查询改用子串匹配**（trigram 搜不到两个汉字的词）。
-- 范围：标题、正文、作者、citekey、tags。空查询列举可见笔记，可配合 `type` 过滤；旧任务可用 `lumio task list --legacy` 列举。
+- 范围：标题、正文、作者、citekey、tags。空查询列举可见笔记，可配合 `type` 过滤。
   新版 `lumio task list` 使用独立 Work 查询，不伪造笔记路径（ADR 0025）。
 - 索引用 WAL，遇锁最多等 5 秒；Hub 与本地 CLI 可同时使用。
 - 没有 ID 的笔记照样能搜到，结果**不带 `id`**，只能按文件名引用。

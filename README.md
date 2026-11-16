@@ -16,9 +16,8 @@
 | `packages/work` | Project、Task、讨论、关系与显式委派 |
 | `packages/execution` | Job、Routine、设备能力与执行规则 |
 | `packages/assistant` | 对话、记忆、模型端口与工具循环 |
-| `packages/storage` | 文件/索引/SQLite 适配、JSONL、产物、备份与显式迁移 |
+| `packages/storage` | 文件/索引/SQLite 适配、JSONL、产物与业务备份 |
 | `packages/foundation`、`packages/platform` | ID/错误，以及终端、诊断、安装维护 |
-| `packages/core` | 旧 API 兼容转发，应用已改用明确模块 |
 | `packages/api-client` | 调用 Hub 的 SDK，所有客户端共用 |
 | `apps/cli` | `lumio` 命令行 |
 | `apps/hub` | HTTP、鉴权/审计、模块组装与跨模块协调 |
@@ -31,7 +30,7 @@
 
 ## 安装
 
-macOS arm64、Linux x64/arm64，无需安装 Bun：
+支持 macOS arm64、Linux x64/arm64。首次安装需要 OpenSSL 3、jq 和带签名清单的正式发布。
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/wicsp/Lumio/main/install.sh | sh
@@ -63,7 +62,6 @@ curl -fsSL https://raw.githubusercontent.com/wicsp/Lumio/main/install.sh | sh -s
 只下载程序或指定版本：在安装脚本参数里使用 `--no-setup` 或 `--version vX.Y.Z`。
 后台服务、日志与手动安装见 [macOS](infra/launchd/README.md)、[Linux](infra/systemd/README.md)。
 知识正文可用任意 Markdown 编辑器编辑；Task/Project 描述通过带版本副本编辑，状态与负责人通过 Lumio 修改。
-已有任务笔记需按[迁移与回退说明](docs/migration-v2.md)显式切换；启动不自动迁移数据。
 内置助手的模型配置与记忆命令见[助手说明](docs/assistant.md)。
 
 ## 源码开发
@@ -81,7 +79,7 @@ Web 工作台随 Hub 提供：安装后打开 `http://127.0.0.1:7420`（或 Hub 
 P0–P2 已完成（v0.1.6），并已合入四模块重构（ADR 0025）：
 
 - **知识（Knowledge）**：笔记仍是外部可编辑的 Markdown。`lumio new paper|idea`、`lumio sync`（自动补全元数据）；`search`/`show`/`links`/`check`/`export bib`。
-- **工作（Work）**：Project/Task 存在 Hub 的数据库里，正文可用 Markdown；修改负责人不会委派，派出是单独的显式操作。旧的任务/例行笔记需按[切换与回退](docs/migration-v2.md)显式迁移，启动时不会自动迁移。
+- **工作（Work）**：Project/Task 存在 Hub 的数据库里，正文可用 Markdown；修改负责人不会委派，派出是单独的显式操作。`lumio check` 会列出仍在 vault 里的旧工作笔记。
 - **执行（Execution）**：每台设备一个执行器；Job 协议 2、离线队列、例行任务、高权限命令的审批门。
 - **助手（Assistant）**：对话与显式记忆，模型由 Hub 配置，见[使用说明](docs/assistant.md)。
 - **Web 工作台**：今日总览、项目与任务、知识阅读、执行与例行任务、助手和审批，见 [apps/web](apps/web/README.md)。

@@ -1,4 +1,4 @@
-# Hub：职责、存放、部署与迁移
+# Hub：职责、存放与部署
 
 > 现行设计分册，只写现在生效的规则；总览、跨模块规则与写法见 [`../DESIGN.md`](../DESIGN.md)。
 
@@ -17,7 +17,7 @@
   以数据库一致性快照确定 ready 托管文件，复制文件并生成校验清单（ADR 0014、0016、0025）。
 - `lumio hub backup verify <目录>` 校验清单、数据库和引用文件；`lumio hub restore business <备份目录> <新状态目录>` 只恢复到新目录。
   拒绝缺失或被篡改的文件、重复清单与符号链接，不覆盖已有状态。知识目录与安装配置单独备份，索引可重建（ADR 0025）。
-- Hub 与离线迁移通过同一业务目录的 SQLite OS 租约互斥；进程崩溃自动释放锁，不删除锁文件或凭 PID 猜测锁失效。
+- Hub 与离线数据脚本通过同一业务目录的 SQLite OS 租约互斥；进程崩溃自动释放锁，不删除锁文件或凭 PID 猜测锁失效。
 
 ## 部署（ADR 0007、0017、0021、0022）
 - **两种模式，都只有一个 Hub**：
@@ -26,29 +26,23 @@
 - **网络由部署者负责**：Hub 只讲 HTTP；监听地址（`LUMIO_HUB_LISTEN`）与对外地址（`LUMIO_PUBLIC_URL`）由部署者设置，
   HTTPS 推荐放 Caddy 等反向代理（文档有示例）。非本机监听且对外地址是 `http://` 时只警告、不拒绝。
   Tailscale 等私有网络是补充：`setup` 检测到时可以帮忙填对外地址，核心代码不依赖它。
-- **安装**（ADR 0021、0027）：打 `v*` 标签时 CI 为每个平台编译一个 `lumio`（嵌入 Web 资源）发布到 GitHub Releases；`install.sh` 下载、校验、装到 `~/.local/bin` 并建立 `lumio-hub`、`lumio-runtime` 兼容链接，
-  为兼容 v0.1.x 升级器，压缩包保留三个普通文件：主程序与两个固定 shell 转发垫片；新安装器/升级器逐字节核对垫片后建立符号链接。从 v0.1.x 升级须执行两次 upgrade：第一次安装主程序与垫片，第二次转换链接、改写服务文件并显示切换提示。
+- **安装**（ADR 0021、0027、0063、0068）：打 `v*` 标签时 CI 为每个平台发布只含一个 `lumio` 的压缩包（嵌入 Web 资源）和 Ed25519 签名清单。
+  `install.sh` 用 OpenSSL 3 与 jq 验签、读取平台与版本，核对文件大小及 SHA-256，安装到 `~/.local/bin`。
   再运行 `lumio hub setup`（可重复运行；`--server` 为服务器模式）：vault 路径、身份、CLI 配置文件 `~/.config/lumio/config.json`、
   Hub 与本机执行器的后台服务（macOS：launchd；Linux：systemd 用户服务；服务命令为 `lumio hub serve`、`lumio runtime serve`，进程仍分开）。Web 由 Hub 在自己的地址上提供，没有单独的 Web 服务（ADR 0027）。
   加执行器：`lumio runtime add <名称>` 生成一次性配对码（10 分钟、一次有效），那台机器上 `lumio runtime join` 换取令牌并装好后台服务；
-  客户端配对码优先返回 Hub 对外地址，未配置时返回供本机客户端使用的地址（I1-7a）。另一台机器上的 CLI 用 `lumio login`。`lumio doctor`、`lumio runtime doctor` 检查安装（含 Web 服务与助手配置）；`lumio selftest` 用真实 agent 和数据库任务验证关键路径；`upgrade` 升级（从 v0.1.x 升级时替换为单个程序并改写本机服务文件）。
-  `upgrade` 始终直接升到目标版本（默认最新），已是该版本时不下载；发布包格式或安装布局变化时，上一个已发布版本的升级程序必须能直接完成升级（ADR 0028）。
-  Release 附 Ed25519 签名的发布清单，`upgrade` 与 Runtime 自更新先验签再核对哈希；`install.sh` 首次安装仍只校验 SHA-256（ADR 0063）。
+  客户端配对码优先返回 Hub 对外地址，未配置时返回供本机客户端使用的地址（I1-7a）。另一台机器上的 CLI 用 `lumio login`。`lumio doctor`、`lumio runtime doctor` 检查安装（含 Web 服务与助手配置）；`lumio selftest` 用真实 agent 和数据库任务验证关键路径。
+  `upgrade` 从签名清单安装目标版本（默认最新），并将服务文件改为调用 `lumio`；相同版本且服务已正确配置时无需下载安装包。
   Hub 机器上，本机 Runtime 声明 `self_update` 时 `upgrade` 与 `deploy-local` 只重启 Hub，Runtime 空闲后自己重启；远端 Runtime 跟随 Hub 的期望版本自动更新，见 [execution.md](execution.md#runtime-版本与自动更新adr-0063u1-0)。
   Hub 在状态目录 `updates/` 保存供 Runtime 下载的更新产物，只保留当前与上一个期望版本；正式版本由 Hub 从 Releases 取来缓存，开发构建由 `deploy-local` 交叉编译、签名后写入（ADR 0063）。
-  从旧笔记模式切到数据库任务：不需要保留旧任务时 `lumio hub switch --retire-legacy` 一条命令退役旧笔记（不导入、不改文件，ADR 0027）；需要导入时按 `docs/migration-v2.md`。
   Nix 以后作为另一种安装方式。作者自己的用法见 `docs/personal-setup.md`。
 - 只信任配置过的反向代理传来的客户端信息。
 - 飞书 Bot 用官方 SDK 的长连接，不需要公网回调地址。
 
-## 旧数据迁移与切换（ADR 0025、0027）
+## HTTP 接口
 
-- `lumio hub migrate plan/apply/retire/sources/source` 提供显式迁移，完整步骤见 [切换与回退](../migration-v2.md)。
-  apply 要求匹配的完整备份、源摘要和设备准备确认，并与 Hub 独占同一状态目录；原始字节和未知字段进入来源档案。
-  第一次成功 apply 或 retire 后关闭整个工作区的旧 Task/Routine 文件控制与旧委派/追问；知识文件继续可编辑，不再由旧字段覆盖数据库。
-- Runtime 与离线准备也持有独占状态租约。`prepare-migration --state-dir <目录>` 只在执行器停止且无待执行/交付数据时清空派生计划缓存。
-  retire 在独占状态目录下自动完整备份并验证，只写退役回执（kind/时间/备份/数量/路径摘要），不导入或改写旧笔记；仍有未结束的旧笔记 Job 时拒绝。已有任何回执时 apply/retire 都拒绝，并说明切换时间与方式（ADR 0027）。
-  迁移仅导入已处理历史关联与已经暂停的 Routine，不生成 Job 或重放工具/审批；下一轮取历史最高轮次加一。
+- human 与 agent 使用 `/v2` 模块路径。知识查询是 `/v2/knowledge/search`、`/v2/knowledge/notes/<ref>` 与 `/v2/knowledge/check`；状态与身份从 `/v2/system` 读取，Job 与设备从 `/v2/execution` 读取，提议从 `/v2/approval` 读取与决定。
+- 客户端与 Runtime 配对在 `/v2/setup`。设备的 Job 协议与高权限消息见 [Execution](execution.md#job-协议与执行边界adr-0019002000250068)。
 
 ## AI 配置与原生会话状态（ADR 0041、0042、0047）
 

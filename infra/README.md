@@ -6,7 +6,7 @@ GitHub Releases 提供 macOS arm64、Linux x64/arm64 的独立程序，不需要
 
 ## Caddy 反向代理
 
-服务器上运行 `lumio-hub setup --server`，对外地址填 `https://lumio.example.org`。
+服务器上运行 `lumio hub setup --server`，对外地址填 `https://lumio.example.org`。
 将域名指向服务器并按 Caddy 的要求开放 HTTPS 端口。示例 Caddyfile：
 
 ```caddyfile
