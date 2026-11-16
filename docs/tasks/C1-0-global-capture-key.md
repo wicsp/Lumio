@@ -57,6 +57,10 @@
 
 ## C1-2 Hub 细节
 
+> 2026-11-16 实施检查：#222 尚缺 `Source.kind: text`、原文所见元数据与托管文件所见归属，
+> 已用合成数据复现契约拒绝；补齐方案见 [ADR 0067](../adr/0067-glance-storage-contract-completion.md)（Proposed）。
+> 按 AGENTS.md 第 1 条，待人类批准后修改契约并继续本切片；C1-2 / C1-3 / C1-4 / C1-6 尚未完成。
+
 **接收所见**
 
 - `POST /v2/glances` 只授予 human。校验元数据（严格对象）与截图（JPEG / PNG，字节与尺寸不超过 `GLANCE_LIMITS`，实际解码尺寸与声明一致）。
