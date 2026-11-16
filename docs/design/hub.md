@@ -11,9 +11,6 @@
 
 ## 存放
 
-> 待批准的所见文件归属扩展见 [ADR 0067](../adr/0067-glance-storage-contract-completion.md)；
-> 现有 `StoredArtifact.owner` 仍只接受 ResourceRef，本提议尚未生效。
-
 - Hub 的运行数据放在 `~/.local/share/lumio/`（可配置），**不在 vault、不在同步目录里**：
   `index.sqlite`（派生索引，可重建）、`hub.sqlite`（身份、令牌、提议、审计、Job、数据库 Work 和 Assistant，需要备份）。
   `lumio hub backup <目标文件>` 仍提供旧数据库单文件备份；完整业务备份用 `lumio hub backup business <新目录>`，

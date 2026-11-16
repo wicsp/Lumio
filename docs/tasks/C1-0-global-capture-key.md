@@ -57,9 +57,7 @@
 
 ## C1-2 Hub 细节
 
-> 2026-11-16 实施检查：#222 尚缺 `Source.kind: text`、原文所见元数据与托管文件所见归属，
-> 已用合成数据复现契约拒绝；补齐方案见 [ADR 0067](../adr/0067-glance-storage-contract-completion.md)（Proposed）。
-> 按 AGENTS.md 第 1 条，待人类批准后修改契约并继续本切片；C1-2 / C1-3 / C1-4 / C1-6 尚未完成。
+> 2026-11-16：#222 的三处契约缺口按 [ADR 0067](../adr/0067-glance-storage-contract-completion.md)（Accepted）补齐，由 [B0-1](B0-0-dev-baseline.md) 实施；C1-2 / C1-3 / C1-4 / C1-6 在 B0-1 合并后继续（B0-0 全部完成前即可开始）。
 
 **接收所见**
 
@@ -67,6 +65,7 @@
 - 截图存为托管文件，所见记录写 `hub.sqlite`：归属、App、窗口、网址、选中文字、指点、轨迹、识字块、截图文件 ID、`used_by`（捕获 ID / 消息 ID，可为空）、创建时间。
 - 网址的 origin 是本 Hub 的 Web 地址（`LUMIO_PUBLIC_URL`、本机监听地址、`LUMIO_WEB_ORIGINS`）时：不保存截图（请求里带了也丢弃），把路由解析成 ResourceRef，
   后续按焦点处理（主对话当作 `focus`，捕获时直接返回"Lumio 内的对象无需收藏"的提示）。
+- 归属（ADR 0067）：截图上传时归 `{module: "hub", id: gln_…}`；存成资料时在生成资料的同一事务把归属转给 `{module: "knowledge", id: src_…}`。
 - 清理：没有被捕获引用的截图，超过保留期（默认 30 天，Hub 配置可改）删除托管文件，记录保留并标记截图已删除。
   取消的所见由小助手调用删除接口立即删除（`DELETE /v2/glances/<id>`，只限所有者且未被引用）。
 
@@ -83,7 +82,7 @@
 - `CaptureCreate.glance` 指向的所见必须属于同一个 human 且未被别的捕获使用。所见捕获**不按网址去重**。
 - 网址是论文链接（arXiv、DOI，复用现有规范化）→ 走论文路径；所见只记在捕获上。
 - 其他 → `source`（有网址 `kind: web`，没有 `kind: text`），标题由窗口标题与指向段落的前几个字生成（卡片完成后可由 AI 给出更好的标题，按现有规则）。
-- 原文 Markdown：`## 指向的段落`（判定方式写在 frontmatter）+ `## 窗口文字`（整窗识字，按位置排序还原阅读顺序）。frontmatter 在现有字段外加 `glance`、`screenshot`（托管文件 ID）、`app`、`window`。
+- 原文 Markdown：`## 指向的段落`（判定方式写在 frontmatter）+ `## 窗口文字`（整窗识字，按位置排序还原阅读顺序）。frontmatter 在现有字段外加一个 `glance` 对象：`id`、`app`、`window`、`screenshot`（托管文件 ID）、`pointing`（ADR 0067）；`extractor` 为 `glance-ocr@1` 或 `glance-vision@1`。
 - 绑定了 `knowledge.vision` 时：把截图（Hub 在图上画出光标标记）交给它整理成 Markdown，成功则替换"窗口文字"部分并把 `extractor` 记为看图；失败则保留识字结果，不让捕获失败。
 - 卡片照常用 `knowledge.summary` 生成，提示词里说明"人指向的是这一段"，以它为重点。
 

@@ -7,8 +7,8 @@
 > **四模块重构**：[ADR 0025](adr/0025-four-module-architecture.md)（Accepted，2026-10-31 人类批准）规定知识、工作、执行、助手四模块与混合存储，
 > 已于 2026-11-02 合并（#62）：四模块边界、业务存储、日志备份与显式迁移已实现，验收证据见 [R0-0](tasks/R0-0-four-module-refactor.md)。Project/Task 的 Markdown 展示与导出派生物尚未实现。真实数据迁移需按 [migration-v2](migration-v2.md) 单独执行。
 
-> **已批准、本地验收中**：[ADR 0034](adr/0034-knowledge-creation-and-authoring.md) 第 1–5 节（知识新建入口与模板，[K1-0](tasks/K1-0-knowledge-authoring.md)）与
-> [ADR 0035](adr/0035-live-note-editing-and-related-notes.md) 第 1–8 节（实时编辑、相关推荐、`[[` 候选与上标脚注，[K2-0](tasks/K2-0-live-note-editing.md)）均于 2026-11-06 获批准并已合并（#99），规则已写入 [`design/knowledge.md`](design/knowledge.md)。PDF 与 RAG 不在本期。
+> **开发期基线**：[ADR 0068](adr/0068-dev-baseline-remove-legacy-compat.md)（Accepted，2026-11-16）：1.0 前契约变更默认破坏性，不保留旧格式读取；只有 Hub↔Runtime 版本差与 vault 手写宽容两处长期兼容。
+> 旧笔记工作模式、显式迁移与 `/v1` 人/agent 接口由 [B0-0](tasks/B0-0-dev-baseline.md) 删除；删除前分册里的旧模式说明仍描述现状。
 
 ## 0. 目标与非目标
 

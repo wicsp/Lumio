@@ -25,12 +25,12 @@ files/     attachments/  drawings/（Excalidraw）  templates/  originals/（资
 
 本表描述知识目录中的文件格式；Project/Task/Routine 保留旧格式兼容，新业务对象与数据库规则见 [work.md](work.md)。
 
-所有实体共有：`id`（`<前缀>_<ULID>`）、`type`、`title`、`created`、`updated`（ISO 8601 带时区）、`tags`，以及可选的 `derived_from`（来源：Lumio ID 或 URL，ADR 0051）。（`related` 已删除，旧笔记里的值原样保留但不计入链接图，ADR 0018。）
+所有实体共有：`id`（`<前缀>_<ULID>`）、`type`、`title`、`created`、`updated`（ISO 8601 带时区）、`tags`，以及可选的 `derived_from`（来源：Lumio ID 或 URL，ADR 0051）。（`related` 已删除，ADR 0018。）
 
 | 类型 | 前缀 | 要点 |
 |---|---|---|
 | paper | `pap` | `citekey`、`authors`、`year` 必填；`arxiv`、`doi`、`venue`、`url`；正文末尾有 BibTeX 一节 |
-| source | `src` | 网页、视频、播客、课程、书；`kind`、`url`、`author`、`site` |
+| source | `src` | 网页、视频、播客、课程、书、无网址文字；`kind`（含 `text`，ADR 0067）、`url`、`author`、`site` |
 | idea | `idea` | `status`；可关联 `project` |
 | project | `prj` | `status`、`goal`、`repo`、`deadline` |
 | task | `task` | `status`（todo/active/waiting/paused/done/cancelled，只由人改）、`assignee`（`human` / `pi` / `pi@server`，同时是"现在轮到谁"）、`due`；派给 AI 时可选的 `workdir`（缺省 `~`）、`model`、`gpus`、`timeout_minutes`（ADR 0019、0024） |
@@ -68,7 +68,6 @@ files/     attachments/  drawings/（Excalidraw）  templates/  originals/（资
 
 - **链接只写在正文里**，由人在写作时写，并在句子里说明关系（ADR 0018）。两种写法都识别，用哪种由人决定（ADR 0022）：
   `[[文件名]]`（去掉 `|别名`、`#标题` 后按文件名解析）；标准 Markdown 链接 `[文字](相对路径.md)`（相对于所在笔记的目录解析，以 `/` 开头的相对于 vault 根目录；大小写敏感；忽略图片、外部地址与非 `.md` 附件；P2-10）。
-- frontmatter 的 `related` **已删除**：旧笔记里的值作为未知字段原样保留，但不计入链接图（ADR 0018）。
 - **改名**：用任何编辑器改名都可以（有的编辑器会自动更新链接）；造成的断链由 `lumio check` 列出，不自动修复；以后官方 GUI 经 Hub 改名并同时更新引用（ADR 0018）。
 - 解析不到的标为悬空链接，不报错；代码块里的 `[[ ]]` 忽略。
 - 导出参考文献时从正文找引用：`lumio export bib --from <笔记>` 只导出该笔记里 `[[citekey]]`、指向论文笔记的 Markdown 链接或 `\cite{citekey}` 引用到的论文（ADR 0018）。
@@ -93,8 +92,8 @@ files/     attachments/  drawings/（Excalidraw）  templates/  originals/（资
 
 - **三层**：原文（Lumio 写，只读）、AI 层（该资料的 AI 笔记，即入库时的卡片）、人的层（`paper` / `source` 实体：笔记、链接、状态）。
   论文入库为 `paper`（citekey 与去重不变），其他为 `source`。实体正文开头单独一段嵌入它的 AI 笔记，其余归人；卡片写好而实体未嵌入时补上（I2-2）。
-- **原文**：`files/originals/<标题> <实体 ID>.md`，frontmatter 记 `of`、`url`、`captured`、`extractor`、`lang`、`sha256`；不扫描为实体、不进链接图。
-  只用于检索、问答和备份，人读资料时打开原链接；重新抽取时整体替换。PDF 存 Hub 托管文件，不进 vault；图片、视频、音频不保存。
+- **原文**：`files/originals/<标题> <实体 ID>.md`，frontmatter 记 `of`、`url`、`captured`、`extractor`、`lang`、`sha256`，所见入库另记 `glance` 对象（App、窗口、截图等，ADR 0067）；不扫描为实体、不进链接图。
+  只用于检索、问答和备份，人读资料时打开原链接；重新抽取时整体替换。PDF 与所见截图存 Hub 托管文件，归所属实体，随它进回收站与备份（ADR 0067）；图片、视频、音频不保存。
 - **Inbox 是收藏夹**（ADR 0065）：捕获记录（`cap_`）在 `hub.sqlite`，属 Hub 的跨模块协调数据。解析成功即生成实体，资料就在知识库里，不需要分拣。
   Inbox 按时间列出全部捕获，失败的置顶，可重试、手动粘贴正文或移除。实体 `status`（默认 `to-read`）保留，界面不要求设置。
   移除时实体、原文、AI 笔记一起进回收站；URL 规范化后去重，再次捕获已移除的链接时提示。
