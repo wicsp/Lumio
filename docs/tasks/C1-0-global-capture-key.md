@@ -32,6 +32,9 @@
 | C1-6 | 构建、签名与本机部署：`bun run desktop:build` / `desktop:check`（只在 macOS 上运行）；固定签名身份；安装到 `~/Applications` 并登录时启动；接入 `scripts/deploy-local.ts`（可选步骤）；CI 增加 macOS 任务（不挡合并，同主线规则） | 后端（Codex） | `apps/desktop`、`scripts/`、`.github/` |
 | C1-7 | （后续）助手看图：模型适配层支持图像输入；主对话有所见且 Profile 支持图像时附截图与局部放大图；请求快照记文件 ID 与 sha256 | 后端（Codex） | `packages/assistant`、`apps/hub` |
 
+> C1-5 进度（2026-11-16）：配对入口、`knowledge.vision` 绑定与发送去向说明、Inbox 与资料页的 `desktop` 来源与截图已完成；排除名单保存在小助手本机，Web 不编辑。
+> **对话消息显示所见**未做：`AssistantMessage` 没有 `glance` 字段，Web 无法知道哪条消息附了所见，需要先补契约（待人决定）。
+
 依赖：C1-2、C1-3、C1-5 依赖 C1-1；C1-3 的上传依赖 C1-2；C1-4 依赖 C1-3 与 C1-2；C1-6 可与 C1-3 同时做；C1-7 在 C1-4 试用之后再定。
 **C1-1 → C1-2 → C1-3 + C1-6 做完即可日常试用轻点收藏**；C1-4 做完后可以按住说话。
 

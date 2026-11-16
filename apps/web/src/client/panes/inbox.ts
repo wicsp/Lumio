@@ -6,7 +6,7 @@
  * - 卡片是这条资料的 AI 笔记；"可能相关"用卡片内容做词法相关推荐（ADR 0035），实时计算、不保存。
  * - 系统分享（PWA share target）带来的链接在 main.ts 暂存，这里取出后直接捕获。
  */
-import { type Capture, type CaptureCommand, type CaptureCreate, type NoteDetail, type KnowledgeRelatedResult } from "@lumio/schema";
+import { type Capture, type CaptureCommand, type Glance, type CaptureCreate, type NoteDetail, type KnowledgeRelatedResult } from "@lumio/schema";
 import { errorText, isConflict, type Client } from "../api.ts";
 import { newRequestId, formatTime } from "../commands.ts";
 import { autosize, clear, confirmDialog, empty, failure, h, icon, loading, openDialog, toast } from "../dom.ts";
@@ -14,6 +14,7 @@ import { ago } from "../format.ts";
 import { t, translated } from "../i18n.ts";
 import type { Navigate } from "../navigation.ts";
 import { renderMarkdown, safeExternalUrl } from "../utils/markdown.ts";
+import { glanceSource, glanceThumb, hostOf } from "../glance-view.ts";
 
 const SHARE_KEY = "lumio.web.share";
 const POLL_MS = 2000;
@@ -71,10 +72,6 @@ const ERROR_TEXT = translated({
   summary_failed: "The AI couldn't write a card.",
 });
 
-function hostOf(url: string | undefined): string {
-  if (!url) return "";
-  try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; }
-}
 
 export function collectionCaptures(captures: readonly Capture[]): Capture[] {
   return captures.filter(capture => capture.triage !== "discard").sort((a, b) =>
@@ -88,6 +85,7 @@ export class InboxPane {
   private meta = h("span", { class: "bar-meta" });
   private captures: Capture[] = [];
   private rows = new Map<string, { key: string; row: HTMLElement }>();
+  private glances = new Map<string, Promise<Glance | undefined>>();
   private generation = 0;
   private timer?: ReturnType<typeof setTimeout>;
   private active = true;
@@ -212,22 +210,43 @@ export class InboxPane {
   private row(capture: Capture): HTMLElement {
     const title = capture.entity?.title || capture.title || hostOf(capture.url) || t("Untitled");
     const kind = capture.kind ?? (capture.url ? "web" : "text");
-    const meta = [KIND_LABEL[kind], hostOf(capture.url), ago(capture.created)].filter(Boolean).join(" · ");
+    const desktop = capture.channel === "desktop";
+    const meta = h("span", { class: "muted", title: formatTime(capture.created) },
+      [desktop ? t("Desktop helper") : "", KIND_LABEL[kind], hostOf(capture.url), ago(capture.created)].filter(Boolean).join(" · "));
     const status = this.statusPill(capture);
     const body = h("div", { class: "inbox-body" });
+    const thumb = h("span", { class: "inbox-thumb", hidden: true });
+    if (capture.glance) this.fillGlance(capture, capture.glance, meta, thumb, kind);
     const row = h("article", { class: "inbox-row", tabindex: "0", "data-pad-row": capture.id },
       h("div", { class: "inbox-head" },
-        h("span", { class: "inbox-kind", title: KIND_LABEL[kind] }, icon(KIND_ICON[kind] ?? "file")),
+        h("span", { class: "inbox-kind", title: desktop ? t("Desktop helper") : KIND_LABEL[kind] }, icon(desktop ? "monitor" : KIND_ICON[kind] ?? "file")),
         h("div", { class: "inbox-main" },
           capture.entity?.id
             ? h("button", { type: "button", class: "inbox-title", "data-pad-action": "primary", onclick: () => this.openEntity(capture) }, title)
             : h("strong", { class: "inbox-title" }, title),
-          h("span", { class: "muted", title: formatTime(capture.created) }, meta)),
+          meta),
+        thumb,
         status),
       body,
       this.actions(capture));
     this.fillBody(body, capture);
     return row;
+  }
+
+  /** 桌面小助手存的条目（ADR 0066，C1-5）：来源标签补上 App 与网址，附截图缩略图。所见记录按 ID 缓存，轮询重绘时不重复读取。 */
+  private fillGlance(capture: Capture, id: string, meta: HTMLElement, thumb: HTMLElement, kind: keyof typeof KIND_LABEL): void {
+    let record = this.glances.get(id);
+    if (!record) { record = this.client.glance(id).catch(() => undefined); this.glances.set(id, record); }
+    void record.then(glance => {
+      if (!glance || !this.active) return;
+      const label = glanceSource(glance);
+      meta.textContent = [t("Desktop helper"), label || KIND_LABEL[kind], ago(capture.created)].filter(Boolean).join(" · ");
+      if (glance.window_title) meta.title = `${glance.window_title}\n${formatTime(capture.created)}`;
+      if (glance.image && !glance.image.purged) {
+        thumb.hidden = false;
+        thumb.append(glanceThumb(this.client, id, glance.window_title || label || capture.title || t("Screenshot")));
+      }
+    });
   }
 
   private statusPill(capture: Capture): HTMLElement | null {
