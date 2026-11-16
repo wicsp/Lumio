@@ -3,7 +3,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { chmod, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { newId } from "@lumio/foundation";
-import { AgentInfo, AgentTokenIssued, JobAccess, type JobSpec, Actor, Proposal, type ProposalOperation, type ProposalStatus, type ActorRole, RuntimeRegistration, RuntimeInfo } from "@lumio/schema";
+import { AgentInfo, AgentTokenIssued, JobAccess, type JobSpec, Actor, Proposal, type ProposalOperation, type ProposalStatus, type ActorRole, RuntimeRegistration, RuntimeRegistered, RuntimeInfo } from "@lumio/schema";
 import { HubError } from "./errors.ts";
 import { ExecutionRuntimes, RuntimeUpdates } from "@lumio/execution";
 import { workSystemActor, SqliteRuntimeRegistry, SqliteExecutionStore, SqliteRuntimeUpdates } from "@lumio/storage";
@@ -70,7 +70,7 @@ export class HubStore {
     })();
   }
 
-  /** Stable, tokenless identity for automatic Work hand-backs and migration. */
+  /** Stable, tokenless identity for automatic Work hand-backs. */
   workActor(): Actor { return workSystemActor(this.db); }
 
   createActor(name: string, role: ActorRole): Actor {
@@ -258,7 +258,7 @@ export class HubStore {
       .run(new Date().toISOString(), identity.actor.id, identity.label, operation, authorization, proposal ?? null, execution ?? null);
   }
 
-  registerRuntime(actor: string, registration: RuntimeRegistration, now: Date): RuntimeInfo { return this.runtimeRegistry.register(actor, registration, now); }
+  registerRuntime(actor: string, registration: RuntimeRegistration, now: Date): RuntimeRegistered { return this.runtimeRegistry.register(actor, registration, now); }
   syncRuntime(actor: string, now: Date): void { this.runtimeRegistry.sync(actor, now); }
   runtimes(now: Date): RuntimeInfo[] { return this.runtimeRegistry.list(now).map(runtime => runtime.registration.features?.includes("self_update") ? { ...runtime, update: this.runtimeUpdates.view(runtime) } : runtime); }
 

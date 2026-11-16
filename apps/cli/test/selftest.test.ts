@@ -83,10 +83,10 @@ test("selftest uses real Hub and runtime with fake codex, claude and pi; databas
 test("selftest enforces deadlines, continues checks, cancels unfinished database jobs and marks the task done", async () => {
   let time = 0, sequence = 0, cancelled = 0;
   const jobs = new Map<string, Job>(), date = "2026-10-29T00:00:00Z";
-  let task = WorkTask.parse({ schema_version: 3, type: "task", id: "task_00000000000000000000000002", title: "自检", description: "", outcome: "open", turn: { holder: "human", reason: "todo", since: date }, tags: [], dependencies: [], references: [], revision: 1, created: date, updated: date });
+  let task = WorkTask.parse({ schema_version: 3, type: "task", created_by: "act_00000000000000000000000001", updated_by: "act_00000000000000000000000001", id: "task_00000000000000000000000002", title: "自检", description: "", outcome: "open", turn: { holder: "human", reason: "todo", since: date }, tags: [], dependencies: [], references: [], revision: 1, created: date, updated: date });
   const fetcher = (async (input, init) => {
     const u = new URL(String(input));
-    if (u.pathname === "/v1/runtimes") return Response.json([{ actor: "act_00000000000000000000000001", registration: { protocol_version: 2, name: "server", engines: [{ name: "pi", version: "1.4.0", sandbox: "none" }], tags: [], max_concurrent: 1 }, last_seen: date, online: true }]);
+    if (u.pathname === "/v1/runtimes") return Response.json([{ actor: "act_00000000000000000000000001", update: null, registration: { version: null, platform: null, install: null, protocol_version: 2, name: "server", engines: [{ name: "pi", version: "1.4.0", sandbox: "none" }], tags: [], max_concurrent: 1 }, last_seen: date, online: true }]);
     if (u.pathname === "/v2/work/commands") {
       const { operation } = WorkCommandRequest.parse(JSON.parse(String(init?.body)));
       if (operation.op === "work.task.finish") { task = WorkTask.parse({ ...task, outcome: "done", turn: { holder: "nobody", reason: "on_hold", since: date } }); return Response.json({ kind: "task", task }); }
@@ -111,7 +111,7 @@ test("selftest enforces deadlines, continues checks, cancels unfinished database
 test("--notes is a compatibility alias: no vault is needed or written even on failures", async () => {
   const home = await mkdtemp(join(tmpdir(), "lumio-selftest-no-vault-"));
   try {
-    const runtime = { actor: "act_00000000000000000000000001", registration: { protocol_version: 2, name: "server", engines: [{ name: "pi", version: "1.4.0", sandbox: "none" }], tags: [], max_concurrent: 1 }, last_seen: "2026-10-29T00:00:00Z", online: true };
+    const runtime = { actor: "act_00000000000000000000000001", update: null, registration: { version: null, platform: null, install: null, protocol_version: 2, name: "server", engines: [{ name: "pi", version: "1.4.0", sandbox: "none" }], tags: [], max_concurrent: 1 }, last_seen: "2026-10-29T00:00:00Z", online: true };
     const paths: string[] = [];
     const fetcher = (async (input) => {
       const path = new URL(String(input)).pathname; paths.push(path);

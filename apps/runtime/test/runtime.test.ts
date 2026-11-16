@@ -7,7 +7,7 @@ import { expect, test } from "bun:test";
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { RuntimeHeartbeat, RuntimeInfo, RuntimeRegistration } from "@lumio/schema";
+import { RuntimeHeartbeat, RuntimeRegistered, RuntimeRegistration } from "@lumio/schema";
 import { readConfig } from "../src/config.ts";
 import { detectEngines, parseVersion } from "../src/engines.ts";
 import { runRuntime } from "../src/runtime.ts";
@@ -80,7 +80,7 @@ test("runtime retries exponentially up to 60 seconds, registers again, sends emp
         if (++calls <= 6 || calls === 9) throw new Error(env.LUMIO_TOKEN);
         if (url.endsWith("/register")) {
           const registration = RuntimeRegistration.parse(JSON.parse(String(init.body)));
-          return Response.json(RuntimeInfo.parse({ actor: "act_00000000000000000000000001", registration, last_seen: "2026-01-01T00:00:00Z", online: true }));
+          return Response.json(RuntimeRegistered.parse({ actor: "act_00000000000000000000000001", registration, last_seen: "2026-01-01T00:00:00Z", online: true }));
         }
         expect(RuntimeHeartbeat.parse(JSON.parse(String(init.body)))).toEqual({ running: [], queued: [], outbox: 0 });
         return Response.json({ jobs: [], cancel: [], routines: [] });

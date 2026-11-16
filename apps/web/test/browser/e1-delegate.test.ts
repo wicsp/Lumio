@@ -6,7 +6,7 @@ import { setLang } from "../../src/client/i18n.ts";
 const at = "2026-11-10T00:00:00Z";
 const id = (n: number) => `task_01JABCDEFGHJKMNPQRSTVWXY${String(n).padStart(2, "0")}`;
 const task = (extra: Partial<WorkTask> = {}): WorkTask => WorkTask.parse({
-  schema_version: 3, type: "task", id: id(1), title: "T1", description: "", revision: 4, outcome: "open",
+  schema_version: 3, type: "task", created_by: "act_00000000000000000000000001", updated_by: "act_00000000000000000000000001", id: id(1), title: "T1", description: "", revision: 4, outcome: "open",
   turn: { holder: "human", reason: "todo", since: at }, created: at, updated: at, tags: [], dependencies: [], references: [], ...extra,
 });
 const next = { target: "codex@macsp", source: "project" } as const;

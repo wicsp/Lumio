@@ -49,7 +49,7 @@ test("only an owning runtime can propose for a live job; every other operation/r
   expect((await api("/v1/operations", "other", { operation: operation(j.spec.id), reason: "x" })).status).toBe(400);
   const otherId = hub.store.actors().find((a) => a.name === "other")!.id;
   expect((await api("/v1/operations", "other", { operation: { ...operation(j.spec.id), args: { ...operation(j.spec.id).args, runtime: otherId } }, reason: "x" })).status).toBe(409);
-  expect((await api("/v1/operations", "server", { operation: { op: "task.dispatch", args: { task: "task_00000000000000000000000001", trigger: "cli" } } })).status).toBe(403);
+  expect((await api("/v1/operations", "server", { operation: { op: "task.dispatch", args: { task: "task_00000000000000000000000001", trigger: "cli" } } })).status).toBe(400);
   expect(hub.store.proposals("pending")).toHaveLength(0);
   for (let i = 0; i < 6; i++) expect((await api("/v1/operations", "server", { operation: operation(j.spec.id, ["/bin/echo", String(i)]), reason: "x" })).status).toBe(i < 5 ? 202 : 409);
   await api(`/v1/jobs/${j.spec.id}/cancel`, "owner", {});

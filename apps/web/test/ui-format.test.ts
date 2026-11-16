@@ -4,7 +4,7 @@ import { workPatchCommand } from "../src/client/commands.ts";
 import { dueLabel, ago, isoFromDateInput, dateInputValue } from "../src/client/format.ts";
 import { setLang } from "../src/client/i18n.ts";
 
-const task: WorkTask = { schema_version: 3, type: "task", id: "task_01JABCDEFGHJKMNPQRSTVWXYZ0", title: "T", description: "", revision: 4, outcome: "open", turn: { holder: "human", reason: "todo", since: "2026-11-01T00:00:00Z" }, created: "2026-11-01T00:00:00+08:00", updated: "2026-11-01T00:00:00+08:00", tags: [], dependencies: [], references: [] };
+const task: WorkTask = { schema_version: 3, type: "task", created_by: "act_00000000000000000000000001", updated_by: "act_00000000000000000000000001", id: "task_01JABCDEFGHJKMNPQRSTVWXYZ0", title: "T", description: "", revision: 4, outcome: "open", turn: { holder: "human", reason: "todo", since: "2026-11-01T00:00:00Z" }, created: "2026-11-01T00:00:00+08:00", updated: "2026-11-01T00:00:00+08:00", tags: [], dependencies: [], references: [] };
 
 describe("workPatchCommand", () => {
   test("sends only the changed field with the seen revision", () => {

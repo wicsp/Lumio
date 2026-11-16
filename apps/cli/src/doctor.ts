@@ -115,7 +115,7 @@ export async function doctor(options: DoctorOptions = {}): Promise<Check[]> {
   });
   await check(msg("doctor.routines"), msg("doctor.run_lumio_routine_list_to_inspect_and_repair_schedules"), async () => {
     if (!base) throw new Error();
-    for (const r of await client.routines()) if (r.problem) checks.push({ name: msg("doctor.routine", r.routine.title), ok: false, problem: r.problem, fix: msg("doctor.repair_routine_configuration_and_check_again") });
+    for (const r of await client.executionRoutines()) if (r.problem) checks.push({ name: msg("doctor.routine", r.routine.title), ok: false, problem: r.problem, fix: msg("doctor.repair_routine_configuration_and_check_again") });
   });
   await check(msg("doctor.pending_proposals"), msg("doctor.run_lumio_proposals"), async () => {
     if (!base) throw new Error(); const pending = await client.proposals();

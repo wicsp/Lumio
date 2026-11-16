@@ -1,6 +1,5 @@
 import { AiNotes } from "./ai-notes.ts";
 import { KNOWLEDGE_ROUTES, KnowledgeAuthoring, type PaperFetch } from "./knowledge-authoring.ts";
-import { migrateTaskModel } from "@lumio/storage";
 import { withLanguage, errorMessage, text as msg } from "./messages.ts";
 import { language, type Language } from "@lumio/platform";
 import { browserAllowed, browserDenied, webResponse, webFileResponse, type HubWeb } from "./web.ts";
@@ -23,8 +22,6 @@ import { localHubUrl, networkWarning, rememberLocalRuntime, type HubConfig } fro
 import { HubError } from "./errors.ts";
 import { HubStore, type Identity } from "./store.ts";
 import { Jobs } from "./jobs.ts";
-import { TaskRounds, type TaskOptions } from "./tasks.ts";
-import { Routines, type RoutineOptions } from "./routines.ts";
 import type { RoutineHooks } from "./jobs.ts";
 import { BusinessModules } from "./modules.ts";
 import { SPEECH_PATH, BINDINGS_PATH, VOCABULARY_PATH } from "./speech-config.ts";
@@ -40,7 +37,7 @@ import { Trash } from "./trash.ts";
 import { WriteCoordinator } from "./coordinator.ts";
 import type { AssistantModel, AssistantTool } from "@lumio/assistant";
 import { KnowledgeService } from "@lumio/knowledge";
-import { FileKnowledgeRepository, acquireStateLease, isMigratedSource, legacyControlDisabled } from "@lumio/storage";
+import { FileKnowledgeRepository, acquireStateLease } from "@lumio/storage";
 
 // Routes share authentication, authorization and logging before dispatch.
 export const ROUTES = [
@@ -62,7 +59,6 @@ export const ROUTES = [
   { operation: "runtime.register", method: "POST", pattern: /^\/v1\/runtime\/register$/ },
   { operation: "runtime.sync", method: "POST", pattern: /^\/v1\/runtime\/sync$/ },
   { operation: "runtimes", method: "GET", pattern: /^\/v1\/runtimes$/ },
-  { operation: "routines", method: "GET", pattern: /^\/v1\/routines$/ },
   { operation: "operations", method: "POST", pattern: /^\/v1\/operations$/ },
   { operation: "actors", method: "GET", pattern: /^\/v1\/actors$/ },
   { operation: "proposals", method: "GET", pattern: /^\/v1\/proposals$/ },
@@ -84,8 +80,6 @@ async function startHubInstance(config: HubConfig, options: {
   authorize?: typeof authorize;
   watch?: WatchOptions;
   operations?: OperationOptions;
-  tasks?: TaskOptions;
-  routines?: RoutineOptions;
   assistantHome?: string;
   assistantFetch?: typeof fetch;
   paperFetch?: PaperFetch;
@@ -109,24 +103,20 @@ async function startHubInstance(config: HubConfig, options: {
   let server: Bun.Server<SpeechSocketData>;
   const pairing = new Pairing(store, config, () => localHubUrl(config.hostname, server.port!), options.now);
   let vaultWatch: Awaited<ReturnType<typeof startVaultWatch>> | undefined;
-  let tasks: TaskRounds | undefined;
-  let routines: Routines | undefined;
   let modules: BusinessModules | undefined;
   const hooks: RoutineHooks = {
-    plans: (actor) => [...(legacyControlDisabled(store.db) ? [] : routines?.plans(actor) ?? []).filter((plan) => !modules?.routineStore.get(plan.routine)), ...(modules?.routines.plans(actor) ?? [])],
-    adopt: (actor, id, now, lease) => modules?.routines.adopt(actor, id, now, lease) ?? (legacyControlDisabled(store.db) ? undefined : routines?.adopt(actor, id, now)),
+    plans: (actor) => modules?.routines.plans(actor) ?? [],
+    adopt: (actor, id, now, lease) => modules?.routines.adopt(actor, id, now, lease),
   };
   try {
     const assistantConfig = new AssistantConfiguration({ home: options.assistantHome ?? config.assistantHome, external: config.assistantModel, fetch: options.assistantFetch,
       reload: model => modules!.assistant.setModel(configuredModel(model)) });
     const model = await assistantConfig.load();
-    await migrateTaskModel(store.db, config.stateDir, store.workActor().id, options.now?.() ?? new Date());
     modules = new BusinessModules({ ...config, assistantModel: model }, store, options);
     modules.assistantConfig = assistantConfig;
     await modules.artifacts.recover();
     const writes = new WriteCoordinator();
-    vaultWatch = config.vault ? await startVaultWatch(config, { ...options.watch, log,
-      onNote: async (path) => { await options.watch?.onNote?.(path); await tasks?.noteChanged(path); await routines?.noteChanged(path); } }) : {
+    vaultWatch = config.vault ? await startVaultWatch(config, { ...options.watch, log }) : {
         exclusive: <T>(action: () => Promise<T>) => writes.exclusive(action),
         notify: (_path: string) => {}, issue: (_path: string, line: string) => log(line), drain: () => writes.drain(),
         status: async () => ({ watching: false, last_full_sync: null, pending_files: 0, issues: [] }), stop: () => writes.drain(),
@@ -143,14 +133,6 @@ async function startHubInstance(config: HubConfig, options: {
     await modules.trash.sweep();
     modules.trash.start();
     const authoring = new KnowledgeAuthoring(config, store, action => watch.exclusive(action), (path, message) => watch.issue(path, message), options.paperFetch);
-    tasks = new TaskRounds(config, store, new Jobs(store, hooks), (action) => watch.exclusive(action), (path, line) => watch.issue(path, line), { ...options.tasks,
-      isManaged: (path, id) => legacyControlDisabled(store.db) || isMigratedSource(store.db, path) || !!(id && modules!.workStore.task(id)) || !!options.tasks?.isManaged?.(path, id) });
-    routines = new Routines(config, store, new Jobs(store, hooks), (action) => watch.exclusive(action), (path, line) => watch.issue(path, line), { ...options.routines,
-      isManaged: (path, id) => legacyControlDisabled(store.db) || isMigratedSource(store.db, path) || !!(id && modules!.routineStore.get(id)) || !!options.routines?.isManaged?.(path, id) });
-    if (config.vault) {
-      await watch.exclusive(() => tasks!.start());
-      await watch.exclusive(() => routines!.start());
-    }
     const speech = new SpeechSessions(modules.speech, modules.funAsr, store, options.now ?? (() => new Date()), log);
     const updateArtifacts = new UpdateArtifacts(config.stateDir, store.runtimeVersion);
     const handle = async (request: Request, server: Bun.Server<SpeechSocketData>, lang: Language): Promise<Response | undefined> => {
@@ -163,7 +145,7 @@ async function startHubInstance(config: HubConfig, options: {
         const v2 = V2_ROUTES.find((route) => request.method === route.method && route.pattern.test(url.pathname));
         const route = v2 ?? ROUTES.find((route) => request.method === ("method" in route ? route.method : "GET") && route.pattern.test(url.pathname));
         const speechPath = [SPEECH_PATH, VOCABULARY_PATH, BINDINGS_PATH].includes(url.pathname);
-        const path = speechPath ? url.pathname : route?.operation.startsWith("knowledge.") ? `/v2/knowledge/${route.operation.split(".")[1]}` : v2 ? v2.path : route && (PAIRING_OPERATIONS as readonly string[]).includes(route.operation) ? `/pairing/${route.operation}` : route?.operation === "runtime.privileged.status" ? "/v1/runtime/privileged/<id>" : route?.operation === "runtime.privileged.report" ? "/v1/runtime/privileged" : route?.operation === "job.submit" || route?.operation === "jobs" ? "/v1/jobs" : route?.operation === "job.show" ? "/v1/jobs/<id>" : route?.operation === "job.cancel" ? "/v1/jobs/<id>/cancel" : route?.operation === "runtime.ack" ? "/v1/runtime/ack" : route?.operation === "runtime.results" ? "/v1/runtime/results" : route?.operation === "runtime.register" ? "/v1/runtime/register" : route?.operation === "runtime.sync" ? "/v1/runtime/sync" : route?.operation === "runtimes" ? "/v1/runtimes" : route?.operation === "routines" ? "/v1/routines" : route?.operation === "status" ? "/v1/status" : route?.operation === "health" ? "/health" : route?.operation === "search" ? "/v1/search"
+        const path = speechPath ? url.pathname : route?.operation.startsWith("knowledge.") ? `/v2/knowledge/${route.operation.split(".")[1]}` : v2 ? v2.path : route && (PAIRING_OPERATIONS as readonly string[]).includes(route.operation) ? `/pairing/${route.operation}` : route?.operation === "runtime.privileged.status" ? "/v1/runtime/privileged/<id>" : route?.operation === "runtime.privileged.report" ? "/v1/runtime/privileged" : route?.operation === "job.submit" || route?.operation === "jobs" ? "/v1/jobs" : route?.operation === "job.show" ? "/v1/jobs/<id>" : route?.operation === "job.cancel" ? "/v1/jobs/<id>/cancel" : route?.operation === "runtime.ack" ? "/v1/runtime/ack" : route?.operation === "runtime.results" ? "/v1/runtime/results" : route?.operation === "runtime.register" ? "/v1/runtime/register" : route?.operation === "runtime.sync" ? "/v1/runtime/sync" : route?.operation === "runtimes" ? "/v1/runtimes" : route?.operation === "status" ? "/v1/status" : route?.operation === "health" ? "/health" : route?.operation === "search" ? "/v1/search"
           : route?.operation === "check" ? "/v1/check" : route?.operation === "show" ? "/v1/notes/<reference>" : route?.operation === "links" ? "/v1/notes/<reference>/links" : route?.operation === "operations" ? "/v1/operations"
             : route?.operation === "actors" ? "/v1/actors" : route?.operation === "proposals" ? "/v1/proposals"
               : route?.operation === "proposal.accept" ? "/v1/proposals/<id>/accept" : route?.operation === "proposal.reject" ? "/v1/proposals/<id>/reject" : "<unmatched>";
@@ -246,20 +228,10 @@ async function startHubInstance(config: HubConfig, options: {
               const runtime = store.runtimes(now).find(value => value.actor === identity!.actor.id);
               if (runtime) notifyRuntimeUpdate(store, modules!.notifications, runtime, now);
             }
-            // 结果到了就尽快写回笔记（失败的留给定时任务重试）。
             if (route.operation === "runtime.results" && response.status === 200) {
               modules!.reconcile();
-              void vaultWatch!.exclusive(async () => { await tasks!.writeResults(); await routines!.writeResults(); }).catch(() => {});
             }
             return response;
-          }
-          if (route.operation === "routines") {
-            const decision = decide(identity!.actor, { operation: "routines" });
-            if (decision.result !== "allow") {
-              store.auditDenied(identity!, route.operation);
-              throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: decision.result === "deny" ? decision.reason : "Approval required" });
-            }
-            status = 200; return Response.json(routines!.list());
           }
           // Reject runtime access before reading operation bodies or querying the vault.
           if (identity?.actor.role === "runtime" && ["actors", "proposals", "proposal.accept", "proposal.reject"].includes(route.operation)) {
@@ -275,9 +247,7 @@ async function startHubInstance(config: HubConfig, options: {
           if (route.operation === "operations" || route.operation === "actors" || route.operation === "proposals" || route.operation === "proposal.accept" || route.operation === "proposal.reject") {
             const response = await vaultWatch!.exclusive(() => handleOperation(request,
               route.operation,
-              route.pattern.exec(url.pathname)?.[1], identity!, store, config, decide, { ...options.operations, tasks, routines, privileged, workCommands: modules!.workCommands,
-                isManagedTask: (id) => legacyControlDisabled(store.db) || modules!.workStore.task(id) !== undefined,
-                isManagedRoutine: (id) => legacyControlDisabled(store.db) || modules!.routineStore.get(id) !== undefined }));
+              route.pattern.exec(url.pathname)?.[1], identity!, store, config, decide, { ...options.operations, privileged, workCommands: modules!.workCommands }));
             status = response.status;
             return response;
           }
@@ -344,8 +314,8 @@ async function startHubInstance(config: HubConfig, options: {
     });
     modules.native.setPort(server.port!);
     modules.inbox.start();
-  } catch (cause) { modules?.stop(); await modules?.inbox?.stop(); await modules?.trash?.stop(); await modules?.notices.stop(); await modules?.explorations.stop(); await modules?.notifications.stop(); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); throw cause; }
-  return { server, store, tasks: tasks!, routines: routines!, modules: modules!, async stop() { modules?.stop(); await modules?.native.stop(); await server.stop(true); await modules?.inbox.stop(); await modules?.speech.drain(); await modules?.trash?.stop(); await modules?.notices.stop(); await modules?.explorations.stop(); await modules?.notifications.stop(); await modules?.artifacts.drain(); tasks?.stop(); routines?.stop(); await vaultWatch?.stop(); store.close(); } };
+  } catch (cause) { modules?.stop(); await modules?.inbox?.stop(); await modules?.trash?.stop(); await modules?.notices.stop(); await modules?.explorations.stop(); await modules?.notifications.stop(); await vaultWatch?.stop(); store.close(); throw cause; }
+  return { server, store, modules: modules!, async stop() { modules?.stop(); await modules?.native.stop(); await server.stop(true); await modules?.inbox.stop(); await modules?.speech.drain(); await modules?.trash?.stop(); await modules?.notices.stop(); await modules?.explorations.stop(); await modules?.notifications.stop(); await modules?.artifacts.drain(); await vaultWatch?.stop(); store.close(); } };
 }
 
 /** One Hub or offline migration owns a state directory. OS locks disappear on crashes, without deleting lock files. */

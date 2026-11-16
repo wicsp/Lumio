@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CheckResult, LinksResult } from "@lumio/schema";
 import { buildBib, checkLinks, collectCitations, noteLinks, searchNotes } from "../src/index.ts";
-import { extractCitations, extractLinks, plainText, resolveMarkdownPath } from "../src/index/links.ts";
+import { extractCitations, extractLinks, plainText, resolveMarkdownPath } from "@lumio/knowledge";
 
 const fixture = fileURLToPath(new URL("../../../fixtures/query-vault", import.meta.url));
 const markdown = fileURLToPath(new URL("./fixtures/markdown-links", import.meta.url));
@@ -96,7 +96,7 @@ test("rebuilds version 2 indexes so unchanged notes gain Markdown links on the f
   db.close();
   expect((await noteLinks(vault, "Markdown", { stateDir })).outgoing.some((l) => l.source === "markdown" && l.note?.path === paperPath)).toBe(true);
   const rebuilt = new Database(join(stateDir, "index.sqlite"));
-  try { expect(rebuilt.query("SELECT version FROM metadata").get()).toEqual({ version: 7 }); }
+  try { expect(rebuilt.query("SELECT version FROM metadata").get()).toEqual({ version: 8 }); }
   finally { rebuilt.close(); }
 });
 

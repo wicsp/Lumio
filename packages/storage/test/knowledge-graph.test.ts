@@ -33,9 +33,9 @@ test("indexed graph matches per-note public links, merges duplicates and include
   } finally { db.close(); }
   expect((await showNote(vault, "research/ideas/GraphIsland.md", { stateDir })).note.id).toBeUndefined();
 });
-test("private and type filters affect both endpoints; legacy is opt-in; dangling counts real unresolved links", async () => {
-  const publicGraph = await knowledgeGraph(vault, { stateDir }), all = await knowledgeGraph(vault, { stateDir, includePrivate: true, includeLegacy: true });
-  expect(all.nodes.some(n => n.type === "asset")).toBe(true); expect(all.nodes.some(n => n.type === "task")).toBe(true);
+test("private and type filters affect both endpoints; dangling counts real unresolved links", async () => {
+  const publicGraph = await knowledgeGraph(vault, { stateDir }), all = await knowledgeGraph(vault, { stateDir, includePrivate: true });
+  expect(all.nodes.some(n => n.type === "asset")).toBe(true);
   expect(publicGraph.nodes.some(n => n.type === "asset")).toBe(false);
   const privatePaths = new Set(all.nodes.filter(n => n.type === "asset").map(n => n.path));
   expect(publicGraph.edges.some(e => privatePaths.has(e.from) || privatePaths.has(e.to))).toBe(false);
@@ -45,7 +45,6 @@ test("private and type filters affect both endpoints; legacy is opt-in; dangling
   expect(ideas.edges.every(e => ids.has(e.from) && ids.has(e.to))).toBe(true);
   expect(ideas.edges.some(e => e.from.endsWith("GraphHub.md") && e.to.endsWith("GraphLeaf.md"))).toBe(true);
   expect(ideas.dangling).toBeGreaterThan(0);
-  expect((await knowledgeGraph(vault, { stateDir, type: "task" })).nodes).toEqual([]);
 });
 test("graph reads only the existing snapshot and preserves its generation time even without readable vault files", async () => {
   const first = await knowledgeGraph(vault, { stateDir });
@@ -58,10 +57,4 @@ test("graph reads only the existing snapshot and preserves its generation time e
   const next = await knowledgeGraph(vault, { stateDir });
   expect(next.nodes.some(n => n.title === "Updated synthetic island")).toBe(true);
   expect(Date.parse(next.generated_at)).toBeGreaterThanOrEqual(Date.parse(first.generated_at));
-});
-test("existing indexes gain timestamp metadata without rebuilding unchanged notes", async () => {
-  const db = new Database(join(stateDir, "index.sqlite"));
-  db.exec("ALTER TABLE metadata DROP COLUMN updated_at"); db.close();
-  await updateIndex(vault, { stateDir, parse: () => { throw Error("unchanged note should not be reparsed"); } });
-  expect(Number.isFinite(Date.parse((await knowledgeGraph(vault, { stateDir })).generated_at))).toBe(true);
 });

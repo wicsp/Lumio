@@ -91,6 +91,8 @@ export const ZH: Record<string, string> = {
   "Saved {0}": "保存于 {0}",
   "Third-party content, read-only": "第三方内容，只读",
   "Podcast": "播客",
+  "Course": "课程",
+  "Book": "书籍",
   "Pasted text": "粘贴的文字",
   "Discarded": "已丢弃",
   "This address isn't allowed: it points to this computer or a private network.": "不允许访问这个地址：它指向本机或内网。",

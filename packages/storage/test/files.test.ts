@@ -140,3 +140,48 @@ test("run-log event lookups scan each archived log once and keep answering from 
     expect(await files.runEvent("evt_00000000000000000000000009")).toBeUndefined();
   } finally { db.close(); }
 }));
+
+test("Hub artifact transfer validates ownership, joins the caller's transaction and survives business backup and restore", async () => temporary(async state => {
+  const db = new Database(join(state, "hub.sqlite"));
+  const backup = join(state, "backup"), restored = join(state, "restored");
+  const actor = { id: "act_00000000000000000000000001", role: "human", created: "2026-11-16T00:00:00Z", name: "synthetic" } as const;
+  const source = { module: "hub", id: "gln_00000000000000000000000001" } as const;
+  const target = { module: "knowledge", id: "src_00000000000000000000000001" } as const;
+  const files = new SqliteArtifacts(db, join(state, "files"));
+  try {
+    db.exec("CREATE TABLE knowledge_example(id TEXT PRIMARY KEY)");
+    files.stage(artifact({ owner: source }));
+    await files.publish(id, chunks(bytes));
+    const ownerOf = (ref: StoredArtifact["owner"]) => ref.id === source.id || db.query("SELECT 1 FROM knowledge_example WHERE id=?").get(ref.id) ? actor : undefined;
+    expect(() => files.transferToKnowledge(id, source, target, ownerOf)).toThrow("FORBIDDEN");
+    const insertTarget = () => db.query("INSERT INTO knowledge_example VALUES(?)").run(target.id);
+    expect(() => db.transaction(() => {
+      insertTarget();
+      files.transferToKnowledge(id, source, target, ownerOf);
+      throw new Error("Synthetic failure");
+    })()).toThrow("Synthetic failure");
+    expect(files.list(source)).toHaveLength(1);
+    db.transaction(() => {
+      insertTarget();
+      expect(() => files.transferToKnowledge(id, source, target, ref => ref.module === "hub" ? actor : { ...actor, id: "act_00000000000000000000000002" })).toThrow("FORBIDDEN");
+      files.transferToKnowledge(id, source, target, ownerOf);
+    })();
+    expect(files.list(source)).toHaveLength(0);
+    expect(files.list(target)).toHaveLength(1);
+    expect(files.transferToKnowledge(id, source, target, ownerOf).owner).toEqual(target);
+
+    const second = "art_00000000000000000000000002";
+    files.stage(artifact({ owner: source, id: second, key: `${second}.bin` }));
+    await files.publish(second, chunks(bytes));
+    const snapshot = await backupBusiness(state, backup);
+    expect(snapshot.files).toHaveLength(2);
+    await restoreBusiness(backup, restored);
+    const copy = new Database(join(restored, "hub.sqlite"));
+    try {
+      const restoredFiles = new SqliteArtifacts(copy, join(restored, "files"));
+      expect(restoredFiles.get(id).owner).toEqual(target);
+      expect(restoredFiles.get(second).owner).toEqual(source);
+      expect(await readFile(await restoredFiles.path(id))).toEqual(bytes);
+    } finally { copy.close(); }
+  } finally { db.close(); }
+}));

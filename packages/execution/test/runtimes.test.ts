@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { RuntimeInfo } from "@lumio/schema";
+import { RuntimeRegistered } from "@lumio/schema";
 import { ExecutionRuntimes, type RuntimeRecord, type RuntimeRegistryStore } from "../src/runtimes.ts";
 
 class MemoryRegistry implements RuntimeRegistryStore {
@@ -17,7 +17,7 @@ const now = new Date("2026-10-31T00:00:00Z");
 
 test("Execution owns runtime names, capability replacement and online facts through a pure store without Work, Knowledge or network", () => {
   const store = new MemoryRegistry(), runtimes = new ExecutionRuntimes(store);
-  expect(RuntimeInfo.parse(runtimes.register(first, registration, now))).toMatchObject({ actor: first, online: true });
+  expect(RuntimeRegistered.parse(runtimes.register(first, registration, now))).toMatchObject({ actor: first, online: true });
   runtimes.register(second, { ...registration, name: "lab" }, now);
   expect(runtimes.list(now).map((value) => value.registration.name)).toEqual(["lab", "server"]);
   expect(runtimes.list(new Date(now.getTime() + 180_000)).every((value) => value.online)).toBe(true);

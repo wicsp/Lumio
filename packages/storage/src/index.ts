@@ -8,9 +8,8 @@ export * from "./logs.ts";
 export * from "./artifacts.ts";
 export * from "./backup.ts";
 export * from "./lease.ts";
-export * from "./migration.ts";
 export * from "./runtimes.ts";
-export { migrateTaskModel, workSystemActor } from "./task-model.ts";
+export { workSystemActor } from "./work-system-actor.ts";
 
 export * from "./ai.ts";
 export * from "./speech.ts";

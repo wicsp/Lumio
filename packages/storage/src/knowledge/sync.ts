@@ -5,7 +5,7 @@ import { CoreError } from "@lumio/foundation";
 import { fillMetadata, type FillContext } from "@lumio/knowledge";
 import { newId } from "@lumio/foundation";
 import { parseFrontmatter } from "@lumio/knowledge";
-import { scanVault, vaultFileAt, type VaultFile } from "./vault.ts";
+import { isUnsupportedWorkNote, scanVault, vaultFileAt, type VaultFile } from "./vault.ts";
 import { writeFileAtomic } from "./write.ts";
 
 export interface SyncOptions {
@@ -38,6 +38,7 @@ async function complete(file: VaultFile, options: SyncOptions): Promise<SyncFile
   try {
     const source = await readFile(file.path);
     const parsed = parseFrontmatter(source);
+    if (isUnsupportedWorkNote(parsed.data.type)) return { ...result, skipped: true };
     const info = await stat(file.path);
     const { patch, issues } = fillMetadata({ type: file.type, frontmatter: parsed.data,
       fileName: basename(file.path, ".md"), birthtime: info.birthtime, mtime: info.mtime }, { ...(options.context ?? context()), text: options.text });

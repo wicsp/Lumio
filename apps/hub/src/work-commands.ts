@@ -1,6 +1,6 @@
 import { executionTargets } from "./targets.ts";
 import { text as msg } from "./messages.ts";
-import { WorkCommandRequest, WorkCommandResult, WorkCommandProposal, DispatchTargetSource, parseAssignee } from "@lumio/schema";
+import { WorkCommandRequest, WorkCommandResult, WorkCommandProposal, DispatchTargetSource } from "@lumio/schema";
 import { WorkService } from "@lumio/work";
 import { authorize } from "./authorize.ts";
 import { HubError } from "./errors.ts";
@@ -43,8 +43,8 @@ export class WorkCommands {
   }
   private matchesTarget(runtime: string, engine: string, targets: string[]): boolean {
     return targets.some(target => {
-      const parsed = parseAssignee(target);
-      return parsed !== "human" && runtime === (parsed.device ?? this.localRuntime) && engine === parsed.agent;
+      const [agent, device] = target.split("@");
+      return runtime === (device ?? this.localRuntime) && engine === agent;
     });
   }
   offlineTargets(operation: WorkCommandRequest["operation"], result?: WorkCommandResult): string[] {

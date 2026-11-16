@@ -14,9 +14,7 @@ export function workingBranches(turn: Turn): PlanBranch[] {
 }
 
 export function completedStages(run: PlanRun): Set<string> {
-  if (run.done) return new Set(run.done);
-  const index = run.plan.stages.findIndex(stage => stage.id === run.stage);
-  return new Set(run.plan.stages.slice(0, index < 0 ? run.plan.stages.length : index).map(stage => stage.id));
+  return new Set(run.done);
 }
 
 export function readyStages(plan: HandoffPlan, done: ReadonlySet<string>, active: readonly PlanBranch[] = []) {

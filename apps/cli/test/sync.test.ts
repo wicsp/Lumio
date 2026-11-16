@@ -115,7 +115,7 @@ test("LUMIO_VAULT is used, explicit --vault wins, missing vault explains setup",
   expect(await snapshot()).toEqual(before);
 });
 
-test("clean vault exits zero, nested notes are completed, all five entity directories are handled", async () => {
+test("clean vault exits zero, nested notes are completed, known entity directories are handled", async () => {
   await rm(join(vault, "library/papers/Foo.md"));
   await rm(join(vault, "research/ideas/坏文件.md"));
   await mkdir(join(vault, "research/ideas/sub"));
@@ -128,10 +128,10 @@ test("clean vault exits zero, nested notes are completed, all five entity direct
   }
   const result = await run(["sync", "--vault", vault]);
   expect(result.code).toBe(0);
-  expect(result.stdout).toContain("完成：扫描 7 个，补全 6 个，问题 0 个，跳过 0 个");
+  expect(result.stdout).toContain("完成：扫描 5 个，补全 4 个，问题 0 个，跳过 0 个");
   expect(result.stdout).toContain("research/ideas/sub/nested.md");
   const before = await snapshot();
-  expect((await run(["sync", "--vault", vault])).stdout).toBe("完成：扫描 7 个，补全 0 个，问题 0 个，跳过 0 个\n");
+  expect((await run(["sync", "--vault", vault])).stdout).toBe("完成：扫描 5 个，补全 0 个，问题 0 个，跳过 0 个\n");
   expect(await snapshot()).toEqual(before);
 });
 

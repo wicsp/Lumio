@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { dueFires, idTime, nextFire, parseCron, routineJobId, validTimeZone } from "../src/index.ts";
+import { dueFires, nextFire, parseCron, routineJobId, validTimeZone } from "../src/index.ts";
+import { idTime } from "@lumio/foundation";
 
 const at = (iso: string) => new Date(iso);
 const next = (expr: string, tz: string, after: string) => nextFire(parseCron(expr), tz, at(after))?.toISOString();

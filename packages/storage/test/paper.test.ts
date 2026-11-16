@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Paper } from "@lumio/schema";
 import response from "../../../fixtures/papers/crossref-lightgcn.json";
-import { generateCitekey, createPaper, fillMetadata, parseCrossrefMetadata, parseFrontmatter, renderPaper, type FillContext } from "../src/index.ts";
+import { generateCitekey, fillMetadata, parseCrossrefMetadata, parseFrontmatter, renderPaper, type FillContext } from "@lumio/knowledge";
+import { createPaper } from "../src/index.ts";
 
 const metadata = parseCrossrefMetadata(response);
 const citekey = generateCitekey(metadata, "LightGCN");

@@ -3,7 +3,7 @@ import { WorkCommandRequest, WorkCommandResult, WorkTask } from "@lumio/schema";
 import { DraftStore, type DraftStorage } from "../src/client/draft-store.ts";
 import { WorkSave } from "../src/client/work-save.ts";
 const at = "2026-11-06T00:00:00Z";
-const initial = () => WorkTask.parse({ schema_version: 3, type: "task", id: "task_00000000000000000000000001", title: "Synthetic", description: "Before", revision: 1, outcome: "open", turn: {holder:"human",reason:"todo",since:at},created:at,updated:at,tags:[],dependencies:[],references:[] });
+const initial = () => WorkTask.parse({ schema_version: 3, type: "task", created_by: "act_00000000000000000000000001", updated_by: "act_00000000000000000000000001", id: "task_00000000000000000000000001", title: "Synthetic", description: "Before", revision: 1, outcome: "open", turn: {holder:"human",reason:"todo",since:at},created:at,updated:at,tags:[],dependencies:[],references:[] });
 function applied(base: WorkTask, input: WorkCommandRequest) {
   const request = WorkCommandRequest.parse(input);
   if (request.operation.op !== "work.task.update") throw new Error("wrong operation");

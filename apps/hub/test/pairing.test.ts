@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ApiError, Job, ClientInvite, ClientJoin, HubSigningKey, RuntimeInvite, RuntimeJoin, RuntimeInfo, RuntimeRegistration } from "@lumio/schema";
+import { ApiError, Job, ClientInvite, ClientJoin, HubSigningKey, RuntimeInvite, RuntimeJoin, RuntimeRegistered, RuntimeRegistration } from "@lumio/schema";
 import { authorize, PAIRING_OPERATIONS } from "../src/authorize.ts";
 import { readConfig } from "../src/config.ts";
 import { startHub } from "../src/server.ts";
@@ -85,7 +85,7 @@ test("join is atomic and single-use, revokes every old runtime token, client tok
   const joined = RuntimeJoin.parse(await responses.find((r) => r.status === 200)!.json());
   expect(hub.store.authenticate(`Bearer ${runtime}`)).toBeNull(); expect(hub.store.authenticate(`Bearer ${secondOld}`)).toBeNull();
   const registration = RuntimeRegistration.parse({ protocol_version: 2, name: "server", engines: [], tags: [], max_concurrent: 1 });
-  const info = RuntimeInfo.parse(await (await request("/v1/runtime/register", joined.token, registration)).json()); expect(info.actor).toBe(joined.actor);
+  const info = RuntimeRegistered.parse(await (await request("/v1/runtime/register", joined.token, registration)).json()); expect(info.actor).toBe(joined.actor);
   const client = ClientJoin.parse(await (await request("/v1/client/join", undefined, { code: c.code })).json());
   expect(hub.store.authenticate(`Bearer ${client.token}`)!.actor.id).toBe(hub.store.authenticate(`Bearer ${human}`)!.actor.id);
   expect((await request("/v1/runtime-invites", human, { name: "owner" })).status).toBe(409);

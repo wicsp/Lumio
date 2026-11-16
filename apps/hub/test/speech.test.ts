@@ -311,7 +311,7 @@ test("vocabulary is scoped, merges live Work titles, syncs at weight four and re
   const f = await fixture();
   try {
     const project = WorkProject.parse({
-      schema_version: 2, type: "project", id: "prj_00000000000000000000000001", title: "Lumio",
+      schema_version: 2, type: "project", created_by: "act_00000000000000000000000001", updated_by: "act_00000000000000000000000001", id: "prj_00000000000000000000000001", title: "Lumio",
       description: "synthetic private description", status: "active", revision: 1,
       created: new Date().toISOString(), updated: new Date().toISOString(), tags: [],
     });

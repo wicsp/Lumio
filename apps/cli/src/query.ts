@@ -1,9 +1,7 @@
 import { text as msg } from "./messages.ts";
-import { readFile } from "node:fs/promises";
-import { vaultFileAt, buildBib, checkLinks, collectCitations, exportBib, noteLinks, searchNotes, showNote, type SearchOptions } from "@lumio/storage";
-import { parseFrontmatter } from "@lumio/knowledge";
+import { buildBib, checkLinks, collectCitations, exportBib, noteLinks, searchNotes, showNote, type SearchOptions } from "@lumio/storage";
 import { createClient } from "@lumio/api-client";
-import { NOTE_TYPES, parseAssignee, type NoteRef } from "@lumio/schema";
+import { NOTE_TYPES, type NoteRef } from "@lumio/schema";
 import { KnowledgeService } from "@lumio/knowledge";
 import { FileKnowledgeRepository } from "@lumio/storage";
 
@@ -42,27 +40,11 @@ export async function runQuery(root: string | undefined, command: QueryCommand, 
   };
   if (command.command === "check") {
     const result = await (remote ? remote.check(options) : local!.check(options));
-    // 沿用警告通道，JSON 与 Hub 的 CheckResult 契约保持原样。
-    const list = (limit?: number) => remote ? remote.search("", { includePrivate: options.includePrivate, limit }) : local!.search("", { ...options, limit });
-    let notes = await list();
-    if (notes.hits.length < notes.total) notes = await list(notes.total);
-    for (const { note } of notes.hits) {
-      const reference = note.id ?? note.citekey ?? note.path.replace(/^.*\//, "").replace(/\.md$/, "");
-      const file = remote ? undefined : await vaultFileAt(root!, note.path);
-      const fm = remote ? (await remote.show(reference, options)).frontmatter : file ? parseFrontmatter(await readFile(file.path)).data : {};
-      if (fm.assignee !== null && typeof fm.assignee === "object") {
-        try {
-          const assignee = parseAssignee(fm.assignee);
-          if (assignee !== "human") warn(msg("query.hint_replace_the_legacy_assignee_object_with_assignee_e_g_pi_server", note.path, assignee.agent, assignee.device ? `@${assignee.device}` : ""));
-        } catch { /* 格式错误由元数据校验报告，不把兼容性提示变成错误。 */ }
-      }
-      if (Object.hasOwn(fm, "turn")) warn(msg("query.hint_turn_is_no_longer_used_and_can_be_removed_dispatch_by_changing", note.path));
-    }
     if (command.json) log(JSON.stringify(result));
-    else if (!result.total) log(msg("query.no_dangling_links"));
     else {
+      for (const path of result.unsupported_work_notes) log(msg("query.unsupported_work_note", path));
       for (const link of result.dangling) log(`${link.from.path}  →  [[${link.target}]]`);
-      log(msg("query.dangling_links", result.total));
+      log(result.total ? msg("query.dangling_links", result.total) : msg("query.no_dangling_links"));
     }
   } else if (command.command === "search") {
     const result = await (remote ? remote.search(command.argument, options) : local!.search(command.argument, options));

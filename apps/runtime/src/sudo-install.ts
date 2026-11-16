@@ -4,7 +4,7 @@ import { chmod, chown, copyFile, lstat, mkdir, mkdtemp, readFile, rename, rm, wr
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, parse } from "node:path";
 import { askTerminal, openTerminal } from "@lumio/platform";
-import { HubSigningKey, RuntimeInfo, signingKeyFingerprint } from "@lumio/schema";
+import { HubSigningKey, RuntimeRegistered, signingKeyFingerprint } from "@lumio/schema";
 import { readConfig, RuntimeError } from "./config.ts";
 import { environmentText, optionalFile } from "./pairing.ts";
 import { parseEnvironment, privateFile, runCommand, type RunCommand } from "./service.ts";
@@ -110,9 +110,9 @@ export async function installSudoHelper(args: string[], options: {
   log(msg("sudo-install.hub_public_key_fingerprint", fingerprint));
   if (!await (options.confirm ?? confirmFingerprint)()) throw new RuntimeError(msg("sudo-install.fingerprint_not_confirmed_helper_was_not_installed"));
   const receipt = await optionalFile(join(config.stateDir, "registered.json"));
-  const registration = receipt ? RuntimeInfo.parse(JSON.parse(receipt)).registration : config.registration;
+  const registration = receipt ? RuntimeRegistered.parse(JSON.parse(receipt)).registration : config.registration;
   if (registration.name !== config.registration.name) throw new RuntimeError(msg("sudo-install.runtime_registration_name_does_not_match"));
-  const info = await request("/v1/runtime/register", RuntimeInfo, registration);
+  const info = await request("/v1/runtime/register", RuntimeRegistered, registration);
   if (info.registration.name !== config.registration.name) throw new RuntimeError(msg("sudo-install.runtime_registration_name_does_not_match"));
   // Validate sudoers before installing any files. All paths are fixed in production.
   const stage = await mkdtemp(join(tmpdir(), "lumio-sudo-install-"));

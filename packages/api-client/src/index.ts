@@ -11,7 +11,7 @@ import { PushSubscriptionInput, PushDevice, PushDeviceUpdate, PushPublicKey, Pus
 import { AgentInfo, AgentTokenIssued, AgentTokenRequest, AgentRevokeRequest, ClientInvite, ClientInviteRequest, ClientJoin, ClientJoinRequest, RuntimeInvite, RuntimeInviteRequest } from "@lumio/schema";
 import { AssistantConfigView, AssistantConfigUpdate, AssistantToolCall, ExecutionJobListArgs, RequestId, WorkTaskListArgs, WorkAttention, WorkCommandRequest, WorkCommandResult, PlanTemplate, type WorkCommand, WorkTask, WorkTaskDetail, WorkProject, ExecutionRoutine, ExecutionRoutineCommandRequest, ExecutionRoutineInfo,
   ProjectStatus, AssistantMemory, AssistantMemoryCommandRequest, AssistantMemoryCommandResult, AssistantChatRequest, AssistantChatResult, AssistantConversation, AssistantConversationDetail, AssistantEvent, StoredArtifact, idOf } from "@lumio/schema";
-import { JobRun, Job, JobSpec, JobStatus, RoutineInfo, RuntimeName, RuntimeInfo, Actor, OperationRequest, OperationResult, Proposal, ProposalStatus, ApiError, CheckResult, LinksResult, NoteDetail, SearchResult, type ApiErrorCode, type NoteRef } from "@lumio/schema";
+import { JobRun, Job, JobSpec, JobStatus, RuntimeName, RuntimeInfo, Actor, OperationRequest, OperationResult, Proposal, ProposalStatus, ApiError, CheckResult, LinksResult, NoteDetail, SearchResult, type ApiErrorCode, type NoteRef } from "@lumio/schema";
 
 export class ApiClientError extends Error {
   hubUrl?: string;
@@ -276,7 +276,6 @@ export function createClient(options: { url: string; token?: string; language?: 
       return request("/v1/jobs", { ...(status === undefined ? {} : { status: validate(JobStatus, status) }), ...(task === undefined ? {} : { task }),
         ...(routine === undefined ? {} : { routine }) }, Job.array());
     },
-    routines() { return request("/v1/routines", {}, RoutineInfo.array()); },
     job(id: string) { return request(`/v1/jobs/${encodeURIComponent(validate(JobSpec.shape.id, id))}`, {}, Job); },
     cancelJob(id: string) { return request(`/v1/jobs/${encodeURIComponent(validate(JobSpec.shape.id, id))}/cancel`, {}, Job, {}); },
     runtimes() { return request("/v1/runtimes", {}, RuntimeInfo.array()); },

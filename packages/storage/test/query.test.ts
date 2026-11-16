@@ -5,8 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { LinksResult, NoteDetail, SearchResult } from "@lumio/schema";
-import { CoreError, exportBib, noteLinks, parseFrontmatter, searchNotes, showNote } from "../src/index.ts";
-import { extractLinks } from "../src/index/links.ts";
+import { CoreError } from "@lumio/foundation";
+import { exportBib, noteLinks, searchNotes, showNote } from "../src/index.ts";
+import { parseFrontmatter } from "@lumio/knowledge";
+import { extractLinks } from "@lumio/knowledge";
 
 const fixture = fileURLToPath(new URL("../../../fixtures/query-vault", import.meta.url));
 let temp: string, vault: string, stateDir: string;
@@ -122,17 +124,17 @@ test("incremental queries parse only changed files, remove deleted notes and ref
   let parsed = 0;
   const options = { stateDir, parse: ((source) => { parsed++; return parseFrontmatter(source); }) as typeof parseFrontmatter };
   await searchNotes(vault, "index", options);
-  expect(parsed).toBe(15);
+  expect(parsed).toBe(13);
   await noteLinks(vault, "Main", options);
-  expect(parsed).toBe(15);
+  expect(parsed).toBe(13);
   const sourcePath = join(vault, "library/sources/来源笔记.md");
   await writeFile(sourcePath, (await readFile(sourcePath, "utf8")) + "\nnewincrementalmarker\n");
   expect((await searchNotes(vault, "newincrementalmarker", options)).total).toBe(1);
-  expect(parsed).toBe(16);
+  expect(parsed).toBe(14);
   await unlink(sourcePath);
   expect((await searchNotes(vault, "newincrementalmarker", options)).total).toBe(0);
   expect((await noteLinks(vault, "Main", options)).outgoing.find((l) => l.target === "来源笔记")?.dangling).toBe(true);
-  expect(parsed).toBe(16);
+  expect(parsed).toBe(14);
   const incoming = (await noteLinks(vault, alpha, options)).incoming;
   expect(incoming.length).toBeGreaterThan(0);
   const mainPath = join(vault, "research/ideas/Main.md");
@@ -205,13 +207,4 @@ test("BibTeX extraction respects section boundaries and ignores headings inside 
   await writeFile(path, original + "\n## BibTeX\n```bibtex\n@article{NoBib_2026_Paper,\n title={This contains a heading}\n% unchanged comment\n}\n```\n");
   expect((await exportBib(vault)).count).toBe(3);
   expect(await readFile(join(vault, "library/refs.bib"), "utf8")).toContain("% unchanged comment");
-});
-
-
-test("empty search lists visible notes and can filter tasks without changing SearchResult", async () => {
-  const result = SearchResult.parse(await searchNotes(vault, "", { stateDir, type: "task" }));
-  expect(result.total).toBe(1); expect(result.hits[0]!.note.type).toBe("task");
-  const all = await searchNotes(vault, "", { stateDir, limit: 1 });
-  expect(all.total).toBeGreaterThan(1); expect(all.hits).toHaveLength(1);
-  expect((await searchNotes(vault, "", { stateDir, limit: all.total })).hits.some((h) => h.note.type === "asset")).toBe(false);
 });

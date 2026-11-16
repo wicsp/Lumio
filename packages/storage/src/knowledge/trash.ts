@@ -30,7 +30,7 @@ export class KnowledgeTrashFiles {
     const { note } = await showNote(this.root, id, { ...this.options, includePrivate: true });
     if (note.id !== id) throw missing();
     const file = await vaultFileAt(this.root, note.path);
-    if (!file || file.private || ["task", "project", "routine"].includes(file.type)) {
+    if (!file || file.private) {
       throw new CoreError("NOTE_NOT_EDITABLE", { key: "query.note_not_found_candidates_none", args: [] });
     }
     const to = await this.available(`.trash/${note.path}`);

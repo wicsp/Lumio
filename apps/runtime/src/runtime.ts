@@ -5,7 +5,7 @@ import { SudoGate } from "./sudo.ts";
 import { privateFile } from "./service.ts";
 import { join } from "node:path";
 import { mkdir } from "node:fs/promises";
-import { RuntimeAck, RuntimeInfo, RuntimeRegistration, RuntimeSync } from "@lumio/schema";
+import { RuntimeAck, RuntimeRegistered, RuntimeRegistration, RuntimeSync } from "@lumio/schema";
 import type { RuntimeConfig } from "./config.ts";
 import { detectEngines } from "./engines.ts";
 import { Queue } from "./queue.ts";
@@ -135,15 +135,9 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
       try {
         if (!registered) {
           updater?.resetNegotiation();
-          let response = await send("/v1/runtime/register", registration);
-          if (response.status === 400) {
-            await response.body?.cancel();
-            await updater?.reconcile(undefined, () => true);
-            const { version: _version, platform: _platform, install: _install, features: _features, ...legacy } = registration;
-            response = await send("/v1/runtime/register", legacy);
-          }
+          const response = await send("/v1/runtime/register", registration);
           if (!response.ok) throw new Error(msg("selftest.hub_request_failed"));
-          const info = RuntimeInfo.parse(await response.json());
+          const info = RuntimeRegistered.parse(await response.json());
           actor = info.actor;
           await privateFile(join(config.stateDir, "registered.json"), JSON.stringify(info));
           registered = true;

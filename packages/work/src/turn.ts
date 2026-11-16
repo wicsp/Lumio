@@ -11,7 +11,7 @@ export type TurnAction =
 /** Work supplies the planned-delivery transition, including an optional new round. */
 export type PlannedDelivery = (task: WorkTask, action: Extract<TurnAction, { kind: "result" }>, at: string) => Turn;
 
-/** The single transition table for commands, round results and migration. */
+/** The single transition table for commands and round results. */
 export function nextTurn(action: TurnAction, at: string, task?: WorkTask, plannedDelivery?: PlannedDelivery): { turn: Turn; outcome?: TaskOutcome } {
   switch (action.kind) {
     case "create": case "reopen": return { turn: Turn.parse({ holder: "human", reason: "todo", since: at }), outcome: "open" };
@@ -25,22 +25,4 @@ export function nextTurn(action: TurnAction, at: string, task?: WorkTask, planne
       return { turn: Turn.parse({ holder: "human", reason, since: at, round: action.round, job: action.job, stage: task?.plan?.stage }) };
     }
   }
-}
-
-export interface LegacyTurnFacts {
-  status: string;
-  latest?: { job: string; round: number; status: Job["status"]; agent?: string; acknowledged?: boolean; pending: boolean };
-}
-/** ADR 0032 §8: assignee is deliberately absent from the migration decision. */
-export function migrateTurn(facts: LegacyTurnFacts, at: string): { outcome: TaskOutcome; turn: Turn } {
-  const { status, latest } = facts;
-  if (status === "done" || status === "cancelled") return nextTurn({ kind: "finish", outcome: status }, at) as { outcome: TaskOutcome; turn: Turn };
-  let action: TurnAction = { kind: "create" };
-  if (status === "waiting") action = { kind: "hand", to: "external" };
-  else if (status === "paused") action = { kind: "hand", to: "nobody" };
-  else if (status === "active" && latest) {
-    if (latest.pending && latest.agent) action = { kind: "dispatch", to: latest.agent, round: latest.round, job: latest.job };
-    else if (!latest.acknowledged) action = { kind: "result", status: latest.status, round: latest.round, job: latest.job };
-  }
-  return { outcome: "open", ...nextTurn(action, at) };
 }

@@ -68,7 +68,7 @@ function render(note: Partial<NoteDetail["note"]> = {}): ElementStub | undefined
 }
 
 test("each note type offers an accessible button that copies only its stable ID", async () => {
-  for (const [type, prefix] of [["paper", "pap"], ["source", "src"], ["idea", "idea"], ["experiment", "exp"], ["post", "post"], ["asset", "ast"], ["ai-note", "ain"], ["task", "task"], ["project", "prj"], ["routine", "rtn"]] as const) {
+  for (const [type, prefix] of [["paper", "pap"], ["source", "src"], ["idea", "idea"], ["experiment", "exp"], ["post", "post"], ["asset", "ast"], ["ai-note", "ain"]] as const) {
     const noteId = `${prefix}_01JA0000000000000000000000`;
     const button = render({ type, id: noteId })!;
     expect(button.tag).toBe("button");

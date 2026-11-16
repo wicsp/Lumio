@@ -3,35 +3,12 @@ import type { WorkCommands } from "./work-commands.ts";
 import { text as msg } from "./messages.ts";
 import type { Privileged } from "./privileged.ts";
 import { CoreError } from "@lumio/foundation";
-import { Actor, OperationRequest, OperationResult, Proposal, type ProposalOperation, ProposalStatus, type NoteRef, type Operation } from "@lumio/schema";
+import { Actor, OperationRequest, OperationResult, Proposal, type ProposalOperation, ProposalStatus } from "@lumio/schema";
 import { authorize } from "./authorize.ts";
 import type { HubConfig } from "./config.ts";
 import { HubError } from "./errors.ts";
 import type { HubStore, Identity } from "./store.ts";
-import type { TaskRounds } from "./tasks.ts";
-import type { Routines } from "./routines.ts";
-
-/**
- * 统一的操作入口（ADR 0016）：先授权（允许 / 拒绝 / 需要批准），再执行；需要批准的原样存成提议，人接受后执行同一个操作。
- * 现在的操作：task.dispatch（P2-4）、routine.followup（P2-5）。exec.privileged 由 P2-6 加入。link.add 已删除（ADR 0018）。
- */
-export interface OperationOptions { workCommands?: WorkCommands; tasks?: TaskRounds; routines?: Routines; privileged?: Privileged; isManagedTask?: (id: string) => boolean; isManagedRoutine?: (id: string) => boolean }
-
-/** 执行一个已经获准的操作。直接执行与接受提议共用这一个函数。 */
-async function execute(operation: Operation, identity: Identity, options: OperationOptions): Promise<NoteRef | undefined> {
-  if (operation.op === "task.dispatch") {
-    if (options.isManagedTask?.(operation.args.task)) throw new HubError("CONFLICT", { key: "operations.this_task_is_managed_by_the_database_use_work_task_dispatch", args: [] });
-    if (!options.tasks) throw new HubError("INTERNAL", { key: "operations.task_dispatch_is_not_enabled_on_hub", args: [] });
-    await options.tasks.dispatch(operation.args.task, operation.args.trigger, identity, undefined, operation.args.to);
-    return;
-  }
-  if (operation.op === "routine.followup") {
-    if (options.isManagedRoutine?.(operation.args.routine)) throw new HubError("CONFLICT", { key: "operations.this_routine_is_managed_by_the_database_use_the_new_routine_followup", args: [] });
-    if (!options.routines) throw new HubError("INTERNAL", { key: "operations.routines_are_not_enabled_on_hub", args: [] });
-    return options.routines.followup(operation.args.routine, operation.args.job, identity);
-  }
-  throw new HubError("INVALID", { key: "operations.unsupported_operation", args: [] }, { operation });
-}
+export interface OperationOptions { workCommands?: WorkCommands; privileged?: Privileged }
 
 export async function handleOperation(request: Request, kind: "operations" | "actors" | "proposals" | "proposal.accept" | "proposal.reject", proposalId: string | undefined,
   identity: Identity, store: HubStore, _config: HubConfig, decide: typeof authorize, options: OperationOptions = {}): Promise<Response> {
@@ -67,19 +44,13 @@ export async function handleOperation(request: Request, kind: "operations" | "ac
       if (!parsed.success) throw new HubError("INVALID", { key: "operations.invalid_operation_request", args: [] });
       operation = parsed.data.operation;
       const decision = check(operation.op);
-      if (decision.result === "needs_approval") {
-        if (!parsed.data.reason) throw new HubError("INVALID", { key: "operations.a_proposal_reason_is_required", args: [] }, { operation });
-        if (operation.op === "exec.privileged") {
-          if (!options.privileged) throw new HubError("INTERNAL", { key: "operations.privileged_approval_is_not_enabled", args: [] });
-          options.privileged.validate(operation, identity.actor.id);
-        }
-        proposal = store.createProposal(operation, parsed.data.reason, identity.actor.id);
-        audit("pending_approval");
-        return Response.json(OperationResult.parse({ status: "pending_approval", proposal }), { status: 202 });
-      }
-      const note = await execute(parsed.data.operation, identity, options);
-      audit("applied");
-      return Response.json(OperationResult.parse({ status: "applied", operation, ...(note ? { note } : {}) }));
+      if (decision.result !== "needs_approval") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { operation });
+      if (!parsed.data.reason) throw new HubError("INVALID", { key: "operations.a_proposal_reason_is_required", args: [] }, { operation });
+      if (!options.privileged) throw new HubError("INTERNAL", { key: "operations.privileged_approval_is_not_enabled", args: [] });
+      options.privileged.validate(operation, identity.actor.id);
+      proposal = store.createProposal(operation, parsed.data.reason, identity.actor.id);
+      audit("pending_approval");
+      return Response.json(OperationResult.parse({ status: "pending_approval", proposal }), { status: 202 });
     }
     proposal = store.proposal(proposalId!);
     operation = proposal?.operation;
@@ -104,10 +75,8 @@ export async function handleOperation(request: Request, kind: "operations" | "ac
       // 以提议作者的身份执行：批准者只是放行（审计里同时记录批准者）。
       const author = store.actors().find((a) => a.id === proposal!.author);
       if (!author) throw new HubError("CONFLICT", { key: "operations.the_proposal_s_author_no_longer_exists", args: [] }, { operation, proposal: proposal.id });
-      if (operation!.op === "exec.privileged") {
-        if (!options.privileged) throw new HubError("INTERNAL", { key: "operations.privileged_approval_is_not_enabled", args: [] });
-        options.privileged.approve(proposal, identity);
-      } else await execute(operation!, { actor: author, label: identity.label }, options);
+      if (!options.privileged) throw new HubError("INTERNAL", { key: "operations.privileged_approval_is_not_enabled", args: [] });
+      options.privileged.approve(proposal, identity);
     }
     proposal = store.decideProposal(proposal.id, kind === "proposal.accept" ? "accepted" : "rejected", identity.actor.id);
     audit(proposal.status);

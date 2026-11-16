@@ -1,7 +1,7 @@
-import { RuntimeInfo, RuntimeRegistration, idOf } from "@lumio/schema";
+import { RuntimeInfo, RuntimeRegistered, RuntimeRegistration, idOf } from "@lumio/schema";
 import { ExecutionError } from "./jobs.ts";
 
-export type RuntimeRecord = Pick<RuntimeInfo, "actor" | "registration" | "last_seen">;
+export type RuntimeRecord = Pick<RuntimeRegistered, "actor" | "registration" | "last_seen">;
 export interface RuntimeRegistryStore {
   byActor(actor: string): RuntimeRecord | undefined;
   byName(name: string): RuntimeRecord | undefined;
@@ -13,7 +13,7 @@ export interface RuntimeRegistryStore {
 /** Execution owns device names, capabilities and online status; authentication remains with the host. */
 export class ExecutionRuntimes {
   constructor(private readonly store: RuntimeRegistryStore) {}
-  register(actor: string, input: unknown, now: Date): RuntimeInfo {
+  register(actor: string, input: unknown, now: Date): RuntimeRegistered {
     const parsed = RuntimeRegistration.safeParse(input);
     if (!parsed.success || !idOf("act").safeParse(actor).success) throw new ExecutionError("INVALID", { key: "runtime.invalid_runtime_registration", args: [] });
     const registration = parsed.data;
@@ -23,7 +23,7 @@ export class ExecutionRuntimes {
       const named = this.store.byName(registration.name);
       if (named && named.actor !== actor) throw new ExecutionError("CONFLICT", { key: "runtimes.runtime_name_is_used_by_another_actor", args: [] });
       const value = { actor, registration, last_seen: now.toISOString() }; this.store.save(value);
-      return RuntimeInfo.parse({ ...value, online: true });
+      return RuntimeRegistered.parse({ ...value, online: true });
     });
   }
   sync(actor: string, now: Date): void {
@@ -31,6 +31,14 @@ export class ExecutionRuntimes {
   }
   list(now: Date): RuntimeInfo[] {
     return this.store.list().sort((a, b) => a.registration.name < b.registration.name ? -1 : a.registration.name > b.registration.name ? 1 : 0)
-      .map((value) => RuntimeInfo.parse({ ...value, online: now.getTime() - Date.parse(value.last_seen) <= 180_000 }));
+      .map(value => {
+        const { registration } = value;
+        return RuntimeInfo.parse({
+          ...value,
+          registration: { ...registration, version: registration.version ?? null, platform: registration.platform ?? null, install: registration.install ?? null },
+          update: null,
+          online: now.getTime() - Date.parse(value.last_seen) <= 180_000,
+        });
+      });
   }
 }

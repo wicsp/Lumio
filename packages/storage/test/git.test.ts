@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openVaultGit } from "../src/git.ts";
+import { openVaultGit } from "../src/index.ts";
 
 let temp: string, vault: string;
 function git(...args: string[]) {

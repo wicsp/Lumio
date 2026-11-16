@@ -2,7 +2,7 @@ import { text as msg } from "./messages.ts";
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { RuntimeInfo } from "@lumio/schema";
+import { RuntimeRegistered } from "@lumio/schema";
 import { RuntimeError } from "./config.ts";
 
 export interface CommandResult { code: number; stdout: string; stderr: string }
@@ -107,7 +107,7 @@ export async function installService(options: ServiceOptions = {}): Promise<void
   const until = now() + 30_000;
   while (now() < until) {
     try {
-      const info = RuntimeInfo.parse(JSON.parse(await readFile(receipt, "utf8")));
+      const info = RuntimeRegistered.parse(JSON.parse(await readFile(receipt, "utf8")));
       if (info.registration.name === env.LUMIO_RUNTIME_NAME) {
         log(msg("service.connected_to_hub_detected", info.registration.engines.map((engine) => `${engine.name} ${engine.version}`).join(", ") || msg("service.no_agent_found_check_path")));
         return;

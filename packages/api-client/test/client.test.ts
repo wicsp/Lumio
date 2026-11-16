@@ -26,7 +26,7 @@ test("client encodes references/options and validates all success schemas", asyn
 });
 
 test("ApiError becomes a coded error preserving all decision information", async () => {
-  const error = ApiError.parse({ error: { code: "FORBIDDEN", message: "Denied", operation: { op: "task.dispatch", args: { task: "task_00000000000000000000000012", trigger: "cli" } }, reason: "agent-cannot-read-private", proposal: "prop_00000000000000000000000001" } });
+  const error = ApiError.parse({ error: { code: "FORBIDDEN", message: "Denied", operation: { op: "exec.privileged", args: { runtime: "act_00000000000000000000000001", job: "job_00000000000000000000000012", argv: ["/bin/true"] } }, reason: "agent-cannot-read-private", proposal: "prop_00000000000000000000000001" } });
   const client = createClient({ url: "http://localhost", token: "secret", fetch: mock(error, 403) });
   try { await client.show("Private"); throw new Error("Expected failure"); }
   catch (cause) {
@@ -47,11 +47,11 @@ test("malformed success/error/non-JSON/network responses never escape validation
   }
 });
 
-const operation = { op: "task.dispatch", args: { task: "task_00000000000000000000000012", trigger: "cli" } } as const;
+const operation = { op: "exec.privileged", args: { runtime: "act_00000000000000000000000001", job: "job_00000000000000000000000012", argv: ["/bin/true"] as string[] } } as const;
 const proposal = { id: "prop_00000000000000000000000001", operation, reason: "Dispatch please", author: "act_00000000000000000000000001", status: "pending", created: "2026-01-01T00:00:00Z" } as const;
 
 test("check encodes visibility, validates CheckResult and propagates authorization errors", async () => {
-  const body = CheckResult.parse({ dangling: [{ from: note, source: "wikilink", target: "Missing" }], total: 1 });
+  const body = CheckResult.parse({ unsupported_work_notes: [], dangling: [{ from: note, source: "wikilink", target: "Missing" }], total: 1 });
   const client = createClient({ url: "http://localhost/", token: "synthetic-token", fetch: mock(body, 200, (url, init) => {
     expect(url.pathname).toBe("/v1/check"); expect(url.searchParams.get("include_private")).toBe("true");
     expect(init?.method).toBe("GET"); expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer synthetic-token");
@@ -67,7 +67,7 @@ test("check encodes visibility, validates CheckResult and propagates authorizati
 
 test("operation/proposal/actors methods use their endpoints, methods, request bodies and success schemas", async () => {
   const cases = [
-    { path: "/v1/runtimes", body: [{ actor: proposal.author, registration: { protocol_version: 2, name: "server", engines: [], tags: [], max_concurrent: 1 }, last_seen: proposal.created, online: true }], call: (client: ReturnType<typeof createClient>) => client.runtimes() },
+    { path: "/v1/runtimes", body: [{ actor: proposal.author, update: null, registration: { version: null, platform: null, install: null, protocol_version: 2, name: "server", engines: [], tags: [], max_concurrent: 1 }, last_seen: proposal.created, online: true }], call: (client: ReturnType<typeof createClient>) => client.runtimes() },
     { path: "/v1/actors", body: [{ id: proposal.author, name: "codex", role: "agent", created: proposal.created }], call: (client: ReturnType<typeof createClient>) => client.actors() },
     { path: "/v1/proposals?status=pending", body: [proposal], call: (client: ReturnType<typeof createClient>) => client.proposals() },
     { path: "/v1/proposals?status=rejected", body: [{ ...proposal, status: "rejected" }], call: (client: ReturnType<typeof createClient>) => client.proposals("rejected") },

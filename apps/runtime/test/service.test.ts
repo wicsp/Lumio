@@ -6,7 +6,7 @@ import { afterEach, expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { RuntimeInfo } from "@lumio/schema";
+import { RuntimeRegistered } from "@lumio/schema";
 import { installService, parseEnvironment, runtimeEnvironment, runtimeUnit } from "../src/service.ts";
 const homes: string[] = [];
 afterEach(async () => { for (const home of homes.splice(0)) await rm(home, { recursive: true, force: true }); });
@@ -15,7 +15,7 @@ async function fixture() {
   const state = join(home, ".local/share/lumio-runtime");
   await mkdir(join(home, ".config/lumio-runtime"), { recursive: true });
   await writeFile(join(home, ".config/lumio-runtime/runtime.env"), `LUMIO_HUB_URL="http://127.0.0.1:7420"\nLUMIO_TOKEN="synthetic-token"\nLUMIO_RUNTIME_NAME="synthetic"\nLUMIO_RUNTIME_STATE_DIR="${state}"\nPATH="/synthetic/agents:/usr/bin:/bin"\n`, { mode: 0o600 });
-  const info = RuntimeInfo.parse({ actor: "act_00000000000000000000000001", registration: { protocol_version: 2, name: "synthetic", engines: [{ name: "codex", version: "0.163.0", sandbox: "os" }], tags: [], max_concurrent: 1 }, last_seen: new Date().toISOString(), online: true });
+  const info = RuntimeRegistered.parse({ actor: "act_00000000000000000000000001", registration: { protocol_version: 2, name: "synthetic", engines: [{ name: "codex", version: "0.163.0", sandbox: "os" }], tags: [], max_concurrent: 1 }, last_seen: new Date().toISOString(), online: true });
   return { home, state, info };
 }
 test("install-service writes launchd and systemd configurations, waits for registration and reports detected agents", async () => {

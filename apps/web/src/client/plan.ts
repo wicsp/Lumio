@@ -105,11 +105,9 @@ export function permissionSummary(stage: PlanStage): string {
 }
 export const hookText = (hook: PlanHook | undefined) => hook ? formatArgv(hook.argv) + (hook.timeout_minutes ? t(" (up to {0} min)", hook.timeout_minutes) : "") : "";
 
-/** 已交付的阶段：run.done，旧数据按 stage 之前的线性前缀推算（ADR 0049 修订记录）。 */
+/** 已交付的阶段。 */
 export function doneStages(run: PlanRun): Set<string> {
-  if (run.done) return new Set(run.done);
-  const index = run.stage === "end" ? run.plan.stages.length : run.plan.stages.findIndex(stage => stage.id === run.stage);
-  return new Set(run.plan.stages.slice(0, index < 0 ? 0 : index).map(stage => stage.id));
+  return new Set(run.done);
 }
 export type StageState = "done" | "current" | "next";
 export function stageStates(run: PlanRun): Map<string, StageState> {

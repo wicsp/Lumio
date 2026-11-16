@@ -4,7 +4,7 @@ import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { lstat, mkdir, open, link, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { RunLogEvent, StoredArtifact, SafeRelativePath, type ResourceRef } from "@lumio/schema";
+import { ArtifactOwner, HubRef, ResourceRef, RunLogEvent, StoredArtifact, SafeRelativePath, type Actor } from "@lumio/schema";
 import { StorageError } from "./errors.ts";
 import { validateArchivedRunLog } from "./logs.ts";
 
@@ -81,10 +81,32 @@ export class SqliteArtifacts {
     if (!row) throw new StorageError("NOT_FOUND", { key: "artifacts.managed_file_not_found", args: [] });
     return StoredArtifact.parse(JSON.parse(row.record));
   }
-  list(owner?: ResourceRef): StoredArtifact[] {
+  list(owner?: ArtifactOwner): StoredArtifact[] {
     const rows = owner ? this.db.query<{ record: string }, [string, string]>("SELECT record FROM storage_artifacts WHERE owner_module=? AND owner_id=? ORDER BY rowid").all(owner.module, owner.id)
       : this.db.query<{ record: string }, []>("SELECT record FROM storage_artifacts ORDER BY rowid").all();
     return rows.map((row) => StoredArtifact.parse(JSON.parse(row.record)));
+  }
+  /** The Hub resolves both owners in this transaction using its business repositories. */
+  transferToKnowledge(id: string, from: HubRef, to: ResourceRef, ownerOf: (ref: ArtifactOwner) => Actor | undefined): StoredArtifact {
+    const source = HubRef.parse(from);
+    const target = ResourceRef.parse(to);
+    if (target.module !== "knowledge") throw new StorageError("INVALID", { key: "artifacts.invalid_ownership_transfer", args: [] });
+    return this.db.transaction(() => {
+      const artifact = this.get(id);
+      const sourceOwner = ownerOf(source), targetOwner = ownerOf(target);
+      if (!sourceOwner || sourceOwner.role !== "human" || targetOwner?.role !== "human" || targetOwner.id !== sourceOwner.id) {
+        throw new StorageError("FORBIDDEN", { key: "artifacts.ownership_transfer_requires_the_same_human", args: [] });
+      }
+      if (artifact.status !== "ready") throw new StorageError("CONFLICT", { key: "artifacts.file_is_not_fully_archived", args: [] });
+      if (artifact.owner.module === target.module && artifact.owner.id === target.id) return artifact;
+      if (artifact.owner.module !== source.module || artifact.owner.id !== source.id) {
+        throw new StorageError("CONFLICT", { key: "artifacts.invalid_ownership_transfer", args: [] });
+      }
+      const updated = StoredArtifact.parse({ ...artifact, owner: target });
+      this.db.query("UPDATE storage_artifacts SET owner_module=?, owner_id=?, record=? WHERE id=?")
+        .run(target.module, target.id, JSON.stringify(updated), id);
+      return updated;
+    }).immediate();
   }
   stage(input: unknown): StoredArtifact {
     const parsed = StoredArtifact.safeParse(input);

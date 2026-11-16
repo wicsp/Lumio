@@ -6,7 +6,7 @@ import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { JobSpec, RuntimeInfo, RoutineSpec } from "@lumio/schema";
+import { JobSpec, RuntimeRegistered, RoutineSpec } from "@lumio/schema";
 import { prepareMigration } from "../src/prepare-migration.ts";
 import { Queue } from "../src/queue.ts";
 import { RoutinePlans } from "../src/routines.ts";
@@ -23,7 +23,7 @@ test("runtime lease excludes a second daemon and offline preparation; prepare re
   const root = await mkdtemp(join(tmpdir(), "lumio-prepare-runtime-")), controller = new AbortController();
   let ready!: () => void; const registered = new Promise<void>((resolve) => { ready = resolve; });
   const first = runRuntime(config(root), { signal: controller.signal, env: { LUMIO_LANG: "zh", HOME: root, PATH: root }, log() {}, fetch: fakeFetch(async () => {
-    ready(); return response(RuntimeInfo.parse({ actor, registration: config(root).registration, last_seen: "2026-10-31T00:00:00Z", online: true }));
+    ready(); return response(RuntimeRegistered.parse({ actor, registration: config(root).registration, last_seen: "2026-10-31T00:00:00Z", online: true }));
   }) });
   try {
     await registered;
@@ -55,7 +55,7 @@ test("an unexpected archive worker failure retries in the same runtime and never
   try {
     await runRuntime(config(root), { signal: controller.signal, env: { LUMIO_LANG: "zh", HOME: root, PATH: root }, log: (line) => logs.push(line),
       archive: { retryNow() {}, async flush() { if (++attempts === 1) throw new Error("synthetic-token-not-a-secret"); controller.abort(); return 1; } },
-      fetch: fakeFetch(async () => response(RuntimeInfo.parse({ actor, registration: config(root).registration, last_seen: "2026-10-31T00:00:00Z", online: true }))),
+      fetch: fakeFetch(async () => response(RuntimeRegistered.parse({ actor, registration: config(root).registration, last_seen: "2026-10-31T00:00:00Z", online: true }))),
     });
     expect(attempts).toBe(2); expect(logs.some((line) => line.includes("retrying later"))).toBe(true); expect(logs.join("\n")).not.toContain("synthetic-token-not-a-secret");
   } finally { controller.abort(); await rm(root, { recursive: true, force: true }); }

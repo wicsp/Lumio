@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Idea } from "@lumio/schema";
 import cases from "../../../fixtures/new-idea/cases.json";
-import { createIdea, fillMetadata, parseFrontmatter, renderIdea, type FillContext } from "../src/index.ts";
+import { createIdea } from "../src/index.ts";
+import { fillMetadata, parseFrontmatter, renderIdea, type FillContext } from "@lumio/knowledge";
 
 const ctx: FillContext = {
   now: new Date("2026-10-22T22:00:00+08:00"), tz: "Asia/Singapore",

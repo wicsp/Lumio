@@ -136,7 +136,7 @@ export async function handleV2(request: Request, server: Pick<Bun.Server<undefin
       const args = KnowledgeGraphArgs.safeParse(raw);
       if (!args.success) throw new HubError("INVALID", { key: "capability.invalid", args: [] });
       if (!modules.knowledge) throw new HubError("INVALID", { key: "server.no_knowledge_directory_configured_work_and_execution_are_available_i", args: [] });
-      return Response.json(KnowledgeGraph.parse(await modules.knowledge.graph({ includePrivate: args.data.include_private, includeLegacy: args.data.include_legacy, type: args.data.type })), { headers: { "Cache-Control": "no-store" } });
+      return Response.json(KnowledgeGraph.parse(await modules.knowledge.graph({ includePrivate: args.data.include_private, type: args.data.type })), { headers: { "Cache-Control": "no-store" } });
     }
     if (route.operation === "knowledge.delete" || route.operation === "assistant.delete" || route.operation.startsWith("trash.")) {
       if (identity.actor.role !== "human") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] });

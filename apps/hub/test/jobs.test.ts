@@ -7,7 +7,7 @@ import { Database } from "bun:sqlite";
 import { cp, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ApiError, Job, JobResult, RuntimeAck, RuntimeInfo, RuntimeSync, StoredArtifact, RunLogEvent, BackupManifest } from "@lumio/schema";
+import { ApiError, Job, JobResult, RuntimeAck, RuntimeInfo, RuntimeRegistered, RuntimeSync, StoredArtifact, RunLogEvent, BackupManifest } from "@lumio/schema";
 import { startHub } from "../src/server.ts";
 import { readConfig } from "../src/config.ts";
 import { HubStore } from "../src/store.ts";
@@ -73,7 +73,7 @@ afterEach(async () => {
 });
 
 test("job API validates inputs, authorizes all endpoints, tracks ownership/lease, deduplicates results and audits identities", async () => {
-  RuntimeInfo.parse(await (await request("/v1/runtime/register", runtime, registration)).json());
+  RuntimeRegistered.parse(await (await request("/v1/runtime/register", runtime, registration)).json());
   const job = await submit();
   expect(job).toMatchObject({ status: "queued", spec: { workdir: "~", timeout_seconds: 7200 } });
   expect(Buffer.from(job.spec.lease, "base64url").length).toBeGreaterThanOrEqual(32);

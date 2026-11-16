@@ -27,7 +27,7 @@ export async function runOperations(args: string[], values: { reason?: string; s
           if (source?.task || source?.routine) {
             const ref = source.task ?? source.routine!;
             let title = ref;
-            try { title = (await client.show(ref)).note.title; } catch { /* 来源笔记可能已删除。 */ }
+            try { title = source.task ? (await client.workTask(source.task)).task.title : (await client.executionRoutine(source.routine!)).title; } catch { /* 来源可能已删除。 */ }
             command += msg("operations.source", title, source.task ? msg("operations.round", source.round) : msg("operations.routine"));
           } else command += msg("operations.source_2", id);
         } catch { command += msg("operations.source_2", id); }
