@@ -4,11 +4,8 @@
 > 本文件写目标、总体结构、工程基础、存储权威和流程；各模块的规则在分册里。AI 开工时读本文件，再读任务说明里列出的分册（ADR 0036）。
 > 规则后的 `ADR 00xx` 说明出处，想知道"为什么"时再去查；小改动可以只标任务或 PR 编号（ADR 0036）。
 
-> **四模块重构**：[ADR 0025](adr/0025-four-module-architecture.md)（Accepted，2026-10-31 人类批准）规定知识、工作、执行、助手四模块与混合存储，
-> 已于 2026-11-02 合并（#62）：四模块边界、业务存储、日志备份与显式迁移已实现，验收证据见 [R0-0](tasks/R0-0-four-module-refactor.md)。Project/Task 的 Markdown 展示与导出派生物尚未实现。真实数据迁移需按 [migration-v2](migration-v2.md) 单独执行。
-
-> **开发期基线**：[ADR 0068](adr/0068-dev-baseline-remove-legacy-compat.md)（Accepted，2026-11-16）：1.0 前契约变更默认破坏性，不保留旧格式读取；只有 Hub↔Runtime 版本差与 vault 手写宽容两处长期兼容。
-> 旧笔记工作模式、显式迁移与 `/v1` 人/agent 接口由 [B0-0](tasks/B0-0-dev-baseline.md) 删除；删除前分册里的旧模式说明仍描述现状。
+> **开发期基线已实施**（[B0-0](tasks/B0-0-dev-baseline.md)，[ADR 0068](adr/0068-dev-baseline-remove-legacy-compat.md)）。
+> 1.0 前契约变更默认允许破坏性更新。遇到既有数据需要调整时，PR 提供一次性离线处理步骤。长期兼容限于 Hub 接受当前与上一正式版本的 Runtime，以及 vault 手写 frontmatter 的宽容规则。
 
 ## 0. 目标与非目标
 
@@ -49,7 +46,7 @@ Foundation 提供 ID 和错误；Platform 提供终端、诊断、下载与升�
   用外部编辑器改文件是一直支持但最不正式的用法，正式的编辑方式以后由官方 GUI 提供（ADR 0001、0007、0022）。默认位置 `~/.config/lumio/vault`，安装时可改。
 - **一套系统只有一个 Hub**，vault 在 Hub 所在的机器上。这个文件夹可以被任何外部工具（git、Syncthing、iCloud……）同步到别的设备上编辑，
   同步进来的修改等同于人改文件；Lumio 不做自己的同步（ADR 0017、0022）。
-- `index.sqlite` 是可重建的知识索引，`refs.bib` 是生成物；`hub.sqlite` 保存身份、执行记录以及新版 Work/Assistant 业务数据，不能删除后靠 vault 重建（ADR 0014、0025）。
+- `index.sqlite` 是可重建的知识索引，`refs.bib` 是生成物；`hub.sqlite` 保存身份、执行记录以及 Work/Assistant 业务数据，不能删除后靠 vault 重建（ADR 0014、0025）。
 - **知识与工作独立**：知识正文仍由文件负责，数据库任务与项目由 Work 负责；Work 可以在未配置 `LUMIO_VAULT` 时使用。
   Task 描述使用 Markdown 语法，但不因此成为知识笔记；各模块通过 ID 和公开接口协作（ADR 0025）。
 
@@ -57,7 +54,7 @@ Foundation 提供 ID 和错误；Platform 提供终端、诊断、下载与升�
 
 - **一个代码仓库**，数据（vault）不放在仓库里（ADR 0001）。
 - **全部 TypeScript，运行在 Bun 上**；开发、测试、CI、发布与人类的 Nix 环境统一使用 `package.json` 的 `packageManager` 指定的 Bun 1.4.4（ADR 0002，AGENTS.md；2026-11-08 人类批准 Bun 1.4 升级）。唯一例外是 macOS 捕获小助手 `apps/desktop`，用 Swift，只做采集与 HTTP 调用（ADR 0066）。
-- 全部角色用 `bun build --compile` 编译成**一个程序** `lumio`，以子命令区分 `lumio hub …`、`lumio runtime …`；`lumio-hub`、`lumio-runtime` 是指向它的兼容链接（ADR 0002、0027）。
+- CLI、Hub 与 Runtime 编译成**一个程序** `lumio`，以子命令区分 `lumio hub …`、`lumio runtime …`（ADR 0002、0027、0068）。
 - **界面语言**（ADR 0028）：面向人的输出默认英文，中文环境用中文。命令行按 `LUMIO_LANG`、`LC_ALL`、`LC_MESSAGES`、`LANG` 的第一个非空值判断（`zh` 开头用中文）；
   后台服务日志固定英文；Hub 的错误说明按请求 `Accept-Language` 选择，`code` 不变、客户端不依赖文字判断；Web 可切换并保存在浏览器。
   文案集中在各 app 的中英两张同键文案表里（测试保证一致）；库代码只抛带 `code` 与参数的错误，由 app 层翻译。不引入 i18n 依赖。开发文档仍用中文。
@@ -75,16 +72,15 @@ Foundation 提供 ID 和错误；Platform 提供终端、诊断、下载与升�
 | `packages/storage` | 各领域的 SQLite、知识文件与索引适配器 | schema 与业务包公开接口 |
 | `packages/foundation` | 稳定 ID 与带 code 的基础错误 | schema |
 | `packages/platform` | 终端、下载、升级回退、诊断与配对/Hub 检查；显示和版本由应用传入 | schema |
-| `packages/core` | 旧包兼容转发入口，已无上述具体实现；应用禁止再依赖 | 上述内部包 |
 | `packages/api-client` | 调用 Hub 的 SDK | schema |
 | `apps/cli` | 唯一程序入口 `lumio`：命令行（联网获取论文元数据、本地知识模式、Hub 客户端），并分派 `hub`、`runtime` 子命令 | api-client, knowledge, storage, foundation, platform, schema；以及 `apps/(hub\|runtime\|web)/src/entry.ts`（ADR 0027） |
-| `apps/hub` | API、模块组装、跨模块协调、身份与旧路径兼容 | 业务包、storage、foundation、platform、schema |
+| `apps/hub` | API、模块组装、跨模块协调、身份与授权 | 业务包、storage、foundation、platform、schema |
 | `apps/runtime` | 设备 daemon，与 Hub 只走 HTTP | execution 的纯计划能力、storage 的日志适配、foundation、platform、schema |
 | `apps/web` | 中文 GUI 与静态资源构建，入口 `src/entry.ts`；网页由 Hub 提供（ADR 0027） | api-client, schema |
 | `apps/desktop` | macOS 菜单栏捕获小助手（Swift，human 客户端，ADR 0066） | 只经 HTTP 调用 Hub；契约用样例文件校验 |
 | `apps/feishu-bot` 等 | 后续客户端 | api-client |
 
-依赖方向由 `bun run lint:deps` 强制：`packages` 不依赖 `apps`，`apps` 之间不互相依赖——唯一例外是 `apps/cli` 可以引用其他 app 的入口模块 `src/entry.ts`，hub、runtime、web 之间仍不互相引用（ADR 0027）；四个业务包不导入其他业务包实现或具体适配器，禁止文件/网络/SQLite/进程 I/O；应用不依赖 Core 兼容汇总入口（ADR 0025）。
+依赖方向由 `bun run lint:deps` 强制：`packages` 不依赖 `apps`，`apps` 之间不互相依赖——唯一例外是 `apps/cli` 可以引用其他 app 的入口模块 `src/entry.ts`，hub、runtime、web 之间仍不互相引用（ADR 0027）；四个业务包不导入其他业务包实现或具体适配器，禁止文件/网络/SQLite/进程 I/O（ADR 0025）。
 
 ## 3. 存储权威与备份
 
@@ -98,7 +94,7 @@ Foundation 提供 ID 和错误；Platform 提供终端、诊断、下载与升�
 
 正文用 Markdown 语法，不意味着每个业务对象必须对应一份知识文件。JSON 用于配置、快照和接口，JSONL 用于逐行过程记录与分段交付；
 二者都不作为反向修改 Task 状态的控制入口。知识目录单独备份；业务库必须连同其引用文件做一致性快照并验证清单，不能删除重建。
-旧 Task/Project/Routine Markdown 只在迁移前走兼容路径，切换后是保留原文和链接的历史来源；不与数据库双向同步。
+`lumio check` 报告遗留的 Task、Project、Routine 工作笔记，文件由人自行移走或删除。
 
 ## 4. 分册
 
@@ -106,9 +102,9 @@ Foundation 提供 ID 和错误；Platform 提供终端、诊断、下载与升�
 |---|---|
 | [`design/knowledge.md`](design/knowledge.md) | vault 目录、实体类型、元数据补全、citekey、链接与 AI 区块、外部资料与 Inbox、自动提交、搜索 |
 | [`design/work.md`](design/work.md) | 数据库项目与任务：任务模型、交接计划、通知、提问与验收、CLI |
-| [`design/execution.md`](design/execution.md) | 执行器与 Job、日志与托管文件、旧任务笔记兼容、数据库 Routine |
+| [`design/execution.md`](design/execution.md) | 执行器与 Job、日志与托管文件、数据库 Routine |
 | [`design/assistant.md`](design/assistant.md) | 内置助手：对话、模型适配、显式记忆、工具状态 |
-| [`design/hub.md`](design/hub.md) | Hub 的职责、运行数据存放与备份、部署与安装、旧数据迁移 |
+| [`design/hub.md`](design/hub.md) | Hub 的职责、运行数据存放与备份、部署与安装 |
 | [`design/web.md`](design/web.md) | Web 工作台 |
 | [`design/security.md`](design/security.md) | AI 协作与权限、身份与令牌、审计、私密实体、敏感信息审查、委派的安全底线 |
 
@@ -142,7 +138,7 @@ Foundation 提供 ID 和错误；Platform 提供终端、诊断、下载与升�
 | 3.1–3.5、4.3、4.4 | [`design/knowledge.md`](design/knowledge.md) |
 | 4.1、4.2、4.5 | [`design/hub.md`](design/hub.md) |
 | 4.2.1、4.6 | [`design/execution.md`](design/execution.md) |
-| 4.7 | [`design/work.md`](design/work.md)；Routine 与设备在 [`execution.md`](design/execution.md)，助手在 [`assistant.md`](design/assistant.md)，迁移在 [`hub.md`](design/hub.md) |
+| 4.7 | [`design/work.md`](design/work.md)；Routine 与设备在 [`execution.md`](design/execution.md)，助手在 [`assistant.md`](design/assistant.md) |
 | 4.8 | [`design/web.md`](design/web.md) |
 | 5、6 | [`design/security.md`](design/security.md) |
 | 7 | 本文件第 5 节 |

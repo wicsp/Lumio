@@ -8,7 +8,7 @@
 在执行器所在机器以执行器账号运行：
 
 ```sh
-sudo ~/.local/bin/lumio-runtime install-sudo-helper
+sudo ~/.local/bin/lumio runtime install-sudo-helper
 ```
 
 核对两边显示的指纹一致后输入 `yes`。非交互终端、未确认指纹或 sudoers 校验失败时不会安装。
@@ -16,7 +16,7 @@ sudo ~/.local/bin/lumio-runtime install-sudo-helper
 程序与配置由 root 所有，运行账号的配置在降回该账号后更新。重启失败会打印手动重启提示。
 升级时重新运行同一条安装命令。macOS 上以执行器账号重新生成并载入 LaunchAgent，安装位置是 `/Library/Lumio`，sudoers 文件是 `/private/etc/sudoers.d/lumio`。
 
-卸载：`sudo ~/.local/bin/lumio-runtime install-sudo-helper --uninstall`。
+卸载：`sudo ~/.local/bin/lumio runtime install-sudo-helper --uninstall`。
 卸载会移除助手、配置、sudoers 和 runtime.env 中的提权命令，保留已用凭据记录（Linux 的 `/var/lib/lumio-sudo/used`，macOS 的 `/Library/Lumio/sudo-state/used`），避免旧批准凭据被再次使用。
 
 ## Linux 手动安装
@@ -59,7 +59,7 @@ LUMIO_RUNTIME_SUDO_TIMEOUT=1800
 第一个元素必须为绝对路径，整个前缀按空白分隔，不使用 shell 引号；安装路径不要包含空格。
 重启 `systemctl --user restart lumio-runtime`。
 
-agent 在一轮之内执行 `lumio-runtime sudo -- /usr/bin/apt-get install <软件包>`；
+agent 在一轮之内执行 `lumio runtime sudo -- /usr/bin/apt-get install <软件包>`；
 Mac 上用 `lumio proposals` 查看服务器、命令、来源与理由，再由人执行 `lumio proposals accept|reject <ID>`。
 批准凭据 10 分钟过期、一次有效；助手在执行前 fsync 已用记录，执行失败也不会重试。助手以固定环境、工作目录 `/` 执行，30 分钟后杀掉进程组。
 输出只返回调用者，Hub 只记录 argv、批准与执行状态、时间和退出码。执行器离线时执行结果保留在本地数据库，恢复后重试交回。

@@ -1,7 +1,7 @@
 # macOS 后台服务
 
-通常使用仓库根目录的 `install.sh`：下载已签名的程序后，`lumio-hub setup` 自动安装 Hub 和本机执行器。
-可重复运行来修复配置或更换 vault：`lumio-hub setup --vault /已有目录`。
+通常使用仓库根目录的 `install.sh`：下载已签名的程序后，`lumio hub setup` 自动安装 Hub 和本机执行器。
+可重复运行来修复配置或更换 vault：`lumio hub setup --vault /已有目录`。
 服务为 `io.lumio.hub` 与 `io.lumio.runtime`；配置在 `~/Library/LaunchAgents/`。
 Hub 日志在 `~/.local/share/lumio/hub.log`、`hub.err.log`，执行器日志在
 `~/.local/share/lumio-runtime/runtime.log`、`runtime.err.log`。登录后自动启动；重启后需要登录用户会话。
@@ -40,7 +40,7 @@ CLI 自动读取 `~/.config/lumio/config.json`，环境变量可以覆盖其中�
 每个请求输出一行 JSON。路径使用路由模板（笔记引用不写入日志），不包含查询内容或认证头；
 拒绝授权写入 `hub.sqlite` 的 audit 表。放行查询不写审计。请单独备份 `hub.sqlite`，索引可重建。
 
-使用同一个 `LUMIO_STATE_DIR` 运行 `lumio-hub backup /ABSOLUTE/PATH/TO/hub-backup.sqlite`，
+使用同一个 `LUMIO_STATE_DIR` 运行 `lumio hub backup /ABSOLUTE/PATH/TO/hub-backup.sqlite`，
 可在 Hub 运行中生成一致快照；目标目录须已存在，目标文件须不存在。备份权限为 0600，包含身份、
 令牌哈希、提议与审计，妥善保管。恢复时先用上面的 `launchctl bootout` 停止 Hub，再将备份复制到
 `LUMIO_STATE_DIR/hub.sqlite` 并确认权限为 0600；若状态目录留有旧的 `hub.sqlite-wal`、

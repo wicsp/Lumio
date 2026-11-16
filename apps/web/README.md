@@ -16,7 +16,7 @@ bun apps/cli/src/main.ts hub serve
 
 网页由 Hub 提供，没有单独的 Web 服务或端口。在已配置的 CLI 上运行 `lumio login-code --name web`，输入一次性配对码；也可输入已有 human 令牌。默认刷新当前标签页会自动恢复登录；勾选「记住这台设备」后，在同一个浏览器中关闭重开也能恢复。只在自己的设备上勾选。配对码要求 Hub 已配置对外地址；未配置时 CLI 会给出设置说明，已有 human 令牌仍可直接连接。
 
-默认 Hub 为 `http://127.0.0.1:7420`。使用包含 v2 Work/Execution/Assistant API 的 Hub；知识旧笔记与数据库工作是不同视图，旧任务需按[迁移说明](../../docs/migration-v2.md)显式切换。Web 不自动迁移或升级已有服务。
+默认 Hub 为 `http://127.0.0.1:7420`。使用包含 v2 Work/Execution/Assistant API 的 Hub；知识使用 vault，项目与任务使用 Hub 的 Work 数据库。
 
 ## 功能
 

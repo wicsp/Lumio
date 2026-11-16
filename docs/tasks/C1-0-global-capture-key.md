@@ -51,7 +51,7 @@
 - `AssistantChatRequest.glance`，与 `focus` 互斥。
 - `KnowledgeAIPurpose` 加 `knowledge.vision`（Profile 引擎 `lumio`，Hub 绑定校验已跟着改）。
 - `CAPTURE_TOOLS = ["capture.glance"]`，参数 `CaptureGlanceToolArgs`（`title`、`reason`，**不含所见 ID**），结果 `CaptureGlanceToolResult`；测试保证不在 `CAPABILITIES`。
-- 配对不新增接口：小助手用现有 `POST /v1/client-invites`（标签如 `desktop@macbook`）与 `POST /v1/client/join` 换 human 令牌。C1-5 在设置页加入口时调用同一接口。
+- 配对不新增接口：小助手用现有 `POST /v2/setup/client-invites`（标签如 `desktop@macbook`）与 `POST /v2/setup/client/join` 换 human 令牌。C1-5 在设置页加入口时调用同一接口。
 - 过渡：C1-2 之前，Hub 对带 `glance` 的捕获与聊天请求一律返回 INVALID。C1-2 实现后去掉这两处拦截。
 - Swift 样例：`apps/desktop/Tests/Fixtures/<契约名>.<说明>.json`（契约名是 `CONTRACTS` 的键，如 `glance-create.tap.json`），`packages/schema/test/c1-1-glance.test.ts` 会逐个校验；目录不存在时跳过。
 
