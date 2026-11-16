@@ -68,8 +68,10 @@ export async function replaceBinary(options: {
 
 function readOnly<T>(path: string, read: (db: Database) => T): T {
   const db = new Database(path, { readonly: true });
-  try { return read(db); }
-  finally { db.close(); }
+  try {
+    db.exec("PRAGMA busy_timeout=5000");
+    return read(db);
+  } finally { db.close(); }
 }
 
 export function assertHubIdle(hubDb: string) {
@@ -80,10 +82,7 @@ export function assertHubIdle(hubDb: string) {
 export function snapshotDatabase(source: string, target: string) {
   const before = fileIdentity(source);
   try {
-    readOnly(source, db => {
-      db.exec("PRAGMA busy_timeout=5000");
-      db.query("VACUUM INTO ?").run(target);
-    });
+    readOnly(source, db => db.query("VACUUM INTO ?").run(target));
   } catch (error) {
     // An inactive WAL-mode database can fail to open read-only without its sidecars.
     // A stable main file with no sidecars can be copied and verified independently.

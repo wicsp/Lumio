@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileIdentity, replaceBinary, snapshotDatabase } from "./deploy-local.ts";
+import { assertHubIdle, fileIdentity, replaceBinary, snapshotDatabase } from "./deploy-local.ts";
 
 function fixture() {
   const directory = mkdtempSync(join(tmpdir(), "lumio-deploy-test."));
@@ -67,6 +67,35 @@ test("Runtime backup includes committed WAL data while the source database remai
     finally { copy.close(); }
   } finally {
     source.close();
+    rmSync(files.directory, { recursive: true, force: true });
+  }
+});
+
+test("deployment reads wait for a short exclusive SQLite lock", async () => {
+  const files = fixture();
+  const path = join(files.directory, "hub.sqlite");
+  const source = new Database(path);
+  source.exec("CREATE TABLE assistant_turns (status TEXT)");
+  source.close();
+  const writer = Bun.spawn([process.execPath, "-e", `
+    import { Database } from "bun:sqlite";
+    const db = new Database(process.argv[1]);
+    db.exec("BEGIN EXCLUSIVE");
+    console.log("locked");
+    await Bun.sleep(750);
+    db.exec("COMMIT");
+    db.close();
+  `, path], { stdout: "pipe" });
+  const output = writer.stdout.getReader();
+  try {
+    const { value } = await output.read();
+    expect(new TextDecoder().decode(value).trim()).toBe("locked");
+    assertHubIdle(path);
+    expect(await writer.exited).toBe(0);
+  } finally {
+    output.releaseLock();
+    if (writer.exitCode === null) writer.kill();
+    await writer.exited;
     rmSync(files.directory, { recursive: true, force: true });
   }
 });
