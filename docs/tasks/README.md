@@ -74,6 +74,7 @@
 | [I2-0](I2-0-material-simplify.md) | 资料入库后的显示与入口收敛：AI 卡片由资料笔记代表、补嵌入、卡片四项提示词、Inbox 改为收藏夹、资料页突出原链接、取消深读（ADR 0065，Implemented；不改契约；I2-1～I2-3 ✅ Codex） | Codex | — |
 | [U1-0](U1-0-runtime-auto-update.md) | Runtime 跟随 Hub 自动更新：期望版本对账、发布签名、Hub 产物库、空闲切换与回退、Web 状态（ADR 0063，Accepted；U1-1 契约 ✅ Claude，U1-2～U1-5 后端 Codex，U1-6 Web Claude） | 见任务说明 | —
 | [C1-0](C1-0-global-capture-key.md) | 全局捕获键：macOS 菜单栏小助手，轻点收藏、按住对主对话说话，前台窗口截图 + 光标指点 + 本机识字（ADR 0066，Accepted；C1-1 契约 ✅ Claude，C1-2～C1-4、C1-6 Codex，C1-5 Web Claude，C1-7 助手看图在后） | 见任务说明 | — |
+| [B0-0](B0-0-dev-baseline.md) | 开发期基线：按 ADR 0067 补齐所见入库契约；删除旧笔记工作模式、显式迁移、`/v1` 人/agent 接口与兼容层（ADR 0068，Accepted） | Codex | C1-2 起依赖 B0-1 |
 
 P1 的设计决定见 ADR 0014、0016、0017、0018；P2 见 ADR 0019、0020、0021、0022 与修订后的 ADR 0005；契约见 `packages/schema/src/` 中的 `query.ts`、`actor.ts`、`operation.ts`、`proposal.ts`、`api.ts`。
 

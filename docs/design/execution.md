@@ -13,6 +13,9 @@
   Job 结果确认与文件确认互不替代，上传失败不阻塞结果交回；确认后原始文件仍留在 Runtime。
 - 文件接口在 `/v2/execution/` 下；runtime 只能上传自己已接手的 Job 的文件。读取只授予 human，私密产物需显式 include_private。
   `lumio job artifacts <Job ID>` 查看 staged/ready；`lumio job download <文件 ID> --output <新文件>` 流式校验后保存，不覆盖目标。
+- **归属**（ADR 0067）：托管文件归一个业务对象（ResourceRef）或 Hub 协调对象（`{module: "hub", id: cap_/gln_}`）。所见截图上传时归所见；存成资料时在同一事务转给该 `src_`，
+  此后随资料进回收站、恢复与备份；只用于对话的按保留期删除。execution 文件规则不变；knowledge 文件按所属实体的可见性与私密规则读取；
+  hub 文件只由所见的 human 所有者经 `/v2/glances/<id>/image` 读取，agent 与 runtime 不能登记或读取。
 - Job 协议仍为 2；旧 Runtime 不归档文件，新 Runtime 遇到旧 Hub 时保留待交付文件并重试，不影响旧结果协议。
 
 ## Runtime 与旧任务笔记兼容（P2，ADR 0005、0019）
