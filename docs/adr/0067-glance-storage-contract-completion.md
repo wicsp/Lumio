@@ -1,78 +1,83 @@
-# 0067 补齐所见入库与托管文件归属契约
+# 0067 所见入库契约：资料类型、原文来源与托管文件归属
 
 - 状态：Proposed（等待人类批准，尚未修改 `packages/schema`）
 - 日期：2026-11-16
-- 领域：契约、存储格式与兼容
-- 关联：ADR 0025、0057、0066；C1-2 / C1-3 / C1-4 / C1-6；PR #221、#222
+- 领域：契约、存储格式
+- 关联：ADR 0025、0057、0066、0068；C1-2 / C1-3 / C1-4 / C1-6；PR #221、#222
 
 ## 背景
 
-人要求完成 C1-2、C1-3、C1-4、C1-6。检查 #222 合入后的契约，发现三处无法满足 C1-0 已描述的入库行为：
+#222 合入的契约无法表达 ADR 0066 已决定的入库行为（三处均已用合成数据调用 `safeParse` 复现）：
 
-1. `packages/schema/src/entities.ts` 的 `Source.kind` 只接受 `web/video/podcast/course/book`，不接受无网址所见所需的 `text`。
-2. `packages/schema/src/inbox.ts` 的 `OriginalFrontmatter` 是严格对象，只接受 `of/url/captured/extractor/lang/sha256/pdf`；
-   C1-0 要求的 `glance/screenshot/app/window` 与指向判定方式都会被拒绝。`writeOriginal` 与原文读取均使用此契约校验。
-3. `packages/schema/src/storage.ts` 的 `StoredArtifact.owner` 只接受 `ResourceRef`，而 `gln_` 明确不是 ResourceRef。
-   上传后、尚未用于捕获或对话时，截图没有可合法填写的现有业务对象归属。
+1. `Source.kind` 没有 `text`，而 ADR 0066 规定无网址的所见生成 `kind: text` 的资料；同时 `CaptureKind` 已有 `text`，两套资料类型各自维护、已经不一致。
+2. `OriginalFrontmatter` 是严格对象，不能记截图、App、窗口与所见。
+3. `StoredArtifact.owner` 只接受 `ResourceRef`，`gln_` 不是 ResourceRef，截图没有合法归属。
 
-以上三项已用合成数据调用当前 schema 的 `safeParse` 复现：分别返回 `invalid_value`、`unrecognized_keys`、`invalid_value`。
-这不是放宽 Hub 校验就能修复的问题。绕过 schema 会令读写、业务备份或其他客户端对同一数据产生不同解释。
-AGENTS.md 第 1 条要求先提出契约 ADR、经人类批准后再实现。
+项目处于开发期，可以做破坏性修改（ADR 0068）。本 ADR 按长期设计补齐，而不是按最小改动打补丁。
 
-## 提议
+## 决定
 
-### 1. 无网址的资料
+### 1. 资料类型只有一份定义
 
-在 `Source.kind` 增加 `text`，用于无网址的桌面所见；有网址仍为 `web`，论文仍走现有论文路径。
-默认值保持 `web`，不改写现有资料，也不改变普通文字捕获的既有行为。
+`entities.ts` 定义 `SOURCE_KINDS = ["web", "video", "podcast", "course", "book", "text"]`，`Source.kind` 用它；
+`CaptureKind` 改为由它派生：`z.enum(["paper", ...SOURCE_KINDS])`，不再单独列举。
+`text` 表示没有网址的资料（粘贴正文或无网址的所见）。有网址仍为 `web` 等，论文仍走论文路径。
 
-### 2. 原文的所见元数据
+### 2. 原文的来源写成一个结构
 
-保持 `OriginalFrontmatter` 为严格对象，新增以下可选字段：
+`OriginalFrontmatter` 仍是严格对象，新增一个可选的嵌套对象 `glance`，替代 #223 草案中的五个平铺字段：
 
-| 字段 | 类型 | 用途 |
-|---|---|---|
-| `glance` | `idOf("gln")` | 原文所依据的所见 |
-| `screenshot` | `idOf("art")` | 所见截图的托管文件 ID |
-| `app` | `GlanceApp` | App 名称与可选 bundle ID |
-| `window` | 字符串，最多 `GLANCE_LIMITS.max_window_title_chars` | 窗口标题 |
-| `pointing` | `GlancePointing` 的 `method` 枚举 | selection / region / point / none |
+```ts
+glance: z.strictObject({
+  id: idOf("gln"),
+  app: GlanceApp,
+  window: z.string().max(GLANCE_LIMITS.max_window_title_chars).optional(),
+  screenshot: idOf("art").optional(),          // 截图已不保存时缺省
+  pointing: GlancePointing.shape.method,        // selection / region / point / none
+}).optional()
+```
 
-这些字段只在所见来源的原文中写入。全文识字、选中文字、光标轨迹仍由 Glance 记录负责，不重复写成 frontmatter。
-正文按 ADR 0066 保留“指向的段落”和“窗口文字”；已有原文缺少新增字段时仍合法。
+理由：这几项只会一起出现，平铺会让"有 app 却没有 glance"之类的组合也合法；嵌套后由类型保证。
+vault 是知识的权威来源，原文脱离 Hub 也应能看懂来自哪个 App、哪个窗口，所以 App 与窗口照抄进 frontmatter；
+识字块、轨迹、选中文字只留在 Glance 记录里，不重复。`extractor` 用 `glance-ocr@1`（本机识字）或 `glance-vision@1`（`knowledge.vision`）。
 
-### 3. 托管文件的所见归属
+### 3. 托管文件的归属：业务对象或 Hub 协调对象
 
-新增独立的 `ArtifactOwner` 契约，取以下两者之一：
+`work.ts` 不变（`Module` 仍只有四个业务模块，`ResourceRef` 不收 `cap_`/`gln_`）。`storage.ts` 新增：
 
-- 现有 `ResourceRef`；
-- 严格对象 `{ module: "capture", id: idOf("gln") }`，仅表示 Hub 捕获协调数据的文件归属。
+```ts
+/** Hub 的跨模块协调数据（捕获、所见），不是业务模块，不进 ResourceRef。 */
+export const HubRef = z.strictObject({ module: z.literal("hub"), id: z.union([idOf("cap"), idOf("gln")]) });
+export const ArtifactOwner = z.union([ResourceRef, HubRef]);
+StoredArtifact.owner: ArtifactOwner
+```
 
-`StoredArtifact.owner` 改用 `ArtifactOwner`。不向 `Module` 或 `ResourceRef` 增加第五个业务模块，
-也不把 `gln_` 塞进 knowledge、assistant 或 execution；其余 ResourceRef 使用方保持现有边界。
+用 `module: "hub"` 而不是 `"capture"`：存储表按 `owner_module/owner_id` 两列存，`hub` 如实说明它是 Hub 协调数据，不会被误读成捕获记录。
 
-截图从上传开始就归所属所见，后续通过 `used_by.capture/message` 关联用途，不伪造笔记、消息或 Job 来挂文件。
-复用现有 staged/ready 发布、大小与哈希校验、业务备份与恢复。保留期清理后，Glance 中保留文件 ID、哈希及 `purged` 时间；
-不再让业务备份引用已删除的文件。清理与资料回收站遵守 ADR 0066 第 5 节，不扩大截图可见性。
+**归属随用途转移**（取代"截图永远归所见"）：
 
-权限检查必须显式区分所见归属：执行归档接口仍仅允许原来的 Job 所有者，不能凭 runtime 或 agent 身份注册、读取所见截图。
-所见截图只能通过 `/v2/glances/<id>/image` 由该所见的 human 所有者读取。
+- 上传后、尚未入库：归 `{ module: "hub", id: gln_… }`。只用于对话的截图一直如此，到保留期删除，Glance 留下 `purged` 时间与哈希。
+- 所见存成资料时：Hub 在生成资料的同一事务里把截图归属改为 `{ module: "knowledge", id: src_… }`，此后随资料进回收站、恢复与业务备份，
+  不需要另外的关联规则。论文 PDF（`OriginalFrontmatter.pdf`，ADR 0057）同样归 `{ knowledge, pap_… }`。
+- Storage 增加"转移归属"操作：只允许 `hub → knowledge`，在同一事务内校验目标存在且属于同一 human。
 
-## 兼容与验证
+**读取权限**：`execution` 文件规则不变（现有代码都显式判断 `module === "execution"`）。
+`knowledge` 文件按所属实体的可见性与私密规则读取；`hub` 文件只能由所见的 human 所有者经 `/v2/glances/<id>/image` 读取。
+runtime 与 agent 身份不能登记或读取 `hub` 文件。
 
-- 不迁移或重写既有 vault、原文或托管文件；既有记录继续通过新契约。
-- 新产生的 `text`、所见原文及所见文件归属不保证能由旧版本识别。因此产生新数据后，不把直接安装旧二进制视为可靠回退；
-  回退必须先评估数据兼容性，必要时使用升级前的一致性备份，明确后续新增数据的处置。
-- 增加契约测试：旧样例兼容、无网址所见、完整原文元数据、非法字段、错误 ID 前缀及 `gln_` 仍不属于 ResourceRef。
-- 增加 Hub / Storage 测试：归属校验、上传发布与失败恢复、备份恢复、截图清理后备份、agent/runtime 拒绝访问；全部使用合成数据。
-- Swift 请求继续按 #222 的 `GlanceCreate` / `CaptureCreate` / `AssistantChatRequest`，本提议不改变上传或对话请求格式。
-- 批准后按契约连带修改规则实施 `packages/schema` 及必要使用方，生成 JSON Schema，并运行 `bun run check`。
+## 兼容
+
+开发期，不保留旧格式读取（ADR 0068）。现有数据中没有 knowledge 或 hub 归属的托管文件，`pdf` 字段尚未实际写入，因此无需迁移。
+Swift 请求格式（`GlanceCreate` / `CaptureCreate` / `AssistantChatRequest`）不变。
+
+## 验证
+
+- 契约测试：`CaptureKind` 与 `SOURCE_KINDS` 一致；无网址所见原文；`glance` 对象缺项、多项、错误前缀被拒绝；`HubRef` 只收 `cap_`/`gln_`；`gln_` 仍不是 ResourceRef。
+- Storage / Hub 测试：上传归 hub → 入库后转为 knowledge → 随资料删除与恢复 → 业务备份含该文件；只用于对话的截图到期清理；agent/runtime 读取被拒。全部合成数据。
 
 ## 考虑过的替代方案
 
-- 把无网址资料标成 `web`、把截图信息塞进正文：避开了校验，但不满足已批准的资料类型与结构化来源要求。
-- 为截图伪造 ResourceRef，或提前创建空笔记/对话：使文件归属与用户实际操作不符。
-- 另外维护一套截图文件表及备份分支：可以避免扩展 `StoredArtifact`，但重复 staged/ready、校验、清理与备份逻辑，偏离复用托管文件的要求。
-- 把 `OriginalFrontmatter` 改成宽松对象：扩大整个原文格式的接受范围，而所需字段有限且明确。
-
-本提议选择显式补齐三处契约。批准前不修改 schema，不合并依赖本提议的实现，也不部署。
+- 平铺五个可选字段（#223 初稿）：允许无意义的组合，靠运行时约定保证一致。
+- 截图永远归所见：资料删除、恢复、备份要再写一套"经 used_by 找截图"的规则。
+- 把 `hub` 加进 `Module`：所有以 ResourceRef 为输入的接口与能力目录都要处理一个不是业务模块的东西。
+- `OriginalFrontmatter` 改宽松对象：扩大整个原文格式，而需要的字段有限且明确。
