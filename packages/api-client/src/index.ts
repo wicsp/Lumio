@@ -1,4 +1,4 @@
-import { SecurityReviewRequest, SecurityReviewResult } from "@lumio/schema";
+import { SecurityReviewRequest, SecurityReviewResult, Glance } from "@lumio/schema";
 import { Capture, CaptureCommand, CaptureList, CaptureListArgs, CaptureProxySettings, CaptureProxyUpdate, KnowledgeAIBinding, KnowledgeAIBindingUpdate, CaptureCreate, CaptureCreateResult, KnowledgeAiNoteCommand, KnowledgeAiNoteResult, KnowledgeOriginal, KnowledgeOriginalShowArgs, ResourceSummary } from "@lumio/schema";
 import {AIConnection,AIConnectionInput,AIProfile,AIProfileInput,AIConfiguration,AIRuntime,NativeConnectionAction,NativeConnectionView,NativeSession,NativeCreate,NativeAction,NativeEventRecord} from "@lumio/schema";
 import { AssistantMain, AssistantMainEnsure, Exploration, ExplorationCommand, ExplorationList, ExplorationListArgs, NoticeCommand, NoticeCommandResult, NoticeList, NoticeListArgs } from "@lumio/schema";
@@ -92,6 +92,25 @@ export function createClient(options: { url: string; token?: string; language?: 
     },
     captureCommand(id: string, input: CaptureCommand) {
       return request(`/v2/inbox/captures/${validate(idOf("cap"), id)}/commands`, {}, Capture, validate(CaptureCommand, input));
+    },
+    /** 全局捕获键的所见（ADR 0066，C1-5）：只读，human 专用。 */
+    glance(id: string) {
+      return request(`/v2/glances/${validate(idOf("gln"), id)}`, {}, Glance);
+    },
+    /** 所见的截图（JPEG / PNG）。截图已按保留期删除或无权查看时抛 NOT_FOUND。 */
+    async glanceImage(id: string): Promise<Blob> {
+      const path = `/v2/glances/${validate(idOf("gln"), id)}/image`; let status: number | undefined;
+      try {
+        const response = await fetcher(new URL(`${base}${path}`), { headers: { ...(options.language ? { "Accept-Language": options.language } : {}), ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}) }, redirect: "error" });
+        status = response.status;
+        if (!response.ok) throw new ApiClientError(ApiError.parse(await response.json()).error, status);
+        const type = (response.headers.get("Content-Type") ?? "").split(";")[0]!.trim().toLowerCase();
+        if (type !== "image/jpeg" && type !== "image/png") throw transportError("Hub 返回的截图格式不合法", status);
+        return new Blob([await response.arrayBuffer()], { type });
+      } catch (cause) {
+        if (cause instanceof ApiClientError) throw cause;
+        throw transportError("无法读取截图", status);
+      }
     },
     captureProxySettings() {
       return request("/v2/inbox/proxy-settings", {}, CaptureProxySettings);

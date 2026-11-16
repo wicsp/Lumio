@@ -25,8 +25,10 @@ import { t, translated } from "../i18n.ts";
 import { renderedOutline } from "../article-outline.ts";
 import { SideRail, type RailEntry } from "../side-rail.ts";
 import { refOf } from "../workbench-assist.ts";
+import { glanceThumb } from "../glance-view.ts";
 
 const TYPE_LABEL: Record<string, string> = translated({ paper: "Paper", idea: "Idea", experiment: "Experiment", source: "Source", post: "Post", asset: "Asset", "ai-note": "AI", project: "Old project", task: "Old task", routine: "Old routine" });
+const POINTING = translated({ selection: "Saved the selected text", region: "Saved the area you circled", point: "Saved the paragraph you pointed at", none: "Saved the whole window" });
 const EDITABLE = new Set(["paper", "source", "idea", "experiment", "post", "ai-note"]);
 
 function editableId(note: NoteDetail["note"]): string | undefined {
@@ -276,6 +278,7 @@ export class KnowledgePane {
       h("h1", { class: "reader-title" }, note.note.title),
       h("div", { class: "reader-meta" }, h("span", { class: "pill" }, kindLabel), attribution && h("span", {}, attribution), note.note.citekey && h("span", { class: "pill" }, note.note.citekey),
         h("button", { type: "button", class: "btn btn-small", title: t("Show how this note links to others"), onclick: () => this.openGraph(note.note.id ?? note.note.path, note.note.title) }, icon("graph"), t("Graph"))),
+      note.note.type === "source" && this.glanceOrigin(note),
       material && h("div", { class: "material-actions" },
         sourceUrl && h("a", { href: sourceUrl, target: "_blank", rel: "noopener noreferrer nofollow", class: "btn btn-primary" }, icon("external"), t("Open original link")),
         h("button", { type: "button", class: "btn btn-small", "aria-label": t("More"), onclick: (event: Event) => openMenu(event.currentTarget as HTMLElement,
@@ -289,6 +292,28 @@ export class KnowledgePane {
     if(editableId(note.note))void this.enableEditing(note);
     else this.detail.querySelector("article")?.append(h("p",{class:"field-hint"},t("This note is read-only here. Check its metadata or edit it in your external editor.")));
   }
+  /**
+   * 桌面小助手存的资料（ADR 0066/0067，C1-5）：原文 frontmatter 的 `glance` 记着 App、窗口与截图文件；
+   * 标出来源并附截图缩略图。没有原文或不是所见生成的资料时什么都不显示。
+   */
+  private glanceOrigin(note: NoteDetail): HTMLElement {
+    const box = h("div", { class: "material-glance", hidden: true });
+    const generation = this.generation;
+    void Promise.resolve().then(() => this.client.showOriginal(note.note.id ?? note.note.path)).then(original => {
+      const glance = original.frontmatter.glance;
+      if (!glance || !this.active || generation !== this.generation) return;
+      const label = [glance.app.name, glance.window].filter(Boolean).join(" · ");
+      box.hidden = false;
+      box.append(
+        glance.screenshot ? glanceThumb(this.client, glance.id, glance.window || glance.app.name) : h("span", {}),
+        h("div", { class: "material-glance-text" },
+          h("span", { class: "pill" }, icon("monitor"), t("Desktop helper")),
+          h("span", { class: "muted", title: label }, label),
+          h("span", { class: "field-hint" }, POINTING[glance.pointing] ?? "")));
+    }).catch(() => { /* 没有原文（手写资料）时不显示来源 */ });
+    return box;
+  }
+
   private async showOriginal(note: NoteDetail): Promise<void> {
     const body = h("div", { class: "inbox-original markdown" }, loading());
     const head = h("p", { class: "field-hint" });
