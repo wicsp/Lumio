@@ -64,7 +64,7 @@ struct Hub {
 
     let origin: URL
     let token: String?
-    private static let session: URLSession = {
+    static let session: URLSession = {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 15
         config.httpShouldSetCookies = false
@@ -125,6 +125,40 @@ struct Hub {
         let body = try JSONEncoder().encode(CaptureRequest(glance: glance.id))
         let data = try await send(request("v2/inbox/captures", method: "POST", body: body))
         return try JSONDecoder().decode(CaptureResult.self, from: data).capture.title ?? "所见"
+    }
+
+    func mainConversation() async throws -> String {
+        struct Input: Encodable { let request_id = UUID().uuidString }
+        struct Result: Decodable { let conversation: String }
+        let data = try await send(request("v2/assistant/main", method: "POST", body: JSONEncoder().encode(Input())))
+        return try JSONDecoder().decode(Result.self, from: data).conversation
+    }
+
+    @MainActor func chat(_ input: ChatRequest, update: (AssistantStream) -> Void) async throws {
+        var query = request("v2/assistant/chat", method: "POST", body: try JSONEncoder().encode(input))
+        query.setValue("application/x-ndjson", forHTTPHeaderField: "Accept")
+        query.timeoutInterval = 130
+        let (bytes, response) = try await Self.session.bytes(for: query)
+        guard let response = response as? HTTPURLResponse else { throw CaptureFailure("Hub 响应无效") }
+        if !(200..<300).contains(response.statusCode) {
+            var data = Data()
+            for try await byte in bytes.prefix(65_536) { data.append(byte) }
+            let detail = try? JSONDecoder().decode(ErrorResponse.self, from: data)
+            throw CaptureFailure(detail?.error.message ?? "助手请求失败（\(response.statusCode)）")
+        }
+        var state = AssistantStream()
+        for try await line in bytes.lines {
+            try Task.checkCancellation()
+            if try state.read(line) { update(state) }
+            if state.finished { return }
+        }
+        throw CaptureFailure("助手回复中断")
+    }
+
+    func conversationURL(_ conversation: String) -> URL {
+        guard var address = URLComponents(url: origin, resolvingAgainstBaseURL: false) else { return origin }
+        address.fragment = "assistant/\(conversation)"
+        return address.url ?? origin
     }
 
     func discard(_ glance: Glance) async throws { _ = try await send(request("v2/glances/\(glance.id)", method: "DELETE")) }

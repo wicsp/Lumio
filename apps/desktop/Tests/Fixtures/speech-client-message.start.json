@@ -1,0 +1,8 @@
+{
+  "format" : "pcm16le-16k-mono",
+  "protocol" : 1,
+  "request_id" : "20000000-0000-4000-8000-000000000002",
+  "token" : "synthetic-paired-desktop",
+  "type" : "start",
+  "vocabulary" : true
+}
