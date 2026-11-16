@@ -197,13 +197,22 @@ import ServiceManagement
         dialog.addButton(withTitle: "配对")
         dialog.addButton(withTitle: "取消")
         let url = NSTextField(string: settings.string(forKey: "origin") ?? "http://127.0.0.1:7420")
+        url.placeholderString = "Hub 地址"
+        url.setAccessibilityLabel("Hub 地址")
         let code = NSSecureTextField()
         code.placeholderString = "配对码"
-        let form = NSStackView(views: [url, code])
-        form.orientation = .vertical
-        form.alignment = .width
-        form.frame.size = NSSize(width: 290, height: 57)
+        code.setAccessibilityLabel("配对码")
+        let width: CGFloat = 320
+        let fieldHeight: CGFloat = 24
+        let spacing: CGFloat = 8
+        let form = NSView(frame: NSRect(x: 0, y: 0, width: width, height: fieldHeight * 2 + spacing))
+        url.frame = NSRect(x: 0, y: fieldHeight + spacing, width: width, height: fieldHeight)
+        code.frame = NSRect(x: 0, y: 0, width: width, height: fieldHeight)
+        form.addSubview(url)
+        form.addSubview(code)
         dialog.accessoryView = form
+        dialog.layout()
+        url.nextKeyView = code
         dialog.window.initialFirstResponder = url
         NSApp.activate(ignoringOtherApps: true)
         guard dialog.runModal() == .alertFirstButtonReturn else { return }
