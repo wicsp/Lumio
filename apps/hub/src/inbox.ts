@@ -1,14 +1,15 @@
 import { createHash, randomBytes } from "node:crypto";
 import {
   CAPTURE_LIMITS, Capture, CaptureCommand, CaptureCreate, CaptureCreateResult, CaptureList, CaptureListArgs, CaptureProxyUpdate,
-  KnowledgeAIBinding, KnowledgeAIBindingUpdate, type CaptureError, type NoteRef,
+  KnowledgeAIBinding, KnowledgeAIBindingUpdate, type CaptureError, type NoteRef, type Glance, type CaptureGlanceToolArgs, type CaptureGlanceToolResult,
 } from "@lumio/schema";
 import { CoreError, newId } from "@lumio/foundation";
 import { noteById, readKnowledgeDocument, showOriginal, type NoteTrashMove } from "@lumio/storage";
 import type { AIConfigurationService } from "./ai-config.ts";
 import type { HubConfig } from "./config.ts";
+import { Glances, windowText } from "./glances.ts";
 import { HubError } from "./errors.ts";
-import { captureKind, extractCapture, normalizeCaptureUrl } from "./inbox-extract.ts";
+import { captureKind, extractCapture, normalizeCaptureUrl, type Extracted } from "./inbox-extract.ts";
 import { CaptureFailure, type CaptureNetwork } from "./inbox-fetch.ts";
 import { InboxFiles } from "./inbox-files.ts";
 import type { InboxProxySettings } from "./inbox-proxy-settings.ts";
@@ -38,6 +39,7 @@ const requestKey = (capture: string, command: CaptureCommand) =>
 
 export interface InboxOptions {
   network?: CaptureNetwork;
+  vision?: (owner: string, profile: string, image: { bytes: Buffer; format: string }, signal: AbortSignal) => Promise<string>;
   model?: (owner: string, profile: string) => SummaryModel;
 }
 
@@ -52,7 +54,7 @@ export class Inbox {
     private readonly trash: () => Trash, private readonly exclusive: <T>(action: () => Promise<T>) => Promise<T>,
     private readonly now: () => Date, private readonly issue: (path: string, message: string) => void, private readonly proxy: InboxProxySettings,
     private readonly options: InboxOptions = {},
-    private readonly onReady?: (capture: Capture) => void) {
+    private readonly onReady: (capture: Capture) => void, private readonly glances: Glances) {
     this.state = new InboxStore(hub.db);
     ai.knowledgeProfileInUse = (profile, nextEngine) => this.state.profileInUse(profile, nextEngine);
     this.files = new InboxFiles(config, issue);
@@ -95,7 +97,6 @@ export class Inbox {
     if (operation === "inbox.create") {
       const input = CaptureCreate.safeParse(await this.json(request));
       if (!input.success) throw invalid();
-      if (input.data.glance) throw invalid(); // 所见捕获在 C1-2 实现（ADR 0066）
       const result = await this.exclusive(async () => this.create(owner, input.data));
       this.schedule();
       return respond(result, result.duplicate === "none" ? 202 : 200);
@@ -122,28 +123,77 @@ export class Inbox {
     catch { throw invalid(); }
   }
 
-  private create(owner: string, input: CaptureCreate): CaptureCreateResult {
-    const signature = ["create", input];
+  private create(owner: string, input: CaptureCreate, glanceReason?: string): CaptureCreateResult {
+    const signature = glanceReason ? ["create", input, glanceReason] : ["create", input];
     return this.hub.db.transaction(() => {
       const replay = this.state.receipt(owner, input.request_id, signature);
       if (replay) return CaptureCreateResult.parse(replay);
+      const glance = input.glance ? this.glances.get(input.glance, owner) : undefined;
+      if (glance && this.glances.isHubURL(glance.url)) throw invalid("glance.already_in_lumio");
+      const originalURL = glance?.url ?? input.url;
       let url: string | undefined;
-      try { url = input.url ? normalizeCaptureUrl(input.url) : undefined; }
+      try { url = originalURL ? normalizeCaptureUrl(originalURL) : undefined; }
       catch { throw invalid("inbox.blocked"); }
-      const previous = url ? this.state.byUrl(owner, url)?.capture : undefined;
+      const previous = !glance && url ? this.state.byUrl(owner, url)?.capture : undefined;
       const now = this.now(), time = now.toISOString();
-      const capture = previous ?? this.state.put({ input, capture: {
+      const capture = previous ?? this.state.put({ input, glanceReason, capture: {
         id: newId("cap", now, randomBytes), owner, channel: input.channel, url,
-        original_url: url !== input.url ? input.url : undefined, title: input.title,
-        kind: captureKind(url), state: "queued", card: "none", attempt: 1, revision: 1, created: time, updated: time,
+        original_url: url !== originalURL ? originalURL : undefined, title: input.title ?? (glance && this.glanceTitle(glance)),
+        glance: glance?.id,
+        kind: glance && captureKind(url) !== "paper" ? url ? "web" : "text" : captureKind(url), state: "queued", card: "none", attempt: 1, revision: 1, created: time, updated: time,
         triage: input.triage, triaged: input.triage ? time : undefined,
       } });
+      if (glance) this.glances.claim(glance.id, owner, "capture", capture.id);
       const result = CaptureCreateResult.parse({
         capture, duplicate: previous ? previous.triage === "discard" ? "discarded" : "existing" : "none",
       });
       this.state.finish(owner, input.request_id, signature, result);
       return result;
     }).immediate();
+  }
+
+  async captureGlance(owner: string, glanceId: string, message: string, request: string, args: CaptureGlanceToolArgs): Promise<CaptureGlanceToolResult> {
+    const result = await this.exclusive(async () => {
+      if (!this.config.vault) throw invalid("knowledge.no_vault");
+      const glance = this.glances.get(glanceId, owner);
+      if (glance.used_by.message !== message) throw inboxConflict();
+      if (glance.used_by.capture) {
+        const { capture } = this.state.get(glance.used_by.capture, owner);
+        return { capture: capture.id, title: capture.title };
+      }
+      const { capture } = this.create(owner, { glance: glanceId, title: args.title, request_id: request, channel: "desktop" }, args.reason);
+      return { capture: capture.id, title: capture.title };
+    });
+    this.schedule();
+    return result;
+  }
+
+  private glanceTitle(glance: Glance): string {
+    const window = glance.window_title?.trim();
+    const detail = (glance.pointing.text ?? windowText(glance)).replace(/\s+/g, " ").trim().slice(0, 65);
+    return [...(window && detail ? [window, detail] : [window || detail || glance.app.name]).join(" · ")].slice(0, 200).join("");
+  }
+
+  private async glanceOriginal(glance: Glance, capture: Capture): Promise<Extracted> {
+    const binding = this.state.binding(capture.owner, "knowledge.vision");
+    let content = windowText(glance);
+    let extractor = "glance-ocr@1";
+    if (binding && glance.image && !glance.image.purged) {
+      try {
+        const image = await this.glances.markedImage(glance);
+        const signal = AbortSignal.any([this.stopping.signal, AbortSignal.timeout(30_000)]);
+        const result = (await (this.options.vision ?? this.ai.describeImage.bind(this.ai))(capture.owner, binding.profile!, image, signal)).trim();
+        if (result) {
+          content = result.slice(0, CAPTURE_LIMITS.max_content_chars);
+          extractor = "glance-vision@1";
+        }
+      } catch { this.stopping.signal.throwIfAborted(); }
+    }
+    const body = [
+      glance.pointing.text ? `## ${msg("glance.pointed_paragraph")}\n\n${glance.pointing.text}` : undefined,
+      `## ${msg("glance.window_text")}\n\n${content || glance.window_title || glance.app.name}`,
+    ].filter(Boolean).join("\n\n") + "\n";
+    return { note: { kind: "web", title: capture.title ?? this.glanceTitle(glance), url: capture.url, tags: [] }, body, extractor };
   }
 
   private bind(owner: string, input: KnowledgeAIBindingUpdate) {
@@ -229,6 +279,7 @@ export class Inbox {
 
   /** Called inside the trash journal's final database transaction. */
   trashed(entity: string, action: "delete-note" | "restore" | "purge", moves: readonly NoteTrashMove[], notePath?: string) {
+    if (action === "purge") this.glances.purgeKnowledge(entity);
     for (const value of this.state.byEntity(entity)) {
       if (action === "delete-note") {
         if (value.capture.triage !== "discard") value.previousTriage = value.capture.triage;
@@ -267,33 +318,43 @@ export class Inbox {
   private async process(value: StoredCapture) {
     const capture = this.update(value, { state: "extracting" });
     try {
-      const extracted = value.plan ? undefined : await extractCapture(capture.url, capture.kind!, capture.title, value.input.content,
-        this.stopping.signal, this.options.network ?? this.proxy.network());
+      const glance = capture.glance && capture.kind !== "paper" ? this.glances.get(capture.glance, capture.owner) : undefined;
+      const extracted = value.plan ? undefined : glance ? await this.glanceOriginal(glance, capture)
+        : await extractCapture(capture.url, capture.kind!, capture.title, value.input.content,
+          this.stopping.signal, this.options.network ?? this.proxy.network());
       await this.exclusive(async () => {
         if (!value.plan) {
           const now = this.now();
           const entityId = newId(extracted!.note.kind === "paper" ? "pap" : "src", now, randomBytes);
-          value.plan = await this.files.prepare(capture, extracted!, entityId, now);
+          value.plan = await this.files.prepare(capture, extracted!, entityId, now, glance && {
+            captured: glance.captured,
+            glance: { id: glance.id, app: glance.app, window: glance.window_title, screenshot: glance.image?.purged ? undefined : glance.image?.file,
+              pointing: glance.pointing.method },
+          });
           this.state.put(value);
         }
         const plan = value.plan;
         await this.files.publish(capture, plan);
         const configured = !!this.state.binding(capture.owner, "knowledge.summary");
         value.ownsEntity ??= plan.entityBytes !== undefined;
-        value.plan = undefined;
         value.summary = "card";
         this.hub.db.transaction(() => {
+          value.plan = undefined;
           const ready = this.update(value, {
             state: "ready", entity: plan.entity, title: plan.entity.title, original: plan.original, error: undefined,
             card: configured ? "pending" : capture.ai_note ? capture.card : "none",
           });
+          if (glance && ready.entity?.id) {
+            this.glances.transfer(glance.id, ready.id, ready.entity.id, this.hub.recoveryIdentity(capture.owner).actor,
+              () => this.state.get(ready.id, capture.owner).capture.entity?.id === ready.entity!.id);
+          }
           this.hub.audit(this.hub.recoveryIdentity(capture.owner), "inbox.extract", "allow", undefined, `ready:${capture.id}`);
-          this.onReady?.(ready);
+          this.onReady(ready);
         })();
       });
     } catch (cause) {
       const error = cause instanceof CaptureFailure ? cause.description() : this.error("extract_failed");
-      this.update(value, { state: "failed", error });
+      this.update(this.state.get(capture.id, capture.owner), { state: "failed", error });
       this.hub.audit(this.hub.recoveryIdentity(capture.owner), "inbox.extract", "allow", undefined, error.code);
     }
   }
@@ -314,7 +375,7 @@ export class Inbox {
       const revision = existing ? (await readKnowledgeDocument(this.config.vault, id, this.indexOptions)).revision : undefined;
       if (!revision && capture.ai_note) throw inboxMissing();
       const provider = this.options.model ? this.options.model(owner, binding.profile) : this.ai.model(owner, binding.profile);
-      const input = await summarizeOriginal(this.config, capture, original.body, value.summary ?? "card", provider, this.stopping.signal);
+      const input = await summarizeOriginal(this.config, capture, original.body, value.summary ?? "card", provider, this.stopping.signal, value.glanceReason);
       await this.exclusive(async () => {
         const current = this.state.binding(owner, "knowledge.summary");
         if (current?.profile !== binding.profile || current.revision !== binding.revision) throw inboxConflict();

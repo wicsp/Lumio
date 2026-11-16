@@ -10,6 +10,7 @@ import type { BusinessModules } from "./modules.ts";
 import { HubError } from "./errors.ts";
 import type { HubStore, Identity } from "./store.ts";
 import type { authorize } from "./authorize.ts";
+import { GLANCE_ROUTES } from "./glances.ts";
 import { INBOX_ROUTES } from "./inbox.ts";
 import { NOTICE_ROUTES } from "./notices.ts";
 import { ORIGINAL_CAPABILITY_NAME } from "@lumio/schema";
@@ -19,6 +20,7 @@ import { updateRuntime } from "./runtime-updates.ts";
 
 export const V2_ROUTES = [
   ...INBOX_ROUTES,
+  ...GLANCE_ROUTES,
   { operation: "security.review", method: "POST", pattern: /^\/v2\/security\/review$/, path: "/v2/security/review" },
   ...NOTICE_ROUTES,
   { operation: "explorations.read", method: "GET", pattern: /^\/v2\/explorations$/, path: "/v2/explorations" },
@@ -101,6 +103,11 @@ export async function handleV2(request: Request, server: Pick<Bun.Server<undefin
     }
     if (route.operation === "notices.read" || route.operation === "notices.command") {
       const response = await modules.notices.handle(request, route.operation, identity);
+      audited = true;
+      return response;
+    }
+    if (route.operation === "glance.create" || route.operation === "glance.read" || route.operation === "glance.delete") {
+      const response = await modules.glances.handle(request, identity, id);
       audited = true;
       return response;
     }
@@ -317,8 +324,15 @@ export async function handleV2(request: Request, server: Pick<Bun.Server<undefin
     const conversation = parsed.data.conversation && modules.assistant.detail(parsed.data.conversation, owner).conversation;
     const native = conversation ? conversation.native_session : undefined;
     const main = !!conversation && !native && modules.assistantMain.isMain(owner, conversation.id);
-    if (parsed.data.focus && !main) throw new HubError("INVALID", { key: "v2.invalid_assistant_request_parameters", args: [] });
-    if (parsed.data.glance) throw new HubError("INVALID", { key: "v2.invalid_assistant_request_parameters", args: [] }); // 对话里的所见在 C1-2 实现（ADR 0066）
+    if ((parsed.data.focus || parsed.data.glance) && !main) throw new HubError("INVALID", { key: "v2.invalid_assistant_request_parameters", args: [] });
+    if (parsed.data.glance) {
+      const glance = modules.glances.get(parsed.data.glance, owner);
+      const receipt = modules.assistantStore.receipt(owner, parsed.data.request_id);
+      const replay = conversation && receipt && modules.assistantStore.userMessage(conversation.id, receipt.turn);
+      if (glance.used_by.message && glance.used_by.message !== (replay ? replay.id : undefined)) {
+        throw new HubError("CONFLICT", { key: "glance.conflict", args: [] });
+      }
+    }
     const profile = parsed.data.profile ?? (conversation ? conversation.profile : undefined);
     if (main && profile) {
       const selected = modules.ai.get(owner, profile);

@@ -37,7 +37,8 @@ export class SqliteArtifacts {
       key TEXT NOT NULL UNIQUE, status TEXT NOT NULL CHECK(status IN ('staged','ready')), record TEXT NOT NULL CHECK(json_valid(record)));
       CREATE INDEX IF NOT EXISTS storage_artifacts_owner ON storage_artifacts(owner_module,owner_id,status);
       CREATE TABLE IF NOT EXISTS storage_run_events (event TEXT PRIMARY KEY, artifact TEXT NOT NULL, run TEXT NOT NULL, type TEXT NOT NULL, time TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS storage_run_events_indexed (artifact TEXT PRIMARY KEY);`);
+      CREATE TABLE IF NOT EXISTS storage_run_events_indexed (artifact TEXT PRIMARY KEY);
+      CREATE TABLE IF NOT EXISTS storage_file_removals (key TEXT PRIMARY KEY);`);
   }
   /**
    * 按日志事件 ID 找到它所在的运行与归档文件。每份已归档的运行日志只扫描一次，结果存进派生表；
@@ -107,6 +108,25 @@ export class SqliteArtifacts {
         .run(target.module, target.id, JSON.stringify(updated), id);
       return updated;
     }).immediate();
+  }
+  /** Hide a captured file immediately; remove its bytes after the caller's transaction commits. */
+  removeCaptureFile(id: string): void {
+    const artifact = this.get(id);
+    if (artifact.owner.module !== "hub" && artifact.owner.module !== "knowledge") {
+      throw new StorageError("INVALID", { key: "artifacts.invalid_ownership_transfer", args: [] });
+    }
+    this.db.transaction(() => {
+      this.db.query("INSERT INTO storage_file_removals(key) VALUES(?)").run(artifact.key);
+      this.db.query("DELETE FROM storage_artifacts WHERE id=?").run(id);
+    })();
+  }
+  async sweepCaptureFiles(): Promise<void> {
+    const pending = this.db.query<{ key: string }, []>("SELECT key FROM storage_file_removals").all();
+    for (const { key } of pending) {
+      try { await rm(await safeStoredFile(this.root, key)); }
+      catch (cause) { if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause; }
+      this.db.query("DELETE FROM storage_file_removals WHERE key=?").run(key);
+    }
   }
   stage(input: unknown): StoredArtifact {
     const parsed = StoredArtifact.safeParse(input);

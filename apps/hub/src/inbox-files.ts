@@ -10,7 +10,7 @@ import {
   FileKnowledgeRepository, openVaultGit, readKnowledgeDocument, readOriginalFile, saveNewNote, updateIndex,
   vaultFileAt, writeFileAtomic, writeOriginal,
 } from "@lumio/storage";
-import { AiNote, Paper, Source, type Capture, type KnowledgeAiNoteCreateArgs, type NoteRef, type ReadingStatus } from "@lumio/schema";
+import { AiNote, Paper, Source, type Capture, type KnowledgeAiNoteCreateArgs, type NoteRef, type OriginalFrontmatter, type ReadingStatus } from "@lumio/schema";
 import type { HubConfig } from "./config.ts";
 import type { Extracted } from "./inbox-extract.ts";
 import { CaptureFailure } from "./inbox-fetch.ts";
@@ -21,7 +21,7 @@ export interface CapturePlan {
   entity: NoteRef;
   entityBytes?: string;
   original: string;
-  extraction: { body: string; extractor: string; lang?: string; captured: string };
+  extraction: { body: string; extractor: string; lang?: string; captured: string; glance?: OriginalFrontmatter["glance"] };
 }
 
 export class InboxFiles {
@@ -32,9 +32,9 @@ export class InboxFiles {
     this.options = { stateDir: config.stateDir };
   }
 
-  async prepare(capture: Capture, extracted: Extracted, id: string, now: Date): Promise<CapturePlan> {
+  async prepare(capture: Capture, extracted: Extracted, id: string, now: Date, provenance?: Pick<OriginalFrontmatter, "glance" | "captured">): Promise<CapturePlan> {
     const note = extracted.note, captured = now.toISOString();
-    const extraction = { body: extracted.body, extractor: extracted.extractor, lang: extracted.lang, captured };
+    const extraction = { body: extracted.body, extractor: extracted.extractor, lang: extracted.lang, captured, ...provenance };
     if (capture.entity?.id && capture.original) {
       const { document } = await readKnowledgeDocument(this.vault, capture.entity.id, this.options);
       await this.noteBytes(document.note);
@@ -66,7 +66,7 @@ export class InboxFiles {
       }
       throw new CaptureFailure("extract_failed");
     }
-    const metadata = Source.parse({ id, type: "source", title: note.title, kind: capture.kind === "podcast" ? "podcast" : kind,
+    const metadata = Source.parse({ id, type: "source", title: note.title, kind: capture.kind === "podcast" || capture.kind === "text" ? capture.kind : kind,
       status, url: capture.url, site: "site" in note ? note.site : undefined, created: captured, updated: captured });
     const entity = { id, type: metadata.type, title: metadata.title, path: `${entityDirectory("source")}/${aiNoteFileName(metadata.title, id)}.md` };
     return { entity, original: originalPath(entity), extraction, entityBytes: render(metadata, template) };

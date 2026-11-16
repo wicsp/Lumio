@@ -25,6 +25,8 @@ import { AgentTarget, RESPONSE_REASONS, type Job, type WorkCommandResult, type A
 import { mergeStageGrant, PlanDispatchUnavailable, WorkService } from "@lumio/work";
 import type { AssistantContext, AssistantModel, AssistantTool } from "@lumio/assistant";
 import { AssistantMainConversations } from "./assistant-main.ts";
+import { glanceChat } from "./glance-chat.ts";
+import type { Glances } from "./glances.ts";
 import { WorkbenchAssistant } from "./workbench-assistant.ts";
 import { WorkbenchTools } from "./workbench-tools.ts";
 import { FileKnowledgeRepository, SqliteWorkStore, SqliteAssistantStore, SqliteRoutineStore, SqliteArtifacts } from "@lumio/storage";
@@ -79,6 +81,7 @@ export class BusinessModules {
   aiNotes?: AiNotes;
   trash!: Trash;
   inbox!: Inbox;
+  glances!: Glances;
   assistantConfig!: AssistantConfiguration;
   readonly assistantStore: SqliteAssistantStore;
   readonly routineStore: SqliteRoutineStore;
@@ -181,6 +184,10 @@ export class BusinessModules {
     this.native=new NativeAssistant(this.ai.store,this,store,config,{ fetch: options.quotaFetch, now });
     const assistantContext: AssistantContext = {
       text: msg, now, id, toolActor: store.assistantActor(),
+      glance: {
+        claim: (owner, glance, message) => { this.glances.claim(glance, owner, "message", message); },
+        context: (owner, glance, message) => glanceChat(this.glances.get(glance, owner), message, this.inbox),
+      },
       resolveModel: (profile, owner) => this.ai.model(owner, profile),
       workbench: new AssistantWorkbenchAnchors(this, store, this.assistantMain, this.notices),
       native: {
