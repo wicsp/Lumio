@@ -16,7 +16,7 @@ test("runtime list renders online/offline, last_seen, engines and tags, with sch
   for (const online of [true, false]) {
     const body = [{ ...info, online }];
     const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(request) {
-      expect(new URL(request.url).pathname).toBe("/v1/runtimes");
+      expect(new URL(request.url).pathname).toBe("/v2/execution/runtimes");
       expect(request.headers.get("authorization")).toBe("Bearer synthetic-token");
       return Response.json(body);
     } });

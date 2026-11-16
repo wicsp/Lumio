@@ -11,7 +11,7 @@ test("session requests are same-origin, omit ambient credentials and close their
   let captured:RequestInit|undefined,url="";
   browser(async(input,init)=>{url=String(input);captured=init;return Response.json([]);});
   const session=createSession("synthetic-human-token",()=>{});expect(await session.client.actors()).toEqual([]);
-  expect(url).toBe("http://127.0.0.1:4317/hub/v1/actors");expect(captured?.credentials).toBe("omit");expect(captured?.cache).toBe("no-store");expect(new Headers(captured?.headers).get("authorization")).toBe("Bearer synthetic-human-token");
+  expect(url).toBe("http://127.0.0.1:4317/hub/v2/system/actors");expect(captured?.credentials).toBe("omit");expect(captured?.cache).toBe("no-store");expect(new Headers(captured?.headers).get("authorization")).toBe("Bearer synthetic-human-token");
   session.close();expect(captured?.signal?.aborted).toBe(true);
 });
 test("late 401 from a closed session cannot invalidate its replacement",async()=>{
@@ -35,5 +35,5 @@ test("a page served by the Hub calls the Hub's API at the same-origin root witho
  let captured:RequestInit|undefined,url="";browser(async(input,init)=>{url=String(input);captured=init;return Response.json([]);});
  page({"lumio-api-base":""});
  const session=createSession("synthetic-token",()=>{});await session.client.actors();
- expect(url).toBe("http://127.0.0.1:4317/v1/actors");expect(new Headers(captured?.headers).get("x-lumio-hub")).toBeNull();session.close();
+ expect(url).toBe("http://127.0.0.1:4317/v2/system/actors");expect(new Headers(captured?.headers).get("x-lumio-hub")).toBeNull();session.close();
 });

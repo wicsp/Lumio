@@ -9,7 +9,7 @@ import { printChecks, timedFetch, type Check } from "./diagnostics.ts";
 
 export interface SelftestResult extends Check { elapsed_ms: number; job?: string }
 export interface SelftestOptions {
-  url: string; token: string; runtime?: string; agents?: string[]; notes?: boolean; vault?: string;
+  url: string; token: string; runtime?: string; agents?: string[];
   fetch?: typeof globalThis.fetch; now?: () => number; sleep?: (ms: number) => Promise<void>;
   timeoutMs?: number; cancelMs?: number; pollMs?: number;
   onResult?: (result: SelftestResult) => void;
@@ -113,7 +113,7 @@ export async function selftest(options: SelftestOptions): Promise<SelftestResult
 }
 export async function runSelftest(args: string[], log: (line: string) => void): Promise<number> {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
-    runtime: { type: "string" }, agents: { type: "string" }, notes: { type: "boolean" }, json: { type: "boolean" },
+    runtime: { type: "string" }, agents: { type: "string" }, json: { type: "boolean" },
   } });
   if (positionals.length) throw new SelftestError(msg("selftest.usage_lumio_selftest_runtime_name_agents_codex_claude_code_pi_notes"));
   let config: ReturnType<typeof readCliConfig>;
@@ -122,7 +122,7 @@ export async function runSelftest(args: string[], log: (line: string) => void): 
     const failed: SelftestResult[] = [{ name: msg("selftest.selftest_configuration"), ok: false, elapsed_ms: 0, problem: msg("selftest.configuration_missing_or_could_not_be_parsed"), fix: msg("selftest.run_lumio_doctor") }];
     return printChecks(failed, Boolean(values.json), log);
   }
-  const results = await selftest({ ...hubCredentials(config), runtime: values.runtime, agents: values.agents?.split(","), notes: values.notes, vault: config.vault,
+  const results = await selftest({ ...hubCredentials(config), runtime: values.runtime, agents: values.agents?.split(","),
     onResult: values.json ? undefined : (r) => log(msg("selftest.seconds", r.ok ? "✓" : "✗", r.name, (r.elapsed_ms / 1000).toFixed(1), r.job ? ` ${r.job}` : "", r.problem ? `${msg(": ")}${r.problem}` : "", r.fix ? ` → ${r.fix}` : "")) });
   if (values.json) return printChecks(results, true, log);
   log(msg("selftest.checks_passed", results.filter((r) => r.ok).length, results.length));

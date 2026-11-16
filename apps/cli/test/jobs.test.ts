@@ -18,22 +18,22 @@ test("all job CLI commands validate JSON and preserve argv; show renders offline
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(req) {
     const url = new URL(req.url); expect(req.headers.get("Authorization")).toBe("Bearer synthetic-token");
     seen.push({ path: url.pathname + url.search, method: req.method, ...(req.method === "POST" ? { body: await req.json() } : {}) });
-    if (url.pathname === "/v1/runtimes") return Response.json([{ actor: job.spec.runtime, update: null, registration: { version: null, platform: null, install: null, protocol_version: 2, name: "server", engines: [], tags: [], max_concurrent: 1 }, last_seen: job.spec.created, online: false }]);
+    if (url.pathname === "/v2/execution/runtimes") return Response.json([{ actor: job.spec.runtime, update: null, registration: { version: null, platform: null, install: null, protocol_version: 2, name: "server", engines: [], tags: [], max_concurrent: 1 }, last_seen: job.spec.created, online: false }]);
     return Response.json(req.method === "GET" && url.pathname === "/v2/execution/jobs" ? [job] : job);
   } });
   const url = `http://127.0.0.1:${server.port}`;
   try {
     let result = await cli(["submit", "--runtime", "server", "--workdir", "~/x", "--timeout", "30m", "--gpus", "0,1", "--json", "--", "/usr/bin/test", "--literal", "$(touch no)"], url);
     expect(result.code).toBe(0); expect(Job.parse(JSON.parse(result.stdout))).toEqual(job);
-    expect(seen.pop()).toEqual({ path: "/v1/jobs", method: "POST", body: { runtime: "server", run: { kind: "command", argv: ["/usr/bin/test", "--literal", "$(touch no)"] }, workdir: "~/x", timeout_seconds: 1800, gpus: [0, 1] } });
+    expect(seen.pop()).toEqual({ path: "/v2/execution/jobs", method: "POST", body: { runtime: "server", run: { kind: "command", argv: ["/usr/bin/test", "--literal", "$(touch no)"] }, workdir: "~/x", timeout_seconds: 1800, gpus: [0, 1] } });
     result = await cli(["submit", "--runtime", "server", "--json", "--", "/usr/bin/test"], url);
     expect(result.code).toBe(0); expect(seen.pop()!.body).toMatchObject({ workdir: "~", timeout_seconds: 7200 });
     for (const action of ["show", "cancel"] as const) {
       result = await cli([action, job.spec.id, "--json"], url); expect(result.code).toBe(0); expect(Job.parse(JSON.parse(result.stdout))).toEqual(job);
-      expect(seen.pop()).toEqual({ path: `/v1/jobs/${job.spec.id}${action === "cancel" ? "/cancel" : ""}`, method: action === "cancel" ? "POST" : "GET", ...(action === "cancel" ? { body: {} } : {}) });
+      expect(seen.pop()).toEqual({ path: `/v2/execution/jobs/${job.spec.id}${action === "cancel" ? "/cancel" : ""}`, method: action === "cancel" ? "POST" : "GET", ...(action === "cancel" ? { body: {} } : {}) });
     }
     result = await cli(["list", "--status", "queued", "--json"], url); expect(result.code).toBe(0); expect(Job.array().parse(JSON.parse(result.stdout))).toEqual([job]);
-    expect(seen.pop()!.path).toBe("/v2/execution/jobs?status=queued");
+    expect(seen.pop()!.path).toBe("/v2/execution/jobs?status=queued&limit=20");
     result = await cli(["show", job.spec.id], url); expect(result.code).toBe(0); expect(result.stdout).toContain("执行器失联"); expect(result.stderr).toBe("");
     const before = seen.length;
     for (const args of [["submit", "--runtime", "server"], ["submit", "--runtime", "server", "--timeout", "0m", "--", "x"], ["submit", "--runtime", "server", "--gpus", "-1", "--", "x"], ["list", "--status", "bad"], ["list", "extra"], ["show", "missing"], ["cancel", job.spec.id, "--status", "done"]]) {

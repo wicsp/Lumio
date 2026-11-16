@@ -22,7 +22,7 @@ test("join validates both contracts, persists private env and current shell PATH
   const logs: string[] = []; let installed = false;
   const fetcher = (async (url: string, init: RequestInit) => {
     if (String(url).endsWith("/health")) return Response.json({ ok: true, version: "0.0.0-dev" });
-    expect(String(url)).toBe("http://synthetic.example/v1/runtime/join"); expect(init.redirect).toBe("error"); expect(new Headers(init.headers).has("Authorization")).toBe(false);
+    expect(String(url)).toBe("http://synthetic.example/v2/setup/runtime/join"); expect(init.redirect).toBe("error"); expect(new Headers(init.headers).has("Authorization")).toBe(false);
     expect(JSON.parse(String(init.body))).toEqual({ code }); return Response.json(joined);
   }) as unknown as typeof fetch;
   await joinRuntime(["--hub", "http://synthetic.example/", "--code", code], { home, env: { PATH: '/agents/with spaces:$HOME:`literal`:"quoted":\\bin' }, fetch: fetcher, log: (l) => logs.push(l), install: async (opts) => { expect(opts.home).toBe(home); installed = true; } });

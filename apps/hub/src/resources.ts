@@ -80,7 +80,7 @@ export class Resources {
           break; // Legacy vault notes can use the same IDs as database tasks and projects.
         }
         case "job": {
-          if (!allowed("job.show")) return unavailable;
+          if (!allowed("execution.read")) return unavailable;
           const job = this.store.executionStore.get(id);
           if (!job) return unavailable;
           const parent = job.spec.source?.task ?? job.spec.source?.routine;

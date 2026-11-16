@@ -31,7 +31,7 @@ const client = () => ({
   workTask: (id: string) => checked(`/v2/work/tasks/${id}`, WorkTaskDetail),
   undoAssistantTool: (id: string, request_id: string) => checked(`/v2/assistant/tools/${id}/undo`, WorkCommandResult, { request_id }),
   workAttention: () => checked("/v2/work/attention", WorkAttention.array()),
-  job: (id: string) => checked(`/v1/jobs/${id}`, Job),
+  job: (id: string) => checked(`/v2/execution/jobs/${id}`, Job),
   assistantConfig: () => checked("/v2/assistant/config", AssistantConfigView),
   updateAssistantConfig: (body: unknown) => checked("/v2/assistant/config", AssistantConfigView, body, "PUT"),
   clearAssistantConfig: () => checked("/v2/assistant/config", AssistantConfigView, undefined, "DELETE"),
@@ -127,9 +127,9 @@ test("HTTP agents can read and write low-risk fields but cannot dispatch, approv
     expect(response.status).toBe(403); expect(ApiError.parse(await response.json()).error.reason).toMatch(/^agent-/);
   }
   const proposal = hub.store.createProposal({ op: "exec.privileged", args: { runtime: "act_00000000000000000000000001", job: "job_00000000000000000000000001", argv: ["/bin/true"] } }, "synthetic", hub.store.authenticate(`Bearer ${human}`)!.actor.id);
-  const denied = await api(`/v1/proposals/${proposal.id}/accept`, {}, agent); expect(denied.status).toBe(403);
+  const denied = await api(`/v2/approval/proposals/${proposal.id}/accept`, {}, agent); expect(denied.status).toBe(403);
   expect(ApiError.parse(await denied.json()).error.reason).toBe("agent-cannot-decide-proposals");
-  for (const path of ["/v2/work/tasks", "/v2/work/projects", "/v2/work/attention", "/v2/execution/routines", "/v1/jobs"]) expect((await api(path, undefined, agent)).status).toBe(200);
+  for (const path of ["/v2/work/tasks", "/v2/work/projects", "/v2/work/attention", "/v2/execution/routines", "/v2/execution/jobs"]) expect((await api(path, undefined, agent)).status).toBe(200);
   for (const def of CAPABILITIES.filter(value => value.kind === "write")) expect(def.result).toBeDefined();
 });
 
@@ -188,8 +188,8 @@ test("private reads require the in-process tool closure and a human owner; each 
     expect(agentCalls[0]?.private_read).not.toBe(true);
     expect(JSON.stringify(agentCalls)).not.toContain("私密发现");
   }
-  expect((await api("/v1/notes/Private", undefined, agent)).status).toBe(404);
-  expect((await api("/v1/notes/Private?include_private=true", undefined, agent)).status).toBe(403);
+  expect((await api("/v2/knowledge/notes/Private", undefined, agent)).status).toBe(404);
+  expect((await api("/v2/knowledge/notes/Private?include_private=true", undefined, agent)).status).toBe(403);
   const injection = await api("/v2/work/tasks?humanConversation=true", undefined, agent); expect(injection.status).toBe(400);
   // Private reads never become implicit memory.
   expect(await hub.modules.assistant.memories(hub.store.authenticate(`Bearer ${human}`)!.actor.id)).toEqual([]);
@@ -440,8 +440,8 @@ test("assistant task tools create proposals that take effect only after human ap
     expect(before.executions).toEqual([]);
     expect(before.task.revision).toBe(args.expected_revision);
     expect(before.task.plan).toBeUndefined();
-    expect((await api("/v1/proposals/" + result.proposal + "/accept", {}, agent)).status).toBe(403);
-    expect((await api("/v1/proposals/" + result.proposal + "/accept", {})).status).toBe(200);
+    expect((await api("/v2/approval/proposals/" + result.proposal + "/accept", {}, agent)).status).toBe(403);
+    expect((await api("/v2/approval/proposals/" + result.proposal + "/accept", {})).status).toBe(200);
   }
   const dispatched = await client().workTask(delegation.id);
   expect(dispatched.executions).toHaveLength(1);
@@ -482,8 +482,8 @@ test("agent delegation proposes once; human approval executes as author with the
   expect(hub.modules.work.detail(created.id).comments).toEqual([]);
   const before = hub.store.proposal(proposed.proposal)!;
   expect(before.operation).toMatchObject({ op: "work.command", args: { request_id, operation: { args: { expected_revision: 1 } } } });
-  expect((await api(`/v1/proposals/${proposed.proposal}/accept`, {}, agent)).status).toBe(403);
-  expect((await api(`/v1/proposals/${proposed.proposal}/accept`, {})).status).toBe(200);
+  expect((await api(`/v2/approval/proposals/${proposed.proposal}/accept`, {}, agent)).status).toBe(403);
+  expect((await api(`/v2/approval/proposals/${proposed.proposal}/accept`, {})).status).toBe(200);
   const identity = hub.store.authenticate(`Bearer ${agent}`)!, humanId = hub.store.authenticate(`Bearer ${human}`)!.actor.id;
   const detail = WorkTaskDetail.parse(await client().workTask(created.id));
   expect(detail.executions).toHaveLength(1); expect(detail.task.turn).toMatchObject({ holder: "pi@server", reason: "working" });
@@ -494,7 +494,7 @@ test("agent delegation proposes once; human approval executes as author with the
   const audits = hub.store.db.query<{ actor_id: string; operation: string }, [string]>("SELECT actor_id,operation FROM audit WHERE proposal_id=?").all(proposed.proposal);
   expect(audits.some(row => row.actor_id === identity.actor.id && row.operation.includes(humanId))).toBe(true);
   expect(audits.some(row => row.actor_id === humanId && row.operation === "proposal.accept")).toBe(true);
-  expect((await api(`/v1/proposals/${proposed.proposal}/accept`, {})).status).toBe(409);
+  expect((await api(`/v2/approval/proposals/${proposed.proposal}/accept`, {})).status).toBe(409);
   expect(WorkCommandResult.parse(await (await api("/v2/work/commands", payload, agent)).json())).toEqual(proposed);
   expect(hub.modules.work.detail(created.id).executions).toHaveLength(1);
 });
@@ -508,10 +508,10 @@ test("changed revisions conflict on delegation and plan approval; rejected or fa
     const proposed = WorkCommandResult.parse(await (await api("/v2/work/commands", { request_id: requestId(), operation }, agent)).json());
     if (proposed.kind !== "proposal") throw new Error("proposal expected");
     await command("work.task.update", { task: created.id, expected_revision: revision, patch: { title: `Synthetic revision ${revision}` } });
-    const response = await api(`/v1/proposals/${proposed.proposal}/accept`, {});
+    const response = await api(`/v2/approval/proposals/${proposed.proposal}/accept`, {});
     expect(response.status).toBe(409); expect(ApiError.parse(await response.json()).error.code).toBe("CONFLICT");
     expect(hub.store.proposal(proposed.proposal)!.status).toBe("pending");
-    expect((await api(`/v1/proposals/${proposed.proposal}/reject`, {})).status).toBe(200);
+    expect((await api(`/v2/approval/proposals/${proposed.proposal}/reject`, {})).status).toBe(200);
   }
   const detail = hub.modules.work.detail(created.id);
   expect(detail.executions).toEqual([]); expect(detail.comments).toEqual([]); expect(detail.task.plan).toBeUndefined();
@@ -523,7 +523,7 @@ test("plan approval stores the approved plan without starting a round and keeps 
     plan: { stages: [{ kind: "agent", id: "implement", agent: "pi@server", instruction: "Synthetic instructions" }] } } };
   const result = WorkCommandResult.parse(await (await api("/v2/work/commands", { request_id, operation }, agent)).json());
   if (result.kind !== "proposal") throw new Error("proposal expected");
-  expect((await api(`/v1/proposals/${result.proposal}/accept`, {})).status).toBe(200);
+  expect((await api(`/v2/approval/proposals/${result.proposal}/accept`, {})).status).toBe(200);
   const detail = hub.modules.work.detail(created.id), humanId = hub.store.authenticate(`Bearer ${human}`)!.actor.id;
   expect(detail.task.plan).toMatchObject({ stage: "implement", rounds: 0, approved: { by: humanId, proposal: result.proposal } });
   expect(detail.task.updated_by).toBe(hub.store.authenticate(`Bearer ${agent}`)!.actor.id);

@@ -24,10 +24,10 @@ async function eventually(check: () => boolean | Promise<boolean>) {
   while (Date.now() < deadline) { if (await check()) return; if (daemon && daemon.exitCode !== null) throw Error(`runtime exited: ${await errors}`); await Bun.sleep(25); }
   throw Error("timed out");
 }
-async function get(id: string) { return Job.parse(await (await api(`/v1/jobs/${id}`)).json()); }
+async function get(id: string) { return Job.parse(await (await api(`/v2/execution/jobs/${id}`)).json()); }
 async function proposal() {
   let p: Proposal | undefined;
-  await eventually(async () => { p = Proposal.array().parse(await (await api("/v1/proposals")).json())[0]; return !!p; }); return p!;
+  await eventually(async () => { p = Proposal.array().parse(await (await api("/v2/approval/proposals")).json())[0]; return !!p; }); return p!;
 }
 async function calls() { try { return (await readFile(join(temp, "calls"), "utf8")).trim().split("\n").filter(Boolean); } catch { return []; } }
 async function start(timeout = "5", supported = true) {
@@ -38,10 +38,10 @@ async function start(timeout = "5", supported = true) {
     FAKE_RUNTIME_MAIN: main, FAKE_BUN: process.execPath, FAKE_RUNTIME_TOKEN_HASH: createHash("sha256").update(runtimeToken).digest("hex"),
   }, stdout: "ignore", stderr: "pipe" });
   errors = new Response(daemon.stderr as ReadableStream<Uint8Array>).text();
-  await eventually(async () => (await (await api("/v1/runtimes")).json() as unknown[]).length === 1);
+  await eventually(async () => (await (await api("/v2/execution/runtimes")).json() as unknown[]).length === 1);
 }
 async function submit(prompt = "normal") {
-  const response = await api("/v1/jobs", { runtime: "server", workdir: temp, run: { kind: "agent", engine: "pi", prompt } });
+  const response = await api("/v2/execution/jobs", { runtime: "server", workdir: temp, run: { kind: "agent", engine: "pi", prompt } });
   expect(response.status).toBe(200); return Job.parse(await response.json());
 }
 async function done(id: string) { await eventually(async () => !!(await get(id)).result); return (await get(id)).result!; }
@@ -70,21 +70,21 @@ afterEach(async () => { if (daemon) { daemon.kill("SIGTERM"); await daemon.exite
 test("approval reaches fake root helper once and caller receives exact output and exit code; execution report is audited", async () => {
   await start(); const j = await submit(); const p = await proposal();
   expect(await calls()).toHaveLength(0);
-  expect((await api(`/v1/proposals/${p.id}/accept`, {})).status).toBe(200);
+  expect((await api(`/v2/approval/proposals/${p.id}/accept`, {})).status).toBe(200);
   const result = await done(j.spec.id); expect(result.exit_code).toBe(7);
   const report = JSON.parse(result.report!);
   expect(report).toMatchObject({ out: "hello world\n", code: 7, runtimeTokenLeaked: false, roundTokenReceived: true }); expect(report.err).toContain("helper stderr"); expect(report.err).toContain("waiting for user approval");
   const received = await calls(); expect(received).toHaveLength(1); expect(PrivilegedApproval.parse(JSON.parse(received[0]!)).proposal).toBe(p.id);
   await eventually(() => !!hub.store.db.query("SELECT report FROM privileged_approvals WHERE report IS NOT NULL").get());
   const audits = JSON.stringify(hub.store.db.query("SELECT * FROM audit").all()); expect(audits).not.toContain("helper stderr"); expect(audits).toContain('exit_code');
-  expect((await api(`/v1/proposals/${p.id}/accept`, {})).status).toBe(409); expect(await calls()).toHaveLength(1);
+  expect((await api(`/v2/approval/proposals/${p.id}/accept`, {})).status).toBe(409); expect(await calls()).toHaveLength(1);
 });
 
 test("reject and timeout return failure without executing; late approval after timeout cannot execute", async () => {
-  await start("0.5"); const j = await submit(); const p = await proposal(); await api(`/v1/proposals/${p.id}/reject`, {});
+  await start("0.5"); const j = await submit(); const p = await proposal(); await api(`/v2/approval/proposals/${p.id}/reject`, {});
   const rejected = await done(j.spec.id); expect(JSON.parse(rejected.report!).code).toBe(1); expect(rejected.report).toContain("User rejected");
   const j2 = await submit(); const p2 = await proposal(); const timed = await done(j2.spec.id); expect(JSON.parse(timed.report!).code).toBe(1); expect(timed.report).toContain("timed out");
-  expect((await api(`/v1/proposals/${p2.id}/accept`, {})).status).toBe(409); expect(await calls()).toHaveLength(0);
+  expect((await api(`/v2/approval/proposals/${p2.id}/accept`, {})).status).toBe(409); expect(await calls()).toHaveLength(0);
 });
 
 test("unsupported runtime and outside-job invocation exit 2 without creating proposals", async () => {
@@ -111,14 +111,14 @@ test("unsupported runtime and outside-job invocation exit 2 without creating pro
 test("job cancellation ends waiting requests and invalidates subsequent human approval", async () => {
   await start(); const j = await submit(); const p = await proposal();
   expect(hub.store.runtimes(new Date()).find(runtime => runtime.registration.name === "server")?.registration.features).toContain("privileged_helper");
-  await api(`/v1/jobs/${j.spec.id}/cancel`, {}); expect(["cancelled", "failed"]).toContain((await done(j.spec.id)).status);
-  expect((await api(`/v1/proposals/${p.id}/accept`, {})).status).toBe(409); expect(await calls()).toHaveLength(0);
+  await api(`/v2/execution/jobs/${j.spec.id}/cancel`, {}); expect(["cancelled", "failed"]).toContain((await done(j.spec.id)).status);
+  expect((await api(`/v2/approval/proposals/${p.id}/accept`, {})).status).toBe(409); expect(await calls()).toHaveLength(0);
 });
 
 
 test("execution report survives a Hub outage and runtime restart through its durable outbox", async () => {
   await start(); const j = await submit(); const p = await proposal();
-  await api(`/v1/proposals/${p.id}/accept`, {});
+  await api(`/v2/approval/proposals/${p.id}/accept`, {});
   await eventually(async () => (await calls()).length === 1);
   const port = hub.server.port!; await hub.stop();
   await Bun.sleep(600);

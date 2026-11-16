@@ -14,11 +14,11 @@ test("proposal rendering uses actors for author/decider names and falls back to 
     const calls: string[] = [];
     const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(request) {
       const path = new URL(request.url).pathname; calls.push(path);
-      if (path === "/v1/actors") return Response.json(known ? [
+      if (path === "/v2/system/actors") return Response.json(known ? [
         { id: proposal.author, name: "codex", role: "agent", created: proposal.created },
         { id: proposal.decided_by, name: "owner", role: "human", created: proposal.created },
       ] : []);
-      if (path === "/v1/proposals") return Response.json([proposal]);
+      if (path === "/v2/approval/proposals") return Response.json([proposal]);
       return Response.json({ error: { code: "NOT_FOUND", message: "Synthetic missing note" } }, { status: 404 });
     } });
     try {
@@ -26,7 +26,7 @@ test("proposal rendering uses actors for author/decider names and falls back to 
         env: { ...process.env, HOME: cliHome, LUMIO_HUB_URL: `http://127.0.0.1:${server.port}`, LUMIO_TOKEN: "synthetic-token" }, stdout: "pipe", stderr: "pipe",
       });
       const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
-      expect(code).toBe(0); expect(stderr).toBe(""); expect(calls).toContain("/v1/actors");
+      expect(code).toBe(0); expect(stderr).toBe(""); expect(calls).toContain("/v2/system/actors");
       expect(stdout).toContain(`提交者：${known ? "codex" : proposal.author}`);
       expect(stdout).toContain(`决定者：${known ? "owner" : proposal.decided_by}`);
       const op = proposal.operation;
@@ -39,9 +39,9 @@ test("privileged proposal renders the command, runtime, task title, round and re
   const p = Proposal.parse({ ...proposal, operation: { op: "exec.privileged", args: { runtime: proposal.author, job: "job_00000000000000000000000001", argv: ["/bin/echo", "hello world", "$(touch x)"] } } });
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(request) {
     const path = new URL(request.url).pathname;
-    if (path === "/v1/actors") return Response.json([{ id: p.author, name: "server", role: "runtime", created: p.created }]);
-    if (path === "/v1/proposals") return Response.json([p]);
-    if (path.startsWith("/v1/jobs/")) return Response.json({ spec: { protocol_version: 2, id: "job_00000000000000000000000001", lease: "1234567890123456", runtime: p.author,
+    if (path === "/v2/system/actors") return Response.json([{ id: p.author, name: "server", role: "runtime", created: p.created }]);
+    if (path === "/v2/approval/proposals") return Response.json([p]);
+    if (path.startsWith("/v2/execution/jobs/")) return Response.json({ spec: { protocol_version: 2, id: "job_00000000000000000000000001", lease: "1234567890123456", runtime: p.author,
       source: { task: "task_00000000000000000000000001", round: 2 }, run: { kind: "command", argv: ["/bin/true"] }, workdir: "/", timeout_seconds: 30, created: p.created }, status: "running" });
     return Response.json({
       task: { id: "task_00000000000000000000000001", schema_version: 3, type: "task", title: "安装软件", description: "",

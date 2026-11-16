@@ -84,7 +84,7 @@ test("Runtime delivers a permission marker, human approval resumes the same Code
   const first = await dispatch(task.id, { to: "codex@mac" });
   expect(first.spec.run.kind === "agent" && first.spec.run.prompt).toContain("<lumio-permission>git</lumio-permission>");
   await eventually(() => hub.modules.work.task(task.id).turn.reason === "answer");
-  const firstResult = Job.parse(await (await request(`/v1/jobs/${first.spec.id}`)).json());
+  const firstResult = Job.parse(await (await request(`/v2/execution/jobs/${first.spec.id}`)).json());
   expect(firstResult.result).toMatchObject({ permission: { git: true, secrets: ["fixture"] }, session_id: "synthetic-permission-session" });
   expect(firstResult.result?.report).not.toContain("<lumio-permission>");
   const attention = WorkAttention.array().parse(await (await request("/v2/work/attention")).json());
@@ -101,7 +101,7 @@ test("Runtime delivers a permission marker, human approval resumes the same Code
   expect((await send("work.task.grant", grant)).status).toBe(409);
   if (reply.kind !== "job") throw new Error("resumed job expected");
   await eventually(() => hub.modules.work.task(task.id).turn.reason === "review");
-  const last = Job.parse(await (await request(`/v1/jobs/${reply.job.spec.id}`)).json());
+  const last = Job.parse(await (await request(`/v2/execution/jobs/${reply.job.spec.id}`)).json());
   expect(last.status).toBe("done");
   expect(last.result?.report).toContain("[REDACTED]");
   expect(last.result?.report).not.toContain("synthetic-permission-secret");
@@ -129,7 +129,7 @@ test("deferred approvals survive restart and stay on the approved stage, while r
   const next = await dispatch(task.id);
   expect(next.spec.run).toMatchObject({ permissions: { git: true, access: "full" }, session: { resume: true } });
   await complete(next);
-  const stages = Job.array().parse(await (await request(`/v1/jobs?task=${task.id}`)).json());
+  const stages = Job.array().parse(await (await request(`/v2/execution/jobs?task=${task.id}`)).json());
   expect(stages.at(-1)?.spec.run).toMatchObject({ permissions: { access: "write", git: false } });
 
   const refused = await newTask();

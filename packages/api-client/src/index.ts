@@ -170,7 +170,7 @@ export function createClient(options: { url: string; token?: string; language?: 
     issueAgentToken(input: AgentTokenRequest) { return request("/v2/agents/tokens", {}, AgentTokenIssued, validate(AgentTokenRequest, input)); },
     revokeAgent(input: AgentRevokeRequest) { return request("/v2/agents/revoke", {}, { parse: () => undefined }, validate(AgentRevokeRequest, input)); },
     executionJobs(filter: ExecutionJobListArgs = {}) {
-      return request("/v2/execution/jobs", Object.fromEntries(Object.entries(validate(ExecutionJobListArgs, filter)).filter(([, value]) => value !== undefined).map(([key, value]) => [key, String(value)])), Job.array());
+      return request("/v2/execution/jobs", Object.fromEntries(Object.entries(validate(ExecutionJobListArgs, { limit: 20, ...filter })).filter(([, value]) => value !== undefined).map(([key, value]) => [key, String(value)])), Job.array());
     },
     executionJob(id: string) { return request(`/v2/execution/jobs/${validate(idOf("job"), id)}`, {}, Job); },
     assistantConfig() { return request("/v2/assistant/config", {}, AssistantConfigView); },
@@ -267,39 +267,39 @@ export function createClient(options: { url: string; token?: string; language?: 
         throw transportError("助手连接中断或返回了不合法的事件；请查询已保存的对话，勿自动重试操作", status);
       } finally { await release?.(); }
     },
-    runtimeInvite(name: string) { return request("/v1/runtime-invites", {}, RuntimeInvite, validate(RuntimeInviteRequest, { name })); },
-    clientInvite(name: string) { return request("/v1/client-invites", {}, ClientInvite, validate(ClientInviteRequest, { name })); },
-    clientJoin(code: string) { return request("/v1/client/join", {}, ClientJoin, validate(ClientJoinRequest, { code })); },
-    removeRuntime(name: string) { return request(`/v1/runtimes/${encodeURIComponent(validate(RuntimeName, name))}`, {}, { parse: () => undefined }, undefined, "DELETE"); },
-    submitJob(input: SubmitJobInput) { return request("/v1/jobs", {}, Job, validate(SubmitJob, input)); },
+    runtimeInvite(name: string) { return request("/v2/setup/runtime-invites", {}, RuntimeInvite, validate(RuntimeInviteRequest, { name })); },
+    clientInvite(name: string) { return request("/v2/setup/client-invites", {}, ClientInvite, validate(ClientInviteRequest, { name })); },
+    clientJoin(code: string) { return request("/v2/setup/client/join", {}, ClientJoin, validate(ClientJoinRequest, { code })); },
+    removeRuntime(name: string) { return request(`/v2/execution/runtimes/${encodeURIComponent(validate(RuntimeName, name))}`, {}, { parse: () => undefined }, undefined, "DELETE"); },
+    submitJob(input: SubmitJobInput) { return request("/v2/execution/jobs", {}, Job, validate(SubmitJob, input)); },
     jobs(status?: JobStatus, task?: string, routine?: string) {
-      return request("/v1/jobs", { ...(status === undefined ? {} : { status: validate(JobStatus, status) }), ...(task === undefined ? {} : { task }),
+      return request("/v2/execution/jobs", { ...(status === undefined ? {} : { status: validate(JobStatus, status) }), ...(task === undefined ? {} : { task }),
         ...(routine === undefined ? {} : { routine }) }, Job.array());
     },
-    job(id: string) { return request(`/v1/jobs/${encodeURIComponent(validate(JobSpec.shape.id, id))}`, {}, Job); },
-    cancelJob(id: string) { return request(`/v1/jobs/${encodeURIComponent(validate(JobSpec.shape.id, id))}/cancel`, {}, Job, {}); },
-    runtimes() { return request("/v1/runtimes", {}, RuntimeInfo.array()); },
-    actors() { return request("/v1/actors", {}, Actor.array()); },
-    operation(input: OperationRequest) { return request("/v1/operations", {}, OperationResult, validate(OperationRequest, input)); },
+    job(id: string) { return request(`/v2/execution/jobs/${encodeURIComponent(validate(JobSpec.shape.id, id))}`, {}, Job); },
+    cancelJob(id: string) { return request(`/v2/execution/jobs/${encodeURIComponent(validate(JobSpec.shape.id, id))}/cancel`, {}, Job, {}); },
+    runtimes() { return request("/v2/execution/runtimes", {}, RuntimeInfo.array()); },
+    actors() { return request("/v2/system/actors", {}, Actor.array()); },
+    operation(input: OperationRequest) { return request("/v2/approval/privileged", {}, OperationResult, validate(OperationRequest, input)); },
     targets(args: { online?: boolean } = {}) { const value = validate(ExecutionTargetListArgs, args); return request("/v2/execution/targets", value.online === undefined ? {} : { online: String(value.online) }, ExecutionTarget.array()); },
     withdrawProposal(id: string) { return request(`/v2/approval/proposals/${encodeURIComponent(validate(idOf("prop"), id))}/withdraw`, {}, Proposal, {}); },
-    proposals(status: ProposalStatus = "pending") { return request("/v1/proposals", { status: validate(ProposalStatus, status) }, Proposal.array()); },
-    acceptProposal(id: string) { return request(`/v1/proposals/${encodeURIComponent(id)}/accept`, {}, Proposal, {}); },
-    rejectProposal(id: string) { return request(`/v1/proposals/${encodeURIComponent(id)}/reject`, {}, Proposal, {}); },
+    proposals(status: ProposalStatus = "pending") { return request("/v2/approval/proposals", { status: validate(ProposalStatus, status) }, Proposal.array()); },
+    acceptProposal(id: string) { return request(`/v2/approval/proposals/${encodeURIComponent(id)}/accept`, {}, Proposal, {}); },
+    rejectProposal(id: string) { return request(`/v2/approval/proposals/${encodeURIComponent(id)}/reject`, {}, Proposal, {}); },
     search(query: string, options: SearchOptions = {}) {
-      return request("/v1/search", { q: query, ...queryParams(options),
+      return request("/v2/knowledge/search", { q: query, ...queryParams(options),
         ...(options.type !== undefined ? { type: options.type } : {}),
         ...(options.limit !== undefined ? { limit: String(options.limit) } : {}),
       }, SearchResult);
     },
     show(reference: string, options: QueryOptions = {}) {
-      return request(`/v1/notes/${encodeURIComponent(reference)}`, queryParams(options), NoteDetail);
+      return request(`/v2/knowledge/notes/${encodeURIComponent(reference)}`, queryParams(options), NoteDetail);
     },
     links(reference: string, options: QueryOptions = {}) {
-      return request(`/v1/notes/${encodeURIComponent(reference)}/links`, queryParams(options), LinksResult);
+      return request(`/v2/knowledge/notes/${encodeURIComponent(reference)}/links`, queryParams(options), LinksResult);
     },
     check(options: QueryOptions = {}) {
-      return request("/v1/check", queryParams(options), CheckResult);
+      return request("/v2/knowledge/check", queryParams(options), CheckResult);
     },
   };
 }

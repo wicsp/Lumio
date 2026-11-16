@@ -92,7 +92,7 @@ test("every catalog capability has an executable CLI command returning its resul
   expect(manage("actor", "create", runtimeName, "--role", "runtime").exitCode).toBe(0);
   const runtime = manage("token", "create", runtimeName, "--actor", runtimeName).stdout.toString().trim();
   expect((await fetch(url + "/v1/runtime/register", { method: "POST", headers: { ...auth, Authorization: `Bearer ${runtime}` }, body: JSON.stringify({ protocol_version: 2, name: "server", engines: [{ name: "codex", version: "synthetic", sandbox: "os" }], tags: [], max_concurrent: 1 }) })).status).toBe(200);
-  const submitted = await fetch(url + "/v1/jobs", { method: "POST", headers: auth, body: JSON.stringify({ runtime: "server", run: { kind: "command", argv: ["/bin/true"] } }) });
+  const submitted = await fetch(url + "/v2/execution/jobs", { method: "POST", headers: auth, body: JSON.stringify({ runtime: "server", run: { kind: "command", argv: ["/bin/true"] } }) });
   expect(submitted.status).toBe(200); const job = await submitted.json() as { spec: { id: string } };
   await run("execution.job.show", ["job", "show", job.spec.id]);
   await run("execution.routine.list", ["routine", "list"]);

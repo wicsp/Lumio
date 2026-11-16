@@ -72,7 +72,7 @@ test("agents write versioned AI notes and can only use visible sources", async (
     expect(await f.metadata(initial.note.path)).toMatchObject({ generated_by: f.agent.actor.id, derived_from: args.derived_from });
     expect(KnowledgeAiNoteResult.parse(await (await f.note(create, args, f.agent.token, requestId)).json())).toEqual(initial);
     expect((await f.note(create, { ...args, title: "Different request" }, f.agent.token, requestId)).status).toBe(409);
-    const read = NoteDetail.parse(await (await f.api(`/v1/notes/${id}`, f.agent.token)).json());
+    const read = NoteDetail.parse(await (await f.api(`/v2/knowledge/notes/${id}`, f.agent.token)).json());
     expect(read.revision).toBe(initial.revision);
 
     expect((await f.note(update, { note: publicNote, expected_revision: initial.revision, title: "Forbidden write" })).status).toBe(400);

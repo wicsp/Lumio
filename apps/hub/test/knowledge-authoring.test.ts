@@ -20,8 +20,8 @@ const client = (auth = token) => {
     resolvePaper: (input: PaperResolveRequest) => call("v2/knowledge/papers/resolve", PaperResolveResult, input),
     securityReview: (input: SecurityReviewRequest) => call("v2/security/review", SecurityReviewResult, input),
     createNote: (input: KnowledgeCreateRequest) => call("v2/knowledge/notes", KnowledgeCreateResult, input),
-    show: (id: string) => call(`v1/notes/${id}`, NoteDetail),
-    search: (q: string) => call(`v1/search?q=${encodeURIComponent(q)}`, SearchResult),
+    show: (id: string) => call(`v2/knowledge/notes/${id}`, NoteDetail),
+    search: (q: string) => call(`v2/knowledge/search?q=${encodeURIComponent(q)}`, SearchResult),
   };
 };
 beforeEach(async () => {

@@ -42,34 +42,34 @@ import { FileKnowledgeRepository, acquireStateLease } from "@lumio/storage";
 // Routes share authentication, authorization and logging before dispatch.
 export const ROUTES = [
   ...KNOWLEDGE_ROUTES,
-  { operation: "runtime.invite", method: "POST", pattern: /^\/v1\/runtime-invites$/ },
-  { operation: "client.invite", method: "POST", pattern: /^\/v1\/client-invites$/ },
-  { operation: "runtime.join", method: "POST", pattern: /^\/v1\/runtime\/join$/ },
-  { operation: "client.join", method: "POST", pattern: /^\/v1\/client\/join$/ },
-  { operation: "runtime.signing-key", method: "GET", pattern: /^\/v1\/runtime\/signing-key$/ },
-  { operation: "runtime.remove", method: "DELETE", pattern: /^\/v1\/runtimes\/([^/]+)$/ },
-  { operation: "runtime.privileged.status", method: "GET", pattern: /^\/v1\/runtime\/privileged\/([^/]+)$/ },
-  { operation: "runtime.privileged.report", method: "POST", pattern: /^\/v1\/runtime\/privileged$/ },
-  { operation: "job.submit", method: "POST", pattern: /^\/v1\/jobs$/ },
-  { operation: "jobs", method: "GET", pattern: /^\/v1\/jobs$/ },
-  { operation: "job.show", method: "GET", pattern: /^\/v1\/jobs\/([^/]+)$/ },
-  { operation: "job.cancel", method: "POST", pattern: /^\/v1\/jobs\/([^/]+)\/cancel$/ },
-  { operation: "runtime.ack", method: "POST", pattern: /^\/v1\/runtime\/ack$/ },
-  { operation: "runtime.results", method: "POST", pattern: /^\/v1\/runtime\/results$/ },
-  { operation: "runtime.register", method: "POST", pattern: /^\/v1\/runtime\/register$/ },
-  { operation: "runtime.sync", method: "POST", pattern: /^\/v1\/runtime\/sync$/ },
-  { operation: "runtimes", method: "GET", pattern: /^\/v1\/runtimes$/ },
-  { operation: "operations", method: "POST", pattern: /^\/v1\/operations$/ },
-  { operation: "actors", method: "GET", pattern: /^\/v1\/actors$/ },
-  { operation: "proposals", method: "GET", pattern: /^\/v1\/proposals$/ },
-  { operation: "proposal.accept", method: "POST", pattern: /^\/v1\/proposals\/([^/]+)\/accept$/ },
-  { operation: "proposal.reject", method: "POST", pattern: /^\/v1\/proposals\/([^/]+)\/reject$/ },
-  { operation: "status", pattern: /^\/v1\/status$/ },
-  { operation: "health", pattern: /^\/health$/ },
-  { operation: "search", pattern: /^\/v1\/search$/ },
-  { operation: "check", pattern: /^\/v1\/check$/ },
-  { operation: "links", pattern: /^\/v1\/notes\/([^/]+)\/links$/ },
-  { operation: "show", pattern: /^\/v1\/notes\/([^/]+)$/ },
+  { operation: "runtime.invite", method: "POST", pattern: /^\/v2\/setup\/runtime-invites$/, path: "/v2/setup/runtime-invites" },
+  { operation: "client.invite", method: "POST", pattern: /^\/v2\/setup\/client-invites$/, path: "/v2/setup/client-invites" },
+  { operation: "runtime.join", method: "POST", pattern: /^\/v2\/setup\/runtime\/join$/, path: "/v2/setup/runtime/join" },
+  { operation: "client.join", method: "POST", pattern: /^\/v2\/setup\/client\/join$/, path: "/v2/setup/client/join" },
+  { operation: "runtime.signing-key", method: "GET", pattern: /^\/v2\/setup\/runtime\/signing-key$/, path: "/v2/setup/runtime/signing-key" },
+  { operation: "runtime.remove", method: "DELETE", pattern: /^\/v2\/execution\/runtimes\/([^/]+)$/, path: "/v2/execution/runtimes/<name>" },
+  { operation: "runtime.privileged.status", method: "GET", pattern: /^\/v1\/runtime\/privileged\/([^/]+)$/, path: "/v1/runtime/privileged/<id>" },
+  { operation: "runtime.privileged.report", method: "POST", pattern: /^\/v1\/runtime\/privileged$/, path: "/v1/runtime/privileged" },
+  { operation: "job.submit", method: "POST", pattern: /^\/v2\/execution\/jobs$/, path: "/v2/execution/jobs" },
+  { operation: "job.cancel", method: "POST", pattern: /^\/v2\/execution\/jobs\/([^/]+)\/cancel$/, path: "/v2/execution/jobs/<job>/cancel" },
+  { operation: "runtime.ack", method: "POST", pattern: /^\/v1\/runtime\/ack$/, path: "/v1/runtime/ack" },
+  { operation: "runtime.results", method: "POST", pattern: /^\/v1\/runtime\/results$/, path: "/v1/runtime/results" },
+  { operation: "runtime.register", method: "POST", pattern: /^\/v1\/runtime\/register$/, path: "/v1/runtime/register" },
+  { operation: "runtime.sync", method: "POST", pattern: /^\/v1\/runtime\/sync$/, path: "/v1/runtime/sync" },
+  { operation: "runtimes", method: "GET", pattern: /^\/v2\/execution\/runtimes$/, path: "/v2/execution/runtimes" },
+  { operation: "operations", method: "POST", pattern: /^\/v2\/approval\/privileged$/, path: "/v2/approval/privileged" },
+  // The preceding release of Runtime can still request an elevated command.
+  { operation: "operations", method: "POST", pattern: /^\/v1\/operations$/, path: "/v1/operations" },
+  { operation: "actors", method: "GET", pattern: /^\/v2\/system\/actors$/, path: "/v2/system/actors" },
+  { operation: "proposals", method: "GET", pattern: /^\/v2\/approval\/proposals$/, path: "/v2/approval/proposals" },
+  { operation: "proposal.accept", method: "POST", pattern: /^\/v2\/approval\/proposals\/([^/]+)\/accept$/, path: "/v2/approval/proposals/<id>/accept" },
+  { operation: "proposal.reject", method: "POST", pattern: /^\/v2\/approval\/proposals\/([^/]+)\/reject$/, path: "/v2/approval/proposals/<id>/reject" },
+  { operation: "status", pattern: /^\/v2\/system\/status$/, path: "/v2/system/status" },
+  { operation: "health", pattern: /^\/health$/, path: "/health" },
+  { operation: "search", pattern: /^\/v2\/knowledge\/search$/, path: "/v2/knowledge/search" },
+  { operation: "check", pattern: /^\/v2\/knowledge\/check$/, path: "/v2/knowledge/check" },
+  { operation: "links", pattern: /^\/v2\/knowledge\/notes\/([^/]+)\/links$/, path: "/v2/knowledge/notes/<reference>/links" },
+  { operation: "show", pattern: /^\/v2\/knowledge\/notes\/([^/]+)$/, path: "/v2/knowledge/notes/<reference>" },
 ] as const;
 const STATUS: Record<ApiErrorCode, number> = { INVALID: 400, UNAUTHENTICATED: 401, FORBIDDEN: 403, NOT_FOUND: 404, CONFLICT: 409, INTERNAL: 500 };
 
@@ -145,10 +145,8 @@ async function startHubInstance(config: HubConfig, options: {
         const v2 = V2_ROUTES.find((route) => request.method === route.method && route.pattern.test(url.pathname));
         const route = v2 ?? ROUTES.find((route) => request.method === ("method" in route ? route.method : "GET") && route.pattern.test(url.pathname));
         const speechPath = [SPEECH_PATH, VOCABULARY_PATH, BINDINGS_PATH].includes(url.pathname);
-        const path = speechPath ? url.pathname : route?.operation.startsWith("knowledge.") ? `/v2/knowledge/${route.operation.split(".")[1]}` : v2 ? v2.path : route && (PAIRING_OPERATIONS as readonly string[]).includes(route.operation) ? `/pairing/${route.operation}` : route?.operation === "runtime.privileged.status" ? "/v1/runtime/privileged/<id>" : route?.operation === "runtime.privileged.report" ? "/v1/runtime/privileged" : route?.operation === "job.submit" || route?.operation === "jobs" ? "/v1/jobs" : route?.operation === "job.show" ? "/v1/jobs/<id>" : route?.operation === "job.cancel" ? "/v1/jobs/<id>/cancel" : route?.operation === "runtime.ack" ? "/v1/runtime/ack" : route?.operation === "runtime.results" ? "/v1/runtime/results" : route?.operation === "runtime.register" ? "/v1/runtime/register" : route?.operation === "runtime.sync" ? "/v1/runtime/sync" : route?.operation === "runtimes" ? "/v1/runtimes" : route?.operation === "status" ? "/v1/status" : route?.operation === "health" ? "/health" : route?.operation === "search" ? "/v1/search"
-          : route?.operation === "check" ? "/v1/check" : route?.operation === "show" ? "/v1/notes/<reference>" : route?.operation === "links" ? "/v1/notes/<reference>/links" : route?.operation === "operations" ? "/v1/operations"
-            : route?.operation === "actors" ? "/v1/actors" : route?.operation === "proposals" ? "/v1/proposals"
-              : route?.operation === "proposal.accept" ? "/v1/proposals/<id>/accept" : route?.operation === "proposal.reject" ? "/v1/proposals/<id>/reject" : "<unmatched>";
+        const path = speechPath ? url.pathname : route && "path" in route ? route.path
+          : route ? `/v2/knowledge/${route.operation.split(".")[1]}` : "<unmatched>";
         let clientIp = server.requestIP(request)?.address ?? null;
         if (config.trustedProxy && clientIp === config.trustedProxy) {
           const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
@@ -205,15 +203,6 @@ async function startHubInstance(config: HubConfig, options: {
           if (route.operation === "runtime.privileged.status" || route.operation === "runtime.privileged.report") {
             const response = await handlePrivileged(request, route.operation, route.pattern.exec(url.pathname)?.[1], identity!, store, decide, privileged);
             status = response.status; return response;
-          }
-          if (route.operation === "jobs" || route.operation === "job.show") {
-            // Keep runtime rejection ahead of v1 argument parsing, including malformed references.
-            const decision = decide(identity!.actor, { operation: route.operation });
-            if (decision.result !== "allow") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: decision.result === "deny" ? decision.reason : msg("v2.approval_required") });
-            const reference = route.pattern.exec(url.pathname)?.[1];
-            if (route.operation === "job.show" && !/^job_[0-9A-HJKMNP-TV-Z]{26}$/.test(reference ?? "")) throw new HubError("NOT_FOUND", { key: "jobs.job_not_found", args: [] });
-            const args = route.operation === "job.show" ? { job: reference } : Object.fromEntries([...url.searchParams].map(([key, value]) => [key, key === "limit" ? Number(value) : value]));
-            status = 200; return Response.json((await modules!.capabilities.execute(route.operation === "jobs" ? "execution.job.list" : "execution.job.show", args, identity!, undefined, { chronologicalJobs: true })).result);
           }
           if (route.operation === "job.submit" || route.operation === "job.cancel") {
             const response = await handleJobs(request, route.operation, route.pattern.exec(url.pathname)?.[1], identity!, store, decide, (options.now ?? (() => new Date()))());
@@ -274,7 +263,7 @@ async function startHubInstance(config: HubConfig, options: {
             if (type !== null && !NOTE_TYPES.includes(type as SearchOptions["type"] & string)) throw new HubError("INVALID", { key: "query.unknown_note_type", args: [] });
             if (limit !== null && (!/^[1-9]\d*$/.test(limit) || !Number.isSafeInteger(Number(limit)))) throw new HubError("INVALID", { key: "query.limit_must_be_a_positive_integer", args: [] });
             const query = url.searchParams.get("q") ?? "";
-            // v1 also supports listing all notes and unbounded limits, outside the catalog's search arguments.
+            // The human client can list all notes and request more than the capability limit.
             result = !query || (limit !== null && Number(limit) > 100) ? await knowledge!.search(query, { ...queryOptions,
               ...(type !== null ? { type: type as SearchOptions["type"] } : {}), ...(limit !== null ? { limit: Number(limit) } : {}) })
               : (await modules!.capabilities.execute("knowledge.note.search", { query,

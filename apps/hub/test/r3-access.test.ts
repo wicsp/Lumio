@@ -77,7 +77,7 @@ test("feature negotiation, redelivery rotation, per-round identity, permissions 
   expect(comment.kind).toBe("comment");
   const denied = await api("/v2/work/commands", { request_id: `synthetic-denied-${++seq}`, operation: { op: "work.task.finish", args: { task: task.id, expected_revision: task.revision, outcome: "done" } } }, access.token);
   expect(denied.status).toBe(403); expect(await denied.json()).toMatchObject({ error: { reason: "agent-operation-not-allowed" } });
-  expect((await api("/v1/search?q=test&include_private=true", undefined, access.token)).status).toBe(403);
+  expect((await api("/v2/knowledge/search?q=test&include_private=true", undefined, access.token)).status).toBe(403);
   const agents = AgentInfo.array().parse(await (await api("/v2/agents")).json());
   expect(agents.find(value => value.actor.id === access.actor)).toMatchObject({ actor: { name: "pi@server" }, tokens: [expect.objectContaining({ kind: "job", job: job.spec.id })] });
   expect((await api("/v1/runtime/results", { job: job.spec.id, lease: job.spec.lease, status: "done", finished: now.toISOString(), report: "Synthetic round report" }, runtime)).status).toBe(200);
@@ -89,7 +89,7 @@ test("feature negotiation, redelivery rotation, per-round identity, permissions 
 for (const condition of ["cancel", "lease", "expires"] as const) test(`job credential immediately fails after ${condition}`, async () => {
   const { job } = await round(1), access = (await delivery()).access![0]!; await ack(job);
   expect((await api("/v2/work/tasks", undefined, access.token)).status).toBe(200);
-  if (condition === "cancel") expect((await api(`/v1/jobs/${job.spec.id}/cancel`, {})).status).toBe(200);
+  if (condition === "cancel") expect((await api(`/v2/execution/jobs/${job.spec.id}/cancel`, {})).status).toBe(200);
   else if (condition === "lease") hub.store.executionStore.save({ ...hub.store.executionStore.get(job.spec.id)!, spec: { ...job.spec, lease: "synthetic-replacement-lease" } });
   else {
     now = new Date(Date.parse(access.expires));

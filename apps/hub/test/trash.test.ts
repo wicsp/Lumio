@@ -158,8 +158,8 @@ test("Knowledge deletion hides notes and references, keeps bytes, and commits co
     expect(await readFile(join(f.vault, ".trash", trashedPath))).toEqual(original);
     expect(git(f.vault, "show", `HEAD:.trash/${trashedPath}`)).toBe(original.toString());
     await trashed(await f.request(`${notePath}/document`));
-    await trashed(await f.request(`/v1/notes/${id}/links`, "GET", undefined, agent.token));
-    expect(SearchResult.parse(await (await f.request("/v1/search?type=idea")).json()).hits.some(hit => hit.note.id === id)).toBe(false);
+    await trashed(await f.request(`/v2/knowledge/notes/${id}/links`, "GET", undefined, agent.token));
+    expect(SearchResult.parse(await (await f.request("/v2/knowledge/search?type=idea")).json()).hits.some(hit => hit.note.id === id)).toBe(false);
     expect(KnowledgeReferencesResult.parse(await (await f.request("/v2/knowledge/references", "POST", { source_kind: "idea", query: doc.document.note.title })).json()).hits.some(hit => hit.note.id === id)).toBe(false);
 
     await writeFile(join(f.vault, path), "Replacement note");
@@ -167,7 +167,7 @@ test("Knowledge deletion hides notes and references, keeps bytes, and commits co
     expect(restored).toMatchObject({ renamed: true, path: trashedPath });
     expect(await readFile(join(f.vault, path), "utf8")).toBe("Replacement note");
     expect(await readFile(join(f.vault, trashedPath))).toEqual(original);
-    expect(LinksResult.parse(await (await f.request(`/v1/notes/${id}/links`)).json()).note.path).toBe(trashedPath);
+    expect(LinksResult.parse(await (await f.request(`/v2/knowledge/notes/${id}/links`)).json()).note.path).toBe(trashedPath);
 
     TrashResult.parse(await (await f.request(notePath, "DELETE", { ...input, request_id: f.requestId() })).json());
     const purge = { request_id: f.requestId() };

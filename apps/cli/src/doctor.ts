@@ -75,7 +75,7 @@ export async function doctor(options: DoctorOptions = {}): Promise<Check[]> {
   await check(msg("doctor.hub_token"), msg("doctor.run_lumio_login_again_or_lumio_hub_setup"), async () => { if (!base) throw new Error(); await client.actors(); });
   await check(msg("doctor.vault_status"), msg("doctor.check_hub_read_write_permissions_on_vault_and_see_hub_logs"), async () => {
     if (!base) throw new Error();
-    const r = await io.fetch(`${base}/v1/status`, { headers: { "Accept-Language": language(), Authorization: `Bearer ${token}` } });
+    const r = await io.fetch(`${base}/v2/system/status`, { headers: { "Accept-Language": language(), Authorization: `Bearer ${token}` } });
     const status = await r.json() as { watching?: boolean; issues?: unknown };
     if (!r.ok || status.watching !== true || !Array.isArray(status.issues) || !status.issues.every((s) => typeof s === "string")) throw new Error();
     for (const issue of status.issues as string[]) checks.push({ name: msg("doctor.hub_issue"), ok: false, problem: issue, fix: msg("doctor.repair_the_note_or_vault_permissions_as_instructed_see_hub_logs") });

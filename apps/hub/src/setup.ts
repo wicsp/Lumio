@@ -206,7 +206,7 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
         if (health.ok && body.ok) {
           const actual = healthVersion(body);
           if (actual !== version) { otherHub = actual; break; }
-          const actors = await fetcher(`${url}/v1/actors`, { headers: { Authorization: `Bearer ${token}` }, redirect: "error", signal: AbortSignal.timeout(1000) });
+          const actors = await fetcher(`${url}/v2/system/actors`, { headers: { Authorization: `Bearer ${token}` }, redirect: "error", signal: AbortSignal.timeout(1000) });
           if (actors.ok) { ready = true; break; }
         }
       } catch { /* diagnose after the deadline */ }

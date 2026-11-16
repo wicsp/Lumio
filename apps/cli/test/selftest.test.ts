@@ -44,7 +44,7 @@ test("selftest uses real Hub and runtime with fake codex, claude and pi; databas
     runtime = Bun.spawn([process.execPath, runtimeMain], { env: { ...env, LUMIO_TOKEN: runtimeToken, LUMIO_HUB_URL: url, LUMIO_RUNTIME_NAME: "server", LUMIO_RUNTIME_STATE_DIR: join(home, "runtime"), LUMIO_RUNTIME_POLL_SECONDS: "0.05", FAKE_SESSIONS: sessions, FAKE_MODE_FILE: mode }, stdout: "ignore", stderr: "ignore" });
     const client = createClient({ url, token });
     await eventually(async () => (await client.runtimes()).length === 1);
-    let results = await selftest({ url, token, notes: true, vault, pollMs: 50, timeoutMs: 60_000 });
+    let results = await selftest({ url, token, pollMs: 50, timeoutMs: 60_000 });
     expect(results).toHaveLength(12);
     expect(results.filter((r) => !r.ok)).toEqual([]);
     for (const r of results) { expect(r.elapsed_ms).toBeGreaterThanOrEqual(0); expect(Job.safeParse(await client.job(r.job!)).success).toBe(true); }
@@ -86,7 +86,7 @@ test("selftest enforces deadlines, continues checks, cancels unfinished database
   let task = WorkTask.parse({ schema_version: 3, type: "task", created_by: "act_00000000000000000000000001", updated_by: "act_00000000000000000000000001", id: "task_00000000000000000000000002", title: "自检", description: "", outcome: "open", turn: { holder: "human", reason: "todo", since: date }, tags: [], dependencies: [], references: [], revision: 1, created: date, updated: date });
   const fetcher = (async (input, init) => {
     const u = new URL(String(input));
-    if (u.pathname === "/v1/runtimes") return Response.json([{ actor: "act_00000000000000000000000001", update: null, registration: { version: null, platform: null, install: null, protocol_version: 2, name: "server", engines: [{ name: "pi", version: "1.4.0", sandbox: "none" }], tags: [], max_concurrent: 1 }, last_seen: date, online: true }]);
+    if (u.pathname === "/v2/execution/runtimes") return Response.json([{ actor: "act_00000000000000000000000001", update: null, registration: { version: null, platform: null, install: null, protocol_version: 2, name: "server", engines: [{ name: "pi", version: "1.4.0", sandbox: "none" }], tags: [], max_concurrent: 1 }, last_seen: date, online: true }]);
     if (u.pathname === "/v2/work/commands") {
       const { operation } = WorkCommandRequest.parse(JSON.parse(String(init?.body)));
       if (operation.op === "work.task.finish") { task = WorkTask.parse({ ...task, outcome: "done", turn: { holder: "nobody", reason: "on_hold", since: date } }); return Response.json({ kind: "task", task }); }
@@ -97,7 +97,7 @@ test("selftest enforces deadlines, continues checks, cancels unfinished database
       jobs.set(job.spec.id, job); return Response.json({ kind: "job", job });
     }
     if (u.pathname.startsWith("/v2/work/tasks/")) return Response.json({ task, dependents: [], children: [], executions: [], comments: [], turns: [] });
-    const id = u.pathname.split("/")[3]!;
+    const id = u.pathname.split("/")[4]!;
     if (u.pathname.endsWith("/cancel")) cancelled++;
     return Response.json(jobs.get(id));
   }) as typeof fetch;
@@ -106,21 +106,4 @@ test("selftest enforces deadlines, continues checks, cancels unfinished database
   // Resume is skipped without a successful session, but independent later steps still run.
   expect(results.map(r => r.elapsed_ms)).toEqual([100, 0, 100, 30]);
   expect(sequence).toBe(3); expect(cancelled).toBe(4); expect(task.outcome).toBe("done");
-});
-
-test("--notes is a compatibility alias: no vault is needed or written even on failures", async () => {
-  const home = await mkdtemp(join(tmpdir(), "lumio-selftest-no-vault-"));
-  try {
-    const runtime = { actor: "act_00000000000000000000000001", update: null, registration: { version: null, platform: null, install: null, protocol_version: 2, name: "server", engines: [{ name: "pi", version: "1.4.0", sandbox: "none" }], tags: [], max_concurrent: 1 }, last_seen: "2026-10-29T00:00:00Z", online: true };
-    const paths: string[] = [];
-    const fetcher = (async (input) => {
-      const path = new URL(String(input)).pathname; paths.push(path);
-      if (path === "/v1/runtimes") return Response.json([runtime]);
-      return Response.json({ error: { code: "INTERNAL", message: "synthetic job failure" } }, { status: 500 });
-    }) as typeof fetch;
-    const results = await selftest({ url: "http://synthetic", token: "synthetic", notes: true, vault: home, fetch: fetcher });
-    expect(results).toHaveLength(4); expect(results.every(r => !r.ok)).toBe(true);
-    expect(paths).toContain("/v2/work/commands"); expect(paths).not.toContain("/v1/jobs");
-    expect(await readdir(home)).toEqual([]);
-  } finally { await rm(home, { recursive: true, force: true }); }
 });

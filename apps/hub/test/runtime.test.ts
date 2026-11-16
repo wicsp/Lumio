@@ -24,7 +24,7 @@ function request(path: string, token: string, body?: unknown) {
   return fetch(`${base()}${path}`, { method: body === undefined ? "GET" : "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     ...(body === undefined ? {} : { body: typeof body === "string" ? body : JSON.stringify(body) }) });
 }
-async function list() { return RuntimeInfo.array().parse(await (await request("/v1/runtimes", human)).json()); }
+async function list() { return RuntimeInfo.array().parse(await (await request("/v2/execution/runtimes", human)).json()); }
 async function eventually(check: () => boolean | Promise<boolean>) {
   const deadline = Date.now() + 7000;
   while (Date.now() < deadline) { if (await check()) return; await Bun.sleep(25); }
@@ -94,17 +94,17 @@ test("malformed JSON, wrong protocol and unknown fields return INVALID without c
 
 test("runtime is denied at every existing endpoint before body parsing; other roles cannot register or sync", async () => {
   for (const route of ROUTES.filter((route) => route.operation !== "operations" && !(PAIRING_OPERATIONS as readonly string[]).includes(route.operation) && !(RUNTIME_OPERATIONS as readonly string[]).includes(route.operation))) {
-    const path = { "knowledge.document": "/v2/knowledge/notes/missing/document", "knowledge.update": "/v2/knowledge/notes/missing/document", "knowledge.related": "/v2/knowledge/related", "knowledge.references": "/v2/knowledge/references", "knowledge.template": "/v2/knowledge/templates", "knowledge.resolve": "/v2/knowledge/papers/resolve", "knowledge.create": "/v2/knowledge/notes", "job.submit": "/v1/jobs", jobs: "/v1/jobs", "job.show": "/v1/jobs/missing", "job.cancel": "/v1/jobs/missing/cancel", operations: "/v1/operations", actors: "/v1/actors", proposals: "/v1/proposals", "proposal.accept": "/v1/proposals/missing/accept", "proposal.reject": "/v1/proposals/missing/reject",
-      status: "/v1/status", health: "/health", search: "/v1/search", check: "/v1/check", links: "/v1/notes/Main/links", show: "/v1/notes/Main", routines: "/v1/routines" };
+    const path = { "knowledge.document": "/v2/knowledge/notes/missing/document", "knowledge.update": "/v2/knowledge/notes/missing/document", "knowledge.related": "/v2/knowledge/related", "knowledge.references": "/v2/knowledge/references", "knowledge.template": "/v2/knowledge/templates", "knowledge.resolve": "/v2/knowledge/papers/resolve", "knowledge.create": "/v2/knowledge/notes", "job.submit": "/v2/execution/jobs", jobs: "/v2/execution/jobs", "job.show": "/v2/execution/jobs/missing", "job.cancel": "/v2/execution/jobs/missing/cancel", operations: "/v2/approval/privileged", actors: "/v2/system/actors", proposals: "/v2/approval/proposals", "proposal.accept": "/v2/approval/proposals/missing/accept", "proposal.reject": "/v2/approval/proposals/missing/reject",
+      status: "/v2/system/status", health: "/health", search: "/v2/knowledge/search", check: "/v2/knowledge/check", links: "/v2/knowledge/notes/Main/links", show: "/v2/knowledge/notes/Main", routines: "/v2/execution/routines" };
     const response = await request(path[route.operation as keyof typeof path], runtime, "method" in route && route.method === "POST" ? "{" : undefined);
     expect(response.status).toBe(403); expect(ApiError.parse(await response.json()).error.code).toBe("FORBIDDEN");
   }
-  for (const token of [runtime, agent]) expect((await request("/v1/runtimes", token)).status).toBe(403);
+  for (const token of [runtime, agent]) expect((await request("/v2/execution/runtimes", token)).status).toBe(403);
   for (const token of [human, agent]) for (const path of ["/v1/runtime/register", "/v1/runtime/sync"]) {
     const response = await request(path, token, "{");
     expect(response.status).toBe(403); ApiError.parse(await response.json());
   }
-  for (const path of ["/v1/runtime/register", "/v1/runtime/sync", "/v1/runtimes"]) {
+  for (const path of ["/v1/runtime/register", "/v1/runtime/sync", "/v2/execution/runtimes"]) {
     const response = await fetch(`${base()}${path}`, { method: path.endsWith("runtimes") ? "GET" : "POST" });
     expect(response.status).toBe(401); ApiError.parse(await response.json());
   }

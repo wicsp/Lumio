@@ -11,7 +11,7 @@ let seq = 0;
 const base = () => hub.server.url.href;
 const client = () => ({
   async targets(args: { online?: boolean } = {}) { return ExecutionTarget.array().parse(await (await api(`/v2/execution/targets${args.online === undefined ? "" : `?online=${args.online}`}`)).json()); },
-  async jobs(_status: undefined, task: string) { return Job.array().parse(await (await api(`/v1/jobs?task=${task}`)).json()); },
+  async jobs(_status: undefined, task: string) { return Job.array().parse(await (await api(`/v2/execution/jobs?task=${task}`)).json()); },
   async workProject(id: string) { return WorkProject.parse(await (await api(`/v2/work/projects/${id}`)).json()); },
 });
 async function api(path: string, body?: unknown, token = human) {
@@ -104,7 +104,7 @@ test("supersession scopes, replay, withdrawal ownership, terminal conflicts and 
   const withdrew = Proposal.parse(await (await api(`/v2/approval/proposals/${second}/withdraw`, {}, agent)).json()); expect(withdrew.status).toBe("withdrawn"); expect(withdrew.superseded_by).toBeUndefined();
   expect(hub.store.db.query("SELECT * FROM notification_events").all()).toHaveLength(events);
   expect((await api(`/v2/approval/proposals/${second}/withdraw`, {}, agent)).status).toBe(409);
-  for (const id of [first, second]) for (const action of ["accept", "reject"]) expect((await api(`/v1/proposals/${id}/${action}`, {})).status).toBe(409);
+  for (const id of [first, second]) for (const action of ["accept", "reject"]) expect((await api(`/v2/approval/proposals/${id}/${action}`, {})).status).toBe(409);
   expect(hub.store.db.query("SELECT * FROM audit WHERE operation='approval.proposal.withdraw'").all()).toHaveLength(2);
   hub.store.db.exec("CREATE TRIGGER fail_withdraw BEFORE INSERT ON audit WHEN NEW.operation='approval.proposal.withdraw' BEGIN SELECT RAISE(FAIL,'synthetic failure'); END");
   expect((await api(`/v2/approval/proposals/${plan}/withdraw`, {}, agent)).status).toBe(500); expect(hub.store.proposal(plan)?.status).toBe("pending");
@@ -237,7 +237,7 @@ test("an agent's implicit proposal preserves its shown target and source through
   expect(await client().jobs(undefined, t.id)).toEqual([]);
 
   await applied("work.project.update", { project: p.id, expected_revision: p.revision, patch: { default_target: null } });
-  expect((await api(`/v1/proposals/${proposal.id}/accept`, {})).status).toBe(200);
+  expect((await api(`/v2/approval/proposals/${proposal.id}/accept`, {})).status).toBe(200);
   const result = hub.modules.workStore.receipt(proposal.author, request)?.result;
   expect(result).toMatchObject({ kind: "job", target: "codex@mac", target_source: "project" });
   expect(await client().jobs(undefined, t.id)).toHaveLength(1);
@@ -390,7 +390,7 @@ test("only a human implicit dispatch attaches and snapshots the project default 
   const delegated = await task({ project: p.id });
   expect((await command("work.task.dispatch", { task: delegated.id }, agent)).status).toBe(400);
   const suggestion = await proposed("work.task.dispatch", { task: delegated.id, to: "codex@mac" });
-  expect((await api(`/v1/proposals/${suggestion}/accept`, {})).status).toBe(200);
+  expect((await api(`/v2/approval/proposals/${suggestion}/accept`, {})).status).toBe(200);
   expect(hub.modules.work.task(delegated.id).plan).toBeUndefined();
 
   const blocked = await task({ project: p.id, dependencies: [(await task()).id] });

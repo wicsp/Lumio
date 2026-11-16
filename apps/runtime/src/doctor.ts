@@ -29,7 +29,7 @@ export async function doctor(options: DiagnosticOptions & {
   });
   await check(msg("doctor.hub_connection_and_authentication"), msg("doctor.check_network_and_token_pair_again_with_lumio_runtime_join_if_invali"), async () => {
     if (!config) throw new Error();
-    const r = await io.fetch(`${config.url}/v1/runtime/signing-key`, { headers: { Authorization: `Bearer ${config.token}` } });
+    const r = await io.fetch(`${config.url}/v2/setup/runtime/signing-key`, { headers: { Authorization: `Bearer ${config.token}` } });
     if (!r.ok) throw new Error(); HubSigningKey.parse(await r.json());
   });
   await check(msg("doctor.runtime_background_service"), msg("doctor.run_lumio_runtime_install_service_see_service_logs"), async () => {

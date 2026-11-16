@@ -16,7 +16,6 @@ import { runSudoHelper } from "./sudo-helper.ts";
 import { readConfig, RuntimeError } from "./config.ts";
 import { runRuntime } from "./runtime.ts";
 import { runWorker } from "./worker.ts";
-import { prepareMigration } from "./prepare-migration.ts";
 import { StorageError } from "@lumio/storage";
 import { sampleClaudeFromStdin } from "./claude-usage.ts";
 import { setupClaudeQuota } from "./native/claude-quota.ts";
@@ -59,12 +58,6 @@ export async function run(args: string[]): Promise<void> {
 
   if (args.length === 1 && args[0] === "--version") {
     console.log(version);
-  } else if (args[0] === "prepare-migration") {
-    try {
-      const { values, positionals } = parseArgs({ args: args.slice(1), allowPositionals: true, options: { "state-dir": { type: "string" } } });
-      if (positionals.length || !values["state-dir"]) throw new RuntimeError(msg("entry.usage_lumio_runtime_prepare_migration_state_dir_runtime_state_direct"));
-      await prepareMigration(values["state-dir"]); console.log(msg("entry.migration_preparation_complete_legacy_plan_cache_cleared_history_and"));
-    } catch (cause) { console.error(cause instanceof RuntimeError || cause instanceof StorageError ? errorMessage(cause) : msg("entry.runtime_migration_preparation_failed")); process.exitCode = 1; }
   } else if (args[0] === "doctor" || args[0] === "upgrade") {
     try {
       if (args[0] === "upgrade") process.exitCode = await runUpgrade(args.slice(1), true);

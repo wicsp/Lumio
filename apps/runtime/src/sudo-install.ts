@@ -104,7 +104,7 @@ export async function installSudoHelper(args: string[], options: {
       return schema.parse(await response.json());
     } catch { throw new RuntimeError(msg("sudo-install.could_not_verify_runtime_identity_and_signing_key_with_hub_helper_wa")); }
   }
-  const key = await request("/v1/runtime/signing-key", HubSigningKey);
+  const key = await request("/v2/setup/runtime/signing-key", HubSigningKey);
   const fingerprint = signingKeyFingerprint(createHash("sha256").update(Buffer.from(key.public_key, "base64url")).digest("hex"));
   if (fingerprint !== key.fingerprint) throw new RuntimeError(msg("sudo-install.hub_public_key_fingerprint_mismatch_helper_was_not_installed"));
   log(msg("sudo-install.hub_public_key_fingerprint", fingerprint));

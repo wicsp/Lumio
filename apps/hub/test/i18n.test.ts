@@ -22,7 +22,7 @@ test("Hub request languages remain independent, including library errors, withou
       expect(error.message).toBe(language === "en" ? "Task not found" : "找不到任务");
     }));
     for (const language of [undefined, "en", "zh-CN", "fr"] as const) {
-      const response = await fetch(`${url}/v1/search`, { headers: language ? { "Accept-Language": language } : {} });
+      const response = await fetch(`${url}/v2/knowledge/search`, { headers: language ? { "Accept-Language": language } : {} });
       const error = ApiError.parse(await response.json()).error;
       expect(error.code).toBe("UNAUTHENTICATED");
       expect(error.message).toBe(language === "zh-CN" ? "需要有效的 Bearer 令牌" : "A valid Bearer token is required");
