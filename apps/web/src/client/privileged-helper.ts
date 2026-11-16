@@ -7,7 +7,7 @@ import type { RuntimeInfo } from "@lumio/schema";
 import { h, icon, toast } from "./dom.ts";
 import { t } from "./i18n.ts";
 
-export const INSTALL_HELPER_COMMAND = "sudo lumio-runtime install-sudo-helper";
+export const INSTALL_HELPER_COMMAND = "sudo lumio runtime install-sudo-helper";
 
 export type HelperState = "installed" | "missing" | "unknown";
 export function helperState(registration: Pick<RuntimeInfo["registration"], "features">): HelperState {

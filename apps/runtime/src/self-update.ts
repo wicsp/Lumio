@@ -2,7 +2,7 @@ import { chmod, lstat, mkdir, readFile, readdir, rm, writeFile } from "node:fs/p
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { RuntimeUpdateDirective, RuntimeUpdateReport, type RuntimeInstall, type RuntimePlatform, type RuntimeUpdateReason } from "@lumio/schema";
-import { downloadRelease, DownloadLimitError, manifestArtifact, releasePublicKeys, releaseShim, ReleaseVerificationError, verifyArtifact, verifyManifest } from "@lumio/platform";
+import { downloadRelease, DownloadLimitError, manifestArtifact, releasePublicKeys, ReleaseVerificationError, verifyArtifact, verifyManifest } from "@lumio/platform";
 import { privateFile, runCommand, type RunCommand } from "./service.ts";
 import { UpdateInstall } from "./update-install.ts";
 
@@ -181,12 +181,13 @@ export class SelfUpdate {
     const run = this.options.run ?? runCommand;
     const command = async (argv: string[]) => { const result = await run(argv); if (result.code) throw new ReleaseVerificationError("preflight_failed"); return result.stdout; };
     try {
-      const names = (await command(["tar", "-tzf", tar])).trim().split("\n"), types = (await command(["tar", "-tvzf", tar])).trim().split("\n");
-      if (names.length !== 3 || ["lumio", "lumio-hub", "lumio-runtime"].some(name => names.filter(value => value === name).length !== 1) || types.length !== 3 || types.some(line => !line.startsWith("-"))) throw new ReleaseVerificationError("preflight_failed");
+      const entry = (await command(["tar", "-tzf", tar])).trim(), type = (await command(["tar", "-tvzf", tar])).trim();
+      if (entry !== "lumio" || type.includes("\n") || !type.startsWith("-")) throw new ReleaseVerificationError("preflight_failed");
       await command(["tar", "-xzf", tar, "-C", directory]);
-      for (const name of names) { const stat = await lstat(join(directory, name)); if (!stat.isFile() || stat.nlink !== 1) throw new ReleaseVerificationError("preflight_failed"); }
-      for (const role of ["hub", "runtime"] as const) if (!(await readFile(join(directory, `lumio-${role}`))).equals(Buffer.from(releaseShim(role)))) throw new ReleaseVerificationError("preflight_failed");
-      const binary = join(directory, "lumio"); await chmod(binary, 0o755);
+      const binary = join(directory, "lumio");
+      const stat = await lstat(binary);
+      if (!stat.isFile() || stat.nlink !== 1) throw new ReleaseVerificationError("preflight_failed");
+      await chmod(binary, 0o755);
       if ((await command([binary, "--version"])).trim().replace(/^v/, "") !== version) throw new ReleaseVerificationError("version_mismatch");
       await command([binary, "runtime", "update-check", "--state-dir", this.options.stateDir]);
       return binary;

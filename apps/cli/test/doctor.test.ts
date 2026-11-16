@@ -15,7 +15,6 @@ function fixture() {
   const bodies: Record<string, unknown> = { "/health": { ok: true, version: "0.0.0-dev" }, "/v2/system/actors": [], "/v2/system/status": { watching: true, issues: [] }, "/v2/execution/runtimes": [runtime], "/v2/execution/routines": [routine], "/v2/approval/proposals": [] };
   const fail = new Set<string>(), commands: string[][] = [], urls: string[] = [];
   const options: DoctorOptions = { home: "/synthetic", env: {}, uid: 501, find: () => null, platform: "darwin",
-    realpath: async () => "/synthetic/.local/bin/lumio",
     read: async (p) => { if (!(p in files)) throw new Error(token); return files[p]!; },
     stat: async (p) => { if (!(p in files)) throw new Error(token); return { mode: modes[p] ?? 0o600, uid: 501, isFile: () => true, isDirectory: () => false }; },
     run: async (argv) => { commands.push(argv); return { code: fail.has("service") ? 1 : 0, stdout: argv.includes("--version") ? "0.0.0-dev" : "", stderr: token }; },
@@ -33,7 +32,7 @@ test("CLI doctor reports every item, HTTP warning and pending proposals without 
   const f = fixture();
   let checks = await doctor(f.options); expect(checks.every((c) => c.ok)).toBe(true);
   expect(checks.some((c) => c.name === "对外地址警告")).toBe(true);
-  expect(f.commands).toEqual([["/synthetic/.local/bin/lumio", "--version"], ["/synthetic/.local/bin/lumio-hub", "--version"], ["/synthetic/.local/bin/lumio-runtime", "--version"], ["launchctl", "list"], ["launchctl", "print", "gui/501/io.lumio.hub"], ["launchctl", "print", "gui/501/io.lumio.runtime"]]);
+  expect(f.commands).toEqual([["/synthetic/.local/bin/lumio", "--version"], ["launchctl", "list"], ["launchctl", "print", "gui/501/io.lumio.hub"], ["launchctl", "print", "gui/501/io.lumio.runtime"]]);
   const output: string[] = []; expect(printChecks(checks, false, (l) => output.push(l))).toBe(0); expect(output.at(-1)).toMatch(/项通过/);
   f.bodies["/v2/approval/proposals"] = [{ id: "prop_00000000000000000000000001", author: runtime.actor, reason: "synthetic", status: "pending", created: runtime.last_seen,
     operation: { op: "exec.privileged", args: { runtime: runtime.actor, job: "job_00000000000000000000000001", argv: ["/bin/true"] } } }];
@@ -63,7 +62,7 @@ test("CLI doctor isolates config, permissions, health, auth, vault, services, ru
   let checks = await doctor(f.options);
   expect(checks.filter((c) => c.name === "Hub 问题")).toHaveLength(2);
   expect(checks.find((c) => c.name.startsWith("Hub 版本"))!.fix).toBe("运行 lumio upgrade");
-  expect(checks.find((c) => c.name === "执行器 server")!.fix).toContain("lumio-runtime doctor");
+  expect(checks.find((c) => c.name === "执行器 server")!.fix).toContain("lumio runtime doctor");
   expect(checks.find((c) => c.name.includes("0.999.0"))!.ok).toBe(false);
   expect(checks.find((c) => c.name === "例行任务 fixture")!.ok).toBe(false);
   f.options.env = { LUMIO_PUBLIC_URL: "ftp://invalid" }; checks = await doctor(f.options);
@@ -105,23 +104,21 @@ test("doctor treats a missing assistant model as a reminder and never prints the
   expect(JSON.stringify(checks)).not.toContain("synthetic-private-key");
 });
 
-test("doctor independently detects broken compatibility targets and mismatched local program versions", async () => {
-  const f = fixture(); f.options.realpath = async path => path.endsWith("lumio-runtime") ? "/synthetic/old-runtime" : "/synthetic/.local/bin/lumio";
-  expect((await doctor(f.options)).find(check => check.name === "本机程序与兼容链接")?.ok).toBe(false);
-  f.options.realpath = async () => "/synthetic/.local/bin/lumio";
+test("doctor detects mismatched local program versions", async () => {
+  const f = fixture();
   f.options.run = async argv => ({ code: 0, stdout: argv.includes("--version") ? "0.1.6" : "", stderr: token });
-  const checks = await doctor(f.options); expect(checks.find(check => check.name === "本机程序与兼容链接")?.ok).toBe(false); expect(JSON.stringify(checks)).not.toContain(token);
+  const checks = await doctor(f.options); expect(checks.find(check => check.name === "本机程序")?.ok).toBe(false); expect(JSON.stringify(checks)).not.toContain(token);
 });
 
 
-test("doctor shows reminders with ! and failure count/exit code separately, including shim repair", async () => {
+test("doctor shows reminders with ! and failure count/exit code separately, including a missing executable", async () => {
   const f = fixture();
   const output: string[] = [];
   expect(printChecks(await doctor(f.options), false, line => output.push(line), { output: { isTTY: false }, env: {} })).toBe(0);
   expect(output).toContain("! 助手模型：未配置 → 运行 lumio hub assistant setup");
   expect(output.at(-1)).toMatch(/\d+ 项通过，3 项提醒，0 项失败/);
-  f.options.realpath = async path => path;
+  f.options.run = async argv => ({ code: argv.includes("--version") ? 1 : 0, stdout: "", stderr: "" });
   const checks = await doctor(f.options);
-  expect(checks.find(check => check.name === "本机程序与兼容链接")?.fix).toContain("再运行一次 lumio upgrade");
+  expect(checks.find(check => check.name === "本机程序")?.fix).toContain("运行 lumio upgrade");
   expect(printChecks(checks, false, () => {})).toBe(1);
 });

@@ -85,7 +85,7 @@ export class SudoGate {
     let proposal: string | undefined;
     while (!signal.aborted && !proposal) {
       try {
-        const response = await this.request("/v1/operations", parsed.data, signal);
+        const response = await this.request("/v2/approval/privileged", parsed.data, signal);
         if (!response.ok) { write(socket, { message: msg("sudo.hub_rejected_the_request"), code: 1 }); return; }
         const result = OperationResult.parse(await response.json());
         if (result.status !== "pending_approval") throw new Error("unexpected result");

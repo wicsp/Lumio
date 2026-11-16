@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ReleaseManifest, RuntimeUpdateReport, type RuntimeInstall } from "@lumio/schema";
-import { releaseShim, signManifest } from "@lumio/platform";
+import { signManifest } from "@lumio/platform";
 import { SelfUpdate } from "../src/self-update.ts";
 import { detectInstall, helperCompatible, UpdateInstall } from "../src/update-install.ts";
 import { trustBuildKey } from "../src/trust-build-key.ts";
@@ -20,9 +20,8 @@ async function fixture(install: RuntimeInstall = "managed") {
   const version = "0.2.3", keys = generateKeyPairSync("ed25519");
   const pub = keys.publicKey.export({ type: "spki", format: "pem" }).toString(), priv = keys.privateKey.export({ type: "pkcs8", format: "pem" }).toString();
   await writeFile(join(archiveDir, "lumio"), "new program");
-  for (const role of ["hub", "runtime"] as const) await writeFile(join(archiveDir, `lumio-${role}`), releaseShim(role));
   const tar = join(home, "archive.tar.gz");
-  const packed = Bun.spawn(["tar", "-czf", tar, "-C", archiveDir, "lumio", "lumio-hub", "lumio-runtime"]); expect(await packed.exited).toBe(0);
+  const packed = Bun.spawn(["tar", "-czf", tar, "-C", archiveDir, "lumio"]); expect(await packed.exited).toBe(0);
   const archive = await readFile(tar);
   const manifest = ReleaseManifest.parse({ format: 1, version, channel: "release", commit: "a".repeat(40), created: "2026-11-12T00:00:00Z", artifacts: [{ platform: "linux-x64", file: "lumio-linux-x64.tar.gz", size: archive.length, sha256: createHash("sha256").update(archive).digest("hex") }] });
   let bytes = Buffer.from(JSON.stringify(manifest)), signature = signManifest(bytes, priv), downloads = 0, restarts = 0, preflight = true, diskVersion = version;

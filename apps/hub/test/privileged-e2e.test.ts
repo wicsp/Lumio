@@ -101,7 +101,7 @@ test("unsupported runtime and outside-job invocation exit 2 without creating pro
   const report = JSON.parse(result.report!);
   expect(report.code).toBe(2);
   expect(report.err).toContain("This runtime has no privileged helper configured");
-  expect(report.err).toContain("sudo lumio-runtime install-sudo-helper");
+  expect(report.err).toContain("sudo lumio runtime install-sudo-helper");
   expect(report.err).toContain("infra/sudo-helper.md");
   expect(result.privileged_unavailable?.program).toMatch(/^\//);
   expect(hub.store.runtimes(new Date()).find(runtime => runtime.registration.name === "server")?.registration.features).not.toContain("privileged_helper");

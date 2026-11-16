@@ -196,7 +196,7 @@ async function deploy() {
   }
   for (const [plist, role] of [[hubPlist, "hub"], [runtimePlist, "runtime"]] as const) {
     if (plistValue(plist, "ProgramArguments:0") !== installed || plistValue(plist, "ProgramArguments:1") !== role
-        || plistValue(plist, "ProgramArguments:2") !== "serve" || readlinkSync(join(dirname(installed), `lumio-${role}`)) !== "lumio") {
+        || plistValue(plist, "ProgramArguments:2") !== "serve") {
       throw new Error(`Unexpected ${role} install layout; expected the unified lumio executable.`);
     }
   }
@@ -286,6 +286,10 @@ async function deploy() {
     };
     await replaceBinary({ installed, candidate, previous, originalIdentity, verify,
       activate: () => activate(version), rollback: () => activate(previousVersion) });
+    for (const role of ["hub", "runtime"]) {
+      const path = join(dirname(installed), `lumio-${role}`);
+      if (lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink() && readlinkSync(path) === "lumio") rmSync(path);
+    }
     console.log(`Verified ${version} on ${hubUrl}; Runtime updates continue in the background.`);
     reportRuntimeUpdates(hubDb);
   } finally {

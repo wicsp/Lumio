@@ -2,7 +2,7 @@ import { createHash, createPublicKey, generateKeyPairSync } from "node:crypto";
 import { chmod, copyFile, lstat, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ReleaseManifest, LumioVersion, RuntimeRegistration, type RuntimePlatform } from "../packages/schema/src/index.ts";
-import { keyFingerprint, releaseShim, signManifest, verifyManifest } from "../packages/platform/src/index.ts";
+import { keyFingerprint, signManifest, verifyManifest } from "../packages/platform/src/index.ts";
 
 export function managedPlatforms(registrations: unknown[]): RuntimePlatform[] {
   return [...new Set(registrations.map(value => RuntimeRegistration.parse(value)).filter(value => value.install === "managed" && value.features?.includes("self_update")).map(value => value.platform!))].sort();
@@ -39,9 +39,8 @@ export async function publishBuildUpdates(options: {
     for (const platform of options.platforms) {
       const build = join(options.build, `update-${platform}`); await mkdir(build, { recursive: true, mode: 0o700 });
       await options.compile(platform, join(build, "lumio"));
-      for (const role of ["hub", "runtime"] as const) await writeFile(join(build, `lumio-${role}`), releaseShim(role), { mode: 0o755 });
       const file = `lumio-${platform}.tar.gz`;
-      await options.run(["tar", "-czf", join(stage, file), "-C", build, "lumio", "lumio-hub", "lumio-runtime"]);
+      await options.run(["tar", "-czf", join(stage, file), "-C", build, "lumio"]);
       const bytes = await readFile(join(stage, file));
       artifacts.push({ platform, file, size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") });
     }

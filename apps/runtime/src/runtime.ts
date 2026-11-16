@@ -51,7 +51,7 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
   await mkdir(config.stateDir, { recursive: true, mode: 0o700 });
   const platform = updatePlatform(), install = await detectInstall({ env: options.env });
   const helper = config.sudoCommand.length ? await helperCompatible(config.sudoCommand, version) : false;
-  if (config.sudoCommand.length && !helper) { log("Privileged helper version mismatch; run sudo lumio-runtime install-sudo-helper"); config = { ...config, sudoCommand: [] }; }
+  if (config.sudoCommand.length && !helper) { log("Privileged helper version mismatch; run sudo lumio runtime install-sudo-helper"); config = { ...config, sudoCommand: [] }; }
   const updater: SelfUpdate | undefined = platform ? new SelfUpdate({ ...config, platform, install, version, binary: process.execPath, fetch: fetcher,
     beforeSwitch: async target => {
       try {

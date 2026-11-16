@@ -4,7 +4,6 @@ import { RELEASE_PUBLIC_KEYS } from "./release-keys.ts";
 
 declare const LUMIO_RELEASE_PUBLIC_KEYS: readonly string[];
 export const releasePublicKeys: readonly string[] = typeof LUMIO_RELEASE_PUBLIC_KEYS === "undefined" ? RELEASE_PUBLIC_KEYS : LUMIO_RELEASE_PUBLIC_KEYS;
-export const FIRST_SIGNED_RELEASE = "0.2.3";
 export class ReleaseVerificationError extends Error {
   readonly code = "RELEASE_VERIFICATION_FAILED";
   constructor(readonly reason: RuntimeUpdateReason) { super(reason); }
@@ -42,12 +41,4 @@ export function manifestArtifact(manifest: ReleaseManifest, platform: RuntimePla
 }
 export function verifyArtifact(bytes: Uint8Array, artifact: ReleaseArtifact): void {
   if (bytes.byteLength !== artifact.size || createHash("sha256").update(bytes).digest("hex") !== artifact.sha256) throw new ReleaseVerificationError("digest_mismatch");
-}
-/** Only a known target older than the signing boundary can use the legacy checksum format. */
-export function permitsUnsignedRelease(version: string, boundary = FIRST_SIGNED_RELEASE): boolean {
-  if (!/^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$/.test(version) || /-dev\./.test(version)) return false;
-  const left = version.split("-")[0]!.split(".").map(BigInt), right = boundary.split(".").map(BigInt);
-  for (let i = 0; i < 3; i++) { if (left[i]! < right[i]!) return true; if (left[i]! > right[i]!) return false; }
-  // Signing is mandatory for the entire first signed release line, including its prereleases.
-  return false;
 }
