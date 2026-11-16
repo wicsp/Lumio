@@ -34,3 +34,14 @@ The built-in excluded bundle IDs are `com.1password.1password`,
 `org.keepassxc.keepassxc`. Add bundle IDs in **排除的 App…**. Browser private windows
 are excluded when their browser reports private mode. An unreachable Hub
 produces a failure in the overlay. Pending captures are held in memory.
+
+## Hold to speak
+
+Hold the trigger for at least 250 ms and speak when the listening indicator
+appears. Allow microphone access on first use. The helper streams 16 kHz mono
+PCM to your Hub and shows the current transcription. The Hub needs a
+`speech.asr` binding for this account. Release to send the final transcript and
+glance to your main conversation. **展开** shows the full answer and
+**在 Lumio 中打开** opens the conversation, where any required approval can be
+handled. Press Esc while holding the trigger to cancel. An empty utterance or
+unavailable speech service leaves the gesture as a save.

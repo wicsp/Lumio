@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import AVFoundation
 import LumioCaptureCore
 
 @MainActor final class CaptureApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -18,6 +19,9 @@ import LumioCaptureCore
     private var submission: Task<Void, Never>?
     private var press: Press?
     private var sampler: Timer?
+    private var speech: SpeechCapture?
+    private var holdTimer: Task<Void, Never>?
+    private var speechProblem: String?
     private var activeHub: Hub?
     private var permissionObserver: NSObjectProtocol?
     private var sound: Bool { !settings.bool(forKey: "mute") }
@@ -95,16 +99,33 @@ import LumioCaptureCore
         }
         capture = Task { try await ScreenCapture.collect(app: front, at: pointer, hub: hub) }
         if sound { NSSound(named: "Tink")?.play() }
+        speechProblem = nil
+        holdTimer = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(CaptureLimits.tapSeconds))
+            guard let self, !Task.isCancelled, press != nil else { return }
+            do {
+                speech = try SpeechCapture(hub: hub) { [weak self] text in
+                    self?.panel.show(text.isEmpty ? "正在听…" : text, seconds: nil)
+                }
+                panel.show("正在听…", seconds: nil)
+            } catch { speechProblem = error.localizedDescription }
+        }
     }
 
     private func finish() {
         sampler?.invalidate()
         sampler = nil
         guard let capture, let press, let hub = activeHub else { return }
+        holdTimer?.cancel()
+        holdTimer = nil
+        let speech = self.speech
+        self.speech = nil
+        speech?.release()
         self.capture = nil
         self.press = nil
         activeHub = nil
         let held = !press.isTap(at: ProcessInfo.processInfo.systemUptime)
+        let problem = speechProblem
         submission = Task {
             defer { submission = nil }
             var uploaded: Hub.Glance?
@@ -112,11 +133,30 @@ import LumioCaptureCore
                 let screen = try await capture.value
                 try Task.checkCancellation()
                 let (meta, image) = try await screen.request(press: press, includeTrail: held)
+                var transcript = "", speechFailure = problem
+                if let speech {
+                    panel.show("正在识别…", seconds: nil)
+                    do { transcript = try await speech.finalText().trimmingCharacters(in: .whitespacesAndNewlines) }
+                    catch { speechFailure = error.localizedDescription }
+                }
+                try Task.checkCancellation()
                 let glance = try await hub.upload(meta, image: image)
                 uploaded = glance
                 try Task.checkCancellation()
-                let title = try await hub.save(glance)
-                panel.show("已收藏 · \(title)", sound: sound ? "Glass" : nil)
+                if transcript.isEmpty {
+                    let title = try await hub.save(glance)
+                    let note = speechFailure.map { "\n语音不可用 · \($0)" } ?? ""
+                    panel.show("已收藏 · \(title)\(note)", sound: sound ? "Glass" : nil)
+                } else {
+                    let conversation = try await hub.mainConversation()
+                    let url = hub.conversationURL(conversation)
+                    panel.show("正在等助手回答…", seconds: nil, url: url)
+                    try await hub.chat(ChatRequest(conversation: conversation, message: transcript, glance: glance.id)) { state in
+                        let confirmation = state.needsApproval ? "\n需要你确认" : ""
+                        let reply = state.reply.isEmpty && !state.finished ? "正在等助手回答…" : state.reply
+                        panel.show(reply + confirmation, seconds: state.finished ? 25 : nil, url: url, expandable: !state.reply.isEmpty)
+                    }
+                }
             } catch {
                 if let uploaded { try? await hub.discard(uploaded) }
                 if !Task.isCancelled { panel.show(error.localizedDescription, sound: sound ? "Basso" : nil) }
@@ -127,6 +167,10 @@ import LumioCaptureCore
     private func cancel() {
         sampler?.invalidate()
         sampler = nil
+        holdTimer?.cancel()
+        holdTimer = nil
+        speech?.cancel()
+        speech = nil
         capture?.cancel()
         capture = nil
         press = nil
@@ -206,6 +250,7 @@ import LumioCaptureCore
             ("屏幕录制", CGPreflightScreenCaptureAccess(), "Privacy_ScreenCapture"),
             ("辅助功能", AXIsProcessTrusted(), "Privacy_Accessibility"),
             ("输入监控", CGPreflightListenEventAccess(), "Privacy_ListenEvent"),
+            ("麦克风", AVCaptureDevice.authorizationStatus(for: .audio) == .authorized, "Privacy_Microphone"),
             ("自动化（各浏览器首次读取网址时申请）", true, "Privacy_Automation"),
         ]
         let dialog = NSAlert()
@@ -221,6 +266,8 @@ import LumioCaptureCore
             case "Privacy_ScreenCapture": _ = CGRequestScreenCaptureAccess()
             case "Privacy_Accessibility": _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
             case "Privacy_ListenEvent": _ = CGRequestListenEventAccess()
+            case "Privacy_Microphone":
+                Task { _ = await AVCaptureDevice.requestAccess(for: .audio) }
             default: break
             }
             if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(missing[index].2)") {
