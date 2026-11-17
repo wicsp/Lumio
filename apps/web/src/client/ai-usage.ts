@@ -204,8 +204,7 @@ function settingsDialog(connection: AIConnection, usage: AIQuotaView, client: Cl
   mode.value = usage.settings.claude_mode ?? "sample";
   mode.onchange = () => { if (mode.value === "background") monitor.checked = true; };
   const thresholds = usage.settings.thresholds;
-  const cny = field("CNY balance below", thresholds.CNY ?? "");
-  const usd = field("USD balance below", thresholds.USD ?? "");
+  const below = field("Balance below", thresholds.balance ?? "");
   const percent = field("Remaining quota below (%)", thresholds.remaining_percent?.toString() ?? "");
   const full = field("Monitoring threshold", usage.settings.full_balance ?? "");
   const message = h("div", { role: "status" });
@@ -215,7 +214,7 @@ function settingsDialog(connection: AIConnection, usage: AIQuotaView, client: Cl
     h("p", { class: "field-hint" }, t("Leave a threshold blank to skip that alert. Enable AI usage alerts in your device’s notification settings.")),
     ...(connection.kind === "deepseek" ? [full.element,
       h("p", { class: "field-hint" }, t("The sidebar bar is full while the balance is at or above the monitoring threshold, and shrinks in proportion below it. Leave it blank to keep the bar full.")),
-      cny.element, usd.element]
+      below.element]
       : [percent.element]), message);
   const save = h("button", { type: "button", class: "btn btn-primary", onclick: () => form.requestSubmit() }, t("Save"));
   const dialog = openDialog(t("Monitoring settings"), form, [save]);
@@ -223,7 +222,7 @@ function settingsDialog(connection: AIConnection, usage: AIQuotaView, client: Cl
     event.preventDefault();
     const remaining = percent.input.value.trim();
     const settings = AIQuotaSettings.safeParse({ monitor: monitor.checked, claude_mode: isClaude ? mode.value : undefined, thresholds: connection.kind === "deepseek"
-      ? { CNY: cny.input.value.trim() || undefined, USD: usd.input.value.trim() || undefined }
+      ? { balance: below.input.value.trim() || undefined }
       : { remaining_percent: remaining ? (/^\d+(\.\d+)?$/.test(remaining) ? Number(remaining) : NaN) : undefined },
       full_balance: connection.kind === "deepseek" ? full.input.value.trim() || undefined : undefined });
     if (!settings.success) { clear(message, failure(t("Enter a valid balance or a percentage between 0 and 100."))); return; }

@@ -59,10 +59,10 @@ function lowItems(snapshot: AIQuotaSnapshot, settings: AIQuotaSettings, now: num
   const low = new Map<string, string>();
   if (!settings.monitor) return low;
   if (snapshot.source === "deepseek") {
-    for (const balance of snapshot.balances) {
-      const threshold = settings.thresholds[balance.currency];
-      if (threshold !== undefined && decimalUnits(balance.total) < decimalUnits(threshold)) low.set(balance.currency, "");
-    }
+    // 只看显示的那笔余额（有人民币用人民币，否则第一笔），与侧栏一致（ADR 0071）
+    const balance = snapshot.balances.find(item => item.currency === "CNY") ?? snapshot.balances[0];
+    const threshold = settings.thresholds.balance;
+    if (balance && threshold !== undefined && decimalUnits(balance.total) < decimalUnits(threshold)) low.set(balance.currency, "");
   } else if ("windows" in snapshot) {
     const threshold = settings.thresholds.remaining_percent;
     for (const window of snapshot.windows) {
@@ -365,8 +365,8 @@ export class AIUsage {
       }
       const thresholds = previous.thresholds;
       const updated = settings.data.thresholds;
-      const changed = previous.monitor !== settings.data.monitor || thresholds.CNY !== updated.CNY ||
-        thresholds.USD !== updated.USD || thresholds.remaining_percent !== updated.remaining_percent;
+      const changed = previous.monitor !== settings.data.monitor || thresholds.balance !== updated.balance ||
+        thresholds.remaining_percent !== updated.remaining_percent;
       this.store.putQuota(connection.id, { ...stored, settings: updatedSettings,
         ...(changed ? { alerted: undefined, next: undefined, failures: undefined } : {}) });
     } else if (action === "bind" && request.method === "POST" && connection.kind === "claude-code-subscription") {

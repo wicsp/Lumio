@@ -202,7 +202,7 @@ test("enabled DeepSeek monitoring persists alert deduplication and alerts again 
   try {
     const connection = await f.connection(api);
     const refresh = () => f.request(path(connection.id, "refresh"), "POST").then(parseView);
-    await parseView(await f.request(path(connection.id, "settings"), "PUT", { monitor: true, thresholds: { CNY: "10" } }));
+    await parseView(await f.request(path(connection.id, "settings"), "PUT", { monitor: true, thresholds: { balance: "10" } }));
     f.hub.modules.native.usage.tick();
     for (let n = 0; !f.notices().length && n < 50; n++) await Bun.sleep(5);
     expect(f.notices()).toHaveLength(1);
@@ -213,7 +213,7 @@ test("enabled DeepSeek monitoring persists alert deduplication and alerts again 
     expect(f.notices()).toHaveLength(1);
     // 只改监控阈值（ADR 0071）不重置提醒去重，原样保存并返回
     const scaled = await parseView(await f.request(path(connection.id, "settings"), "PUT",
-      { monitor: true, thresholds: { CNY: "10" }, full_balance: "20" }));
+      { monitor: true, thresholds: { balance: "10" }, full_balance: "20" }));
     expect(scaled.settings.full_balance).toBe("20");
     f.advance(60_000);
     await refresh();
