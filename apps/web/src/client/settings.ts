@@ -1,5 +1,5 @@
 /** 主题与语言的选择菜单（ADR 0028），侧栏、连接页与命令面板共用。 */
-import { icon, openMenu } from "./dom.ts";
+import { h, icon, openMenu } from "./dom.ts";
 import { lang, setLang, t, type Lang } from "./i18n.ts";
 import { setTheme, themeChoice, type ThemeChoice } from "./theme.ts";
 
@@ -14,5 +14,28 @@ export function pickTheme(anchor: HTMLElement): void {
 /** 语言名称用各自的语言写，不翻译。 */
 export function pickLang(anchor: HTMLElement): void {
   openMenu(anchor, LANGS.map(([value, label]) => ({ value, label, selected: lang() === value })), value => setLang(value as Lang));
+}
+
+/** 设置页共用的本地选项控件。值是稳定 ID，显示文案从定义翻译。 */
+export function browserChoiceRow(preference: {
+  label: string;
+  options: readonly { value: string; label: string }[];
+  choose(value: string): boolean;
+  subscribe(listener: (value: string) => void): () => void;
+}, hint?: string): { element: HTMLElement; dispose: () => void } {
+  const status = h("span", { class: "set-sub", role: "status" });
+  const label = t(preference.label);
+  const select = h("select", { class: "set-choice", "aria-label": label, onchange: () => {
+    status.textContent = preference.choose(select.value) ? "" : t("This browser could not save this choice.");
+  } }, ...preference.options.map(({ value, label }) => h("option", { value }, t(label))));
+  const dispose = preference.subscribe(value => {
+    select.value = value;
+    status.textContent = "";
+  });
+  return {
+    element: h("label", { class: "set-row" }, h("span", { class: "set-label" }, label,
+      hint && h("span", { class: "set-sub" }, hint), status), select),
+    dispose,
+  };
 }
 

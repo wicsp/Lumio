@@ -2,8 +2,8 @@
  * 侧栏 AI 用量指示器：在侧栏底部、账号上方，每个开启监控的连接一行。
  * 订阅额度显示各窗口中最少的剩余百分比，细条依次是从短到长的窗口；API 余额显示余额，细条按监控阈值折算（ADR 0071）。
  * 每条细条上有一根竖线，表示离该窗口重置还剩的时间占比：亮条越过竖线说明额度撑得到重置，没到说明会提前用完。
- * 平时是灰色，低于监控阈值变黄，用完变红。收起侧栏时每个连接仍各占一行，只是去掉名称和数值、细条缩到栏宽，
- * 竖线照常画；鼠标移上去立即浮出与展开状态相同的完整列表。
+ * 收起侧栏时每个连接仍各占一行，按本机偏好显示短细条或带重置圆点的开口弧线。
+ * 鼠标移上去浮出与展开状态相同的完整列表。
  * 点一行弹出详情（各窗口剩余与重置时间、刷新、去设置）。数据复用 ADR 0052 的用量接口，不新增契约。
  */
 import type { AIConnection, AIQuotaView, AIQuotaWindow } from "@lumio/schema";
@@ -12,11 +12,14 @@ import { clear, failure, h, icon } from "./dom.ts";
 import { t } from "./i18n.ts";
 import { formatTime } from "./commands.ts";
 import { amount, usageSummary, windowRow } from "./ai-usage.ts";
+import { sidebarUsageStyle } from "./browser-preferences.ts";
+import { renderUsageArc, type UsageArc } from "./usage-arc.ts";
 
 export type UsageLevel = "ok" | "low" | "empty" | "issue";
 export type UsageGlance = {
   connection: string;
   name: string;
+  kind: AIConnection["kind"];
   level: UsageLevel;
   /** 订阅额度：各窗口中最少的剩余百分比（整数）。API 余额没有这一项。 */
   remaining?: number;
@@ -26,6 +29,8 @@ export type UsageGlance = {
   resets: Array<number | undefined>;
   /** 行尾显示的值：百分比、余额，或无法读取时的「—」。 */
   value: string;
+  /** 弧线显示金额或最紧张的额度窗口，重置点使用同一个窗口。 */
+  arc?: UsageArc;
 };
 
 /** 没有可用读数、或读数来源本身有问题的状态。离线、过期但仍有上次读数时照常显示。 */
@@ -47,17 +52,28 @@ export function balanceBar(total: string, scale?: string): number {
   return Math.min(100, Math.max(0, (value / full) * 100));
 }
 
+const compactBalance = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 0 });
+
+function arcBalance(total: string): string {
+  const value = Number(total);
+  if (value > 0 && value < 1) return "<1";
+  if (value < 0 && value > -1) return ">−1";
+  const compact = compactBalance.format(Math.trunc(value));
+  return compact.length <= 4 ? compact : "…";
+}
+
 export function usageGlance(connection: AIConnection, usage: AIQuotaView, now = Date.now()): UsageGlance | undefined {
   if (!usage.settings.monitor || usage.aliyun_billing_configured !== undefined) return undefined;
-  const base = { connection: connection.id, name: connection.name };
+  const base = { connection: connection.id, name: connection.name, kind: connection.kind };
   const snapshot = usage.snapshot;
   if (!snapshot || BROKEN.has(usage.status) || usage.claude_issue) return { ...base, level: "issue", bars: [], resets: [], value: "—" };
   if (snapshot.source === "deepseek") {
     const balance = snapshot.balances.find(b => b.currency === "CNY") ?? snapshot.balances[0];
     const level: UsageLevel = !snapshot.available ? "empty" : usage.attention ? "low" : "ok";
     if (!balance) return { ...base, level, bars: [], resets: [], value: "—" };
-    return { ...base, level, bars: [balanceBar(balance.total, usage.settings.full_balance)], resets: [undefined],
-      value: amount(balance.currency, balance.total) };
+    const progress = balanceBar(balance.total, usage.settings.full_balance);
+    return { ...base, level, bars: [progress], resets: [undefined], value: amount(balance.currency, balance.total),
+      arc: { value: arcBalance(balance.total), progress } };
   }
   if (!("windows" in snapshot)) return undefined;
   const windows = snapshot.windows.filter(window => window.used_percent !== undefined)
@@ -66,9 +82,11 @@ export function usageGlance(connection: AIConnection, usage: AIQuotaView, now = 
   const shown = windows.slice(0, 2);
   const bars = shown.map(remainingOf);
   const resets = shown.map(window => timeLeftOf(window, now));
-  const remaining = Math.min(...windows.map(remainingOf));
+  const tightest = windows.reduce((tight, window) => window.used_percent! > tight.used_percent! ? window : tight);
+  const remaining = remainingOf(tightest);
   const level: UsageLevel = remaining === 0 ? "empty" : usage.attention ? "low" : "ok";
-  return { ...base, level, remaining, bars, resets, value: `${remaining}%` };
+  return { ...base, level, remaining, bars, resets, value: `${remaining}%`,
+    arc: { value: String(remaining), progress: remaining, reset: timeLeftOf(tightest, now) } };
 }
 
 const LEVEL_LABEL: Record<UsageLevel, string> = { ok: "", low: "Running low", empty: "Used up", issue: "Usage unavailable" };
@@ -90,9 +108,15 @@ export class UsageIndicator {
   private disposed = false;
   private popover?: { element: HTMLElement; anchor: HTMLElement; connection: string; close: () => void };
   private timer = setInterval(() => void this.refresh(), 60_000);
+  private readonly unbindStyle: () => void;
 
   constructor(private client: Client, private openSettings: () => void) {
     this.element.append(this.rows);
+    this.unbindStyle = sidebarUsageStyle.subscribe(style => {
+      this.element.setAttribute("data-usage-style", style);
+      this.hideHover();
+      this.popover?.close();
+    });
     const enter = () => this.scheduleHover(true), leave = () => this.scheduleHover(false);
     this.element.addEventListener("mouseenter", enter);
     this.element.addEventListener("mouseleave", leave);
@@ -160,7 +184,8 @@ export class UsageIndicator {
         }
         return bar;
       }), ...(g.bars.length ? [] : [h("span", { class: "usage-bar usage-bar-dashed" }, h("span", { class: "usage-track" }))])),
-      h("span", { class: "usage-value" }, g.level === "issue" ? icon("alert") : g.value));
+      h("span", { class: "usage-value" }, g.level === "issue" ? icon("alert") : g.value),
+      !onOpen && renderUsageArc(g.kind, g.arc));
     return button;
   }
 
@@ -268,6 +293,7 @@ export class UsageIndicator {
 
   dispose(): void {
     this.disposed = true;
+    this.unbindStyle();
     clearInterval(this.timer);
     this.hideHover();
     this.hover.remove();

@@ -21,7 +21,8 @@ const windows = (five: number, week: number) => [
 describe("sidebar usage indicator", () => {
   test("subscriptions show the smallest remaining share, bars from short to long windows", () => {
     const glance = usageGlance(claude, view(claude.id, { snapshot: { source: "claude-code", sampled_at: at, windows: windows(66.4, 39) } }));
-    expect(glance).toMatchObject({ name: "Claude", level: "ok", remaining: 34, bars: [34, 61], value: "34%" });
+    expect(glance).toMatchObject({ name: "Claude", level: "ok", remaining: 34, bars: [34, 61], value: "34%",
+      arc: { value: "34", progress: 34 } });
   });
   test("attention turns a row low and an exhausted window turns it empty", () => {
     const low = usageGlance(codex, view(codex.id, { attention: true, snapshot: { source: "codex", sampled_at: at, windows: windows(88, 42) } }));
@@ -32,7 +33,7 @@ describe("sidebar usage indicator", () => {
   test("API balances show the CNY total and become empty when calls are blocked", () => {
     const balances = [{ currency: "USD", total: "3.00", topped_up: "3.00", granted: "0" }, { currency: "CNY", total: "48.20", topped_up: "40.00", granted: "8.20" }] as const;
     expect(usageGlance(deepseek, view(deepseek.id, { snapshot: { source: "deepseek", sampled_at: at, available: true, balances: [...balances] } })))
-      .toMatchObject({ level: "ok", value: "¥48.20", bars: [100], resets: [undefined] });
+      .toMatchObject({ level: "ok", value: "¥48.20", bars: [100], resets: [undefined], arc: { value: "48", progress: 100 } });
     const scaled = (full: string) => usageGlance(deepseek, view(deepseek.id, { settings: { monitor: true, thresholds: {}, full_balance: full },
       snapshot: { source: "deepseek", sampled_at: at, available: true, balances: [...balances] } }))?.bars;
     expect(scaled("20")).toEqual([100]);
@@ -40,6 +41,23 @@ describe("sidebar usage indicator", () => {
     expect(scaled("100")).toEqual([48.2]);
     expect(balanceBar("5", "0")).toBe(100);
     expect(usageGlance(deepseek, view(deepseek.id, { snapshot: { source: "deepseek", sampled_at: at, available: false, balances: [...balances] } }))?.level).toBe("empty");
+  });
+  test("the arc follows the tightest window even when it is not one of the two bars", () => {
+    const glance = usageGlance(codex, view(codex.id, { snapshot: { source: "codex", sampled_at: at, windows: [
+      { id: "short", minutes: 60, used_percent: 30 },
+      { id: "medium", minutes: 120, used_percent: 50 },
+      { id: "long", minutes: 240, used_percent: 68, resets_at: "2026-11-10T13:00:00+08:00" },
+    ] } }), Date.parse(at));
+    expect(glance).toMatchObject({ bars: [70, 50], value: "32%", arc: { value: "32", progress: 32, reset: 25 } });
+  });
+  test("a positive fractional balance stays distinguishable from zero", () => {
+    const snapshot = { source: "deepseek", sampled_at: at, available: true, balances: [
+      { currency: "CNY", total: "0.42", topped_up: "0.42", granted: "0" },
+    ] } as const;
+    const glance = usageGlance(deepseek, view(deepseek.id, { snapshot: { ...snapshot, balances: [...snapshot.balances] },
+      settings: { monitor: true, thresholds: {}, full_balance: "1" } }));
+    expect(glance).toMatchObject({ value: "¥0.42", arc: { value: "<1", progress: 42 } });
+    expect(glance?.arc?.reset).toBeUndefined();
   });
   test("unmonitored connections are hidden and broken sources show an issue", () => {
     expect(usageGlance(codex, view(codex.id, { settings: { monitor: false, thresholds: {} } }))).toBeUndefined();

@@ -249,6 +249,22 @@ kbd { padding: 0 5px; border: 1px solid var(--line); border-bottom-width: 2px; b
 .usage-bar-dashed .usage-track { --dash: var(--ink-4); background: repeating-linear-gradient(90deg, var(--dash) 0 4px, transparent 4px 7px); opacity: .7; }
 .usage-row[data-level="low"] .usage-bar-dashed .usage-track { --dash: var(--ochre); opacity: 1; }
 .usage-row[data-level="empty"] .usage-bar-dashed .usage-track { --dash: var(--red); opacity: 1; }
+.usage-arc { display: none; position: relative; place-items: center; width: 22px; height: 22px; color: var(--ink); }
+.usage-arc-meter { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.usage-arc-meter path { fill: none; stroke-width: 2.4; }
+.usage-arc-track { stroke: var(--line-strong); }
+.usage-arc-fill { stroke: color-mix(in srgb, var(--green) 45%, var(--ink-4)); }
+.usage-row[data-level="low"] .usage-arc-fill { stroke: var(--ochre); }
+.usage-row[data-level="empty"] .usage-arc-fill { stroke: var(--red); }
+.usage-arc-reset { fill: var(--ink-2); }
+.usage-arc .usage-arc-logo { width: 9px; height: 9px; }
+.usage-arc .usage-arc-logo-pi { width: 11px; height: 11px; }
+.usage-arc-value {
+  position: absolute; top: 90%; left: 50%; transform: translate(-50%, -50%);
+  font: 600 8px/1 ui-rounded, "SF Pro Rounded", "Arial Rounded MT Bold", sans-serif;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.usage-arc-value-long { top: 98%; font-size: 7px; }
 /* 收起侧栏时的悬停浮层：与展开状态的各行一致，宽度对齐展开的侧栏。 */
 .menu.usage-hover { position: fixed; z-index: 60; width: 236px; padding: 4px; display: flex; flex-direction: column; gap: 1px; }
 .menu.usage-hover[hidden] { display: none; }
@@ -264,6 +280,9 @@ kbd { padding: 0 5px; border: 1px solid var(--line); border-bottom-width: 2px; b
   .sidebar-collapsed .sidebar .usage-row { height: 16px; padding: 0 5px; gap: 0; }
   .sidebar-collapsed .sidebar .usage-row :is(.usage-name, .usage-value) { display: none; }
   .sidebar-collapsed .sidebar .usage-bars { gap: 2px; }
+  .sidebar-collapsed .sidebar .usage-glance[data-usage-style="arcs"] .usage-row { height: 28px; padding: 0; justify-content: center; }
+  .sidebar-collapsed .sidebar .usage-glance[data-usage-style="arcs"] .usage-bars { display: none; }
+  .sidebar-collapsed .sidebar .usage-glance[data-usage-style="arcs"] .usage-arc { display: grid; }
 }
 .who { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--r-sm); }
 .who-avatar { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--ink); color: var(--paper); font-size: 11px; font-weight: 600; }
@@ -864,6 +883,7 @@ div.note-rich-preview { padding:4px 0; }
 .set-row:first-child { border-top: 0; }
 button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoration: none; }
 .set-label { flex: 1; min-width: 0; }
+.set-row .set-choice { width: auto; max-width: 50%; flex: none; }
 .set-value { color: var(--ink-2); font-size: var(--fs-sm); text-align: right; overflow-wrap: anywhere; }
 .set-value kbd + kbd { margin-left: 2px; }
 .set-status { display: inline-flex; align-items: center; gap: 7px; }

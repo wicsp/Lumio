@@ -11,7 +11,8 @@ import { formatTime } from "../commands.ts";
 import { helperState, installCommandBlock } from "../privileged-helper.ts";
 import { lang, setLang, t, type Lang } from "../i18n.ts";
 import { onTheme, setTheme, themeChoice, type ThemeChoice } from "../theme.ts";
-import { LANGS, THEMES } from "../settings.ts";
+import { browserChoiceRow, LANGS, THEMES } from "../settings.ts";
+import { sidebarUsageStyle } from "../browser-preferences.ts";
 import { AISettings } from "../ai-settings.ts";
 import { AgentsSettings } from "../agents-settings.ts";
 import { captureProxySettings } from "../capture-proxy-settings.ts";
@@ -112,10 +113,13 @@ export class SettingsPane {
     const page = (...children: Array<Node | null | undefined | false>) => h("div", { class: "set-page" },
       h("header", { class: "set-head" }, h("h2", { class: "set-title" }, t(info.label)), h("p", { class: "set-lede" }, t(info.hint))), ...children);
     switch (key) {
-      case "general":
+      case "general": {
+        const usageStyle = browserChoiceRow(sidebarUsageStyle, t("Applies when the desktop sidebar is collapsed."));
         return { element: page(
-          this.group(t("Appearance"), t("Choose how Lumio looks on this device."), this.themes()),
-          this.group(t("Language"), t("Used for menus, dates and messages from the Hub."), this.languages())) };
+          this.group(t("Appearance"), t("Choose how Lumio looks on this device."), h("div", {}, this.themes(), usageStyle.element)),
+          this.group(t("Language"), t("Used for menus, dates and messages from the Hub."), this.languages())),
+          dispose: usageStyle.dispose };
+      }
       case "controls": {
         const gamepad = this.gamepad ? new GamepadSettings(this.gamepad) : undefined;
         return { element: page(
