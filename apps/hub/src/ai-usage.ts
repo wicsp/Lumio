@@ -353,6 +353,7 @@ export class AIUsage {
       this.owned(owner, connection.id);
       const stored = this.store.quota(connection.id);
       if (connection.kind !== "claude-code-subscription" && settings.data.claude_mode) throw error("INVALID");
+      if (connection.kind !== "deepseek" && settings.data.full_balance) throw error("INVALID");
       const previous = stored.settings;
       const mode = settings.data.claude_mode ?? previous.claude_mode;
       const updatedSettings = { ...settings.data, claude_mode: mode };
