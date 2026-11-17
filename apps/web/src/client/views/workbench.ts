@@ -25,8 +25,9 @@ import { UsageIndicator } from "../usage-indicator.ts";
 import { MainDock } from "../main-dock.ts";
 import { canNavigateNow, navigateRoute, type FocusInput } from "../workbench-assist.ts";
 import type { Notice, WorkbenchAction } from "@lumio/schema";
-import { pendingNotices } from "../panes/overview.ts";
+import { needsYouCount, pendingNotices } from "../panes/overview.ts";
 import { newRequestId } from "../commands.ts";
+import { LiveData, settled, type LiveSnapshot } from "../live-data.ts";
 
 /** 记住侧栏是否收起（只影响本设备）。 */
 const SIDEBAR_KEY = "lumio.web.sidebar-collapsed";
@@ -65,7 +66,8 @@ export class WorkbenchView {
   private palette: CommandPalette;
   private disposeReferenceLinks: () => void;
   private disposeResourceLinks: () => void;
-  private countTimer: ReturnType<typeof setInterval>;
+  /** Today、计数与提醒共用的实时数据（见 live-data.ts 的刷新规则）。 */
+  private live: LiveData;
   /** 主对话面板（ADR 0060，A1-5）。 */
   private dock: MainDock;
   /** 人最近一次在页面上输入、滚动、点击或按键的时间；助手替人跳转前要先空闲一会儿。 */
@@ -109,16 +111,31 @@ export class WorkbenchView {
       if (search && search.offsetParent !== null) { event.preventDefault(); search.focus(); search.select(); }
     }
   };
-  /** 实时刷新（R4-8）：回到前台或窗口重新获得焦点、收到推送时立即刷新；页面可见时每 15 秒静默刷新一次。 */
+  /**
+   * 唯一的刷新入口（R4-8，规则见 live-data.ts）：回到前台、窗口重新获得焦点、收到推送时立即刷新；
+   * 页面可见时每 15 秒静默刷新一次。两秒内的重复触发合并；正在刷新时再触发，结束后补一次。
+   */
   private lastRefresh = 0;
-  private readonly refreshNow = () => {
-    if (document.visibilityState !== "visible" || document.querySelector("dialog[open]")) return;
-    if (Date.now() - this.lastRefresh < 2000) return;
-    this.lastRefresh = Date.now();
-    this.current?.pane.liveRefresh?.();
-    void this.refreshCounts();
-    void this.usage.refresh();
-  };
+  private refreshing = false;
+  private refreshAgain = false;
+  private readonly refreshNow = () => { void this.refresh(); };
+  private async refresh(force = false): Promise<void> {
+    if (document.visibilityState !== "visible") return;
+    if (this.refreshing) { this.refreshAgain = true; return; }
+    if (!force && Date.now() - this.lastRefresh < 2000) return;
+    this.refreshing = true; this.lastRefresh = Date.now();
+    try {
+      await this.refreshCounts();
+      // 对话框打开时不刷新底下的模块：确认框指向的内容不能在人眼前变掉。
+      if (!document.querySelector("dialog[open]")) this.current?.pane.liveRefresh?.();
+      void this.usage.refresh();
+    } finally {
+      this.refreshing = false;
+      if (this.refreshAgain) { this.refreshAgain = false; void this.refresh(true); }
+    }
+  }
+  /** 任何操作改了数据：快照作废，计数立即更新；发起操作的模块自己刷新，其他模块切回来时刷新。 */
+  private readonly changed = () => { this.live.invalidate(); void this.refreshCounts(); };
   private readonly onVisible = () => { if (document.visibilityState === "visible") this.refreshNow(); else void this.current?.pane.beforeLeave?.(); };
   private liveTimer: ReturnType<typeof setInterval> = setInterval(() => this.refreshNow(), 15_000);
   private readonly onUnload = () => { this.current?.pane.canLeave?.(); };
@@ -131,6 +148,7 @@ export class WorkbenchView {
   private beforeSettings = "#overview";
   /** 语言切换被推迟时，App 在下一次切换模块前重建界面；返回 true 表示已接管。 */
   constructor(root: HTMLElement, private session: Session, humans: string[], private logout: () => void, private beforeShow: () => boolean = () => false) {
+    this.live = new LiveData(session.client, session.hub);
     this.disposeReferenceLinks = referenceLinks(this.main, session.client, ref => this.go("knowledge",ref));
     this.disposeResourceLinks = resourceLinks(this.main, session.client, (section, id, intent) => void this.go(section, id, intent));
     this.palette = new CommandPalette(session.client, (section, id, intent) => this.go(section, id, intent));
@@ -235,7 +253,6 @@ export class WorkbenchView {
     const route = this.readRoute();
     this.show(route.section, route.id);
     void this.refreshCounts();
-    this.countTimer = setInterval(() => { if (document.visibilityState === "visible") void this.refreshCounts(); }, 60_000);
   }
 
   private adjacentSection(step: number): typeof SECTIONS[number] | undefined {
@@ -313,9 +330,9 @@ export class WorkbenchView {
     this.main.append(target);
     const client = this.session.client;
     const navigate: Navigate = (s, i, n) => this.go(s, i, n);
-    const changed = () => void this.refreshCounts();
+    const changed = this.changed;
     let pane: Pane;
-    if (section === "overview") pane = new OverviewPane(target, client, this.session.hub, navigate, this.name, changed);
+    if (section === "overview") pane = new OverviewPane(target, client, this.session.hub, navigate, this.name, changed, this.live);
     else if (section === "settings") pane = new SettingsPane(target, this.session, this.name, () => void this.signOut(), () => this.leaveSettings(), sub => void this.go("settings", sub), id, this.gamepad);
     else if (section === "knowledge") pane = new KnowledgePane(target, client, id, () => this.dock?.pageChanged());
     else if (section === "work") pane = new WorkPane(target, client, this.session.hub, this.workMode, id, navigate, changed,
@@ -393,26 +410,28 @@ export class WorkbenchView {
   }
 
   private async refreshCounts(): Promise<void> {
-    const client = this.session.client;
-    const [tasks, proposals, jobs, attention, notices] = await Promise.allSettled([client.workTasks(), client.proposals("pending"), client.jobs(), this.session.hub.attention(),
-      client.notices({ unread: true, limit: 100 })]);
-    if (notices.status === "fulfilled") this.applyNotices(notices.value.notices);
+    let snapshot: LiveSnapshot;
+    try { snapshot = await this.live.get(); } catch { return; }
+    if (!this.current) return;
+    this.applyCounts(snapshot);
+  }
+
+  private applyCounts(snapshot: LiveSnapshot): void {
+    const tasks = settled(snapshot.tasks), proposals = settled(snapshot.proposals), jobs = settled(snapshot.jobs);
+    const attention = settled(snapshot.attention), notices = settled(snapshot.notices), live = settled(snapshot.jobAttention);
+    if (notices) this.applyNotices(notices);
     const set = (section: Section, value: number | undefined, attention = false) => {
       const el = this.counts.get(section)!;
       el.textContent = value ? String(value) : "";
       el.classList.toggle("attention", attention && !!value);
     };
-    set("work", tasks.status === "fulfilled" ? tasks.value.filter(t => turnGroup(t) === "needs" || turnGroup(t) === "todo").length : undefined);
+    set("work", tasks?.filter(t => turnGroup(t) === "needs" || turnGroup(t) === "todo").length);
     set("inbox", undefined);
-    set("approvals", proposals.status === "fulfilled" ? proposals.value.length : undefined, true);
-    const groups = jobs.status === "fulfilled" ? executionGroups(jobs.value,
-      tasks.status === "fulfilled" ? tasks.value : undefined,
-      attention.status === "fulfilled" ? attention.value : undefined) : undefined;
+    set("approvals", proposals?.length, true);
+    const groups = jobs ? executionGroups(jobs, tasks, attention) : undefined;
     set("execution", groups ? groups.live.length + groups.needs.length : undefined);
-    // 今日的提醒数 = 需要你处理的轮次 + 待批准（ADR 0030）；窄屏底栏只看得到这一个数。
-    const needs = attention.status === "fulfilled" && attention.value ? attention.value.length : 0;
-    const pending = notices.status === "fulfilled" ? pendingNotices(notices.value.notices).length : 0;
-    set("overview", needs + (proposals.status === "fulfilled" ? proposals.value.length : 0) + pending, true);
+    // 今日的数字与 Today 页「需要你处理」的卡片数一致，再加上待看的提醒（ADR 0030）；窄屏底栏只看得到这一个数。
+    set("overview", needsYouCount(snapshot) + (notices ? pendingNotices(notices).length : 0), true);
   }
 
   private leaveSettings(): void {
@@ -483,7 +502,7 @@ export class WorkbenchView {
     this.current = undefined;
     this.palette.dispose();
     this.usage.dispose();
-    clearInterval(this.countTimer); clearInterval(this.liveTimer);
+    clearInterval(this.liveTimer);
     window.removeEventListener("focus", this.refreshNow);
     window.removeEventListener("lumio-refresh", this.refreshNow);
     document.removeEventListener("visibilitychange", this.onVisible);

@@ -4,8 +4,11 @@
  * 「我自己来」把任务交回给你（原因 todo）：提醒消失，任务仍在你手里。
  * 权限申请（ADR 0049 第 3 节，H1-9）：等你回答且这一轮的结果带 permission 时，卡片换成批准表单：
  * 只能勾选申请里有的项，选择只给下一轮还是这个任务（有计划时为这一步）以后都给；拒绝就写明原因并继续。
+ *
+ * 汇报：Today 先显示开头几行，「展开完整汇报」就地读出全文，操作按钮始终紧跟在汇报下面；
+ * 任务详情直接显示全文，决定按钮放进详情底部固定的栏里，与讨论输入框在一起，滚到哪里都能决定。
  */
-import type { WorkAttention } from "@lumio/schema";
+import type { Job, WorkAttention } from "@lumio/schema";
 import { errorText, isConflict, type Client, type HubExtras } from "./api.ts";
 import { answerCommand, engineTargets, formatTime, grantCommand, itemsPermission, newRequestId, permissionItemLabel, permissionItems, type PermissionItem } from "./commands.ts";
 import type { StagePermissions } from "@lumio/schema";
@@ -26,6 +29,13 @@ export interface AttentionContext {
   navigate: Navigate;
   /** 处理完成后调用：调用方刷新列表或页面。 */
   changed(): void;
+  /** Today：展开了完整汇报的卡片（按轮次记），重画后保持展开。 */
+  expanded?: Set<string>;
+  /**
+   * 任务详情：决定按钮放进底部固定栏 bar；需要写字的回答、意见与带修改重试交给讨论输入框（reply 聚焦它）。
+   * 没有可继续的 agent 时不要传，卡片退回自带输入框的形式。
+   */
+  docked?: { bar: HTMLElement; reply(kind: WorkAttention["kind"]): void };
 }
 
 const KIND: Record<WorkAttention["kind"], { label: string; glyph: string; tone: string }> = {
@@ -41,6 +51,7 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
   const planned = item.stage !== undefined;
   let target = planned ? undefined : item.agent;
   const card = h("article", { class: `attn attn-${kind.tone}`, "data-pad-row": `round:${item.task}:${item.round}:${item.stage ?? ""}`, tabindex: "0", "data-task": item.task, "data-round": String(item.round) });
+  const docked = where === "task" ? ctx.docked : undefined;
   const status = h("div", { role: "status", class: "attn-status" });
   const error = h("div", { role: "alert" });
   const actions = h("div", { class: "attn-actions" });
@@ -48,16 +59,19 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
 
   const run = async (work: () => Promise<string>) => {
     if (busy) return;
-    busy = true; card.classList.add("is-busy"); clear(error);
+    busy = true; card.classList.add("is-busy"); docked?.bar.classList.add("is-busy"); clear(error);
     try {
       const done = await work();
       clear(card, h("p", { class: "attn-done" }, icon("check"), done));
       card.classList.add("is-done");
+      if (docked) clear(docked.bar);
       ctx.changed();
     } catch (cause) {
       clear(error, failure(isConflict(cause) ? t("This task changed since this card was shown. Refresh and try again.") : errorText(cause)));
-    } finally { busy = false; card.classList.remove("is-busy"); }
+    } finally { busy = false; card.classList.remove("is-busy"); docked?.bar.classList.remove("is-busy"); }
   };
+  /** 交给讨论输入框写字（只在任务详情里）。 */
+  const reply = docked ? () => docked.reply(item.kind) : undefined;
   const currentTask = async () => (await ctx.client.workTask(item.task)).task;
 
   // 回答框：等你回答时直接显示；验收与失败时点按钮后展开。
@@ -145,12 +159,22 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
     content.innerHTML = renderMarkdown(source);
     return content;
   };
+  // 读这一轮的 Job：完整汇报、权限申请与管理员助手提示都来自它（读取失败时保持摘要）。
+  const job = ctx.client.job(item.job);
+  job.catch(() => undefined);
   if (item.kind === "question") {
-    const answer = composer(t("Answer and continue"), true, t("Your answer…"));
-    body = h("div", { class: "attn-body" }, question(item.question ?? t("The agent is waiting for your input.")), answer.form);
+    if (reply) {
+      const answer = h("button", { type: "button", class: "btn btn-primary btn-small", "data-pad-action": "primary" }, icon("send"), t("Answer…"));
+      answer.addEventListener("click", reply);
+      actions.append(answer, seen);
+      body = h("div", { class: "attn-body" }, question(item.question ?? t("The agent is waiting for your input.")));
+    } else {
+      const answer = composer(t("Answer and continue"), true, t("Your answer…"));
+      body = h("div", { class: "attn-body" }, question(item.question ?? t("The agent is waiting for your input.")), answer.form);
+    }
   } else {
-    if (item.prompt) body = question(item.prompt);
-    else if (item.summary) body = h("p", { class: "attn-summary" }, item.summary);
+    const report = reportView(item, job, where === "today" ? ctx.expanded ?? new Set() : undefined);
+    body = report || item.prompt ? h("div", { class: "attn-body" }, report, item.prompt ? question(item.prompt) : null) : null;
     if (item.kind === "review" && (item.prompt || item.stage === "end")) checkpoint(item.stage!);
     else if (item.kind === "review") {
       const done = h("button", { type: "button", class: "btn btn-primary btn-small", "data-pad-action": "primary" }, icon("check"), t("Mark done"));
@@ -160,10 +184,24 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
       }));
       const feedback = h("button", { type: "button", class: "btn btn-small", "data-pad-action": "reject" }, icon("edit"), t("Add feedback and continue"));
       feedback.addEventListener("click", () => {
+        if (reply) { reply(); return; }
         const next = composer(t("Send and continue"), true, t("What should change in the next round?"));
         actions.replaceWith(next.form); next.focus();
       });
       actions.append(done, feedback, seen);
+    } else if (reply) {
+      // 任务详情：直接重试交给原来的 agent；要改点什么就在下面的输入框写，再「交给 … 继续」。
+      const retry = h("button", { type: "button", class: "btn btn-primary btn-small", "data-pad-action": "primary" }, icon("refresh"), t("Retry"));
+      retry.addEventListener("click", () => void run(async () => {
+        const task = await currentTask();
+        await ctx.client.workCommand({ request_id: newRequestId(), operation: { op: "work.task.dispatch", args: { task: task.id, ...(item.agent ? { to: item.agent } : {}), expected_revision: task.revision } } });
+        const who = item.agent ?? t("the agent");
+        toast(t("Dispatched to {0}", who));
+        return t("Sent. {0} is continuing.", who);
+      }));
+      const change = h("button", { type: "button", class: "btn btn-small", "data-pad-action": "reject" }, icon("edit"), t("Retry with changes…"));
+      change.addEventListener("click", reply);
+      actions.append(retry, change, seen);
     } else {
       const retry = h("button", { type: "button", class: "btn btn-small", "data-pad-action": "primary" }, icon("refresh"), t("Retry"));
       retry.addEventListener("click", () => {
@@ -212,7 +250,7 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
   }
 
   // 读这一轮的结果：带权限申请时换成批准表单；机器没装管理员助手时附上安装提示（读取失败时保持原样）。
-  void ctx.client.job(item.job).then(job => {
+  void job.then(job => {
     const missing = job.result?.privileged_unavailable;
     if (missing) {
       const notice = helperMissingNotice(item.agent, missing.program);
@@ -224,10 +262,18 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
     const next = permissionRequest(requested, job.result?.report);
     body.replaceWith(next); body = next;
     label.textContent = t("Asking for permission");
+    // 批准表单在卡片里；底部栏只留一句指引。
+    if (docked) clear(docked.bar, h("p", { class: "attn-bar-hint" }, t("Approve or refuse the request above.")));
   }, () => undefined);
 
   const meta = [t("Round {0}", item.round), item.agent, ago(item.since)].filter(Boolean).join(t(" · "));
   const label = h("p", { class: "attn-kind" }, item.kind === "review" && item.prompt ? t("Checkpoint") : item.kind === "review" && item.stage === "end" ? t("Plan finished · ready for your review") : t(kind.label));
+  if (docked) {
+    // 底部固定栏：这件事是什么 + 决定按钮。卡片里只留内容。
+    docked.bar.setAttribute("data-pad-row", `round-bar:${item.task}:${item.round}:${item.stage ?? ""}`);
+    clear(docked.bar, h("div", { class: "attn-bar-head" }, h("span", { class: `attn-bar-icon attn-${kind.tone}` }, icon(kind.glyph)),
+      h("span", { class: "attn-bar-label" }, label.textContent), h("span", { class: "attn-bar-meta" }, meta)), actions, error);
+  }
   card.append(
     h("header", { class: "attn-head" },
       h("span", { class: "attn-icon" }, icon(kind.glyph)),
@@ -236,8 +282,67 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
         where === "today" ? h("button", { type: "button", class: "attn-title", "data-pad-action": "detail", onclick: () => ctx.navigate("work", item.task) }, item.title) : null,
         h("p", { class: "attn-meta", title: formatTime(item.since) }, meta)),
       where !== "job" ? h("button", { type: "button", class: "text-btn attn-report", "data-pad-action": "detail", onclick: () => ctx.navigate("execution", item.job) }, t("View run")) : null),
-    ...[body as Node | null, item.kind === "question" ? null : actions, status, error].filter((node): node is Node => node !== null));
+    ...[body as Node | null, docked || item.kind === "question" && !reply ? null : actions, status, docked ? null : error].filter((node): node is Node => node !== null));
   return card;
+}
+
+/** Hub 给的摘要最多 500 个字符；到了这个长度说明后面还有。 */
+const SUMMARY_LIMIT = 500;
+
+/**
+ * 汇报：expanded 给出时（Today）先显示第一段（agent 被要求先写结论，PR #244），后面还有内容时可就地展开全文并记住；
+ * 不给时（任务详情、执行详情）直接显示全文。全文来自这一轮的 Job；读取失败或没有全文时保留摘要。
+ * 检查点的摘要就是给人的提示（已单独显示），这时不重复摘要，只提供展开这一轮的汇报。
+ */
+function reportView(item: WorkAttention, job: Promise<Job>, expanded?: Set<string>): HTMLElement | null {
+  const key = `${item.task}:${item.round}`;
+  const summary = item.summary && item.summary !== item.prompt ? item.summary.trim() : "";
+  const lead = summary.split(/\n\s*\n/)[0]!.trim();
+  const full = h("div", { class: "attn-report-full markdown" });
+  const short = lead ? h("div", { class: "attn-summary markdown" }) : null;
+  if (short) short.innerHTML = renderMarkdown(lead);
+  const fill = (value: Job) => {
+    const text = value.result?.report || value.result?.error;
+    if (!text) return false;
+    full.innerHTML = renderMarkdown(text);
+    return true;
+  };
+  if (!expanded) {
+    full.hidden = true;
+    void job.then(value => {
+      if (!fill(value)) return;
+      if (short) short.replaceWith(full);
+      full.hidden = false;
+    }, () => undefined);
+    return short ? h("div", { class: "attn-digest" }, short) : full;
+  }
+  const more = !short || lead.length < summary.length || summary.length >= SUMMARY_LIMIT;
+  const host = h("div", { class: "attn-digest" }, short);
+  if (!more) return host;
+  const toggle = h("button", { type: "button", class: "text-btn attn-expand", "aria-expanded": "false" }, t("Read full report"));
+  let filled = false, shown = false;
+  const show = async (open: boolean) => {
+    if (open) {
+      toggle.disabled = true;
+      try { filled ||= fill(await job); }
+      catch { toggle.disabled = false; return; }
+      toggle.disabled = false;
+      // 没有全文（旧 Runtime 或只有摘要）：摘要就是全部，不再提供展开。
+      if (!filled) { toggle.hidden = true; return; }
+      if (short) short.replaceWith(full); else toggle.before(full);
+      expanded.add(key);
+    } else {
+      if (short) full.replaceWith(short); else full.remove();
+      expanded.delete(key);
+    }
+    shown = open;
+    toggle.setAttribute("aria-expanded", String(open));
+    toggle.textContent = open ? t("Show less") : t("Read full report");
+  };
+  toggle.addEventListener("click", () => void show(!shown));
+  host.append(toggle);
+  if (expanded.has(key)) void show(true);
+  return host;
 }
 
 /** 按任务查当前的提醒（任务页、执行详情用）；旧 Hub 没有接口时返回 undefined。 */

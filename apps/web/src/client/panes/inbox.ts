@@ -118,7 +118,6 @@ export class InboxPane {
 
   dispose(): void { this.active = false; this.generation++; clearTimeout(this.timer); }
   liveRefresh(): void { void this.load(true); }
-  resume(): void { void this.load(true); }
   intent(name: string): void { if (name === "capture") this.input.focus(); }
   get dirty(): boolean { return !!this.input.value.trim(); }
 

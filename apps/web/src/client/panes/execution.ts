@@ -36,6 +36,8 @@ export class ExecutionPane {
   private detailGeneration = 0;
   private active = true;
   private timer: ReturnType<typeof setInterval>;
+  /** 最近一次列表里是否有进行中的运行（决定要不要快速刷新）。 */
+  private hasLive = false;
   private selected?: string;
   private currentJob?: Job;
   private routines: ExecutionRoutineInfo[] = [];
@@ -63,11 +65,20 @@ export class ExecutionPane {
     this.layout();
     if (initialJob) { this.selected = initialJob; this.split.classList.add("has-detail"); clear(this.detail, loading()); }
     void this.load().then(() => { if (initialJob && this.active && this.selected === initialJob) void this.openJob(initialJob); });
+    // 常规刷新由工作台统一触发（liveRefresh，15 秒）；只有列表里有进行中的运行或打开的运行还在跑时，才每 5 秒快速刷新。
     this.timer = setInterval(() => {
       if (document.visibilityState !== "visible" || this.root.hidden || this.mode !== "jobs") return;
+      const openLive = !!this.currentJob && LIVE.includes(this.currentJob.status) && !!this.selected;
+      if (!this.hasLive && !openLive) return;
       void this.load(true);
-      if (this.currentJob && LIVE.includes(this.currentJob.status) && this.selected) void this.pollJob(this.selected);
+      if (openLive) void this.pollJob(this.selected!);
     }, 5000);
+  }
+
+  liveRefresh(): void {
+    if (this.root.hidden) return;
+    void this.load(true);
+    if (this.mode === "jobs" && this.selected && this.currentJob && LIVE.includes(this.currentJob.status)) void this.pollJob(this.selected);
   }
 
   dispose(): void { this.active = false; this.listGeneration++; this.detailGeneration++; clearInterval(this.timer); this.unbindKeys(); }
@@ -130,6 +141,7 @@ export class ExecutionPane {
         if (runtimes) this.runtimeNames = new Map(runtimes.map(r => [r.actor, r.registration.name]));
         const sorted = jobs.slice().sort((a, b) => b.spec.created.localeCompare(a.spec.created));
         const groups = executionGroups(sorted, this.tasks, attention, (this.statusFilter || undefined) as Job["status"] | undefined);
+        this.hasLive = sorted.some(job => LIVE.includes(job.status));
         if (!Object.values(groups).some(items => items.length)) { clear(this.list, empty(this.statusFilter ? t("No runs with this status.") : t("No runs yet. Click Delegate on a task and each round shows up here."))); return; }
         clear(this.list, ...GROUPS.map(([label, group]) => {
           const items = groups[group];

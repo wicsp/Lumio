@@ -3,7 +3,7 @@
  * 列表上可直接交回、完成、取消（带 revision）；新建在对话框里完成，新建不会委派。
  */
 import { knowledgeReferences, referenceConsequence } from "../resources.ts";
-import type { ResourceRef, WorkProject, WorkTask, WorkTaskDetail } from "@lumio/schema";
+import type { ResourceRef, WorkAttention, WorkProject, WorkTask, WorkTaskDetail } from "@lumio/schema";
 import { PROJECT_STATUSES } from "@lumio/schema";
 import { errorText, isConflict, type Client, type HubExtras } from "../api.ts";
 import { newRequestId, projectCreateCommand, taskCreateCommand } from "../commands.ts";
@@ -17,6 +17,7 @@ import { allTags, blockingTitles } from "../task-structure.ts";
 import { listKeys, markSelected } from "../list-keys.ts";
 import type { Navigate } from "../navigation.ts";
 import { WorkEditor } from "./work-editor.ts";
+import { attentionFor } from "../attention-card.ts";
 import { taskTurnMenu } from "../turn-menu.ts";
 import { t } from "../i18n.ts";
 
@@ -43,6 +44,7 @@ export class WorkPane {
   private selected?: string;
   private editor?: WorkEditor;
   private displayed?: WorkTaskDetail | WorkProject;
+  private displayedAttention?: WorkAttention | null;
   private listGeneration = 0;
   private detailGeneration = 0;
   private active = true;
@@ -109,10 +111,17 @@ export class WorkPane {
     void this.load(true);
     if (this.selected && this.canRefreshDetail()) void this.open(this.selected, true, true);
   }
+  /**
+   * 详情可以静默重画的条件：没有未保存内容、没有进行中的操作、讨论框里没有没发的字、没有打开的菜单，
+   * 焦点也不在详情里的输入控件上。只是点过详情里的按钮（焦点停在按钮上）不挡刷新。
+   */
   private canRefreshDetail(): boolean {
+    const active = document.activeElement as Element | null;
+    const typing = !!active && this.detailLayout.contains(active) && !!active.matches?.("input, textarea, select, [contenteditable=true]");
     return !this.root.hidden && !!this.editor && !this.editor.dirty && !this.editor.isBusy
-      && !this.detailLayout.contains(document.activeElement)
+      && !typing
       && !this.editor.hasUnsentComment
+      && !document.querySelector?.(".menu")
       && !this.detailLayout.querySelector(".is-busy");
   }
   beforeLeave(): Promise<boolean> { return this.editor?.beforeLeave() ?? Promise.resolve(true); }
@@ -349,10 +358,15 @@ export class WorkPane {
     if (!quiet || this.focus?.id !== id) this.clearFocus(!quiet);
     if (!quiet) { this.editor?.dispose(); this.editor = undefined; this.clearDock(); clear(this.detail, loading()); }
     try {
-      const object = id.startsWith("task_") ? await this.client.workTask(id) : await this.client.workProject(id);
+      // 任务和它的「需要你处理」一起读，详情一次画完，不会在卡片晚到时整页往下跳。
+      const isTask = id.startsWith("task_");
+      const [object, attention] = await Promise.all([
+        isTask ? this.client.workTask(id) : this.client.workProject(id),
+        isTask ? attentionFor(this.hub, id).then(item => item ?? null, () => undefined) : Promise.resolve(null),
+      ]);
       if (!this.active || generation !== this.detailGeneration) return;
       if (live && !this.canRefreshDetail()) return;
-      if (live && JSON.stringify(object) === JSON.stringify(this.displayed)) {
+      if (live && JSON.stringify(object) === JSON.stringify(this.displayed) && JSON.stringify(attention) === JSON.stringify(this.displayedAttention)) {
         if ("task" in object) void this.editor?.refreshRelatedTasks(() => this.canRefreshDetail());
         return;
       }
@@ -360,8 +374,8 @@ export class WorkPane {
       this.editor?.dispose();
       this.clearDock();
       clear(this.detail);
-      this.displayed = object;
-      this.renderEditor(object, id);
+      this.displayed = object; this.displayedAttention = attention;
+      this.renderEditor(object, id, attention);
       this.focusChanged?.(false);
       if (!quiet) this.markDetailRead();
       if (quiet) this.detail.scrollTop = scroll;
@@ -375,7 +389,7 @@ export class WorkPane {
     }
   }
 
-  private renderEditor(object: WorkTaskDetail | WorkProject, id: string): void {
+  private renderEditor(object: WorkTaskDetail | WorkProject, id: string, attention?: WorkAttention | null): void {
     this.editor = new WorkEditor(this.detail, this.dock, this.client, this.hub, object, this.projects, {
       changed: () => { this.changed(); this.focusChanged?.(false); void this.load(); },
       reload: () => void this.open(id, true),
@@ -384,7 +398,7 @@ export class WorkPane {
       openProject: projectId => this.navigate("work", projectId),
       newTask: projectId => this.create("tasks", projectId),
       newSubtask: (parent, projectId) => this.create("tasks", projectId, parent),
-    });
+    }, attention);
   }
 
   // ───────────── 新建 ─────────────

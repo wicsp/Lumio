@@ -848,6 +848,35 @@ div.note-rich-preview { padding:4px 0; }
 .attn-target:hover { color: var(--ink); background: var(--hover); }
 .attn-target .icon { width: 13px; height: 13px; }
 .attn-slot:empty, .attn > [role="status"]:empty, .attn > [role="alert"]:empty { display: none; }
+/* 汇报：Today 先显示开头，可就地展开全文；任务详情显示全文。 */
+.attn-body .attn-summary { margin-left: 0; }
+.attn-summary.markdown { white-space: normal; color: var(--ink); }
+.attn-summary.markdown > * { margin: 0; }
+.attn-digest { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.attn-report-full { min-width: 0; max-width: 100%; color: var(--ink); line-height: 1.6; overflow-wrap: anywhere; }
+.today .attn-report-full { max-height: min(70dvh, 720px); overflow-y: auto; overscroll-behavior: contain; padding-right: 6px; }
+.attn-expand { align-self: flex-start; font-size: var(--fs-xs); }
+/* 任务详情底部固定栏：这件事是什么 + 决定按钮，紧贴讨论输入框。 */
+.attn-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; max-width: 796px; margin: 0 auto 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--shadow-pop); transition: opacity .15s; }
+.attn-bar.is-busy { opacity: .6; pointer-events: none; }
+.attn-bar:empty { display: none; }
+.attn-bar-head { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1 1 200px; }
+.attn-bar-icon { display: grid; place-items: center; flex: none; width: 24px; height: 24px; border-radius: 7px; }
+.attn-bar-icon .icon { width: 14px; height: 14px; }
+.attn-bar-icon.attn-ochre { background: var(--ochre-wash); color: var(--ochre); }
+.attn-bar-icon.attn-green { background: var(--green-wash); color: var(--green); }
+.attn-bar-icon.attn-red { background: var(--red-wash); color: var(--red); }
+.attn-bar-label { font-weight: 600; font-size: var(--fs-sm); white-space: nowrap; }
+.attn-bar-meta { color: var(--ink-3); font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attn-bar .attn-actions { margin-left: 0; }
+.attn-bar > [role="alert"] { flex-basis: 100%; }
+.attn-bar > [role="alert"]:empty { display: none; }
+.attn-bar > .attn-composer { flex-basis: 100%; }
+.attn-bar-hint { color: var(--ink-2); font-size: var(--fs-sm); }
+/* 时间线里很长的消息先收起。 */
+.comment-content { min-width: 0; }
+.comment .markdown.is-clamped { max-height: 18em; overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, #000 70%, transparent); mask-image: linear-gradient(to bottom, #000 70%, transparent); }
+.comment-more { margin-top: 4px; font-size: var(--fs-xs); }
 .detail .attn-slot { margin: 4px 0 16px; }
 .detail .attn-slot .question { margin: 0; }
 
@@ -1787,3 +1816,12 @@ button.inbox-title:hover { text-decoration: underline; }
 
 .image-hosting-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 12px; }
 .image-hosting-fields > * { min-width: 0; }
+
+/* 主对话的悬浮按钮不能盖住详情底部的讨论框和决定栏：桌面让出右侧，窄屏（底栏已有助手入口）时隐藏。 */
+body:has(.dock-launcher:not([hidden])) .pane:not([hidden]) .thread-dock:not([hidden]) { padding-right: 76px; }
+@media (max-width: 860px) {
+  body:has(.pane:not([hidden]) .thread-dock:not([hidden])) .dock-launcher { display: none; }
+  body:has(.dock-launcher:not([hidden])) .pane:not([hidden]) .thread-dock:not([hidden]) { padding-right: 10px; }
+  .attn-bar { padding: 6px 8px; gap: 6px 8px; }
+  .attn-bar-meta { display: none; }
+}

@@ -6,7 +6,7 @@
  * - 委派是单独的明确动作；一轮成功也不会自动完成任务。有交接计划时，下一轮交给计划里写明的 agent。
  * - 讨论、轮次和交接记录按时间合并成一条时间线。
  */
-import { PROJECT_STATUSES, type ResourceRef, type WorkProject, type WorkTask, type WorkTaskDetail, type WorkCommandRequest } from "@lumio/schema";
+import { PROJECT_STATUSES, type ResourceRef, type WorkAttention, type WorkProject, type WorkTask, type WorkTaskDetail, type WorkCommandRequest } from "@lumio/schema";
 import { errorText, isConflict, type Client, type HubExtras } from "../api.ts";
 import { attentionCard, attentionFor } from "../attention-card.ts";
 import { jobActivityBadge } from "../job-activity.ts";
@@ -72,7 +72,13 @@ export class WorkEditor {
   private delegateButton?: HTMLButtonElement;
   private detailInput?: WorkTaskDetail;
 
-  constructor(private root: HTMLElement, private dock: HTMLElement, private client: Client, private hub: HubExtras, input: WorkProject | WorkTaskDetail, private projects: WorkProject[], private hooks: EditorHooks) {
+  /** 讨论输入框聚焦并按提醒类型改写提示（「需要你处理」的回答、意见、带修改重试都在这里写）。 */
+  private reply?: (kind: WorkAttention["kind"]) => void;
+  private applyAttention: (kind: WorkAttention["kind"], docked: boolean) => void = () => {};
+
+  /** attention：这个任务当前的「需要你处理」；null 表示确认没有，undefined 表示还不知道（自己去读）。 */
+  constructor(private root: HTMLElement, private dock: HTMLElement, private client: Client, private hub: HubExtras, input: WorkProject | WorkTaskDetail, private projects: WorkProject[], private hooks: EditorHooks,
+    attention_?: WorkAttention | null) {
     this.record = "task" in input ? input.task : input;
     const isTask = this.record.type === "task";
     this.recovery = this.store.claim(`work:${this.record.id}`);
@@ -121,16 +127,23 @@ export class WorkEditor {
     this.saved();
     if (this.writer.dirty) void this.flush();
     if ("task" in input) {
-      // 这个任务需要你处理时（ADR 0030），把卡片放在标题下面。
-      void attentionFor(hub, input.task.id).then(item => {
-        if (item && this.active) attention.append(attentionCard(item, { client, hub, navigate: hooks.navigate, changed: () => { hooks.changed(); hooks.reload(); } }, "task"));
-      }).catch(() => { /* 旧 Hub：没有这个接口 */ });
       if (input.task.plan) detail.append(this.planSection(input.task));
       this.detailInput = input;
       detail.append(this.relations);
       this.renderRelations();
       void this.refreshRelatedTasks();
       detail.append(this.timeline(input));
+      // 这个任务需要你处理时（ADR 0030）：标题下面显示完整的汇报或问题，决定按钮固定在底部，和讨论输入框在一起。
+      const show = (item: WorkAttention | undefined) => {
+        if (!item || !this.active) return;
+        const bar = h("div", { class: "attn-bar", role: "group", "aria-label": t("Needs you") });
+        const docked = this.reply ? { bar, reply: this.reply } : undefined;
+        attention.append(attentionCard(item, { client, hub, navigate: hooks.navigate, changed: () => { hooks.changed(); hooks.reload(); }, docked }, "task"));
+        if (docked && bar.childNodes.length) this.dock.prepend(bar);
+        this.applyAttention(item.kind, !!docked);
+      };
+      if (attention_ !== undefined) show(attention_ ?? undefined);
+      else void attentionFor(hub, input.task.id).then(show).catch(() => { /* 旧 Hub：没有这个接口 */ });
       if (input.task.references.length) detail.append(h("section", { class: "section" },
         h("div", { class: "section-head" }, h("h3", {}, t("References")), h("span", { class: "count" }, input.task.references.length)),
         h("ul", {}, ...input.task.references.map(ref => h("li", {}, ref.label ?? ref.id)))));
@@ -772,8 +785,20 @@ export class WorkEditor {
       body.innerHTML = renderMarkdown(value.body);
       const author = h("span", { class: "comment-author" });
       who(value.author, author);
+      // 很长的消息（通常是 agent 的汇报）先收起，时间线保持可扫读；需要你处理的那份汇报已在顶部完整显示。
+      const long = value.body.length > LONG_COMMENT_CHARS || value.body.split("\n").length > LONG_COMMENT_LINES;
+      let more: HTMLButtonElement | null = null;
+      if (long) {
+        body.classList.add("is-clamped");
+        more = h("button", { type: "button", class: "text-btn comment-more", "aria-expanded": "false" }, t("Show all"));
+        more.addEventListener("click", () => {
+          const open = body.classList.toggle("is-clamped") === false;
+          more!.setAttribute("aria-expanded", String(open));
+          more!.textContent = open ? t("Show less") : t("Show all");
+        });
+      }
       return h("article", { class: "comment" }, h("span", { class: "comment-avatar", "aria-hidden": "true" }, icon("user")),
-        h("div", {}, h("p", { class: "comment-meta", title: formatTime(value.created) }, author, " ", ago(value.created)), body));
+        h("div", { class: "comment-content" }, h("p", { class: "comment-meta", title: formatTime(value.created) }, author, " ", ago(value.created)), body, more));
     };
     const event = (glyph: string, text: string, at: string, job?: string, by?: string) => {
       const actor = h("span", { class: "tl-by" });
@@ -809,7 +834,18 @@ export class WorkEditor {
     const submit = h("button", { type: "submit", class: "btn btn-primary btn-small" }, t("Comment"));
     // 评论并交给 agent 继续：评论与委派在同一事务（ADR 0030）；继续的是计划当前步骤或上一轮的 agent。
     const next = continueTarget(input);
-    const onward = next ? h("button", { type: "button", class: "btn btn-small", title: t("Post the comment and delegate the next round in one step") }, icon("play"), t("Comment and continue with {0}", next)) : null;
+    const onward = next ? h("button", { type: "button", class: "btn btn-small", "data-pad-action": "continue", title: t("Post the comment and delegate the next round in one step") }, icon("play"), t("Comment and continue with {0}", next)) : null;
+    if (onward && next) {
+      // 「需要你处理」时这里就是回答 / 意见 / 带修改重试的地方：主按钮换成「交给 … 继续」。
+      this.applyAttention = (kind, docked) => {
+        if (!docked) return;
+        onward.classList.add("btn-primary"); submit.classList.remove("btn-primary");
+        clear(onward, icon(kind === "failed" ? "refresh" : "play"), kind === "question" ? t("Answer and continue with {0}", next)
+          : kind === "failed" ? t("Retry with {0}", next) : t("Send feedback to {0} and continue", next));
+        text.placeholder = kind === "question" ? t("Your answer for {0}…", next) : kind === "failed" ? t("What should change this time?") : t("What should {0} change in the next round?", next);
+      };
+      this.reply = kind => { this.applyAttention(kind, true); text.focus(); };
+    }
     const form = h("form", { class: "composer", "data-pad-input": "discussion" }, text, h("div", { class: "composer-foot" }, h("span", { class: "hint" }, t("⌘↵ to post · Markdown supported")), speechButton(text), onward, submit));
     text.addEventListener("keydown", event => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); form.requestSubmit(); } });
     let requestId = newRequestId(), previous = "";
@@ -850,6 +886,10 @@ export class WorkEditor {
     return h("section", { class: "section" }, h("div", { class: "section-head" }, h("h3", {}, t("Activity")), count), list);
   }
 }
+
+/** 超过这个长度或行数的讨论消息在时间线里先收起。 */
+const LONG_COMMENT_CHARS = 1200;
+const LONG_COMMENT_LINES = 18;
 
 /** 一条交接记录的说明（时间线用）。 */
 export function describeTurn(change: WorkTaskDetail["turns"][number], plan?: { stages: Array<{ id: string; kind: string; prompt?: string }> }): [string, string] {

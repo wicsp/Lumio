@@ -121,6 +121,17 @@ for (let i = 0; i < 20 && (await api.workTask(planned.id)).task.turn.reason !== 
 const reviewJob = (await api.workTask(planned.id)).task.turn.job;
 if (reviewJob) await run({ spec: { id: reviewJob } }, "Looks good. Tests cover the new settings.");
 
+// 一轮交付了较长的汇报、等你验收：用来看「需要你处理」的展开、任务详情顶部的完整汇报和底部的决定栏。
+const ablation = (await command({ op: "work.task.create", args: { title: "Summarize ablation results", project: paper.id, description: "Collect the ablation numbers into one table." } })).task;
+const ablationJob = (await command({ op: "work.task.dispatch", args: { task: ablation.id, to: "codex@demo", expected_revision: ablation.revision } })).job;
+await run(ablationJob, [
+  "Ablations are summarized; removing the wrapper drops success by 9–14 points across all three settings.", "",
+  "## Results", "", "| Setting | Full | No wrapper | Δ |", "|---|---|---|---|",
+  "| A | 41.2% | 30.1% | −11.1 |", "| B | 37.9% | 28.6% | −9.3 |", "| C | 52.6% | 38.4% | −14.2 |", "",
+  "## Notes", "", "- Seeds 0–4; 1,000 episodes per setting.", "- Raw outputs are in `runs/ablation/`.", "- Setting C has the widest interval; more seeds would tighten it.", "",
+  "## Open questions", "", "1. Keep setting C in the main table or move it to the appendix?", "2. Should I add a no-tools baseline?",
+].join("\n"));
+
 // agent 的委派提议：需要你批准（ADR 0031 第 2 节）。
 const agentApi = createClient({ url: `http://${HUB}`, token: agentToken });
 for (const comment of ["Please run the dry run.", "The migration script is ready; please run the dry run against the fixture vault."]) {

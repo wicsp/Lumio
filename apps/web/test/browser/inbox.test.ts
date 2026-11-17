@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { LiveData } from "../../src/client/live-data.ts";
 import { WorkbenchView } from "../../src/client/views/workbench.ts";
 import { Capture, CaptureCreate } from "@lumio/schema";
 import { captureInput, collectionCaptures, sharedCapture } from "../../src/client/panes/inbox.ts";
@@ -43,11 +44,12 @@ test("the collection does not request or show a triage badge", async () => {
   let calls = 0;
   const badge = () => ({ textContent: "stale", classList: { toggle() {} } });
   const counts = new Map(["work", "inbox", "approvals", "execution", "overview"].map(key => [key, badge()]));
+  const client = {
+    workTasks: async () => [], proposals: async () => [], jobs: async () => [], notices: async () => ({ notices: [] }), jobAttention: async () => [],
+    captures: async () => { calls++; return { captures: [], total: 9 }; },
+  };
   const view = Object.assign(Object.create(WorkbenchView.prototype), {
-    counts, applyNotices() {}, session: { hub: { attention: async () => [] }, client: {
-      workTasks: async () => [], proposals: async () => [], jobs: async () => [], notices: async () => ({ notices: [] }),
-      captures: async () => { calls++; return { captures: [], total: 9 }; },
-    } },
+    counts, current: {}, applyNotices() {}, live: new LiveData(client as never, { attention: async () => [] }),
   }) as { refreshCounts(): Promise<void> };
   await view.refreshCounts();
   expect(calls).toBe(0);

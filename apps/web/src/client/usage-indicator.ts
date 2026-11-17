@@ -107,7 +107,6 @@ export class UsageIndicator {
   private loading = false;
   private disposed = false;
   private popover?: { element: HTMLElement; anchor: HTMLElement; connection: string; close: () => void };
-  private timer = setInterval(() => void this.refresh(), 60_000);
   private readonly unbindStyle: () => void;
 
   constructor(private client: Client, private openSettings: () => void) {
@@ -125,7 +124,7 @@ export class UsageIndicator {
     void this.refresh(true);
   }
 
-  /** 工作台刷新时调用；距上次不足 30 秒时跳过，除非 force。 */
+  /** 由工作台统一的刷新调用（不自带定时器）；距上次不足 30 秒时跳过，除非 force。 */
   async refresh(force = false): Promise<void> {
     if (this.loading || this.disposed) return;
     if (!force && (document.visibilityState !== "visible" || Date.now() - this.loadedAt < MIN_INTERVAL)) return;
@@ -294,7 +293,6 @@ export class UsageIndicator {
   dispose(): void {
     this.disposed = true;
     this.unbindStyle();
-    clearInterval(this.timer);
     this.hideHover();
     this.hover.remove();
     this.popover?.close();

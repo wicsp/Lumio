@@ -20,6 +20,7 @@ import { locale, t } from "../i18n.ts";
 import { turnGroup, turnIcon, turnText } from "../turn.ts";
 import { isWorkProposal, proposalCard } from "../proposal-card.ts";
 import { jobActivityBadge } from "../job-activity.ts";
+import { LiveData, settled, type LiveSnapshot } from "../live-data.ts";
 
 const LIVE = ["queued", "assigned", "running"];
 const DAY = 86_400_000;
@@ -28,18 +29,25 @@ export class OverviewPane {
   private body = h("div", { class: "today-inner" });
   private generation = 0;
   private active = true;
+  /** 上一次渲染所用数据的指纹：数据没变就不重画，保留展开的汇报、焦点与滚动位置。 */
+  private signature = "";
+  /** 「需要你处理」里展开了完整汇报的卡片（按轮次），刷新后保持展开。 */
+  private expanded = new Set<string>();
+  private live: LiveData;
 
-  constructor(owner: HTMLElement, private client: Client, private hub: HubExtras, private navigate: Navigate, private name: string, private changed: () => void = () => {}) {
+  constructor(owner: HTMLElement, private client: Client, private hub: HubExtras, private navigate: Navigate, private name: string, private changed: () => void = () => {}, live?: LiveData) {
+    this.live = live ?? new LiveData(client, hub);
     owner.append(h("div", { class: "today" }, this.body));
     clear(this.body, this.header(), loading(t("Gathering today's work…")));
     void this.load();
   }
   dispose(): void { this.active = false; this.generation++; }
-  /** 静默刷新；卡片里正在输入或正在提交时不打断。 */
+  /** 静默刷新；卡片里正在输入、正在提交或焦点在输入框里时不打断。 */
   liveRefresh(): void {
     const typing = [...this.body.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("textarea, input")].some(el => el.value.trim());
-    if (typing || this.body.querySelector(".is-busy")) return;
-    void this.load();
+    const active = document.activeElement;
+    if (typing || this.body.querySelector(".is-busy") || (active && this.body.contains(active) && active.matches("input, textarea, select"))) return;
+    void this.load(2000);
   }
 
   private header(summary?: string): HTMLElement {
@@ -56,15 +64,19 @@ export class OverviewPane {
         this.name.slice(0, 1).toUpperCase()));
   }
 
-  private async load(): Promise<void> {
+  /** maxAge：可以复用多新的共用快照（毫秒）；操作之后传 0 强制重读。 */
+  private async load(maxAge = 0): Promise<void> {
     const generation = ++this.generation;
-    const [tasks, projects, jobs, approvals, attention, notices, liveAttention] = await Promise.allSettled([this.client.workTasks(), this.client.workProjects(), this.client.jobs(), this.client.proposals("pending"), this.hub.attention(),
-      this.client.notices({ unread: true, limit: 30 }), this.client.jobAttention()]);
+    const [snapshot, projects] = await Promise.all([this.live.get(maxAge), Promise.allSettled([this.client.workProjects()]).then(([value]) => value)]);
     if (!this.active || generation !== this.generation) return;
-    const taskData = tasks.status === "fulfilled" ? tasks.value : undefined;
-    const projectData = projects.status === "fulfilled" ? projects.value : [];
-    const jobData = jobs.status === "fulfilled" ? jobs.value : undefined;
-    const approvalData = approvals.status === "fulfilled" ? approvals.value : undefined;
+    const signature = JSON.stringify([snapshotKey(snapshot), projects, new Date().toDateString()]);
+    if (signature === this.signature) return;
+    this.signature = signature;
+    const { tasks, jobs, proposals: approvals, attention, notices, jobAttention: liveAttention } = snapshot;
+    const taskData = settled(tasks);
+    const projectData = settled(projects) ?? [];
+    const jobData = settled(jobs);
+    const approvalData = settled(approvals);
 
     const now = new Date();
     const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() + DAY;
@@ -77,12 +89,9 @@ export class OverviewPane {
     const waiting = taskData?.filter(task => turnGroup(task) === "external") ?? [];
     const running = jobData?.filter(job => LIVE.includes(job.status)) ?? [];
     // ADR 0032：任务提醒按当前交接；旧 Hub 与独立运行使用同一套回退规则。
-    const attentionData = attention.status === "fulfilled" ? attention.value : undefined;
-    const attentionJobs = executionGroups(jobData ?? [], taskData, attentionData).needs
-      .filter(job => attentionData === undefined || !job.spec.source?.task);
-
-    const liveRequests = liveAttention.status === "fulfilled" ? liveAttention.value : [];
-    const needCount = liveRequests.length + (attentionData?.length ?? 0) + attentionJobs.length + (approvalData?.length ?? 0);
+    const attentionData = settled(attention);
+    const liveRequests = settled(liveAttention) ?? [];
+    const needCount = needsYouCount(snapshot);
     const parts = taskData ? [
       needCount ? t(needCount === 1 ? "{0} needs you" : "{0} need you", needCount) : "",
       t(mine.length === 1 ? "{0} to-do" : "{0} to-dos", mine.length),
@@ -94,8 +103,8 @@ export class OverviewPane {
       this.ask(),
       h("div", { class: "today-grid" },
         h("div", { class: "today-col" },
-          this.needsYou(approvalData, attentionJobs, approvals.status === "rejected" ? approvals.reason : undefined, taskData ?? [], attentionData ?? [], liveRequests),
-          notices.status === "fulfilled" ? this.pending(pendingNotices(notices.value.notices)) : null,
+          this.needsYou(approvalData, attentionJobs(snapshot), approvals.status === "rejected" ? approvals.reason : undefined, taskData ?? [], attentionData ?? [], liveRequests),
+          notices.status === "fulfilled" ? this.pending(pendingNotices(notices.value)) : null,
           focus.length || tasks.status === "rejected" ? this.section("due", t("Due today"), focus.length, () => this.navigate("work", "tasks"),
             tasks.status === "rejected" ? failure(errorText(tasks.reason)) : this.taskList(focus, projectData, "")) : null,
           tasks.status === "fulfilled" ? this.section("todo", focus.length ? t("Your other to-dos") : t("Your to-dos"), next.length, () => this.navigate("work", "tasks"), this.taskList(next.slice(0, 6), projectData, focus.length ? t("Nothing else on your list.") : t("Your to-do list is clear."))) : null,
@@ -197,7 +206,9 @@ export class OverviewPane {
 
   private needsYou(approvals: Proposal[] | undefined, jobs: Job[], error: unknown, tasks: WorkTask[], rounds: WorkAttention[], liveRequests: JobAttention): HTMLElement | null {
     if (error) return this.section("needs", t("Needs you"), 0, undefined, failure(errorText(error)));
-    const context = { client: this.client, hub: this.hub, navigate: this.navigate, changed: () => { this.changed(); setTimeout(() => void this.load(), 1200); } };
+    // 处理完一张卡片：先让「已处理」的确认停留一会儿再重画（changed 已让共用快照作废，这次读取一定是新的）。
+    const context = { client: this.client, hub: this.hub, navigate: this.navigate, expanded: this.expanded,
+      changed: () => { this.changed(); setTimeout(() => void this.load(), 900); } };
     const cards = [
       ...liveRequests.map(request => this.needCard(request.job, request.kind === "approval" ? "approvals" : "help", "ochre",
         tasks.find(task => task.id === request.task)?.title ?? t("Agent run"), t("Expires at {0}", formatTime(request.expires)),
@@ -275,4 +286,28 @@ const byDue = byFocus;
 /** 规则判为重要的（需要你回答、验收、处理失败、待批准）已经在「需要你处理」里，这里不重复。 */
 export function pendingNotices(notices: readonly Notice[]): Notice[] {
   return notices.filter(notice => !notice.read && notice.level !== "silent" && !(notice.level === "important" && notice.graded.by === "rule"));
+}
+
+/** 只取 Today 会显示的部分做指纹：运行的心跳等不影响这一页的字段变化时不重画。 */
+function snapshotKey(snapshot: LiveSnapshot): unknown {
+  const value = <T>(result: PromiseSettledResult<T>, pick: (value: T) => unknown = value => value) =>
+    result.status === "fulfilled" ? pick(result.value) : { error: errorText(result.reason) };
+  return [
+    value(snapshot.tasks), value(snapshot.proposals), value(snapshot.attention), value(snapshot.notices), value(snapshot.jobAttention),
+    value(snapshot.jobs, jobs => jobs.map(job => [job.spec.id, job.status, job.spec.created, job.result?.question, job.result?.error])),
+  ];
+}
+
+/** 不属于任何任务提醒的运行（等你回答 / 失败）：Hub 已有任务提醒时，有任务的运行由提醒代表。 */
+function attentionJobs(snapshot: LiveSnapshot): Job[] {
+  const attention = settled(snapshot.attention);
+  return executionGroups(settled(snapshot.jobs) ?? [], settled(snapshot.tasks), attention).needs
+    .filter(job => attention === undefined || !job.spec.source?.task);
+}
+
+/** 「需要你处理」的卡片数；侧栏 Today 的数字用同一个算法，两边一致。 */
+export function needsYouCount(snapshot: LiveSnapshot): number {
+  const approvals = settled(snapshot.proposals);
+  return (settled(snapshot.jobAttention)?.length ?? 0) + (settled(snapshot.attention)?.length ?? 0)
+    + (settled(snapshot.jobs) ? attentionJobs(snapshot).length : 0) + (approvals?.length ?? 0);
 }
