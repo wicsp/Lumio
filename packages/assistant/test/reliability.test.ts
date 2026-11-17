@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { AssistantConversation, AssistantModelRequest, WorkCommandResult, toolName, type AssistantModelResponse, type ResourceRef } from "@lumio/schema";
-import { AssistantService, type AssistantModel, type AssistantTool } from "../src/index.ts";
+import { AssistantService, type AssistantContext, type AssistantModel, type AssistantTool } from "../src/index.ts";
 import { memoryStore } from "./memory-store.ts";
 
 const owner = "act_00000000000000000000000001";
@@ -12,11 +12,12 @@ const reply = (content: string): AssistantModelResponse => ({ content, tool_call
 const call = (name: string, args = {}): AssistantModelResponse => ({ content: "", tool_calls: [{ id: "provider-call", name, args }] });
 const data = (request: AssistantModelRequest) => JSON.parse(request.messages[0]!.content.split("\n").at(-1)!);
 
-function scenario(model: AssistantModel, tools: AssistantTool[] = []) {
+function scenario(model: AssistantModel, tools: AssistantTool[] = [], glance?: AssistantContext["glance"]) {
   const store = memoryStore();
   let counter = 0, request = 0, visible = true;
   store.putConversation(AssistantConversation.parse({ id: main, owner, title: "Synthetic main", revision: 1, created: now, updated: now }));
   const service = new AssistantService(store, model, tools, {
+    glance,
     now: () => new Date(now), id: prefix => `${prefix}_${String(++counter).padStart(26, "0")}`,
     toolActor: { id: "act_00000000000000000000000002", name: "synthetic-agent", role: "agent", created: now },
     workbench: { isMain: conversation => conversation.id === main,
@@ -230,4 +231,44 @@ test("rewriting cannot disclose receipts from a preceding turn whose write targe
   await f.chat("Ask the agent for a second opinion");
   f.hide();
   expect((await f.chat("Say it plainly")).turn.status).toBe("done");
+});
+
+test("glance images stay in the active turn and out of durable request snapshots", async () => {
+  const glance = "gln_00000000000000000000000001";
+  const file = "art_00000000000000000000000001";
+  const sha256 = "a".repeat(64);
+  const image = "data:image/png;base64,c3ludGhldGlj";
+  const snapshots: AssistantModelRequest[] = [];
+  const attachments: (readonly string[] | undefined)[] = [];
+  let loads = 0;
+  const f = scenario({
+    supportsImages: model => model === "vision",
+    async complete(input, { screenImages }) {
+      expect(snapshots.at(-1)).toEqual(input);
+      attachments.push(screenImages);
+      return reply("Synthetic reply");
+    },
+  }, [], {
+    claim() {},
+    context: () => ({ data: { window_text: "Synthetic OCR" }, image: {
+      file, sha256, async load() { loads++; return [image]; },
+    } }),
+  });
+  f.store.putContext = (_turn, _step, input) => snapshots.push(AssistantModelRequest.parse(input));
+  const ask = (model: string) => f.service.chat({
+    conversation: main, request_id: `synthetic-${model}`, message: "What is in this image?", glance, model,
+  }, owner);
+
+  expect((await ask("vision")).turn.status).toBe("done");
+  expect((await ask("text-only")).turn.status).toBe("done");
+  expect((await f.chat("New question")).turn.status).toBe("done");
+  expect(loads).toBe(1);
+  expect(attachments).toEqual([[image], undefined, undefined]);
+  const [visual, ocrOnly, unrelated] = snapshots.map(snapshot => snapshot.messages[0]!.content);
+  expect(visual).toContain("Synthetic OCR");
+  expect(visual).toContain(JSON.stringify({ screen_image: { file, sha256 } }));
+  expect(visual).not.toContain(image);
+  expect(ocrOnly).toContain("Synthetic OCR");
+  expect(ocrOnly).not.toContain(file);
+  expect(unrelated).not.toContain("Synthetic OCR");
 });
