@@ -12,7 +12,8 @@ import { WorkerJobControl } from "./job-control.ts";
 import { contains, interactiveWorkspace, type JobEngineConfig } from "./job-engine-config.ts";
 import { text as msg } from "./messages.ts";
 import { runPi } from "./pi-job.ts";
-import { codexGitOptions } from "./stage.ts";
+import { gitWritePaths } from "./stage.ts";
+import { codexJobFilesystem, jobGitToolchain, type JobGitToolchain } from "./job-codex-sandbox.ts";
 
 type Start = {
   provider: JobEngineConfig;
@@ -92,31 +93,41 @@ function cliEnvironment(input: Start, root: string, withClaudeKey: boolean): Nod
     } : {}),
   };
 }
-function sandbox(input: Start, root: string) {
+function sandbox(input: Start, root: string, git?: JobGitToolchain, gitReads: string[] = []) {
   const cwd = JSON.stringify(input.cwd);
   const extraReads = [
-    input.cwd, dirname(process.execPath), ...input.gitPaths, "/private/var/empty",
+    input.cwd, dirname(process.execPath), ...input.gitPaths, ...gitReads, ...(git?.readPaths ?? []), "/private/var/empty",
     ...(input.provider.engine === "pi" ? [input.provider.packageRoot, dirname(input.provider.node)] : []),
     ...(input.lastMessageFile ? [dirname(input.lastMessageFile)] : []),
     ...(input.env.LUMIO_SUDO_SOCKET && isAbsolute(input.env.LUMIO_SUDO_SOCKET) ? [input.env.LUMIO_SUDO_SOCKET] : []),
   ];
+  const base = seatbelt(root, input.provider.executable, extraReads)
+    + '(deny sysctl-read (sysctl-name "kern.procargs") (sysctl-name "kern.procargs2"))\n';
+  const writable = input.run.permissions?.access !== "read";
+  if (input.provider.engine === "codex") return base + codexJobFilesystem(input.cwd, root, writable, input.gitPaths);
   const allowedGit = input.gitPaths.map(path => `(require-not (subpath ${JSON.stringify(path)}))`).join(" ");
-  return seatbelt(root, input.provider.executable, extraReads)
-    + '(deny sysctl-read (sysctl-name "kern.procargs") (sysctl-name "kern.procargs2"))\n'
-    + (input.run.permissions?.access === "read" ? "" : `(allow file-write* (subpath ${cwd}))\n`)
+  return base
+    + (writable ? `(allow file-write* (subpath ${cwd}))\n` : "")
     + input.gitPaths.map(path => `(allow file-write* (subpath ${JSON.stringify(path)}))\n`).join("")
     + `(deny file-write* (require-all (regex #"/[.]git(/|$)") ${allowedGit || `(subpath ${cwd})`}))\n`;
 }
 type Context = {
-  start: Start; root: string; profile: string; control: WorkerJobControl;
+  start: Start; root: string; profile: string; control: WorkerJobControl; git?: JobGitToolchain;
 };
 
-async function runCodex({ start, root, profile, control }: Context): Promise<EngineResult> {
+async function runCodex({ start, root, profile, control, git }: Context): Promise<EngineResult> {
   const { provider, run, cwd, redact } = start;
   const env = cliEnvironment(start, root, false);
-  const git = start.gitPaths.length ? codexGitOptions(start.gitPaths, run.permissions?.access === "read", true) : [];
-  const rpc = new NativeRpc(["/usr/bin/sandbox-exec", "-p", profile, provider.executable, "app-server", "--listen", "stdio://",
-    "--enable", "default_mode_request_user_input", "-c", 'cli_auth_credentials_store="ephemeral"', ...git], cwd, env, false);
+  if (git) env.PATH = `${dirname(git.executable)}:${env.PATH}`;
+  if (!start.gitPaths.length) env.GIT_OPTIONAL_LOCKS = "0";
+  const sandboxPolicy = { type: "externalSandbox", networkAccess: "enabled" };
+  const sandboxArgv = ["/usr/bin/sandbox-exec", "-p", profile];
+  const probe = Bun.spawnSync([...sandboxArgv, "/usr/bin/true"], {
+    cwd, env, stdin: "ignore", stdout: "ignore", stderr: "ignore", timeout: 5000,
+  });
+  if (probe.exitCode !== 0) return { exit_code: 1, error: msg("executor.interactive_sandbox") };
+  const rpc = new NativeRpc([...sandboxArgv, provider.executable, "app-server", "--listen", "stdio://",
+    "--enable", "default_mode_request_user_input", "-c", 'cli_auth_credentials_store="ephemeral"'], cwd, env, false);
   const instance = ipcUUID();
   let thread = "", turn = "", report = "", done = false, interrupted = false;
   const applied = new Map<string | number, string>();
@@ -243,7 +254,7 @@ async function runCodex({ start, root, profile, control }: Context): Promise<Eng
     const readOnly = run.permissions?.access === "read";
     const policy = {
       cwd, model: run.model, approvalPolicy: "on-request", approvalsReviewer: "user",
-      ...(!start.gitPaths.length ? { sandbox: readOnly ? "read-only" : "workspace-write" } : {}),
+      sandbox: readOnly ? "read-only" : "workspace-write",
       developerInstructions: [start.instructions, "Use the available user input tool when an answer is needed for this turn."].filter(Boolean).join("\n\n"),
       config: {
         "features.apps": false, "features.plugins": false, "features.hooks": false, "features.goals": false, "features.multi_agent": false,
@@ -262,7 +273,11 @@ async function runCodex({ start, root, profile, control }: Context): Promise<Eng
     if (interrupted) return { exit_code: 1 };
     emit({ type: "thread.started", thread_id: thread });
     active = true;
-    const reply = await rpc.request("turn/start", { threadId: thread, input: [{ type: "text", text: run.prompt }] });
+    // Commands inherit Lumio's Seatbelt profile. Applying another Seatbelt profile
+    // inside it fails even for a command that only reads the workspace.
+    const reply = await rpc.request("turn/start", {
+      threadId: thread, input: [{ type: "text", text: run.prompt }], sandboxPolicy,
+    });
     bind(reply.turn?.id);
     return await completion;
   } catch { return active ? { unknown: true } : { exit_code: 1 }; }
@@ -379,7 +394,12 @@ export async function runInteractive(start: Start): Promise<EngineResult> {
   const control = new WorkerJobControl();
   try {
     for (const key of ["tmp", "codex", "claude"]) await mkdir(join(root, key), { recursive: true, mode: 0o700 });
-    const context = { start, root, profile: sandbox(start, root), control };
+    const git = start.provider.engine === "codex" ? jobGitToolchain(start.env) : undefined;
+    const checkout = start.provider.engine === "codex" && !start.gitPaths.length ? gitWritePaths(cwd, start.env) : [];
+    const gitReads = checkout.length > 1
+      ? (await interactiveWorkspace(cwd, start.stateDir, start.provider, checkout, Boolean(start.accountKey)))?.gitPaths
+      : undefined;
+    const context = { start, root, profile: sandbox(start, root, git, gitReads), control, git };
     const result = start.provider.engine === "pi"
       ? (start.lastMessageFile ? await runPi({ provider: start.provider, workdir: cwd, root, job: start.job,
         roundDir: dirname(start.lastMessageFile), profile: context.profile, run: start.run, env: scopedEnvironment(start),
