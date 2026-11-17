@@ -106,8 +106,9 @@ public struct CaptureRequest: Codable {
 
 public struct ChatRequest: Codable {
     public let request_id: String, conversation: String, message: String, glance: String
-    public init(conversation: String, message: String, glance: String, requestID: String = UUID().uuidString) {
-        request_id = requestID; self.conversation = conversation; self.message = message; self.glance = glance
+    public let record_idea: Bool?
+    public init(conversation: String, message: String, glance: String, requestID: String = UUID().uuidString, recordIdea: Bool? = nil) {
+        request_id = requestID; self.conversation = conversation; self.message = message; self.glance = glance; record_idea = recordIdea
     }
 }
 

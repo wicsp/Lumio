@@ -22,7 +22,7 @@ export function saveDefaultAssistantProfile(owner: string, id: string, storage?:
 }
 
 export function assistantProfiles(all: readonly AIProfile[], existing: boolean, nativeProfile?: string): readonly AIProfile[] {
-  const profiles = all.filter(profile => profile.engine !== "speech");
+  const profiles = all.filter(profile => profile.engine === "lumio" || profile.engine === "codex");
   if (nativeProfile) return profiles.filter(profile => profile.id === nativeProfile);
   if (existing) return profiles.filter(profile => profile.engine === "lumio");
   return profiles;

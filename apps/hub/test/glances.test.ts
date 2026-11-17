@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PNG } from "pngjs";
 import { encode } from "jpeg-js";
-import { AIConnection, AIProfile, AssistantMain, AssistantChatResult, AssistantChatRequest, Capture, CaptureCreateResult, Glance, GlanceCreate, KnowledgeOriginal, NoteDetail, AssistantModelRequest, type AssistantModelResponse } from "@lumio/schema";
+import { AIConnection, AIProfile, AssistantEvent, AssistantMain, AssistantChatResult, AssistantChatRequest, Capture, CaptureCreateResult, Glance, GlanceCreate, KnowledgeOriginal, KnowledgeCreateResult, SearchResult, NoteDetail, AssistantModelRequest, type AssistantModelResponse } from "@lumio/schema";
 import { backupBusiness, verifyBusinessBackup } from "@lumio/storage";
 import type { AssistantModel } from "@lumio/assistant";
 import { ChatCompletionsModel } from "../src/assistant-model.ts";
@@ -356,5 +356,103 @@ test("photo captures embed a visual description card with only a vision binding,
       expect(await f.ready(capture.id)).toMatchObject({ card: "ready", ai_note: capture.ai_note });
     }
     expect(requests).toHaveLength(2);
+  } finally { await provider.stop(true); }
+}));
+
+test("voice ideas persist before model work, link the selected paper and recover the discussion from a new chat", async () => {
+  const transcript = "I wonder if the result only applies to large samples. Please explain the statistical assumption.";
+  const answer = "The experiment only evaluated a large sample.";
+  let voiceIdea: string | undefined;
+  const discussion = "knowledge__idea__discussion";
+  const model: AssistantModel = { async complete(input) {
+    const last = input.messages.at(-1)!;
+    if (input.messages[0]!.content.includes("[NOTE_ONLY]")) {
+      expect(input.tools.some(tool => tool.name === "work__task__create")).toBe(false);
+      if (last.content.includes("Synthetic timeout")) throw new Error("Synthetic timeout");
+      return { content: last.content.includes("Recording-only thought") ? "[NOTE_ONLY]" : answer, tool_calls: [] };
+    }
+    if (last.role === "user") return { content: "", tool_calls: [{ id: "synthetic-discussion", name: discussion, args: { idea: voiceIdea! } }] };
+    return { content: last.content.includes(answer) ? "I recovered the earlier discussion." : "Discussion unavailable.", tool_calls: [] };
+  } };
+  await fixture(async f => {
+    const article = KnowledgeCreateResult.parse(await (await f.request("/v2/knowledge/notes", "POST", {
+      request_id: randomUUID(), note: { kind: "paper", title: "Synthetic Generalization Paper", authors: ["Test Author"], year: 2026 }, body: "Fixture text.",
+    })).json());
+    // Existing Idea creation skips mandatory title and gives same-text ideas distinct paths.
+    const untitled = { note: { kind: "idea" }, body: "Freeform first line.\nSecond line." };
+    const one = KnowledgeCreateResult.parse(await (await f.request("/v2/knowledge/notes", "POST", { ...untitled, request_id: randomUUID() })).json());
+    const two = KnowledgeCreateResult.parse(await (await f.request("/v2/knowledge/notes", "POST", { ...untitled, request_id: randomUUID() })).json());
+    expect(one.metadata.title).toBe("Freeform first line.");
+    expect(one.path).not.toBe(two.path);
+    const main = AssistantMain.parse(await (await f.request("/v2/assistant/main", "POST", { request_id: randomUUID() })).json());
+    const utterance = async (message: string) => {
+      const glance = Glance.parse(await (await f.upload(meta({ window_title: "Synthetic Generalization Paper.pdf", selection_text: "Only large samples were studied." }), png)).json());
+      return AssistantChatRequest.parse({ request_id: randomUUID(), conversation: main.conversation, message, glance: glance.id, record_idea: true });
+    };
+    const voice = await utterance(transcript);
+    const stream = await fetch(new URL("/v2/assistant/chat", f.hub.server.url), { method: "POST", headers: {
+      Authorization: `Bearer ${f.owner}`, Accept: "application/x-ndjson", "Content-Type": "application/json",
+    }, body: JSON.stringify(voice) });
+    expect(stream.status).toBe(200);
+    const events = (await stream.text()).trim().split("\n").map(line => AssistantEvent.parse(JSON.parse(line)));
+    const saved = events.find(event => event.type === "idea_saved");
+    expect(saved?.type).toBe("idea_saved");
+    if (!saved) throw new Error("Missing saved idea event");
+    voiceIdea = saved.idea;
+    expect(events.findIndex(event => event.type === "idea_saved")).toBeLessThan(events.findIndex(event => event.type === "token"));
+    const published = NoteDetail.parse(await (await f.request(`/v2/knowledge/notes/${voiceIdea}`)).json());
+    expect(published.body).toContain(transcript);
+    expect(published.body).toContain("Only large samples were studied.");
+    expect(published.frontmatter.derived_from).toContain(article.id);
+    expect(published.body).toMatch(/lumio:amsg_/);
+    const replay = AssistantChatResult.parse(await (await f.request("/v2/assistant/chat", "POST", voice)).json());
+    expect(replay.turn.idea).toBe(voiceIdea);
+    expect(replay.messages.at(-1)?.content).toBe(answer);
+
+    const newChat = { request_id: randomUUID(), message: "Find our earlier discussion.", };
+    expect(AssistantChatResult.parse(await (await f.request("/v2/assistant/chat", "POST", newChat)).json()).messages.at(-1)?.content).toBe("I recovered the earlier discussion.");
+    expect(AssistantChatResult.parse(await (await f.request("/v2/assistant/chat", "POST", { ...newChat, request_id: randomUUID() }, f.other)).json()).messages.at(-1)?.content).toBe("Discussion unavailable.");
+
+    const quiet = AssistantChatResult.parse(await (await f.request("/v2/assistant/chat", "POST", await utterance("Recording-only thought"))).json());
+    expect(quiet.turn.status).toBe("done");
+    expect(quiet.turn.idea).toBeDefined();
+    expect(quiet.messages.map(message => message.role)).toEqual(["user"]);
+    const stopped = AssistantChatResult.parse(await (await f.request("/v2/assistant/chat", "POST", await utterance("Synthetic timeout"))).json());
+    expect(stopped.turn.status).toBe("failed");
+    expect(stopped.turn.idea).toBeDefined();
+    expect(await f.request(`/v2/knowledge/notes/${stopped.turn.idea}`)).toHaveProperty("status", 200);
+  }, model);
+});
+
+test("configured embeddings find paraphrased ideas and keep private input off the provider", () => fixture(async f => {
+  const sent: string[] = [];
+  const provider = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
+    expect(new URL(request.url).pathname).toBe("/embeddings");
+    const { input } = await request.json() as { input: string[] };
+    sent.push(...input);
+    return Response.json({ data: input.map((value, index) => ({ index, embedding: /少量观测|小样本/.test(value) ? [1, 0] : [0, 1] })) });
+  } });
+  try {
+    const connection = AIConnection.parse(await (await f.request("/v2/ai/connections", "POST", { name: "Synthetic vectors",
+      kind: "openai-compatible", host: "hub", base_url: provider.url.href })).json());
+    const profile = AIProfile.parse(await (await f.request("/v2/ai/profiles", "POST", { name: "Synthetic vectors", connection: connection.id,
+      model: "test-vectors", engine: "embedding", thinking: "default" })).json());
+    expect((await f.request("/v2/ai/knowledge-bindings", "PUT", { request_id: randomUUID(), purpose: "knowledge.embedding", profile: profile.id })).status).toBe(200);
+    const idea = KnowledgeCreateResult.parse(await (await f.request("/v2/knowledge/notes", "POST", { request_id: randomUUID(),
+      note: { kind: "idea" }, body: "小样本下这个结论会不会站不住？" })).json());
+    await mkdir(join(f.vault, "life"), { recursive: true });
+    await Bun.write(join(f.vault, "life/private.md"), "---\ntitle: Synthetic private phrase\ntype: idea\n---\nSynthetic private phrase");
+    const owner = f.hub.store.actors().find(actor => actor.name === "owner")!.id;
+    await f.hub.modules.semantic.refresh([owner]);
+    const q = encodeURIComponent("用少量观测还能泛化吗");
+    const response = await f.request(`/v2/knowledge/search?q=${q}`);
+    const result = SearchResult.parse(await response.json());
+    expect(result.hits[0]).toMatchObject({ note: { id: idea.id }, matched_in: "semantic" });
+    expect(sent.every(text => !text.includes("Synthetic private phrase"))).toBe(true);
+    const total = sent.length;
+    await f.request(`/v2/knowledge/search?q=${q}&include_private=true`);
+    expect(sent).toHaveLength(total);
+    const other = SearchResult.parse(await (await f.request(`/v2/knowledge/search?q=${q}`, "GET", undefined, f.other)).json());
+    expect(other.hits).toEqual([]);
   } finally { await provider.stop(true); }
 }));

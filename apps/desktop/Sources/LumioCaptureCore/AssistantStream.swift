@@ -16,12 +16,14 @@ public struct AssistantStream {
 
         let type: String
         let delta: String?
+        let idea: String?
         let notice: Notice?
         let tool: Tool?
         let messages: [Message]?
         let error: String?
     }
 
+    public private(set) var idea: String?
     public private(set) var reply = ""
     public private(set) var needsApproval = false
     public private(set) var finished = false
@@ -30,6 +32,9 @@ public struct AssistantStream {
     public mutating func read(_ line: String) throws -> Bool {
         let event = try JSONDecoder().decode(Event.self, from: Data(line.utf8))
         switch event.type {
+        case "idea_saved":
+            idea = event.idea
+            return idea != nil
         case "token":
             reply += event.delta ?? ""
             return true

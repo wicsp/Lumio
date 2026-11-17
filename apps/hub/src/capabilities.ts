@@ -1,4 +1,5 @@
 import { CoreError } from "@lumio/foundation";
+import type { SemanticSearch } from "./semantic-search.ts";
 import type { AiNotes } from "./ai-notes.ts";
 import type { ConversationSource, Resources } from "./resources.ts";
 import type { WorkCommands } from "./work-commands.ts";
@@ -25,6 +26,7 @@ interface CapabilityModules {
   aiNotes?: AiNotes;
   resources: Resources;
   assistantStore: SqliteAssistantStore;
+  semantic?: SemanticSearch;
 }
 interface CapabilityOptions { includePrivate?: boolean; chronologicalJobs?: boolean; conversation?: ConversationSource }
 
@@ -71,13 +73,13 @@ export class Capabilities {
           conversation = humanOwner && turn ? this.modules.resources.conversationSource(context.owner, turn) : undefined;
           if (!conversation) throw new HubError("FORBIDDEN", { key: "knowledge.ai_note_source_unavailable", args: [] });
         }
-        const outcome = await this.invoke(def.name, args, { actor, label: "assistant-tools" }, context.request, false, humanOwner, false, conversation);
+        const outcome = await this.invoke(def.name, args, { actor, label: "assistant-tools" }, context.request, false, humanOwner, false, conversation, humanOwner ? context.owner : undefined);
         context.record?.({ capability: def.name, change: outcome.change, private_read: outcome.private_read });
         return outcome.result;
       },
     }));
   }
-  private async invoke(name: string, raw: unknown, identity: Identity, requestId?: string, includePrivate = false, humanConversation = false, chronologicalJobs = false, conversation?: ConversationSource): Promise<CapabilityResult> {
+  private async invoke(name: string, raw: unknown, identity: Identity, requestId?: string, includePrivate = false, humanConversation = false, chronologicalJobs = false, conversation?: ConversationSource, semanticOwner?: string): Promise<CapabilityResult> {
     const def = capability(name);
     if (!def) throw new HubError("INVALID", { key: "capability.invalid", args: [] });
     const parsed = def.args.safeParse(raw);
@@ -141,7 +143,14 @@ export class Capabilities {
       if (!this.knowledge) throw new HubError("INVALID", { key: "server.no_knowledge_directory_configured_work_and_execution_are_available_i", args: [] });
       const read = async (privateAllowed: boolean) => {
         const options = { includePrivate: privateAllowed };
-        if (name === "knowledge.note.search") return this.knowledge!.search(String(args.query), { ...options, type: args.type as never, limit: args.limit as number | undefined });
+        if (name === "knowledge.note.search") {
+          const owner = semanticOwner ?? (identity.actor.role === "human" ? identity.actor.id : undefined);
+          const type = args.type as NonNullable<Parameters<KnowledgeService["search"]>[1]>["type"];
+          const limit = (args.limit as number | undefined) ?? 20;
+          const semantic = !privateAllowed && owner && this.modules.semantic;
+          const lexical = await this.knowledge!.search(String(args.query), { ...options, type, limit: semantic ? Math.max(30, limit) : limit });
+          return semantic ? semantic.search(owner!, lexical, type, limit) : lexical;
+        }
         assertNoteVisible(this.store.db, String(args.ref));
         if (name === "knowledge.note.show") {
           const detail = await this.knowledge!.show(String(args.ref), options);

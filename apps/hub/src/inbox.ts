@@ -176,6 +176,10 @@ export class Inbox {
     return [...(window && detail ? [window, detail] : [window || detail || glance.app.name]).join(" · ")].slice(0, 200).join("");
   }
 
+  embeddingProfile(owner: string): string | undefined {
+    return this.state.binding(owner, "knowledge.embedding")?.profile;
+  }
+
   visionEnabled(owner: string): boolean {
     return !!this.state.binding(owner, "knowledge.vision");
   }

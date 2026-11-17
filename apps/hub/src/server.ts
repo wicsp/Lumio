@@ -1,4 +1,5 @@
 import { AiNotes } from "./ai-notes.ts";
+import { VoiceIdeas } from "./voice-ideas.ts";
 import { KNOWLEDGE_ROUTES, KnowledgeAuthoring, type PaperFetch } from "./knowledge-authoring.ts";
 import { withLanguage, errorMessage, text as msg } from "./messages.ts";
 import { language, type Language } from "@lumio/platform";
@@ -142,7 +143,8 @@ async function startHubInstance(config: HubConfig, options: {
     modules.trash = new Trash(config, store, modules, action => watch.exclusive(action), now, (path, message) => watch.issue(path, message), inbox);
     await modules.trash.sweep();
     modules.trash.start();
-    const authoring = new KnowledgeAuthoring(config, store, action => watch.exclusive(action), (path, message) => watch.issue(path, message), options.paperFetch);
+    const authoring = new KnowledgeAuthoring(config, store, action => watch.exclusive(action), (path, message) => watch.issue(path, message), options.paperFetch, modules.semantic);
+    modules.voiceIdeas = new VoiceIdeas(config, store, modules.assistantStore, modules.glances, authoring);
     const speech = new SpeechSessions(modules.speech, modules.funAsr, store, options.now ?? (() => new Date()), log);
     const updateArtifacts = new UpdateArtifacts(config.stateDir, store.runtimeVersion);
     const handle = async (request: Request, server: Bun.Server<SpeechSocketData>, lang: Language): Promise<Response | undefined> => {

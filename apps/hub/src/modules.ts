@@ -27,6 +27,8 @@ import { mergeStageGrant, PlanDispatchUnavailable, WorkService } from "@lumio/wo
 import type { AssistantContext, AssistantModel, AssistantTool } from "@lumio/assistant";
 import { AssistantMainConversations } from "./assistant-main.ts";
 import { glanceChat } from "./glance-chat.ts";
+import { VoiceIdeas } from "./voice-ideas.ts";
+import { SemanticSearch } from "./semantic-search.ts";
 import type { ImageHosting } from "./image-hosting.ts";
 import type { Glances } from "./glances.ts";
 import { WorkbenchAssistant } from "./workbench-assistant.ts";
@@ -86,6 +88,8 @@ export class BusinessModules {
   trash!: Trash;
   inbox!: Inbox;
   glances!: Glances;
+  voiceIdeas!: VoiceIdeas;
+  readonly semantic: SemanticSearch;
   imageHosting!: ImageHosting;
   assistantConfig!: AssistantConfiguration;
   readonly assistantStore: SqliteAssistantStore;
@@ -169,6 +173,12 @@ export class BusinessModules {
     this.assistantMain = new AssistantMainConversations(store, this.assistantStore);
     this.workbench = new WorkbenchTools(this.assistantMain, this.assistantStore, this.resources);
     this.ai=new AIConfigurationService(store.aiStore,config.assistantModel);
+    this.semantic = new SemanticSearch(config, owner => {
+      const id = this.inbox?.embeddingProfile(owner);
+      if (!id) return;
+      const resolved = this.ai.get(owner, id);
+      return { ...resolved, key: this.ai.store.secret(resolved.connection.id) };
+    }, this.signal);
     this.ai.migrateLegacy(store.actors().filter(actor => actor.role === "human").map(actor => actor.id));
     this.ai.store.installConversationPurge();
     this.decisionGate = new DecisionGate(this.ai.decisionGate, {
@@ -198,6 +208,7 @@ export class BusinessModules {
         claim: (owner, glance, message) => { this.glances.claim(glance, owner, "message", message); },
         context: (owner, glance, message) => glanceChat(this.glances.get(glance, owner), message, this.inbox, this.glances),
       },
+      recordIdea: (owner, turn, user, glance) => this.voiceIdeas.record(owner, turn, user, glance),
       resolveModel: (profile, owner) => this.ai.model(owner, profile),
       workbench: new AssistantWorkbenchAnchors(this, store, this.assistantMain, this.notices),
       native: {
@@ -207,10 +218,15 @@ export class BusinessModules {
       },
     };
     this.assistant = new WorkbenchAssistant(this.assistantStore, options.assistantModel ?? configuredModel(config.assistantModel),
-      [...this.capabilities.tools(), ...(options.assistantTools ?? [])], assistantContext, this.assistantMain, this.workbench);
+      [...this.capabilities.tools(), VoiceIdeas.tool(() => this.voiceIdeas), ...(options.assistantTools ?? [])], assistantContext, this.assistantMain, this.workbench);
     this.assistant.recover();
     this.reconcile();
+    let nextEmbedding = 0;
     this.timer = setInterval(() => {
+      if (now().getTime() >= nextEmbedding) {
+        nextEmbedding = now().getTime() + 10_000;
+        void this.semantic.refresh(store.actors().filter(actor => actor.role === "human").map(actor => actor.id));
+      }
       try { this.reconcile(); } catch { /* Persisted pending results remain for the next pass. */ }
       try { this.jobActivity.sweep(now()); } catch { /* Retry the next interval. */ }
       try { this.native.usage.tick(); } catch { /* The next tick can retry quota collection. */ }

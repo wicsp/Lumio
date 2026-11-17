@@ -130,7 +130,8 @@ export class AIConfigurationService {
     if (connection.kind === "typesafe-jev") throw failure("jev_chat_unsupported");
     if (connection.kind === "claude-code-subscription") throw failure("engine_mismatch");
     if ((input.engine === "codex") !== (connection.kind === "codex-account")) throw failure("engine_mismatch");
-    if ((input.engine === "speech") !== (connection.kind === "dashscope")) throw failure("engine_mismatch"); // ADR 0055：语音 Profile 只用于语音用途
+    if (input.engine === "speech" && connection.kind !== "dashscope" ||
+        connection.kind === "dashscope" && input.engine !== "speech" && input.engine !== "embedding") throw failure("engine_mismatch"); // ADR 0055：语音 Profile 只用于语音用途
     if (connection.kind === "codex-account" && input.thinking !== "default") throw failure("thinking_unsupported");
     if (input.effort && !/^[a-z]+$/.test(input.effort)) throw failure("effort_unsupported");
     if (connection.kind !== "codex-account" && connection.kind !== "deepseek") {

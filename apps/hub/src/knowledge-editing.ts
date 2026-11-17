@@ -1,7 +1,8 @@
+import type { SemanticSearch } from "./semantic-search.ts";
 import { assertNoteVisible } from "./trash.ts";
 import { Id, KnowledgeUpdateRequest, KnowledgeRelatedRequest, KnowledgeReferencesRequest } from "@lumio/schema";
 import { CoreError } from "@lumio/foundation";
-import { KnowledgeEditingStore, readKnowledgeDocument, relatedKnowledge, knowledgeReferences, updateIndex, openVaultGit } from "@lumio/storage";
+import { KnowledgeEditingStore, noteById, fuseSearch, readKnowledgeDocument, relatedKnowledge, knowledgeReferences, updateIndex, openVaultGit } from "@lumio/storage";
 import { HubError } from "./errors.ts";
 import { text as msg } from "./messages.ts";
 import type { HubStore, Identity } from "./store.ts";
@@ -14,12 +15,24 @@ export const EDITING_ROUTES = [
 ] as const;
 export class KnowledgeEditing {
     private edits: KnowledgeEditingStore;
-    constructor(private config: HubConfig, private store: HubStore, private exclusive: <T>(action: () => Promise<T>) => Promise<T>, private issue: (path: string, message: string) => void) { this.edits = new KnowledgeEditingStore(store.db, config.vault, { stateDir: config.stateDir }); }
+    constructor(private config: HubConfig, private store: HubStore, private exclusive: <T>(action: () => Promise<T>) => Promise<T>, private issue: (path: string, message: string) => void, private semantic?: SemanticSearch) { this.edits = new KnowledgeEditingStore(store.db, config.vault, { stateDir: config.stateDir }); }
     async handle(request: Request, operation: string, body: unknown, identity: Identity, now: Date): Promise<Response> {
         const options = { stateDir: this.config.stateDir };
         try {
             if (operation === "knowledge.related") {
-                const result = await relatedKnowledge(this.config.vault, KnowledgeRelatedRequest.parse(body), options);
+                const input = KnowledgeRelatedRequest.parse(body);
+                const result = await relatedKnowledge(this.config.vault, input, options);
+                // Only send context for an existing public note selected by its ID.
+                if (input.exclude_id && this.semantic && await noteById(this.config.vault, input.exclude_id, options)) {
+                    const hits = (await this.semantic.hits(identity.actor.id, [input.title, input.focus, input.text].filter(Boolean).join("\n"), undefined, 12))
+                        .filter(hit => hit.note.id !== input.exclude_id);
+                    if (hits.length) {
+                        const lexical = result.hits.map(hit => ({ ...hit, matched_in: "body" as const, status: null, created: null }));
+                        const fused = fuseSearch({ query: "", total: lexical.length, hits: lexical }, hits, 5);
+                        this.store.audit(identity, operation, "allow");
+                        return Response.json({ method: "hybrid", hits: fused.hits.map(({ note, snippet }) => ({ note, snippet })) });
+                    }
+                }
                 this.store.audit(identity, operation, "allow");
                 return Response.json(result);
             }

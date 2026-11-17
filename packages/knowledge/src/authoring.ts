@@ -13,12 +13,12 @@ const HEADINGS = {
   paper: ["One sentence", "Method and evidence", "Limitations", "Relation to my research", "Questions to verify"],
   video: ["Summary", "Key timestamps", "My understanding and questions", "Next steps"],
   web: ["Main points", "Quotes and sources", "My understanding and questions", "Next steps"],
-  idea: ["Problem", "Current idea", "Evidence", "Uncertainties", "Next validation"],
+  idea: [],
 };
 /** Applications supply localized labels, while Knowledge owns template structure and version. */
 export function knowledgeTemplate(input: KnowledgeTemplateRequest, text: (key: string) => string): KnowledgeTemplateResult {
   const { kind, locale } = KnowledgeTemplateRequest.parse(input);
-  return KnowledgeTemplateResult.parse({ kind, locale, version: "1", body: HEADINGS[kind].map(title => `## ${text(title)}\n\n`).join("") });
+  return KnowledgeTemplateResult.parse({ kind, locale, version: kind === "idea" ? "2" : "1", body: HEADINGS[kind].map(title => `## ${text(title)}\n\n`).join("") });
 }
 
 export function paperIdentity(value: unknown, kind: "arxiv" | "doi"): string | undefined {
@@ -40,7 +40,10 @@ export function duplicatePaper(note: KnowledgeCreateRequest["note"], files: { fr
 export function renderKnowledgeNote(input: KnowledgeCreateRequest, ctx: FillContext, suffix = ""): NewNote & { result: KnowledgeCreateResult } {
   const { note, body } = KnowledgeCreateRequest.parse(input);
   const type = note.kind === "video" || note.kind === "web" ? "source" : note.kind;
-  const fm: Record<string, unknown> = { title: note.title };
+  const title = note.title ?? ([...body.trim().split(/\r?\n/u, 1)[0]!.replace(/^#{1,6}\s+/u, "").replace(/\s+/gu, " ")].slice(0, 45).join("") || "Idea");
+  const fm: Record<string, unknown> = { title };
+  if (note.kind === "idea" && note.derived_from?.length) fm.derived_from = note.derived_from;
+  if (note.kind === "idea" && note.title === undefined) fm.id = ctx.newId("idea");
   if (note.tags.length) fm.tags = note.tags;
   let name: string, content = body;
   if (note.kind === "paper") {
@@ -51,7 +54,8 @@ export function renderKnowledgeNote(input: KnowledgeCreateRequest, ctx: FillCont
     if (note.status && note.status !== "to-read") fm.status = note.status;
     if (note.bibtex) content += `${content.endsWith("\n") ? "" : "\n"}\n## BibTeX\n\n\`\`\`bibtex\n${rewriteBibtexKey(note.bibtex, name)}\n\`\`\`\n`;
   } else {
-    name = note.title.replace(/[\\/:*?"<>|#^\[\]\x00-\x1f\x7f]/g, " ").replace(/\s+/gu, " ").replace(/^[. ]+|[. ]+$/g, "").trim();
+    name = title.replace(/[\\/:*?"<>|#^\[\]\x00-\x1f\x7f]/g, " ").replace(/\s+/gu, " ").replace(/^[. ]+|[. ]+$/g, "").trim();
+    if (typeof fm.id === "string") name = aiNoteFileName(name, fm.id);
     if (!name || new TextEncoder().encode(name).length > 230) throw new CoreError("INVALID_FILE_NAME", { key: "create.title_is_empty_after_removing_invalid_characters_cannot_generate_fil", args: [] });
     if (note.kind !== "idea") {
       fm.kind = note.kind;

@@ -155,6 +155,12 @@ struct Hub {
         throw CaptureFailure("助手回复中断")
     }
 
+    func noteURL(_ idea: String) -> URL {
+        guard var address = URLComponents(url: origin, resolvingAgainstBaseURL: false) else { return origin }
+        address.fragment = "knowledge/\(idea)"
+        return address.url ?? origin
+    }
+
     func conversationURL(_ conversation: String) -> URL {
         guard var address = URLComponents(url: origin, resolvingAgainstBaseURL: false) else { return origin }
         address.fragment = "assistant/\(conversation)"

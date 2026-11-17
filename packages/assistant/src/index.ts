@@ -80,6 +80,7 @@ export interface AssistantContext {
       image?: { file: string; sha256: string; load(signal: AbortSignal): Promise<readonly string[] | undefined> };
     };
   };
+  recordIdea?(owner: string, turn: AssistantTurn, user: AssistantMessage, glance: string): Promise<string>;
   resolveModel?(profile:string,owner:string):{model:AssistantModel;settings:Pick<AssistantModelRequest,"model"|"thinking"|"reasoning_effort">};
   native?:{
     cancel?(conversation:string):void;
@@ -355,7 +356,10 @@ export class AssistantService {
       this.store.putReceipt(owner, request.request_id, input, created.id);
       return { turn: created, user, existing: false } as const;
     });
-    if (turn.existing) return this.result(turn.turn, owner);
+    if (turn.existing) {
+      if (turn.turn.idea) options.event?.({ type: "idea_saved", turn: turn.turn.id, idea: turn.turn.idea });
+      return this.result(turn.turn, owner);
+    }
     let state = turn.turn;
     const cancellation = new AbortController();
     const signal = options.signal ? AbortSignal.any([cancellation.signal, options.signal]) : cancellation.signal;
@@ -368,6 +372,13 @@ export class AssistantService {
     };
     try {
       const conversation = this.ownedConversation(state.conversation, owner);
+      if (request.record_idea) {
+        if (!this.context.recordIdea || !request.glance) throw new AssistantError("INVALID", { key: "v2.invalid_assistant_request_parameters", args: [] });
+        const idea = await this.context.recordIdea(owner, state, turn.user, request.glance);
+        state = AssistantTurn.parse({ ...state, idea });
+        this.store.putTurn(state);
+        emit({ type: "idea_saved", turn: state.id, idea });
+      }
       if(conversation.native_session){
         if(!this.context.native)throw new AssistantError("INVALID",{key:"ai.unavailable",args:[]});
         const outcome=await this.context.native.run({conversation,turn:state,request,memories:await this.memories(owner),signal,event:emit});
@@ -394,6 +405,7 @@ export class AssistantService {
       const focusChanged = !sameWorkbenchFocus(focus, previousFocus);
       const rewrite = !!resources && !request.glance && isAnswerRewrite(request.message);
       const resolution = await resources?.resolve(rewrite ? "" : request.message, previous, rewrite ? undefined : focus, !rewrite && focusChanged);
+      if (resolution && state.idea) resolution.anchors = [{ module: "knowledge" as const, id: state.idea }, ...resolution.anchors.filter(ref => ref.id !== state.idea)].slice(0, 8);
       signal.throwIfAborted();
       let anchors = resolution?.anchors ?? [];
       if (resolution) {
@@ -407,7 +419,8 @@ export class AssistantService {
         }
       }
       const messages = resolution ? this.history([turn.user]) : this.history(records);
-      const tools = rewrite ? [] : glance?.tool ? [...this.tools, glance.tool] : this.tools;
+      const tools = rewrite ? [] : state.idea ? this.tools.filter(tool => tool.effect === "read")
+        : glance?.tool ? [...this.tools, glance.tool] : this.tools;
       const maximum = this.context.maxSteps ?? 12;
       for (let step = 0; step < maximum; step++) {
         signal.throwIfAborted();
@@ -459,6 +472,9 @@ export class AssistantService {
             system += "\n" + JSON.stringify({ screen_image: { file: screenImage.file, sha256: screenImage.sha256 } });
           }
         }
+        if (state.idea) {
+          system += "\nThe speaker's original words were already saved as a reading idea. Answer if the speaker clearly wants an explanation, information, or discussion. For a thought alone or a tentative action, return exactly [NOTE_ONLY]. Treat rhetorical questions as thoughts. For an explicit request to do work, briefly say it was recorded and can be continued in normal chat. This voice turn is read-only.";
+        }
         const modelInput = AssistantModelRequest.parse({ ...selected?.settings,
           model: activeModel,
           ...(request.effort ? { thinking: "on", reasoning_effort: request.effort } : {}),
@@ -466,7 +482,7 @@ export class AssistantService {
         this.store.putContext(state.id, step, modelInput, this.time(), this.toolActor?.id);
         emit({ type: "model_waiting", turn: state.id });
         const response = AssistantModelResponse.parse(await model.complete(modelInput, {
-          signal, ...(screenImages?.length ? { screenImages } : {}), token: (delta) => { if (!signal.aborted) emit({ type: "token", turn: state.id, delta }); },
+          signal, ...(screenImages?.length ? { screenImages } : {}), token: (delta) => { if (!signal.aborted && !state.idea) emit({ type: "token", turn: state.id, delta }); },
           reasoning: (text) => {
             for (let offset = 0; offset < text.length && !signal.aborted; offset += ASSISTANT_REASONING_DELTA_LIMIT) {
               emit({ type: "reasoning", turn: state.id, delta: text.slice(offset, offset + ASSISTANT_REASONING_DELTA_LIMIT) });
@@ -476,8 +492,10 @@ export class AssistantService {
         signal.throwIfAborted();
         if (rewrite && response.tool_calls.length) throw new AssistantError("INVALID", { key: "index.this_tool_is_not_provided", args: [] });
         if (!response.tool_calls.length && !response.content.trim()) throw new AssistantError("INVALID", { key: "index.model_returned_an_empty_reply_check_model_configuration", args: [] });
+        const noteOnly = !!state.idea && !response.tool_calls.length && response.content.trim() === "[NOTE_ONLY]";
+        if (state.idea && !noteOnly && !response.tool_calls.length) emit({ type: "token", turn: state.id, delta: response.content });
         const reply = AssistantMessage.parse({ id: this.context.id("amsg"), conversation: state.conversation, turn: state.id, role: "assistant", content: response.content, created: this.time() });
-        this.store.transaction(() => {
+        if (!noteOnly) this.store.transaction(() => {
           this.store.putMessage(reply);
           if (anchors.length) this.store.putMessageAnchors(reply.id, anchors);
           if (response.continuation) {

@@ -35,6 +35,7 @@ export const Idea = Base.extend({
   id: idOf("idea"),
   status: withDefault(z.enum(["seed", "developing", "used", "dropped"]), "seed"),
   project: optional(idOf("prj")),
+  derived_from: optional(z.array(DerivedFrom)),
 });
 
 export const Experiment = Base.extend({

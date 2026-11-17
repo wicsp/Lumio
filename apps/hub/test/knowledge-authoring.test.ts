@@ -38,7 +38,7 @@ test("four types create through HTTP, immediately show/search with one audit eac
     const result = KnowledgeCreateResult.parse(await client().createNote(request));
     const detail = await client().show(result.id);
     expect(detail.body).toStartWith(request.body);
-    expect((await client().search(request.note.title)).hits.some(hit => hit.note.id === result.id)).toBe(true);
+    expect((await client().search(request.note.title!)).hits.some(hit => hit.note.id === result.id)).toBe(true);
     expect(await client().createNote(request)).toEqual(result);
   }
   expect(hub.store.db.query<{ n: number }, []>("SELECT count(*) n FROM audit WHERE operation='knowledge.create' AND execution_result LIKE 'created:%'").get()!.n).toBe(4);
@@ -49,7 +49,7 @@ test("concurrent double click and same-title saves never create duplicates", asy
   expect(first).toEqual(second);
   const conflict = await client().createNote({ ...request, request_id: "another-fixture-request" }).catch(e => e);
   expect(conflict.code).toBe("CONFLICT");
-  expect((await client().search(request.note.title)).hits).toHaveLength(1);
+  expect((await client().search(request.note.title!)).hits).toHaveLength(1);
 });
 test("agent/runtime authorization precedes parsing and cannot read templates or resolve papers", async () => {
   for (const role of ["agent", "runtime"] as const) {
