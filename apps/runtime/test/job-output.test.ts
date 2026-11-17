@@ -40,3 +40,22 @@ test("Claude keeps the final result after malformed and oversized lines", () => 
   expect(output.report).toBe("检查通过");
   expect(output.sessionId).toBe("session-1");
 });
+
+test("Pi streaming records retain the report and session while dropping tool content", () => {
+  const seen: JobActivityEvent[] = [];
+  const output = new JobOutput("pi", "/repo", event => seen.push(JobActivityEvent.parse({ at: new Date().toISOString(), ...event })));
+  const input = Buffer.from([
+    { type: "session", id: "pi-session" },
+    { type: "agent_start" },
+    { type: "tool_execution_start", toolCallId: "changed", toolName: "edit", args: { path: "/repo/说明.md", newText: "private" } },
+    { type: "tool_execution_end", toolCallId: "changed", isError: true, result: "private" },
+    { type: "message_end", message: { role: "assistant", content: [{ type: "thinking", thinking: "private" }, { type: "text", text: "完成" }] } },
+  ].map(event => JSON.stringify(event)).join("\n"));
+  for (let i = 0; i < input.length; i += 3) output.push(input.subarray(i, i + 3));
+  output.push(Buffer.alloc(0), true);
+  expect(output.sessionId).toBe("pi-session");
+  expect(output.report).toBe("完成");
+  expect(seen).toContainEqual(expect.objectContaining({ type: "tool_started", tool: { id: "changed", kind: "files", label: "Edit", files: ["说明.md"] } }));
+  expect(seen).toContainEqual(expect.objectContaining({ type: "tool_finished", outcome: "failed" }));
+  expect(JSON.stringify(seen)).not.toContain("private");
+});

@@ -19,6 +19,7 @@ export interface AgentContext {
   skillFile?: string;
   skillText?: string;
   gitPaths?: readonly string[];
+  structuredProgress?: boolean;
 }
 
 export interface Adapter {
@@ -88,12 +89,14 @@ const claude: Adapter = {
   },
 };
 
+export const PI_ACTIVITY_VERSION = "1.5.0";
+
 const pi: Adapter = {
   engine: "pi", command: "pi", sandbox: "none",
   versions: { min: "1.4.0", below: "2.0.0" },
   argv(run, ctx) {
     // pi 的 --session-id：不存在则新建，存在则打开，所以新建与继续用同一个参数。
-    return ["-p", run.prompt, ...(ctx.skillFile ? ["--skill", ctx.skillFile] : []), ...(run.model ? ["--model", run.model] : []), ...(run.session ? ["--session-id", run.session.id] : [])];
+    return ["-p", run.prompt, ...(ctx.structuredProgress ? ["--mode", "json"] : []), ...(ctx.skillFile ? ["--skill", ctx.skillFile] : []), ...(run.model ? ["--model", run.model] : []), ...(run.session ? ["--session-id", run.session.id] : [])];
   },
   parse(stdout, _last, run) {
     return { report: stdout.trim() || undefined, sessionId: run.session?.id };
