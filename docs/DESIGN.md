@@ -78,6 +78,7 @@ Foundation 提供 ID 和错误；Platform 提供终端、诊断、下载与升�
 | `apps/runtime` | 设备 daemon，与 Hub 只走 HTTP | execution 的纯计划能力、storage 的日志适配、foundation、platform、schema |
 | `apps/web` | 中文 GUI 与静态资源构建，入口 `src/entry.ts`；网页由 Hub 提供（ADR 0027） | api-client, schema |
 | `apps/desktop` | macOS 菜单栏捕获小助手（Swift，human 客户端，ADR 0066） | 只经 HTTP 调用 Hub；契约用样例文件校验 |
+| `apps/mobile` | 生成 iPhone 捕获快捷指令（收藏 / 问一问，扫码配对），human 客户端 | schema（只在测试中校验请求体） |
 | `apps/feishu-bot` 等 | 后续客户端 | api-client |
 
 依赖方向由 `bun run lint:deps` 强制：`packages` 不依赖 `apps`，`apps` 之间不互相依赖——唯一例外是 `apps/cli` 可以引用其他 app 的入口模块 `src/entry.ts`，hub、runtime、web 之间仍不互相引用（ADR 0027）；四个业务包不导入其他业务包实现或具体适配器，禁止文件/网络/SQLite/进程 I/O（ADR 0025）。

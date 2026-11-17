@@ -66,6 +66,13 @@
         "@types/turndown": "^5.0.6",
       },
     },
+    "apps/mobile": {
+      "name": "@lumio/mobile",
+      "version": "0.1.0",
+      "dependencies": {
+        "@lumio/schema": "workspace:*",
+      },
+    },
     "apps/runtime": {
       "name": "@lumio/runtime",
       "version": "0.0.0",
@@ -247,6 +254,8 @@
     "@lumio/hub": ["@lumio/hub@workspace:apps/hub"],
 
     "@lumio/knowledge": ["@lumio/knowledge@workspace:packages/knowledge"],
+
+    "@lumio/mobile": ["@lumio/mobile@workspace:apps/mobile"],
 
     "@lumio/platform": ["@lumio/platform@workspace:packages/platform"],
 

@@ -48,6 +48,10 @@
 - 主对话请求的 `glance` 与 `focus` 互斥；所见作为数据放入当前轮上下文。主对话工具 `capture.glance` 只能把当前这条人的消息所附的所见存为资料，不进能力目录。
   对外副作用照常走能力目录与批准；小助手不做批准，提示人去 Lumio。
 - 默认不把截图发给模型，只用本机识字的文字；绑定 `knowledge.vision` 后捕获可看图整理原文，助手看图在后续切片（C1-7）。
+- iPhone 用系统快捷指令做弱化版（`apps/mobile`）：轻点背面 = 收藏，操作按钮 = 截屏后听写并发给主对话。拿不到 App 名、网址、选中文字与光标，
+  `app.name` 记为 `iPhone`，识字作为一块覆盖整图的文字（`ios-vision@1`），Hub 按"没有指向"处理；捕获渠道用 `share`，不改契约。
+  配对不单独成快捷指令：设置页显示 `shortcuts://run-shortcut?name=Lumio%20收藏&input=text&text=…` 二维码，相机扫码后"Lumio 收藏"用配对码换取令牌，
+  存在 iCloud 云盘 `快捷指令/Lumio/config.json`。签名文件（`apps/mobile/signed/`）不含地址或令牌，所有用户共用，由维护者在 Mac 上签名提交，用户不需要 Mac。
 
 ## 单入口助手（ADR 0059、0060 Accepted，0061 部分 Accepted；试用中）
 
