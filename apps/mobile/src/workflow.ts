@@ -30,6 +30,9 @@ export const key = (base: Ref, name: string) => aggrandize(base, { Type: "WFDict
 /** 当作某种类型使用（例如把文件当作词典读）。 */
 export const asType = (base: Ref, type: string) => aggrandize(base, { Type: "WFCoercionVariableAggrandizement", CoercionItemClass: type });
 
+/** 快捷指令收到的输入（例如经 `shortcuts://run-shortcut?...&input=text&text=…` 传入的文字）。 */
+export const shortcutInput: Ref = ref({ Type: "ExtensionInput" });
+
 /** 单个变量参数。 */
 export const attach = (value: Ref): PlistValue => ({ Value: value.value, WFSerializationType: "WFTextTokenAttachment" });
 
@@ -140,10 +143,10 @@ export class Workflow {
       WFWorkflowActions: this.actions as unknown as PlistValue[],
       WFWorkflowClientVersion: "2607.0.2",
       WFWorkflowHasOutputFallback: false,
-      WFWorkflowHasShortcutInputVariables: false,
+      WFWorkflowHasShortcutInputVariables: true,
       WFWorkflowIcon: { WFWorkflowIconGlyphNumber: options.glyph, WFWorkflowIconStartColor: options.color },
       WFWorkflowImportQuestions: [],
-      WFWorkflowInputContentItemClasses: [],
+      WFWorkflowInputContentItemClasses: ["WFStringContentItem"],
       WFWorkflowMinimumClientVersion: 900,
       WFWorkflowMinimumClientVersionString: "900",
       WFWorkflowName: this.name,

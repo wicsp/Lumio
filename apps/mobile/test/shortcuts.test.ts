@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { AssistantChatRequest, CaptureCreate, ClientJoinRequest, GLANCE_LIMITS, GlanceCreate, RequestId } from "@lumio/schema";
 import { toPlist } from "../src/plist.ts";
-import { askShortcut, pairShortcut, saveShortcut, CONFIG_PATH } from "../src/shortcuts.ts";
+import { askShortcut, saveShortcut, CONFIG_PATH, PAIR_SHORTCUT_NAME } from "../src/shortcuts.ts";
 import type { Action, Workflow } from "../src/workflow.ts";
 
 /**
@@ -21,7 +21,7 @@ const IDS = {
 
 class Exit extends Error {}
 
-function run(workflow: Workflow, options: { ocr?: string; config?: boolean; fail?: string } = {}) {
+function run(workflow: Workflow, options: { ocr?: string; config?: boolean; fail?: string; input?: string } = {}) {
   const outputs = new Map<string, Value>();
   const requests: Request[] = [];
   const shown: string[] = [];
@@ -30,7 +30,7 @@ function run(workflow: Workflow, options: { ocr?: string; config?: boolean; fail
   const env = { hub: "http://hub.test:7420", token: "tok_synthetic" };
 
   const resolve = (ref: Record<string, Value>): Value => {
-    let value = ref.Type === "ActionOutput" ? outputs.get(ref.OutputUUID as string) : undefined;
+    let value = ref.Type === "ActionOutput" ? outputs.get(ref.OutputUUID as string) : ref.Type === "ExtensionInput" ? options.input : undefined;
     for (const agg of (ref.Aggrandizements as Record<string, string>[] | undefined) ?? []) {
       if (agg.Type === "WFDictionaryValueVariableAggrandizement")
         for (const part of agg.DictionaryKey!.split(".")) value = (value as Record<string, Value> | undefined)?.[part];
@@ -77,6 +77,7 @@ function run(workflow: Workflow, options: { ocr?: string; config?: boolean; fail
   };
 
   const actions = workflow.actions;
+  const executed: string[] = [];
   // 预先建立 If 块的跳转表。
   const groups = new Map<string, number[]>();
   actions.forEach((action, i) => {
@@ -91,6 +92,7 @@ function run(workflow: Workflow, options: { ocr?: string; config?: boolean; fail
     const p = action.WFWorkflowActionParameters as Record<string, Value>;
     const id = p.UUID as string;
     const kind = action.WFWorkflowActionIdentifier.replace("is.workflow.actions.", "");
+    executed.push(kind);
     let out: Value;
     switch (kind) {
       case "conditional": {
@@ -153,7 +155,7 @@ function run(workflow: Workflow, options: { ocr?: string; config?: boolean; fail
   } catch (error) {
     if (!(error instanceof Exit)) throw error;
   }
-  return { requests, shown, notifications, saved };
+  return { requests, shown, notifications, saved, executed };
 }
 
 function checkGlance(request: Request) {
@@ -213,16 +215,30 @@ describe("iPhone 快捷指令", () => {
   test("没有配对时提示先配对，不发请求", () => {
     const { requests, notifications } = run(askShortcut(), { config: false });
     expect(requests).toEqual([]);
-    expect(notifications[0]).toContain("Lumio 配对");
+    expect(notifications[0]).toContain("扫一下");
   });
 
-  test("配对：去掉地址末尾斜杠，换取令牌并保存", () => {
-    const { requests, saved } = run(pairShortcut());
-    expect(requests[0]!.url).toBe("http://hub.test:7420/v2/setup/client/join");
-    ClientJoinRequest.parse(requests[0]!.body);
-    expect(saved).toHaveLength(1);
-    expect(saved[0]!.path).toBe(CONFIG_PATH);
-    expect(JSON.parse(saved[0]!.content as string)).toEqual({ hub: "http://hub.test:7420", token: "tok_synthetic" });
+  test("扫码配对：用输入里的地址和配对码换取令牌、保存后结束，不截屏", () => {
+    for (const shortcut of [saveShortcut(), askShortcut()]) {
+      const input = JSON.stringify({ hub: "http://hub.test:7420//", code: "abcdefghijklmnopqrstuvwxyz234567" });
+      const { requests, saved, notifications, executed } = run(shortcut, { input });
+      expect(requests).toHaveLength(1);
+      expect(requests[0]!.url).toBe("http://hub.test:7420/v2/setup/client/join");
+      ClientJoinRequest.parse(requests[0]!.body);
+      expect(saved).toEqual([{ path: CONFIG_PATH, content: JSON.stringify({ hub: "http://hub.test:7420", token: "tok_synthetic" }) }]);
+      expect(notifications).toEqual(["Lumio 已配对: http://hub.test:7420"]);
+      expect(executed).not.toContain("takescreenshot");
+    }
+  });
+
+  test("配对码无效时提示 Hub 的错误", () => {
+    const { saved, notifications } = run(saveShortcut(), { input: JSON.stringify({ hub: "http://hub.test:7420", code: "x" }), fail: "/v2/setup/client/join" });
+    expect(saved).toEqual([]);
+    expect(notifications).toEqual(["Lumio 失败: 合成错误"]);
+  });
+
+  test("二维码按名字启动的是收藏", () => {
+    expect(saveShortcut().name).toBe(PAIR_SHORTCUT_NAME);
   });
 
   test("生成的文件是确定的 plist", () => {
@@ -232,8 +248,10 @@ describe("iPhone 快捷指令", () => {
     expect(a).toContain("is.workflow.actions.takescreenshot");
   });
 
-  test("截屏是最先执行的动作，避免截到快捷指令自己的界面", () => {
-    for (const w of [saveShortcut(), askShortcut()])
-      expect(w.actions[0]!.WFWorkflowActionIdentifier).toBe("is.workflow.actions.takescreenshot");
+  test("没有输入时截屏是第一个可见动作，避免截到快捷指令自己的界面", () => {
+    for (const w of [saveShortcut(), askShortcut()]) {
+      const { executed } = run(w);
+      expect(executed.filter(kind => kind !== "conditional")[0]).toBe("takescreenshot");
+    }
   });
 });
