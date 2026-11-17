@@ -11,6 +11,15 @@ export function jobInteractionStatus(online: boolean, capability?: JobEngineActi
   return "Live questions and approvals are not enabled on this runtime";
 }
 
+export function jobInteractionChoice(input: {
+  available: boolean; required: boolean; fullAccess: boolean; workdir: string; preferInteractive: boolean;
+}) {
+  const needsProjectDirectory = input.workdir === "~" || input.workdir === "~/";
+  const selectable = input.available && !input.fullAccess && !needsProjectDirectory;
+  return { selectable, needsProjectDirectory,
+    checked: input.required || (selectable && input.preferInteractive), disabled: input.required || !selectable };
+}
+
 export class JobInteractionSettings {
   readonly element = h("div", { class: "set-rows" });
   private active = true;

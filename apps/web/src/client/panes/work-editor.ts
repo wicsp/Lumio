@@ -10,7 +10,7 @@ import { PROJECT_STATUSES, type ResourceRef, type WorkProject, type WorkTask, ty
 import { errorText, isConflict, type Client, type HubExtras } from "../api.ts";
 import { attentionCard, attentionFor } from "../attention-card.ts";
 import { jobActivityBadge } from "../job-activity.ts";
-import { jobInteractionStatus } from "../job-interaction-settings.ts";
+import { jobInteractionChoice, jobInteractionStatus } from "../job-interaction-settings.ts";
 import { answerCommand, commentCommand, dispatchCommand, engineTargets, formatTime, newRequestId, workPatchCommand } from "../commands.ts";
 import { nextTargetText } from "../delegate.ts";
 import { autosize, clear, confirmDialog, failure, field, h, icon, openDialog, openMenu, promptDialog, select, statusIcon, toast, type MenuItem } from "../dom.ts";
@@ -546,10 +546,10 @@ export class WorkEditor {
   }
 
   /** 一轮实际会用的工作目录：任务 → 项目 → ~（ADR 0033）。 */
-  private effectiveWorkdir(task: WorkTask): string {
-    if (task.workdir) return task.workdir;
+  private effectiveWorkdir(task: WorkTask): { path: string; inherited: boolean } {
+    if (task.workdir) return { path: task.workdir, inherited: false };
     const inherited = this.projects.find(p => p.id === task.project)?.workdir;
-    return inherited ? t("{0} (from project)", inherited) : "~";
+    return { path: inherited ?? "~", inherited: Boolean(inherited) };
   }
 
   // ───────────── 项目里的任务 ─────────────
@@ -661,8 +661,10 @@ export class WorkEditor {
       const preferred = fixed ?? (suggested && targets.some(x => x.target === suggested) ? suggested : targets.find(x => x.online)?.target) ?? "";
       const target = select("dispatch-target", fixed ? options : [["", t("Choose a runtime and engine")], ...options], preferred);
       target.required = true; target.disabled = !!fixed;
-      const interactive = h("input", { type: "checkbox", name: "dispatch-interactive", checked: stage?.kind === "agent" && stage.interaction === "interactive" });
-      const fixedInteractive = interactive.checked;
+      const workdir = this.effectiveWorkdir(task);
+      const interactive = h("input", { type: "checkbox", name: "dispatch-interactive" });
+      const fixedInteractive = stage?.kind === "agent" && stage.interaction === "interactive";
+      let preferInteractive = true;
       const connection = select("dispatch-connection", [], "");
       const connectionField = field(t("Codex connection"), connection);
       let choices: ReadonlyArray<{ id: string; name: string }> = [];
@@ -687,21 +689,23 @@ export class WorkEditor {
         connection.value = choices.some(choice => choice.id === selected) ? selected : "";
         const fullAccess = stage?.kind === "agent" && stage.access === "full";
         const state = runtime && registered ? jobInteractionStatus(runtime.online && (reported?.online ?? true), cap, choices.length) : undefined;
-        const supported = state === "Live questions and approvals enabled" && !fullAccess;
-        interactive.disabled = fixedInteractive || !supported;
-        if (!supported && !fixedInteractive) interactive.checked = false;
+        const choice = jobInteractionChoice({ available: state === "Live questions and approvals enabled", required: fixedInteractive,
+          fullAccess, workdir: workdir.path, preferInteractive });
+        interactive.disabled = choice.disabled;
+        interactive.checked = choice.checked;
         const authHint = choices.length === 1 ? t("Uses your existing Codex connection {0}", choices[0]!.name)
           : choices.length === 0 ? t("Uses the runtime’s API key") : undefined;
         interactionHint.textContent = !target.value ? t("Choose a runtime and engine")
           : fullAccess ? t("Live questions and approvals require a sandboxed plan step")
-          : supported ? (interactive.checked && authHint ? authHint : t("OS sandbox"))
+          : choice.needsProjectDirectory ? t("Set a project working directory to allow questions and approvals")
+          : choice.selectable ? (interactive.checked && authHint ? authHint : t("OS sandbox"))
           : !activityCaps ? t("Could not load runtime capabilities")
           : t(state ?? "Runtime has not reported interaction support");
         updateConnectionField();
-        interactionSettings.hidden = !target.value || supported || fullAccess;
+        interactionSettings.hidden = !target.value || choice.selectable || fullAccess || choice.needsProjectDirectory;
       };
       target.addEventListener("change", refreshInteraction);
-      interactive.addEventListener("change", refreshInteraction);
+      interactive.addEventListener("change", () => { preferInteractive = interactive.checked; refreshInteraction(); });
       refreshInteraction();
       const formId = `dispatch-${newRequestId()}`, error = h("div", { role: "alert" });
       const form = h("form", { id: formId, class: "form-stack" },
@@ -709,7 +713,7 @@ export class WorkEditor {
         field(t("Target"), target, fixed ? t("Set by the plan step “{0}”.", stage!.id) : undefined),
         h("label", { class: "check-field" }, interactive, t("Allow questions and approvals during this round")),
         interactionHint, connectionField, interactionSettings,
-        h("dl", { class: "meta-grid" }, h("div", {}, h("dt", {}, t("Working directory")), h("dd", {}, this.effectiveWorkdir(task))), h("div", {}, h("dt", {}, t("Time limit")), h("dd", {}, t("{0} min", task.timeout_minutes ?? 120)))),
+        h("dl", { class: "meta-grid" }, h("div", {}, h("dt", {}, t("Working directory")), h("dd", {}, workdir.inherited ? t("{0} (from project)", workdir.path) : workdir.path)), h("div", {}, h("dt", {}, t("Time limit")), h("dd", {}, t("{0} min", task.timeout_minutes ?? 120)))),
         !targets.length && !fixed && h("div", { class: "notice" }, icon("alert"), h("span", {}, t("No device with a registered engine yet. Run lumio runtime add in a terminal to connect one."))),
         error);
       const submit = h("button", { type: "submit", form: formId, class: "btn btn-primary", disabled: !targets.length && !fixed }, icon("play"), t("Confirm"));
