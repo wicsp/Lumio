@@ -21,7 +21,7 @@ import type { RuntimeConfig } from "./config.ts";
 import { Queue, type LocalJob } from "./queue.ts";
 import type { RuntimeJobActivity } from "./job-activity.ts";
 import { JobOutput } from "./job-output.ts";
-import { interactiveEngine, type JobEngineConfig } from "./job-engine-config.ts";
+import { interactiveEngine, interactiveWorkspace, type JobEngineConfig } from "./job-engine-config.ts";
 
 type Engines = RuntimeRegistration["engines"];
 /** agent 的 stdout 最多保留这么多字节用于解析（完整输出照旧写入日志）。 */
@@ -142,7 +142,7 @@ export class Executor {
         ...(fields.error === undefined ? {} : { error: redact(fields.error) }) });
     };
     const fail = (error: string) => finish({ job: spec.id, lease: spec.lease, started, finished: new Date().toISOString(), status: "failed", error });
-    const workdir = spec.workdir === "~" ? homedir() : spec.workdir.startsWith("~/") ? join(homedir(), spec.workdir.slice(2)) : spec.workdir;
+    let workdir = spec.workdir === "~" ? homedir() : spec.workdir.startsWith("~/") ? join(homedir(), spec.workdir.slice(2)) : spec.workdir;
     const run = spec.run;
     let argv: string[];
     const injected = stageSecrets(run.kind === "agent" ? run.permissions : undefined, this.env);
@@ -176,6 +176,10 @@ export class Executor {
           gitPaths = gitWritePaths(workdir, this.env);
           if (!gitPaths.length) { await fail(msg("executor.git_profile_workdir")); return; }
         }
+        const workspace = await interactiveWorkspace(workdir, this.config.stateDir, interactive, gitPaths ?? [], Boolean(account));
+        if (!workspace) { await fail(msg("executor.interactive_workdir")); return; }
+        workdir = workspace.cwd;
+        gitPaths = workspace.gitPaths;
         if (account) {
           if (!this.accounts || !await activity?.authorized(spec)) { await fail(msg("executor.account_unavailable")); return; }
           try { await this.accounts.access(account.connection, account.owner, account, undefined, true); }

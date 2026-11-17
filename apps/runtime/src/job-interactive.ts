@@ -9,7 +9,7 @@ import { isolatedEnvironment, seatbelt } from "./native/isolation.ts";
 import type { CodexJobCredential } from "./native/connection-auth.ts";
 import { NativeRpc, type Wire } from "./native/rpc.ts";
 import { WorkerJobControl } from "./job-control.ts";
-import { contains, type JobEngineConfig } from "./job-engine-config.ts";
+import { contains, interactiveWorkspace, type JobEngineConfig } from "./job-engine-config.ts";
 import { text as msg } from "./messages.ts";
 import { runPi } from "./pi-job.ts";
 import { codexGitOptions } from "./stage.ts";
@@ -355,11 +355,13 @@ async function runClaude({ start, root, profile, control }: Context): Promise<En
 }
 
 export async function runInteractive(start: Start): Promise<EngineResult> {
-  const sessions = join(start.stateDir, "job-engine-sessions");
-  const cwd = await realpath(start.cwd);
-  if (start.provider.engine !== start.run.engine || process.platform !== "darwin" || !start.provider.roots.some(root => contains(root, cwd))
-    || contains(cwd, start.stateDir) || contains(start.stateDir, cwd) || start.run.permissions?.access === "full") return { exit_code: 1 };
+  if (start.provider.engine !== start.run.engine || process.platform !== "darwin" || start.run.permissions?.access === "full") return { exit_code: 1 };
   if (start.accountKey ? start.run.engine !== "codex" || !start.credential || start.provider.key : !start.provider.key) return { exit_code: 1 };
+  const workspace = await interactiveWorkspace(start.cwd, start.stateDir, start.provider, start.gitPaths, Boolean(start.accountKey));
+  if (!workspace || workspace.cwd !== start.cwd || workspace.gitPaths.some((path, i) => path !== start.gitPaths[i]))
+    return { exit_code: 1, error: msg("executor.interactive_workdir") };
+  const cwd = workspace.cwd;
+  const sessions = join(start.stateDir, "job-engine-sessions");
   const identity = start.accountKey ? { account: start.accountKey } : start.provider.engine === "pi"
     ? { provider: start.provider.provider, key: start.provider.key } : start.provider.key;
   const signature = createHash("sha256").update(JSON.stringify([cwd, start.run.engine, identity])).digest("hex");
@@ -377,7 +379,7 @@ export async function runInteractive(start: Start): Promise<EngineResult> {
   const control = new WorkerJobControl();
   try {
     for (const key of ["tmp", "codex", "claude"]) await mkdir(join(root, key), { recursive: true, mode: 0o700 });
-    const context = { start: { ...start, cwd }, root, profile: sandbox({ ...start, cwd }, root), control };
+    const context = { start, root, profile: sandbox(start, root), control };
     const result = start.provider.engine === "pi"
       ? (start.lastMessageFile ? await runPi({ provider: start.provider, workdir: cwd, root, job: start.job,
         roundDir: dirname(start.lastMessageFile), profile: context.profile, run: start.run, env: scopedEnvironment(start),
