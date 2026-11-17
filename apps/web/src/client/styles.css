@@ -798,7 +798,8 @@ div.note-rich-preview { padding:4px 0; }
 .attn-report { font-size: var(--fs-xs); white-space: nowrap; }
 .attn-body { display: flex; flex-direction: column; gap: 10px; margin-left: 44px; }
 .attn-question { padding: 10px 12px; border-radius: var(--r-md); background: var(--ochre-wash); color: var(--ink); line-height: 1.55; white-space: pre-wrap; }
-.attn-summary { margin-left: 44px; color: var(--ink-2); font-size: var(--fs-sm); line-height: 1.55; white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.attn-summary { margin-left: 44px; color: var(--ink-2); font-size: var(--fs-sm); line-height: 1.55; white-space: pre-wrap; }
+.attn-summary, .dock-notice p { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .attn-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: 44px; }
 .attn > .attn-composer { margin-left: 44px; }
 .attn-composer { border: 1px solid var(--line-strong); border-radius: var(--r-md); background: var(--surface); }
