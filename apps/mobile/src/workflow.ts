@@ -33,6 +33,8 @@ export const asType = (base: Ref, type: string) => aggrandize(base, { Type: "WFC
 /** 快捷指令收到的输入（例如经 `shortcuts://run-shortcut?...&input=text&text=…` 传入的文字）。 */
 export const shortcutInput: Ref = ref({ Type: "ExtensionInput" });
 
+export const variable = (name: string): Ref => ref({ Type: "Variable", VariableName: name });
+
 /** 单个变量参数。 */
 export const attach = (value: Ref): PlistValue => ({ Value: value.value, WFSerializationType: "WFTextTokenAttachment" });
 
@@ -76,9 +78,11 @@ function fieldValue(field: Field): PlistValue {
   switch (field.type) {
     case "text": return textToken(...field.value);
     case "number": return textToken(typeof field.value === "number" ? String(field.value) : field.value);
-    case "dict": return dictionary(field.value);
+    // Nested Dictionary items wrap the serialized dictionary once more.
+    case "dict": return { Value: dictionary(field.value), WFSerializationType: "WFDictionaryFieldValue" };
     case "array": return { Value: field.value.map(item => ({ WFItemType: ITEM_TYPE[item.type], WFValue: fieldValue(item) })), WFSerializationType: "WFArrayParameterState" };
-    case "file": return { Value: field.value.value, WFSerializationType: "WFTokenAttachmentParameterState" };
+    // The form field state wraps a text-token attachment, not its raw reference.
+    case "file": return { Value: attach(field.value), WFSerializationType: "WFTokenAttachmentParameterState" };
   }
 }
 
@@ -119,8 +123,8 @@ export class Workflow {
     return ref({ Type: "ActionOutput", OutputUUID: id, OutputName: output });
   }
 
-  /** If 块：`then` 里的动作只在条件成立时执行；有 `otherwise` 时返回整个块的结果（执行到的分支最后一个输出）。 */
-  when(input: Ref, condition: number, then: () => void, otherwise?: () => void): Ref {
+  /** If 块：`then` 里的动作只在条件成立时执行。 */
+  when(input: Ref, condition: number, then: () => void, otherwise?: () => void): void {
     const group = this.uuid();
     const flow = (mode: number, extra: { [key: string]: PlistValue } = {}) => {
       const id = this.uuid();
@@ -128,13 +132,11 @@ export class Workflow {
         WFWorkflowActionIdentifier: "is.workflow.actions.conditional",
         WFWorkflowActionParameters: { GroupingIdentifier: group, WFControlFlowMode: mode, UUID: id, ...extra },
       });
-      return id;
     };
     flow(0, { WFCondition: condition, WFInput: { Type: "Variable", Variable: attach(input) } });
     then();
     if (otherwise) { flow(1); otherwise(); }
-    const end = flow(2);
-    return ref({ Type: "ActionOutput", OutputUUID: end, OutputName: "If Result" });
+    flow(2);
   }
 
   toPlist(options: { glyph: number; color: number }): PlistValue {

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { AssistantChatRequest, CaptureCreate, ClientJoinRequest, GLANCE_LIMITS, GlanceCreate, RequestId } from "@lumio/schema";
 import { toPlist } from "../src/plist.ts";
-import { askShortcut, saveShortcut, CONFIG_PATH, PAIR_SHORTCUT_NAME } from "../src/shortcuts.ts";
+import { askShortcut, saveShortcut, CONFIG_PATH, PAIR_SHORTCUT_NAME, SHORTCUT_REVISION } from "../src/shortcuts.ts";
 import type { Action, Workflow } from "../src/workflow.ts";
 
 /**
@@ -19,10 +19,13 @@ const IDS = {
   turn: "turn_01ARZ3NDEKTSV4RRFFQ69G5FAV",
 };
 
+const screenshot = new File(["synthetic screenshot"], "Screenshot.jpg", { type: "image/jpeg" });
+
 class Exit extends Error {}
 
 function run(workflow: Workflow, options: { ocr?: string; config?: boolean; fail?: string; input?: string } = {}) {
   const outputs = new Map<string, Value>();
+  const variables = new Map<string, Value>();
   const requests: Request[] = [];
   const shown: string[] = [];
   const notifications: string[] = [];
@@ -30,7 +33,12 @@ function run(workflow: Workflow, options: { ocr?: string; config?: boolean; fail
   const env = { hub: "http://hub.test:7420", token: "tok_synthetic" };
 
   const resolve = (ref: Record<string, Value>): Value => {
-    let value = ref.Type === "ActionOutput" ? outputs.get(ref.OutputUUID as string) : ref.Type === "ExtensionInput" ? options.input : undefined;
+    let value: Value;
+    switch (ref.Type) {
+      case "ActionOutput": value = outputs.get(ref.OutputUUID as string); break;
+      case "ExtensionInput": value = options.input; break;
+      case "Variable": value = variables.get(ref.VariableName as string); break;
+    }
     for (const agg of (ref.Aggrandizements as Record<string, string>[] | undefined) ?? []) {
       if (agg.Type === "WFDictionaryValueVariableAggrandizement")
         for (const part of agg.DictionaryKey!.split(".")) value = (value as Record<string, Value> | undefined)?.[part];
@@ -50,13 +58,19 @@ function run(workflow: Workflow, options: { ocr?: string; config?: boolean; fail
     });
     return out;
   };
+  const unwrap = (param: Value, type: string): Value => {
+    const state = param as { WFSerializationType: string; Value: Value };
+    expect(state.WFSerializationType).toBe(type);
+    return state.Value;
+  };
+  const attachValue = (param: Value) => resolve(unwrap(param, "WFTextTokenAttachment") as Record<string, Value>);
   const evalItem = (item: { WFItemType: number; WFValue: Value }): Value => {
     switch (item.WFItemType) {
       case 0: return evalText(item.WFValue);
-      case 1: return evalDict(item.WFValue);
+      case 1: return evalDict(unwrap(item.WFValue, "WFDictionaryFieldValue"));
       case 2: return ((item.WFValue as { Value: { WFItemType: number; WFValue: Value }[] }).Value).map(evalItem);
       case 3: { const text = evalText(item.WFValue); return Number(text); }
-      case 5: return { file: resolve((item.WFValue as { Value: Record<string, Value> }).Value) };
+      case 5: return attachValue(unwrap(item.WFValue, "WFTokenAttachmentParameterState"));
       default: throw new Error(`未知类型 ${item.WFItemType}`);
     }
   };
@@ -64,7 +78,6 @@ function run(workflow: Workflow, options: { ocr?: string; config?: boolean; fail
     const items = (param as { Value: { WFDictionaryFieldValueItems: { WFItemType: number; WFKey: Value; WFValue: Value }[] } }).Value.WFDictionaryFieldValueItems;
     return Object.fromEntries(items.map(item => [evalText(item.WFKey), evalItem(item)]));
   };
-  const attachValue = (param: Value) => resolve((param as { Value: Record<string, Value> }).Value);
 
   const respond = (path: string): Value => {
     if (options.fail === path) return { error: { message: "合成错误" } };
@@ -86,8 +99,6 @@ function run(workflow: Workflow, options: { ocr?: string; config?: boolean; fail
       groups.set(g, [...(groups.get(g) ?? []), i]);
     }
   });
-  let last: Value;
-  const branchResult = new Map<string, Value>();
   const step = (action: Action, i: number): number => {
     const p = action.WFWorkflowActionParameters as Record<string, Value>;
     const id = p.UUID as string;
@@ -105,11 +116,10 @@ function run(workflow: Workflow, options: { ocr?: string; config?: boolean; fail
           if (pass) return i + 1;
           return group.length === 3 ? group[1]! + 1 : group[group.length - 1]!;
         }
-        if (mode === 1) { branchResult.set(p.GroupingIdentifier as string, last); return group[2]!; }
-        out = branchResult.has(p.GroupingIdentifier as string) ? branchResult.get(p.GroupingIdentifier as string) : last;
-        break;
+        if (mode === 1) return group[2]!;
+        return i + 1;
       }
-      case "takescreenshot": case "image.resize": case "image.convert": out = { image: "jpeg" }; break;
+      case "takescreenshot": case "image.resize": case "image.convert": out = screenshot; break;
       case "properties.images": out = p.WFContentItemPropertyName === "Width" ? 944 : 2046; break;
       case "extracttextfromimage": out = options.ocr ?? "合成屏幕文字"; break;
       case "text.match": {
@@ -119,13 +129,20 @@ function run(workflow: Workflow, options: { ocr?: string; config?: boolean; fail
       }
       case "getitemfromlist": { const list = attachValue(p.WFInput) as Value[]; out = p.WFItemSpecifier === "First Item" ? list[0] : list.at(-1); break; }
       case "date": out = "now"; break;
-      case "format.date": out = p.WFDateFormatStyle === "Custom" ? "20261117112000123" : "2026-11-17T11:20:00+08:00"; break;
+      case "format.date": {
+        expect(unwrap(p.WFDate, "WFTextTokenString")).toBeDefined();
+        expect(evalText(p.WFDate)).toBe("now");
+        out = p.WFDateFormatStyle === "Custom" ? "20261117112000123" : "2026-11-17T11:20:00+08:00";
+        break;
+      }
       case "number.random": out = 482913; break;
       case "gettext": out = evalText(p.WFTextActionText); break;
       case "documentpicker.open": out = options.config === false ? undefined : JSON.stringify(env); break;
       case "detect.dictionary": out = JSON.parse(attachValue(p.WFInput) as string); break;
       case "dictatetext": out = "这段是什么意思"; break;
       case "dictionary": out = evalDict(p.WFItems); break;
+      case "setvariable": variables.set(p.WFVariableName as string, attachValue(p.WFInput)); break;
+      case "detect.text": out = str(attachValue(p.WFInput)); break;
       case "ask": out = p.WFInputType === "URL" ? `${env.hub}//` : "abcdefghijklmnopqrstuvwxyz234567"; break;
       case "text.replace": out = evalText(p.WFInput).replace(new RegExp(p.WFReplaceTextFind as string), p.WFReplaceTextReplace as string); break;
       case "setitemname": out = attachValue(p.WFInput); break;
@@ -133,7 +150,7 @@ function run(workflow: Workflow, options: { ocr?: string; config?: boolean; fail
       case "getvalueforkey": out = (attachValue(p.WFInput) as Record<string, Value>)[p.WFDictionaryKey as string]; break;
       case "notification": notifications.push(`${p.WFNotificationActionTitle}: ${evalText(p.WFNotificationActionBody)}`); break;
       case "showresult": shown.push(evalText(p.Text)); break;
-      case "vibrate": break;
+      case "vibrate": case "comment": break;
       case "exit": throw new Exit();
       case "downloadurl": {
         const url = evalText(p.WFURL);
@@ -147,7 +164,6 @@ function run(workflow: Workflow, options: { ocr?: string; config?: boolean; fail
       default: throw new Error(`解释器不认识动作 ${kind}`);
     }
     outputs.set(id, out);
-    if (kind !== "conditional") last = out;
     return i + 1;
   };
   try {
@@ -162,6 +178,7 @@ function checkGlance(request: Request) {
   expect(request.url).toBe("http://hub.test:7420/v2/glances");
   expect(request.type).toBe("Form");
   expect(Object.keys(request.body).sort()).toEqual(["image", "meta"]);
+  expect(request.body.image).toBe(screenshot);
   const meta = GlanceCreate.parse(JSON.parse(request.body.meta as string));
   expect(meta.image).toEqual({ format: "jpeg", width: 944, height: 2046 });
   expect(meta.app.name).toBe("iPhone");
@@ -179,6 +196,20 @@ describe("iPhone 快捷指令", () => {
     expect(capture).toMatchObject({ channel: "share", glance: IDS.glance });
     expect(capture.request_id).not.toBe(meta.request_id);
     expect(notifications).toEqual(["已收藏: 已存入 Lumio"]);
+  });
+
+  test("截图在 multipart 请求里作为文件上传", async () => {
+    const { requests } = run(saveShortcut());
+    const upload = requests[0]!;
+    const meta = checkGlance(upload);
+    const form = new FormData();
+    form.set("meta", upload.body.meta as string);
+    form.set("image", upload.body.image as File);
+    const decoded = await new Response(form).formData();
+    expect(GlanceCreate.parse(JSON.parse(decoded.get("meta") as string))).toEqual(meta);
+    const image = decoded.get("image") as File;
+    expect(image).toBeInstanceOf(File);
+    expect(image).toMatchObject({ name: screenshot.name, type: screenshot.type, size: screenshot.size });
   });
 
   test("屏幕上没有文字时不带识字块", () => {
@@ -241,6 +272,13 @@ describe("iPhone 快捷指令", () => {
     expect(saveShortcut().name).toBe(PAIR_SHORTCUT_NAME);
   });
 
+  test("两条指令都在编辑页展示版本", () => {
+    for (const shortcut of [saveShortcut(), askShortcut()]) {
+      expect(shortcut.actions[0]?.WFWorkflowActionIdentifier).toBe("is.workflow.actions.comment");
+      expect(shortcut.actions[0]?.WFWorkflowActionParameters.WFCommentActionText).toBe(`Lumio iPhone · v${SHORTCUT_REVISION}`);
+    }
+  });
+
   test("生成的文件是确定的 plist", () => {
     const a = toPlist(saveShortcut().toPlist({ glyph: 1, color: 1 }));
     expect(a).toBe(toPlist(saveShortcut().toPlist({ glyph: 1, color: 1 })));
@@ -251,7 +289,7 @@ describe("iPhone 快捷指令", () => {
   test("没有输入时截屏是第一个可见动作，避免截到快捷指令自己的界面", () => {
     for (const w of [saveShortcut(), askShortcut()]) {
       const { executed } = run(w);
-      expect(executed.filter(kind => kind !== "conditional")[0]).toBe("takescreenshot");
+      expect(executed.find(kind => kind !== "conditional" && kind !== "comment")).toBe("takescreenshot");
     }
   });
 });
