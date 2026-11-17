@@ -1,34 +1,69 @@
-import { StateEffect, StateField } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
-import { IMAGE_UPLOAD_MAX_BYTES, type ImageHostingSettings, type ImageUploadResult } from "@lumio/schema";
+import { StateEffect, StateField, type Range } from "@codemirror/state";
+import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemirror/view";
+import { IMAGE_UPLOAD_MAX_BYTES, type ImageHostingSettings } from "@lumio/schema";
 import { errorText } from "./api.ts";
 import { h } from "./dom.ts";
 import { t } from "./i18n.ts";
-import { imageMarkdown, noteImageInsert } from "./utils/markdown-images.ts";
+import type { NoteImageQueue, PendingNoteImage } from "./note-image-queue.ts";
 
 export interface NoteImageUpload {
   settings(): Promise<ImageHostingSettings>;
-  send(file: File, signal: AbortSignal): Promise<ImageUploadResult>;
+  queue: NoteImageQueue;
 }
 
-const mark = StateEffect.define<number | null>();
-const pending = StateField.define<number | null>({
-  create: () => null,
-  update(position, transaction) {
-    for (const effect of transaction.effects) if (effect.is(mark)) return effect.value;
-    return position === null ? null : transaction.changes.mapPos(position, 1);
-  },
-});
+const redraw = StateEffect.define<null>();
+
+class LocalImagePreview extends WidgetType {
+  private readonly state: PendingNoteImage["state"];
+  private readonly error: unknown;
+
+  constructor(private readonly image: PendingNoteImage, private readonly queue: NoteImageQueue) {
+    super();
+    this.state = image.state;
+    this.error = image.error;
+  }
+
+  override eq(other: LocalImagePreview): boolean {
+    return other.image === this.image && other.state === this.state && other.error === this.error;
+  }
+
+  toDOM(): HTMLElement {
+    const label = this.image.file.name || t("Image preview");
+    const canvas = h("canvas", { class: "note-image-preview-canvas", role: "img", "aria-label": label, hidden: true });
+    const alt = h("span", { class: "muted" }, label);
+    // Decode directly into a canvas so the local file needs no URL or CSP exception.
+    if (typeof createImageBitmap === "function") void createImageBitmap(this.image.file).then(bitmap => {
+      try {
+        const context = canvas.getContext("2d");
+        if (!context) return;
+        const scale = Math.min(1, 960 / Math.max(bitmap.width, bitmap.height));
+        canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+        canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+        context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        canvas.hidden = false;
+        alt.hidden = true;
+      } finally { bitmap.close(); }
+    }).catch(() => { /* The filename remains visible if this format cannot be decoded locally. */ });
+    const status = this.state === "failed" ? t("Image upload failed: {0}", errorText(this.error))
+      : this.state === "queued" ? t("Image waiting to upload") : t("Uploading image in the background…");
+    const controls = h("div", { class: "note-image-preview-actions" },
+      h("span", { class: "field-hint", role: "status" }, status),
+      this.state === "failed" && h("button", { type: "button", class: "btn btn-small", onclick: () => this.queue.retry(this.image) }, t("Retry upload")),
+      h("button", { type: "button", class: "btn btn-small", onclick: () => this.queue.remove(this.image) }, t("Remove image")));
+    return h("div", { class: "note-image-preview" }, canvas, alt, controls);
+  }
+
+  override ignoreEvent(): boolean { return true; }
+}
 
 export class NoteImages {
   readonly element: HTMLElement;
   private readonly input = h("input", { type: "file", accept: "image/png,image/jpeg,image/webp,image/gif,image/avif", multiple: true, hidden: true });
   private readonly status = h("span", { class: "field-hint", role: "status" });
   private readonly button = h("button", { type: "button", class: "btn btn-small", disabled: true }, t("Insert image"));
-  private readonly abort = new AbortController();
   private enabled = false;
-  private busy = false;
-  private destination = "";
+  private disposed = false;
+  private disconnect?: () => void;
 
   constructor(private readonly upload: NoteImageUpload, private readonly editor: () => EditorView) {
     this.element = h("div", { class: "note-image-controls" }, this.button, this.input, this.status);
@@ -39,69 +74,70 @@ export class NoteImages {
       this.start(files, this.editor().state.selection.main.head);
     });
     void upload.settings().then(settings => {
-      if (this.abort.signal.aborted) return;
+      if (this.disposed) return;
       this.enabled = !!settings.destination;
-      this.destination = settings.destination?.label ?? "";
       this.button.disabled = !this.enabled;
-      this.status.textContent = this.enabled ? t("Uploads to {0}", this.destination) : t("Configure an upload destination in Image hosting settings.");
+      this.status.textContent = settings.destination ? t("Uploads to {0}", settings.destination.label) : t("Configure an upload destination in Image hosting settings.");
     }).catch(cause => {
-      if (!this.abort.signal.aborted) this.status.textContent = errorText(cause);
+      if (!this.disposed) this.status.textContent = errorText(cause);
+    });
+  }
+
+  connect(): void {
+    const view = this.editor();
+    this.disconnect = this.upload.queue.connect({
+      redraw: () => view.dispatch({ effects: redraw.of(null) }),
+      insert: ({ from, insert, next }) => {
+        const selection = view.state.selection.main;
+        view.dispatch({
+          changes: { from, insert },
+          ...(selection.empty && selection.head === from ? { selection: { anchor: next } } : {}),
+          userEvent: "input.paste",
+        });
+      },
     });
   }
 
   get extension() {
-    return [pending, EditorView.domEventHandlers({
-      paste: (event, view) => this.start([...(event.clipboardData?.files ?? [])], view.state.selection.main.head),
-      drop: (event, view) => this.start([...(event.dataTransfer?.files ?? [])],
-        view.posAtCoords({ x: event.clientX, y: event.clientY }) ?? view.state.selection.main.head),
-    })];
+    const queue = this.upload.queue;
+    const decorations = () => {
+      const ranges: Range<Decoration>[] = queue.pending.map(image =>
+        Decoration.widget({ widget: new LocalImagePreview(image, queue), block: true, side: 1 }).range(image.position));
+      return Decoration.set(ranges, true);
+    };
+    const field = StateField.define<DecorationSet>({
+      create: decorations,
+      update: (value, transaction) => transaction.effects.some(effect => effect.is(redraw)) ? decorations() : value.map(transaction.changes),
+      provide: field => EditorView.decorations.from(field),
+    });
+    return [
+      field,
+      EditorView.updateListener.of(update => { if (update.docChanged) queue.map(update.changes); }),
+      EditorView.domEventHandlers({
+        paste: (event, view) => this.start([...(event.clipboardData?.files ?? [])], view.state.selection.main.head),
+        drop: (event, view) => this.start([...(event.dataTransfer?.files ?? [])],
+          view.posAtCoords({ x: event.clientX, y: event.clientY }) ?? view.state.selection.main.head),
+      }),
+    ];
   }
 
-  dispose(): void { this.abort.abort(); }
+  dispose(): void {
+    this.disposed = true;
+    this.disconnect?.();
+  }
 
   private start(inputs: File[], position: number): boolean {
     const files = inputs.filter(file => file.type.startsWith("image/") || /\.(?:png|jpe?g|gif|webp|avif)$/i.test(file.name));
-    if (!files.length || !this.enabled) return false;
+    if (!files.length || !this.enabled || this.disposed) return false;
     const view = this.editor();
-    if (view.state.readOnly || this.abort.signal.aborted) return false;
-    if (this.busy) {
-      this.status.textContent = t("Wait for the current image upload.");
-      return true;
-    }
+    if (view.state.readOnly) return false;
     if (files.some(file => !file.size || file.size > IMAGE_UPLOAD_MAX_BYTES)) {
       this.status.textContent = t("Each image must be between 1 byte and 10 MiB.");
       return true;
     }
-    this.busy = true;
-    this.button.disabled = true;
-    view.dispatch({ effects: mark.of(position) });
-    void this.run(files, view);
+    this.status.textContent = "";
+    const line = view.state.doc.lineAt(position);
+    this.upload.queue.add(files, position === line.from ? line.from : line.to);
     return true;
-  }
-
-  private async run(files: File[], view: EditorView): Promise<void> {
-    const signal = this.abort.signal;
-    let completed = 0;
-    try {
-      for (const file of files) {
-        this.status.textContent = t("Uploading image {0} of {1} to {2}…", completed + 1, files.length, this.destination);
-        const result = await this.upload.send(file, signal);
-        if (signal.aborted || view.state.readOnly) return;
-        const at = view.state.field(pending);
-        if (at === null) return;
-        const change = noteImageInsert(view.state.doc.lineAt(at), at, view.state.doc.length, imageMarkdown(file.name, result.url));
-        view.dispatch({ changes: { from: change.from, insert: change.insert }, effects: mark.of(change.next), userEvent: "input.paste" });
-        completed++;
-      }
-      this.status.textContent = t("Images inserted.");
-    } catch (cause) {
-      if (!signal.aborted) this.status.textContent = t("Inserted {0} of {1}. {2}", completed, files.length, errorText(cause));
-    } finally {
-      if (!signal.aborted) {
-        view.dispatch({ effects: mark.of(null) });
-        this.button.disabled = !this.enabled;
-        this.busy = false;
-      }
-    }
   }
 }

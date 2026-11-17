@@ -168,6 +168,7 @@ export class NoteEditor {
                             options.change(this.value, this.position, false);
                         } }); return false; } }),
                 ] }) });
+        this.images?.connect();
         this.renderReferences();
     }
     /** Headings down to ###, positioned from CodeMirror's layout so off-screen lines work too. */
