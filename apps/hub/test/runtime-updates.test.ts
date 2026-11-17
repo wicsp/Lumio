@@ -17,7 +17,8 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "lumio-hub-update-")); roots.push(root);
   const store = await HubStore.open(root); stores.push(store); store.runtimeVersion = "0.2.3";
   const actor = store.createActor("server", "runtime"), human = store.createActor("owner", "human"), agent = store.createActor("assistant", "agent");
-  const identity = { actor, label: "server" }, owner = { actor: human, label: "owner" };
+  const identity = store.authenticate(`Bearer ${store.createToken("server", actor.name)}`, now)!;
+  const owner = { actor: human, label: "owner" };
   const registration = RuntimeRegistration.parse({ protocol_version: 2, name: "server", engines: [], tags: [], max_concurrent: 1, features: ["self_update"], version: "0.2.2", platform: "linux-x64", install: "managed" });
   store.registerRuntime(actor.id, registration, now);
   const sync = async (update?: unknown) => RuntimeSync.parse(await (await handleRuntime(new Request("http://synthetic/v1/runtime/sync", { method: "POST", body: JSON.stringify({ running: [], queued: [], outbox: 0, ...(update ? { update } : {}) }) }), "runtime.sync", identity, store, authorize, now)).json());

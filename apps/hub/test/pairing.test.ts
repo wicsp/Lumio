@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ApiError, Job, ClientInvite, ClientJoin, HubSigningKey, RuntimeInvite, RuntimeJoin, RuntimeRegistered, RuntimeRegistration } from "@lumio/schema";
+import { ApiError, Job, ClientInvite, ClientJoin, HubSigningKey, RuntimeInvite, RuntimeJoin, RuntimeInfo, RuntimeRegistered, RuntimeRegistration } from "@lumio/schema";
 import { authorize, PAIRING_OPERATIONS } from "../src/authorize.ts";
 import { readConfig } from "../src/config.ts";
 import { startHub } from "../src/server.ts";
@@ -95,9 +95,37 @@ test("join is atomic and single-use, revokes every old runtime token, client tok
   const history = Job.parse(await (await request("/v2/execution/jobs", human, { runtime: "server", run: { kind: "command", argv: ["/bin/echo", "synthetic"] } })).json());
   const fresh = await invite();
   expect((await request("/v2/execution/runtimes/server", human, undefined, "DELETE")).status).toBe(204);
-  expect(hub.store.authenticate(`Bearer ${joined.token}`)).toBeNull(); expect(hub.store.runtimes(new Date(now))).toHaveLength(1);
+  expect(hub.store.authenticate(`Bearer ${joined.token}`)).toBeNull();
+  expect(hub.store.registeredRuntimes(new Date(now))).toHaveLength(1);
   expect((await request(`/v2/execution/jobs/${history.spec.id}`, human)).status).toBe(200);
   expect((await request("/v2/setup/runtime/join", undefined, { code: fresh.code })).status).toBe(401);
+});
+
+
+test("removing a runtime hides it from device and delegation lists across Hub restarts", async () => {
+  const list = async () => RuntimeInfo.array().parse(await (await request("/v2/execution/runtimes", human)).json());
+  const targets = () => request("/v2/execution/targets", human);
+  const registration = RuntimeRegistration.parse({
+    protocol_version: 2, name: "server", engines: [{ name: "pi", version: "synthetic", sandbox: "none" }], tags: [], max_concurrent: 1,
+  });
+  const keep = hub.store.createActor("keep", "runtime");
+  const keepToken = hub.store.createToken("keep-runtime", keep.name);
+  expect((await request("/v1/runtime/register", runtime, registration)).status).toBe(200);
+  expect((await request("/v1/runtime/register", keepToken, { ...registration, name: keep.name })).status).toBe(200);
+  now += 180_001;
+  expect((await list()).map(row => [row.registration.name, row.online])).toEqual([["keep", false], ["server", false]]);
+  expect((await request("/v2/execution/runtimes/server", human, undefined, "DELETE")).status).toBe(204);
+  await hub.stop(); hub = await boot();
+  expect((await list()).map(row => row.registration.name)).toEqual(["keep"]);
+  const available = await targets();
+  expect(available.status).toBe(200);
+  expect(await available.json()).toMatchObject([{ target: "pi@keep" }]);
+  expect((await request("/v1/runtime/register", runtime, registration)).status).toBe(401);
+
+  const pairing = await invite();
+  const next = RuntimeJoin.parse(await (await request("/v2/setup/runtime/join", undefined, { code: pairing.code })).json());
+  expect((await request("/v1/runtime/register", next.token, registration)).status).toBe(200);
+  expect((await list()).find(row => row.registration.name === "server")?.online).toBe(true);
 });
 
 test("global failure budget is shared across both joins, blocks even valid codes for one minute, and invites survive Hub restart", async () => {
