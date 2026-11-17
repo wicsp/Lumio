@@ -34,7 +34,8 @@ class ElementStub extends EventTarget {
   querySelector(): undefined { return undefined; }
   focus(): void {}
   remove(): void {}
-  isConnected = true;
+  // Not connected: the shared toast host must not stay attached to this file's stub body for later test files.
+  isConnected = false;
   click(): void { this.dispatchEvent(new Event("click")); }
   find(match: (node: ElementStub) => boolean): ElementStub | undefined {
     if (match(this)) return this;
