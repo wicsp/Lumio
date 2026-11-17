@@ -32,12 +32,13 @@
 - **普通权限申请**（ADR 0049，H1-9）：执行器从 agent 汇报末尾的独立 `<lumio-permission>` 行提取权限，按等待人决定交回并保留理由。
 - **不做**：跨设备调用工具、上下文管理、模型路由；留给以后自研的 agent（作为执行器里的一种引擎接入）。
 
-## Job 实时活动与同轮介入（ADR 0069）
+## Job 实时活动与同轮介入（ADR 0069、0070）
 
 - Job 2 通过登记头协商活动扩展。Runtime 用独立通道提交少量脱敏事件，以 Job、lease 和连续序号校验、补读和去重。活动与最终结果独立，活动流延迟不会重启任务或改变业务终态。
 - 心跳说明执行器连通，活动只呈现实际观察到的阶段和工具。普通活动在 Job 完成后保留 30 天，查询标明过期前缀。
 - Codex 与 Claude Code 的非交互 Job 可上报运行事件。显式互动仅在具备已验证引擎、凭据与 OS 隔离的 Runtime 提供。交互模式允许 Web 对一个正在等待的请求进行答复、批准或拒绝，Codex 支持同轮纠偏。调用与回执绑定原执行进程与轮次。
-- Runtime 管理员启用 macOS 交互执行时，用 `LUMIO_INTERACTIVE_JOB_ROOTS` 指定以冒号分隔的绝对项目根，并用 `LUMIO_JOB_CODEX_API_KEY` 或 `LUMIO_JOB_CLAUDE_API_KEY` 注入对应提供商 API 凭据。已验证的是 Codex 0.166.0 和 Claude Code 2.1.322。项目目录须在登记的根内。交互轮使用受限沙箱及独立的会话目录，阶段为全权限时须使用原非交互模式。
+- Runtime 管理员用 `LUMIO_INTERACTIVE_JOB_ROOTS` 指定允许同轮交互的绝对项目根。已验证版本是 macOS 上的 Codex 0.166.0 和 Claude Code 2.1.322。交互轮使用受限沙箱及独立的会话目录，阶段为全权限时须使用原非交互模式。
+- 显式派出 Codex 交互轮次的人可以复用自己在同一 Runtime 上已登录的 AI 连接。唯一可用的连接自动选用，多连接时由人选择。Hub 保存该轮的授权快照，Runtime 通过协商后的现有同步接口取到快照，沿用原生通道管理的登录和刷新。注销、重新登录、切换连接或认证代次后，旧轮不得交付新决定或恢复会话。无可用连接时仍支持管理员已明确配置的 `LUMIO_JOB_CODEX_API_KEY`。Claude Agent SDK 路径沿用 `LUMIO_JOB_CLAUDE_API_KEY`。
 - `lumio job watch <id>` 使用同一状态与事件接口。CLI 派出时可用 `lumio task continue <id> --interactive` 或 `lumio job submit --interactive` 请求交互，不能由定时例行任务启用。
 
 ## Runtime 版本与自动更新（ADR 0063，U1-0）

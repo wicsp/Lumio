@@ -16,12 +16,12 @@ export async function runJobs(args: string[], log: (line: string) => void) {
   const split = args.indexOf("--");
   const { values, positionals } = parseArgs({ args: split < 0 ? args : args.slice(0, split), allowPositionals: true, strict: true, options: {
     task: { type: "string" }, routine: { type: "string" }, limit: { type: "string" }, runtime: { type: "string" }, workdir: { type: "string" }, timeout: { type: "string" }, gpus: { type: "string" }, status: { type: "string" }, json: { type: "boolean" },
-    interactive: { type: "boolean" }, agent: { type: "string" }, model: { type: "string" }, session: { type: "string" }, resume: { type: "boolean" },
+    interactive: { type: "boolean" }, connection: { type: "string" }, agent: { type: "string" }, model: { type: "string" }, session: { type: "string" }, resume: { type: "boolean" },
     output: { type: "string" }, "include-private": { type: "boolean" },
   } });
   const [action, id] = positionals;
   const keys = Object.keys(values);
-  const agentKeys = ["agent", "model", "session", "resume", "interactive"];
+  const agentKeys = ["agent", "model", "session", "resume", "interactive", "connection"];
   if (action === "artifacts" || action === "download") {
     if (positionals.length !== 2 || split >= 0 || (action === "download" && !values.output)
       || keys.some((key) => !["json", "include-private", ...(action === "download" ? ["output"] : [])].includes(key))) throw new Error(msg("jobs.usage_lumio_job_artifacts_job_id_json_lumio_job_download_file_id_out"));
@@ -51,6 +51,7 @@ export async function runJobs(args: string[], log: (line: string) => void) {
   if (action === "submit" && values.agent !== undefined) {
     // agent 类型：要求是唯一的位置参数，不用 --。
     if (positionals.length !== 2 || split >= 0 || !positionals[1] || !values.runtime || (values.resume && !values.session)
+      || (values.connection !== undefined && (!values.interactive || values.agent !== "codex"))
       || keys.some((k) => !["runtime", "workdir", "timeout", "gpus", "json", ...agentKeys].includes(k))) throw new Error(usage());
   } else if (action === "submit") {
     if (positionals.length !== 1 || split < 0 || !args[split + 1] || !values.runtime || keys.some((k) => !["runtime", "workdir", "timeout", "gpus", "json"].includes(k))) throw new Error(usage());
@@ -81,6 +82,7 @@ export async function runJobs(args: string[], log: (line: string) => void) {
         ...(values.interactive ? { interaction: "interactive" } : {}), ...(values.model ? { model: values.model } : {}), ...(values.session ? { session: { id: values.session, resume: Boolean(values.resume) } } : {}) })
       : { kind: "command" as const, argv: args.slice(split + 1) };
     result = await client.submitJob({ runtime: values.runtime!, run,
+      ...(values.connection !== undefined ? { connection: values.connection } : {}),
       ...(values.workdir !== undefined ? { workdir: values.workdir } : {}), ...(timeout !== undefined ? { timeout_seconds: timeout } : {}), ...(gpus ? { gpus } : {}) });
   } else if (action === "list") {
     const status = values.status === undefined ? undefined : JobStatus.parse(values.status);

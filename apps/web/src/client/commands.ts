@@ -63,9 +63,9 @@ export function commentCommand(task: string, body: string, requestId = newReques
 }
 
 /** 显式委派/继续：目标是选中的 engine@device，并锁定看到的版本。 */
-export function dispatchCommand(task: Pick<WorkTask, "id" | "revision">, target: string, requestId = newRequestId(), interactive = false): WorkCommandRequest {
+export function dispatchCommand(task: Pick<WorkTask, "id" | "revision">, target: string, requestId = newRequestId(), interactive = false, connection?: string): WorkCommandRequest {
   return { request_id: requestId, operation: { op: "work.task.dispatch", args: {
-    task: task.id, to: target, expected_revision: task.revision, ...(interactive ? { interaction: "interactive" } : {}),
+    task: task.id, to: target, expected_revision: task.revision, ...(interactive ? { interaction: "interactive", ...(connection ? { connection } : {}) } : {}),
   } } };
 }
 

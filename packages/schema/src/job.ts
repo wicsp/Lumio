@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AGENTS, AgentTarget, Timestamp, RuntimeName, idOf } from "./common.ts";
+import { NativeAccountBinding } from "./ai.ts";
 import { JobAccess } from "./access.ts";
 import { PlanHook, StagePermissions } from "./plan.ts";
 import { LumioVersion, RuntimeInstall, RuntimePlatform, RuntimeUpdateDirective, RuntimeUpdateReport, RuntimeUpdateView } from "./runtime-update.ts";
@@ -13,6 +14,14 @@ import { LumioVersion, RuntimeInstall, RuntimePlatform, RuntimeUpdateDirective, 
  * - 协议是严格对象：未知字段拒绝。
  */
 export const JOB_PROTOCOL_VERSION = 2;
+export const JOB_ACCOUNT_FEATURE = "job-codex-account";
+
+/** Opaque authorization for the assigned Runtime; public Job views never contain it. */
+export const JobAccount = NativeAccountBinding.extend({
+  job: idOf("job"), connection: idOf("aic"), owner: idOf("act"),
+  revision: z.number().int().positive(),
+});
+export type JobAccount = z.infer<typeof JobAccount>;
 
 export { RuntimeName } from "./common.ts";
 
@@ -69,6 +78,12 @@ export const JobSpec = z.strictObject({
   gpus: z.array(z.number().int().nonnegative()).optional(),
   timeout_seconds: z.number().int().positive(),
   created: Timestamp,
+});
+
+/** Human job submission. Only the Hub builds a verified Runtime account binding. */
+export const SubmitJob = JobSpec.omit({ protocol_version: true, id: true, source: true, lease: true, created: true }).extend({
+  runtime: RuntimeName, run: JobRun, connection: JobAccount.shape.connection.optional(),
+  workdir: JobSpec.shape.workdir.default("~"), timeout_seconds: JobSpec.shape.timeout_seconds.default(7200),
 });
 
 export const JOB_STATUSES = ["queued", "assigned", "running", "done", "waiting_for_human", "failed", "unknown", "cancelled"] as const;
@@ -209,6 +224,7 @@ export const RuntimeSync = z.strictObject({
     "本次新指派的各轮的访问凭据（ADR 0029 第 5 节）。只在执行器的同步请求带有 X-Lumio-Features: job-access 头时出现，"
     + "这样旧执行器不会遇到它不认识的字段。执行器把它与 Job 一起存进本地私有队列，只交给该轮的 agent 进程",
   ),
+  accounts: z.array(JobAccount).optional(),
   update: RuntimeUpdateDirective.optional().describe(
     "期望版本（ADR 0063）。只发给登记了 self_update 的执行器；策略为 manual 时缺失。"
     + "执行器收到过它，才在之后的心跳里带 update，避免旧 Hub 遇到不认识的字段",

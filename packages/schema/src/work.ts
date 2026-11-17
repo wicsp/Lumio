@@ -299,6 +299,7 @@ export const WorkTaskDispatch = z.strictObject({
   args: z.strictObject({
     task: idOf("task"),
     interaction: z.literal("interactive").optional(),
+    connection: idOf("aic").optional(),
     to: AgentTarget.optional().describe("委派给谁；缺省依次用交接计划步骤、最近一轮的 agent、项目默认执行者，都没有时须指定（ADR 0044）"),
     expected_revision: Revision.optional().describe("给出时与当前 revision 不符则 CONFLICT，确保派出的是看到的版本"),
     comment: z.string().min(1).optional().describe(

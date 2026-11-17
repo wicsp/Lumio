@@ -801,6 +801,13 @@ export class NativeAssistant {
       throw problem("native.connection_busy", "CONFLICT");
     this.authChanges.add(connection.id);
     this.usage.suspendCodex(connection.id);
+    if (input.action === "logout" || input.action === "login") {
+      const runtime = this.hub.runtimes(new Date()).find(device => device.registration.name === connection.host);
+      this.hub.db.transaction(() => {
+        this.hub.jobActivity.revokeAccounts(connection.id);
+        if (runtime) this.usage.observeCodex(connection, runtime.actor);
+      })();
+    }
     try {
       this.ai.putReceipt(connection.owner, key, input.action, true);
       const view = await this.authCommand(connection, input.action);

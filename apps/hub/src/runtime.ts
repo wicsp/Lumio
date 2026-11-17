@@ -1,4 +1,4 @@
-import { JOB_ACTIVITY_FEATURE, JobResult, RuntimeAck, RuntimeHeartbeat, RuntimeInfo, RuntimeRegistration, RuntimeSync, type Job } from "@lumio/schema";
+import { JOB_ACCOUNT_FEATURE, JOB_ACTIVITY_FEATURE, JobResult, RuntimeAck, RuntimeHeartbeat, RuntimeInfo, RuntimeRegistration, RuntimeSync, type Job } from "@lumio/schema";
 import { Jobs, type RoutineHooks } from "./jobs.ts";
 import type { authorize } from "./authorize.ts";
 import { HubError } from "./errors.ts";
@@ -13,16 +13,17 @@ export async function handleRuntime(request: Request, operation: "runtime.regist
     if (decision.result !== "allow") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, {
       reason: decision.result === "deny" ? decision.reason : "Approval required",
     });
+    const features = request.headers.get("X-Lumio-Features")?.split(",").map(value => value.trim()) ?? [];
     if (operation === "runtimes") return Response.json(RuntimeInfo.array().parse(store.runtimes(now)));
     let body: unknown;
     try { body = await request.json(); } catch { throw new HubError("INVALID", { key: "runtime.request_body_must_be_json", args: [] }); }
     if (operation === "runtime.register") {
       const registration = RuntimeRegistration.safeParse(body);
       if (!registration.success) throw new HubError("INVALID", { key: "runtime.invalid_runtime_registration", args: [] });
-      const supported = request.headers.get("X-Lumio-Features")?.split(",").some(feature => feature.trim() === JOB_ACTIVITY_FEATURE);
+      const supported = features.filter(feature => feature === JOB_ACTIVITY_FEATURE || feature === JOB_ACCOUNT_FEATURE);
       const info = store.registerRuntime(identity.actor.id, registration.data, now);
       store.jobActivity.forget(identity.actor.id);
-      return Response.json(info, supported ? { headers: { "X-Lumio-Features": JOB_ACTIVITY_FEATURE } } : undefined);
+      return Response.json(info, supported.length ? { headers: { "X-Lumio-Features": supported.join(", ") } } : undefined);
     }
     const jobs = new Jobs(store, routines);
     if (operation === "runtime.ack") {
@@ -55,7 +56,16 @@ export async function handleRuntime(request: Request, operation: "runtime.regist
         const update = store.runtimeUpdates.directive(runtime);
         if (update) sync.update = update;
       }
-      if (request.headers.get("X-Lumio-Features")?.split(",").some(value => value.trim() === "job-access")) {
+      if (features.includes(JOB_ACCOUNT_FEATURE)) {
+        const accounts = sync.jobs.flatMap(spec => {
+          const binding = store.jobActivity.account(spec.id);
+          return binding ? [binding] : [];
+        });
+        if (accounts.length) sync.accounts = accounts;
+      } else {
+        sync.jobs = sync.jobs.filter(spec => !store.jobActivity.account(spec.id));
+      }
+      if (features.includes("job-access")) {
         sync.access = sync.jobs.flatMap(spec => { const access = store.issueJobAccess(spec, now); return access ? [access] : []; });
       }
       return Response.json(RuntimeSync.parse(sync));

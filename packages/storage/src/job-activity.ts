@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import {
-  JobAction, JobActionReceipt, JobActivityRecord, JobControlTarget, JobEngineActivityCapability, JobHumanRequest,
+  JobAccount, JobAction, JobActionReceipt, JobActivityRecord, JobControlTarget, JobEngineActivityCapability, JobHumanRequest,
   type JobActivitySync,
 } from "@lumio/schema";
 
@@ -14,12 +14,29 @@ type ActionRow = { action: JobAction; receipt: JobActionReceipt; owner: string; 
 export class SqliteJobActivity {
   constructor(private readonly db: Database) {
     db.exec(`
+      CREATE TABLE IF NOT EXISTS job_accounts(job TEXT PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+        connection TEXT NOT NULL, revoked INTEGER NOT NULL DEFAULT 0, record TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS job_accounts_connections ON job_accounts(connection,revoked);
       CREATE TABLE IF NOT EXISTS job_activity_engines(runtime TEXT PRIMARY KEY, record TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS job_activity_state(job TEXT PRIMARY KEY, sequence INTEGER NOT NULL, first INTEGER, target TEXT, pending TEXT);
       CREATE TABLE IF NOT EXISTS job_activity_events(job TEXT NOT NULL, sequence INTEGER NOT NULL, record TEXT NOT NULL, PRIMARY KEY(job,sequence));
       CREATE TABLE IF NOT EXISTS job_activity_actions(job TEXT NOT NULL, id TEXT NOT NULL, owner TEXT NOT NULL, action TEXT NOT NULL,
         receipt TEXT NOT NULL, expires TEXT NOT NULL, PRIMARY KEY(job,id));
     `);
+  }
+  account(job: string): JobAccount | undefined {
+    const row = this.db.query<{ record: string }, [string]>("SELECT record FROM job_accounts WHERE job=?").get(job);
+    return row ? JobAccount.parse(JSON.parse(row.record)) : undefined;
+  }
+  bindAccount(binding: JobAccount): void {
+    this.db.query("INSERT INTO job_accounts(job,connection,record) VALUES (?,?,?)")
+      .run(binding.job, binding.connection, JSON.stringify(JobAccount.parse(binding)));
+  }
+  revokeAccounts(connection: string): void {
+    this.db.query("UPDATE job_accounts SET revoked=1 WHERE connection=? AND revoked=0").run(connection);
+  }
+  accountRevoked(job: string): boolean {
+    return !!this.db.query<{ revoked: number }, [string]>("SELECT revoked FROM job_accounts WHERE job=?").get(job)?.revoked;
   }
   engines(runtime: string) {
     const row = this.db.query<{ record: string }, [string]>("SELECT record FROM job_activity_engines WHERE runtime=?").get(runtime);

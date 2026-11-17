@@ -3,11 +3,12 @@ import type { Client } from "./api.ts";
 import { clear, h } from "./dom.ts";
 import { t } from "./i18n.ts";
 
-export function jobInteractionStatus(engine: string, online: boolean, capability?: JobEngineActivityCapability) {
+export function jobInteractionStatus(engine: string, online: boolean, capability?: JobEngineActivityCapability, codexConnections = 0) {
   if (!online) return "Offline";
   if (engine === "pi") return "Live questions and approvals unavailable for this engine";
   if (!capability) return "Runtime has not reported interaction support";
-  if (capability.sandbox === "os" && capability.approvals && capability.questions) return "Live questions and approvals enabled";
+  if (capability.sandbox === "os" && ((capability.approvals && capability.questions) || (capability.account_reuse && codexConnections))) return "Live questions and approvals enabled";
+  if (capability.account_reuse) return "Sign in to Codex in Connections to enable live interaction";
   return "Live questions and approvals are not enabled on this runtime";
 }
 
@@ -36,7 +37,8 @@ export class JobInteractionSettings {
         const reported = capabilities.find(value => value.runtime === runtime.actor);
         return runtime.registration.engines.map(engine => {
           const cap = reported?.engines.find(value => value.engine === engine.name && value.version === engine.version);
-          return this.engineRow(runtime, engine.name, runtime.online && (reported?.online ?? true), cap);
+          return this.engineRow(runtime, engine.name, runtime.online && (reported?.online ?? true), cap,
+            cap?.account_reuse ? reported?.codex_connections?.map(connection => connection.name) ?? [] : []);
         });
       });
       clear(this.rows, ...(rows.length ? rows : [h("p", { class: "set-empty" }, t("No registered runtime engines"))]));
@@ -45,10 +47,12 @@ export class JobInteractionSettings {
     } finally { this.refresh.disabled = false; }
   }
 
-  private engineRow(runtime: RuntimeInfo, engine: string, online: boolean, cap?: JobEngineActivityCapability): HTMLElement {
+  private engineRow(runtime: RuntimeInfo, engine: string, online: boolean, cap: JobEngineActivityCapability | undefined, connections: string[]): HTMLElement {
     return h("div", { class: "set-row" },
       h("span", { class: "set-label" }, `${engine} @ ${runtime.registration.name}`, online && cap?.progress &&
-        h("span", { class: "set-sub" }, t("Live task progress available"))),
-      h("span", { class: "set-value muted" }, t(jobInteractionStatus(engine, online, cap))));
+        h("span", { class: "set-sub" }, t("Live task progress available")), online && (connections.length > 0
+        ? h("span", { class: "set-sub" }, t("Existing Codex connections: {0}", connections.join(", ")))
+        : cap?.approvals && cap.questions && h("span", { class: "set-sub" }, t("Uses the runtime’s API key")))),
+      h("span", { class: "set-value muted" }, t(jobInteractionStatus(engine, online, cap, connections.length))));
   }
 }

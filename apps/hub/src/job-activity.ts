@@ -3,6 +3,7 @@ import {
   JOB_ACTIVITY_MAX_BODY, JobAction, JobActivityAck, JobActivityCapabilities, JobActivityPage, JobActivityQuery, JobActivitySync, JobAttention, JobLiveView,
   type AgentRun, type Job, type JobActionReceipt, type JobControlTarget, type JobHumanRequest,
 } from "@lumio/schema";
+import { jobAccountCurrent, jobCodexConnections } from "./job-accounts.ts";
 import type { HubStore, Identity } from "./store.ts";
 import { HubError } from "./errors.ts";
 import type { Notifications } from "./notifications.ts";
@@ -47,13 +48,13 @@ function matchesAnswers(prompt: Extract<JobHumanRequest, { kind: "question" }>, 
   });
 }
 
-export function checkJobInteraction(store: HubStore, runtime: string, run: AgentRun, now: Date): boolean {
+export function checkJobInteraction(store: HubStore, runtime: string, run: AgentRun, now: Date, account = false): boolean {
   if (!run.interaction) return true;
   const device = store.runtimes(now).find(value => value.actor === runtime);
   const engine = device?.registration.engines.find(value => value.name === run.engine);
   const cap = store.jobActivity.engines(runtime).find(value => value.engine === run.engine && value.version === engine?.version);
-  return Boolean(device?.online && cap?.approvals && cap.questions
-    && run.permissions?.access !== "full" && cap.sandbox === "os");
+  return Boolean(device?.online && (account ? cap?.account_reuse : cap?.approvals && cap.questions)
+    && run.permissions?.access !== "full" && cap?.sandbox === "os");
 }
 
 export class JobActivity {
@@ -64,14 +65,20 @@ export class JobActivity {
     if (!job) throw issue("NOT_FOUND");
     return job;
   }
-  private allowed(job: Job) { return isLive(job) && !this.store.executionStore.cancelRequested(job.spec.id); }
+  private allowed(job: Job, now: Date) {
+    if (!isLive(job) || this.store.executionStore.cancelRequested(job.spec.id)) return false;
+    const binding = this.store.jobActivity.account(job.spec.id);
+    if (!binding) return true;
+    const runtime = this.store.runtimes(now).find(device => device.actor === job.spec.runtime);
+    return !!runtime && jobAccountCurrent(this.store, binding, runtime);
+  }
   private connected(job: Job, now: Date) {
     const last = job.last_seen ?? job.assigned;
     return Boolean(last && now.getTime() - Date.parse(last) <= 3 * MINUTE
       && this.store.runtimes(now).find(value => value.actor === job.spec.runtime)?.online);
   }
   private settle(job: Job, now: Date) {
-    const active = this.allowed(job);
+    const active = this.allowed(job, now);
     for (const row of this.store.jobActivity.actions(job.spec.id)) {
       if (row.receipt.state !== "queued" && row.receipt.state !== "delivered") continue;
       if (active && Date.parse(row.expires) > now.getTime()) continue;
@@ -89,12 +96,12 @@ export class JobActivity {
   }
   private pending(job: Job, now: Date) {
     const state = this.store.jobActivity.state(job.spec.id);
-    return this.allowed(job) && this.connected(job, now) && state.pending && Date.parse(state.pending.expires) > now.getTime()
+    return this.allowed(job, now) && this.connected(job, now) && state.pending && Date.parse(state.pending.expires) > now.getTime()
       ? state.pending : null;
   }
-  live(job: Job, now: Date) {
+  live(job: Job, now: Date, viewer?: string) {
     const id = job.spec.id, store = this.store.jobActivity, state = store.state(id);
-    const events = store.events(id), active = this.allowed(job);
+    const events = store.events(id), active = this.allowed(job, now);
     const activeTools = new Map<string, Extract<import("@lumio/schema").JobActivityEvent, { type: "tool_started" }>["tool"]>();
     let phase: JobLiveView["phase"] = null, started = job.result?.started ?? null;
     for (const { event } of events) {
@@ -105,35 +112,42 @@ export class JobActivity {
       if (event.type === "tool_started") activeTools.set(event.tool.id, event.tool);
       if (event.type === "tool_finished") activeTools.delete(event.tool.id);
     }
+    const binding = store.account(id);
+    const controlsVisible = !viewer || !binding || binding.owner === viewer;
     const run = job.spec.run;
     const cap = run.kind === "agent" ? store.engines(job.spec.runtime).find(value => value.engine === run.engine) : undefined;
     this.settle(job, now);
     return JobLiveView.parse({
       job: id, status: job.status, created: job.spec.created, assigned: job.assigned ?? null, started,
       last_heartbeat: job.last_seen ?? null, last_activity: events.at(-1)?.event.at ?? null,
-      connected: isLive(job) ? this.connected(job, now) : null, capability: cap ?? null, phase,
+      connected: isLive(job) ? this.connected(job, now) : null,
+      capability: cap ? (cap.account_reuse && binding ? { ...cap, approvals: true, questions: true, steer: true } : cap) : null,
+      phase,
       sequence: state.sequence, first_available: state.first,
-      stop_requested: isLive(job) && this.store.executionStore.cancelRequested(id),
+      stop_requested: isLive(job) && !active,
       active_tools: active ? Array.from(activeTools.values()).slice(-32) : [],
-      recent: events.slice(-8), target: active && this.connected(job, now) ? state.target : null,
-      pending: this.pending(job, now), receipts: store.actions(id, 12).map(value => value.receipt),
+      recent: events.slice(-8), target: controlsVisible && active && this.connected(job, now) ? state.target : null,
+      pending: controlsVisible ? this.pending(job, now) : null, receipts: controlsVisible ? store.actions(id, 12).map(value => value.receipt) : [],
     });
   }
   async human(request: Request, identity: Identity, id: string | undefined, kind: "live" | "events" | "actions" | "attention" | "capabilities", now: Date) {
     if (identity.actor.role !== "human") throw issue("FORBIDDEN");
-    if (kind === "capabilities") return Response.json(JobActivityCapabilities.parse(this.store.runtimes(now).map(runtime => ({
-      runtime: runtime.actor, name: runtime.registration.name, online: runtime.online, engines: this.store.jobActivity.engines(runtime.actor),
-    }))));
+    if (kind === "capabilities") return Response.json(JobActivityCapabilities.parse(this.store.runtimes(now).map(runtime => {
+      const codex_connections = jobCodexConnections(this.store, runtime, identity.actor.id);
+      return { runtime: runtime.actor, name: runtime.registration.name, online: runtime.online, engines: this.store.jobActivity.engines(runtime.actor),
+        ...(codex_connections ? { codex_connections } : {}) };
+    })));
     if (kind === "attention") {
       const items = this.store.jobActivity.pendingJobs().flatMap(id => {
         const job = this.store.executionStore.get(id);
-        const pending = job && this.pending(job, now);
+        const binding = this.store.jobActivity.account(id);
+        const pending = job && (!binding || binding.owner === identity.actor.id) && this.pending(job, now);
         return job && pending ? [{ job: id, task: job.spec.source?.task ?? null, kind: pending.kind, expires: pending.expires }] : [];
       });
       return Response.json(JobAttention.parse(items));
     }
     const job = this.job(id!);
-    if (kind === "live") return Response.json(this.live(job, now));
+    if (kind === "live") return Response.json(this.live(job, now, identity.actor.id));
     if (kind === "events") {
       const params = new URL(request.url).searchParams;
       const number = (name: string) => {
@@ -162,8 +176,10 @@ export class JobActivity {
         this.settle(current, now);
         return Response.json(store.action(current.spec.id, action.request_id)!.receipt);
       }
+      const binding = store.account(current.spec.id);
+      if (binding && binding.owner !== identity.actor.id) throw issue("FORBIDDEN");
       const run = current.spec.run, state = store.state(current.spec.id);
-      if (run.kind !== "agent" || !run.interaction || !this.allowed(current) || !this.connected(current, now)
+      if (run.kind !== "agent" || !run.interaction || !this.allowed(current, now) || !this.connected(current, now)
         || !sameTarget(state.target, action.target)) throw issue("CONFLICT");
       this.settle(current, now);
       const rows = store.actions(current.spec.id);
@@ -176,7 +192,7 @@ export class JobActivity {
         if (action.action === "approve" && (pending.kind !== "approval" || !pending.can_approve)) throw issue("INVALID");
         if (action.action === "answer" && (pending.kind !== "question" || !matchesAnswers(pending, action))) throw issue("INVALID");
         expires = pending.expires;
-      } else if (state.pending || !store.engines(current.spec.runtime).some(value => value.engine === run.engine && value.steer)) throw issue("CONFLICT");
+      } else if (state.pending || !store.engines(current.spec.runtime).some(value => value.engine === run.engine && (value.steer || !!binding && value.account_reuse))) throw issue("CONFLICT");
       const receipt = { request_id: action.request_id, state: "queued", at: now.toISOString() } as const;
       store.addAction(current.spec.id, { action, receipt, expires, owner: identity.actor.id });
       this.store.audit(identity, JSON.stringify({ op: "job.activity.action", job: current.spec.id, turn: action.target.turn, action: action.action,
@@ -193,7 +209,8 @@ export class JobActivity {
     if (!runtime) throw issue("FORBIDDEN");
     if (input.type === "register") {
       if (new Set(input.engines.map(value => value.engine)).size !== input.engines.length
-        || input.engines.some(value => !runtime.registration.engines.some(engine => engine.name === value.engine && engine.version === value.version))) {
+        || input.engines.some(value => !runtime.registration.engines.some(engine => engine.name === value.engine && engine.version === value.version)
+          || (value.account_reuse && (value.engine !== "codex" || value.sandbox !== "os" || input.platform !== "darwin")))) {
         throw issue("INVALID");
       }
       store.register(actor, input);
@@ -205,9 +222,13 @@ export class JobActivity {
       const afterFinish = job.result && now.getTime() - Date.parse(job.result.finished);
       if (afterFinish !== undefined && afterFinish > DAY) throw issue("CONFLICT");
       const state = store.state(input.job), original = state.sequence;
-      const cancel = !this.allowed(job);
+      const cancel = !this.allowed(job, now);
       const ack = (acknowledged: number, conflict: boolean, actions: JobAction[] = [], receipts: JobActionReceipt[] = []) =>
         Response.json(JobActivityAck.parse({ type: "job", acknowledged, conflict, cancel, actions, receipts }), { status: conflict ? 409 : 200 });
+      if (input.authorization_check) {
+        if (input.events.length || input.receipts.length || input.target !== undefined || input.pending !== undefined) throw issue("INVALID");
+        return ack(original, false);
+      }
       for (const record of input.events) {
         if (record.sequence <= original) {
           if (store.event(input.job, record.sequence) !== JSON.stringify(record)) return ack(original, true);

@@ -6,9 +6,11 @@ import { query, type PermissionResult } from "@anthropic-ai/claude-agent-sdk/cor
 import { JobHumanRequest, SessionId, type AgentRun, type JobControlTarget } from "@lumio/schema";
 import { acquireStateLease } from "@lumio/storage";
 import { isolatedEnvironment, seatbelt } from "./native/isolation.ts";
+import type { CodexJobCredential } from "./native/connection-auth.ts";
 import { NativeRpc, type Wire } from "./native/rpc.ts";
 import { WorkerJobControl } from "./job-control.ts";
 import { contains, type JobEngineConfig } from "./job-engine-config.ts";
+import { text as msg } from "./messages.ts";
 import { codexGitOptions } from "./stage.ts";
 
 type Start = {
@@ -20,10 +22,12 @@ type Start = {
   env: NodeJS.ProcessEnv;
   gitPaths: string[];
   instructions?: string;
+  accountKey?: string;
+  credential?(rejected?: string): Promise<CodexJobCredential>;
   lastMessageFile?: string;
   redact(value: string): string;
 };
-type EngineResult = { exit_code?: number; unknown?: boolean; interrupted?: boolean; session?: string; report?: string };
+type EngineResult = { exit_code?: number; error?: string; unknown?: boolean; interrupted?: boolean; session?: string; report?: string };
 
 const ipcUUID = () => randomUUID();
 type Question = Extract<JobHumanRequest, { kind: "question" }>["questions"][number];
@@ -117,7 +121,13 @@ async function runCodex({ start, root, profile, control }: Context): Promise<Eng
   const waiting = new Map<string | number, AbortController>();
   const changes = new Map<string, string[]>();
   let finish: (result: EngineResult) => void = () => {};
-  let active = false;
+  let active = false, authFailed = false, accessHash: string | undefined;
+  const credential = async (rejected?: string) => {
+    if (!start.credential) throw new Error("Job account authorization unavailable");
+    const material = await start.credential(rejected);
+    accessHash = createHash("sha256").update(material.accessToken).digest("hex");
+    return material;
+  };
   const completion = new Promise<EngineResult>(resolve => { finish = resolve; });
   const sessionResult = () => SessionId.safeParse(thread).success ? thread : undefined;
   rpc.onExit = () => finish({ ...(active ? { unknown: true } : { exit_code: 1 }) });
@@ -157,8 +167,8 @@ async function runCodex({ start, root, profile, control }: Context): Promise<Eng
     }
     if (method === "turn/completed" && params.turn?.id === turn) {
       done = true;
-      finish({ exit_code: params.turn.status === "completed" || (interrupted && params.turn.status === "interrupted") ? 0 : 1,
-        session: sessionResult(), report, interrupted });
+      finish({ exit_code: !authFailed && (params.turn.status === "completed" || (interrupted && params.turn.status === "interrupted")) ? 0 : 1,
+        ...(authFailed ? { error: msg("executor.account_unavailable") } : {}), session: sessionResult(), report, interrupted });
     }
   };
   const deny = (method: string, id: string | number) => {
@@ -175,6 +185,13 @@ async function runCodex({ start, root, profile, control }: Context): Promise<Eng
     } finally { waiting.delete(id); }
   };
   rpc.onRequest = (method, id, params) => {
+    if (method === "account/chatgptAuthTokens/refresh" && start.credential && accessHash) {
+      void credential(accessHash).then(material => rpc.answer(id, material)).catch(() => {
+        authFailed = true;
+        try { rpc.reject(id); } finally { void control.stop().catch(() => {}); }
+      }).catch(() => {});
+      return;
+    }
     void (async () => {
       if (params.threadId !== thread || (turn && params.turnId !== turn) || typeof params.turnId !== "string") { deny(method, id); return; }
       bind(params.turnId);
@@ -216,9 +233,11 @@ async function runCodex({ start, root, profile, control }: Context): Promise<Eng
   });
   try {
     await rpc.initialize();
-    await rpc.request("account/login/start", { type: "apiKey", apiKey: provider.key });
-    const account = await rpc.request("account/read", {});
-    if (account.account?.type !== "apiKey") return { exit_code: 1 };
+    const material = start.credential ? await credential() : undefined;
+    await rpc.request("account/login/start", material ? { type: "chatgptAuthTokens", ...material } : { type: "apiKey", apiKey: provider.key });
+    const account = (await rpc.request("account/read", {})).account;
+    if (material ? account?.type !== "chatgpt" || (account.accountId && account.accountId !== material.chatgptAccountId)
+      : account?.type !== "apiKey") return { exit_code: 1 };
     const readOnly = run.permissions?.access === "read";
     const policy = {
       cwd, model: run.model, approvalPolicy: "on-request", approvalsReviewer: "user",
@@ -338,7 +357,9 @@ export async function runInteractive(start: Start): Promise<EngineResult> {
   const cwd = await realpath(start.cwd);
   if (start.provider.engine !== start.run.engine || process.platform !== "darwin" || !start.provider.roots.some(root => contains(root, cwd))
     || contains(cwd, start.stateDir) || contains(start.stateDir, cwd) || start.run.permissions?.access === "full") return { exit_code: 1 };
-  const signature = createHash("sha256").update(JSON.stringify([cwd, start.run.engine, start.provider.key])).digest("hex");
+  if (start.accountKey ? start.run.engine !== "codex" || !start.credential || start.provider.key : !start.provider.key) return { exit_code: 1 };
+  const identity = start.accountKey ? { account: start.accountKey } : start.provider.key;
+  const signature = createHash("sha256").update(JSON.stringify([cwd, start.run.engine, identity])).digest("hex");
   const lookup = (session: string) => join(sessions, createHash("sha256").update(session).digest("hex") + ".json");
   await mkdir(sessions, { recursive: true, mode: 0o700 });
   let name = start.job;

@@ -21,3 +21,9 @@ test("distinguishes an online interactive engine from an offline or unreported r
   expect(jobInteractionStatus("claude-code", true)).toBe("Runtime has not reported interaction support");
   expect(jobInteractionStatus("pi", true)).toBe("Live questions and approvals unavailable for this engine");
 });
+
+test("a Runtime can offer interaction via an existing Codex connection without API key capability", () => {
+  const accountOnly = JobEngineActivityCapability.parse({ ...codex, approvals: false, questions: false, steer: false, account_reuse: true });
+  expect(jobInteractionStatus("codex", true, accountOnly, 0)).toBe("Sign in to Codex in Connections to enable live interaction");
+  expect(jobInteractionStatus("codex", true, accountOnly, 1)).toBe("Live questions and approvals enabled");
+});

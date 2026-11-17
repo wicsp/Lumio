@@ -83,7 +83,7 @@ export class AISettings {
       group(t("Default assistant model"), t("New chats start with this profile. This preference is saved in this browser."), this.defaultRows),
       group(t("AI profiles"), t("Choose an API or an official Codex session. Profiles share model settings; each conversation keeps its own permissions and history."), this.profileRows, this.newProfile),
       group(t("Connections"), t("Manage API connections, runtime sign-ins, and usage monitoring."), this.connectionRows, this.newConnection),
-      group(t("Task execution"), t("Live progress uses the runtime’s existing login. Live questions and approvals currently require a provider API key and allowed project folders on the runtime."), this.jobInteraction.element),
+      group(t("Task execution"), t("Live interaction can use an existing Codex connection. Claude Agent SDK uses a provider API key. Interactive rounds require allowed project folders on the runtime."), this.jobInteraction.element),
       group(t("Voice input"), t("Dictate into text boxes with the mic button. Audio goes through the Hub to the speech service and isn't stored."), this.speech.element),
       group(t("Inbox cards"), t("When you save a link, AI writes a short card from the original text."), this.knowledge.element));
     for (const rows of [this.defaultRows, this.connectionRows, this.profileRows]) {

@@ -663,34 +663,52 @@ export class WorkEditor {
       target.required = true; target.disabled = !!fixed;
       const interactive = h("input", { type: "checkbox", name: "dispatch-interactive", checked: stage?.kind === "agent" && stage.interaction === "interactive" });
       const fixedInteractive = interactive.checked;
+      const connection = select("dispatch-connection", [], "");
+      const connectionField = field(t("Codex connection"), connection);
+      let choices: ReadonlyArray<{ id: string; name: string }> = [];
+      const selectedConnection = () => !interactive.checked ? undefined : choices.length === 1 ? choices[0]?.id : connection.value || undefined;
       const interactionHint = h("p", { class: "muted" });
       const interactionSettings = h("button", { type: "button", class: "btn btn-quiet btn-small", hidden: true }, t("View task execution in AI settings"));
+      const updateConnectionField = () => {
+        connectionField.hidden = !interactive.checked || choices.length < 2;
+        connection.disabled = connectionField.hidden;
+        connection.required = !connectionField.hidden;
+      };
       const refreshInteraction = () => {
         const [engine, name] = target.value.split("@");
         const runtime = runtimes.find(value => value.registration.name === name);
         const registered = runtime?.registration.engines.find(value => value.name === engine);
         const reported = activityCaps?.find(value => value.runtime === runtime?.actor);
         const cap = reported?.engines.find(value => value.engine === engine && value.version === registered?.version);
+        choices = cap?.account_reuse ? reported?.codex_connections ?? [] : [];
+        const selected = connection.value;
+        clear(connection, h("option", { value: "" }, t("Choose an existing Codex connection")),
+          ...choices.map(choice => h("option", { value: choice.id }, choice.name)));
+        connection.value = choices.some(choice => choice.id === selected) ? selected : "";
         const fullAccess = stage?.kind === "agent" && stage.access === "full";
-        const state = runtime && registered ? jobInteractionStatus(registered.name, runtime.online && (reported?.online ?? true), cap) : undefined;
+        const state = runtime && registered ? jobInteractionStatus(registered.name, runtime.online && (reported?.online ?? true), cap, choices.length) : undefined;
         const supported = state === "Live questions and approvals enabled" && !fullAccess;
         interactive.disabled = fixedInteractive || !supported;
         if (!supported && !fixedInteractive) interactive.checked = false;
+        const authHint = choices.length === 1 ? t("Uses your existing Codex connection {0}", choices[0]!.name)
+          : choices.length === 0 ? t("Uses the runtime’s API key") : undefined;
         interactionHint.textContent = !target.value ? t("Choose a runtime and engine")
           : fullAccess ? t("Live questions and approvals require a sandboxed plan step")
-          : supported ? t("OS sandbox")
+          : supported ? (interactive.checked && authHint ? authHint : t("OS sandbox"))
           : !activityCaps ? t("Could not load runtime capabilities")
           : t(state ?? "Runtime has not reported interaction support");
+        updateConnectionField();
         interactionSettings.hidden = !target.value || supported || fullAccess || engine === "pi";
       };
       target.addEventListener("change", refreshInteraction);
+      interactive.addEventListener("change", refreshInteraction);
       refreshInteraction();
       const formId = `dispatch-${newRequestId()}`, error = h("div", { role: "alert" });
       const form = h("form", { id: formId, class: "form-stack" },
         h("p", {}, ...tParts("“{0}” will be handed to the runtime as currently saved.", h("strong", {}, task.title))),
         field(t("Target"), target, fixed ? t("Set by the plan step “{0}”.", stage!.id) : undefined),
         h("label", { class: "check-field" }, interactive, t("Allow questions and approvals during this round")),
-        interactionHint, interactionSettings,
+        interactionHint, connectionField, interactionSettings,
         h("dl", { class: "meta-grid" }, h("div", {}, h("dt", {}, t("Working directory")), h("dd", {}, this.effectiveWorkdir(task))), h("div", {}, h("dt", {}, t("Time limit")), h("dd", {}, t("{0} min", task.timeout_minutes ?? 120)))),
         !targets.length && !fixed && h("div", { class: "notice" }, icon("alert"), h("span", {}, t("No device with a registered engine yet. Run lumio runtime add in a terminal to connect one."))),
         error);
@@ -701,11 +719,12 @@ export class WorkEditor {
       form.addEventListener("submit", async event => {
         event.preventDefault();
         if (pending) return;
-        const selection = JSON.stringify([target.value, interactive.checked]);
+        const selected = selectedConnection();
+        const selection = JSON.stringify([target.value, interactive.checked, selected]);
         if (previousTarget && previousTarget !== selection) requestId = newRequestId();
         previousTarget = selection; pending = true; submit.disabled = true;
         try {
-          const result = await this.client.workCommand(dispatchCommand(task, target.value, requestId, interactive.checked));
+          const result = await this.client.workCommand(dispatchCommand(task, target.value, requestId, interactive.checked, selected));
           dialog.close();
           toast(t("Dispatched to {0}", target.value), "ok", result.kind === "job" ? {
             label: t("View run"), run: () => this.hooks.navigate("execution", result.job.spec.id, "from-dispatch-toast"),

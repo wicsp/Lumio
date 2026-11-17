@@ -1,4 +1,4 @@
-import { JOB_PROTOCOL_VERSION, Job, JobResult, JobRun, JobSpec, RuntimeName, RuntimeSync,
+import { JOB_PROTOCOL_VERSION, Job, JobResult, JobSpec, RuntimeSync, SubmitJob,
   type RoutineSpec, type RuntimeInfo, type RuntimeHeartbeat } from "@lumio/schema";
 import { ExecutionError } from "./errors.ts";
 export { ExecutionError } from "./errors.ts";
@@ -17,9 +17,7 @@ export interface ExecutionStore {
 }
 export interface RoutineHooks { plans(actor: string): RoutineSpec[]; adopt(actor: string, id: string, now: Date, lease?: string): Job | undefined }
 export interface ExecutionContext { id(now: Date): string; lease(): string; now(): Date }
-export const SubmitJob = JobSpec.omit({ protocol_version: true, id: true, source: true, lease: true, created: true }).extend({
-  runtime: RuntimeName, run: JobRun, workdir: JobSpec.shape.workdir.default("~"), timeout_seconds: JobSpec.shape.timeout_seconds.default(7200),
-});
+export { SubmitJob };
 const active = (job: Job) => job.status === "assigned" || job.status === "running";
 
 /** Job lifecycle is independent of Task, Markdown and SQLite; storage and runtime capabilities are injected. */
@@ -49,7 +47,8 @@ export class ExecutionJobs {
     if (!runtime) throw new ExecutionError("INVALID", { key: "jobs.specified_runtime_does_not_exist", args: [] });
     const run = parsed.data.run;
     if (run.kind === "agent" && !runtime.registration.engines.some((engine) => engine.name === run.engine)) throw new ExecutionError("INVALID", { key: "tasks.is_not_registered_on_runtime", args: [parsed.data.runtime, run.engine] });
-    return this.create({ ...parsed.data, runtime: runtime.actor }, now);
+    const { connection: _connection, ...fields } = parsed.data;
+    return this.create({ ...fields, runtime: runtime.actor }, now);
   }
   cancel(id: string): Job {
     return this.store.transaction(() => {

@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import type { CodexJobCredential } from "./native/connection-auth.ts";
 import { text as msg } from "./messages.ts";
 import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -18,7 +20,31 @@ interface WorkerInput {
   lastMessageFile?: string;
   hookReportFile?: string;
   redactions?: string[];
-  interactive?: { provider: JobEngineConfig; stateDir: string; gitPaths: string[]; instructions?: string };
+  interactive?: { provider: JobEngineConfig; stateDir: string; gitPaths: string[]; instructions?: string; accountKey?: string };
+}
+
+function jobCredential(rejected?: string): Promise<CodexJobCredential> {
+  return new Promise((resolve, reject) => {
+    const id = randomUUID();
+    const finish = (material?: CodexJobCredential) => {
+      clearTimeout(timeout);
+      process.off("message", receive);
+      process.off("disconnect", close);
+      if (material) resolve(material);
+      else reject(new Error("Job account authorization unavailable"));
+    };
+    const close = () => finish();
+    const receive = (message: { kind?: string; id?: string; material?: CodexJobCredential }) => {
+      if (message?.kind === "job-credential" && message.id === id) finish(message.material);
+    };
+    const timeout = setTimeout(close, 30_000);
+    process.on("message", receive);
+    process.once("disconnect", close);
+    try {
+      if (!process.connected || !process.send) close();
+      else process.send({ kind: "job-credential", id, rejected }, error => { if (error) close(); });
+    } catch { close(); }
+  });
 }
 
 function runCommand(argv: string[], cwd: string, env: NodeJS.ProcessEnv, capture?: (chunk: Buffer) => void, hook?: boolean): Promise<Exit> {
@@ -70,8 +96,13 @@ export async function runWorker() {
     phase("engine");
     if (!interactive || run.kind !== "agent") return runCommand(argv, spec.workdir, env, capture);
     try {
-      const result = await runInteractive({ ...interactive, job: spec.id, cwd: spec.workdir, run, env, lastMessageFile, redact });
-      return { exit_code: result.exit_code, unknown: result.unknown, interrupted: result.interrupted };
+      const credential = interactive.accountKey ? async (rejected?: string) => {
+        const material = await jobCredential(rejected);
+        redactions.push(material.accessToken);
+        return material;
+      } : undefined;
+      const result = await runInteractive({ ...interactive, job: spec.id, cwd: spec.workdir, run, env, lastMessageFile, redact, credential });
+      return { exit_code: result.exit_code, unknown: result.unknown, interrupted: result.interrupted, error: result.error };
     } catch { return { exit_code: 1, error: msg("executor.interactive_unavailable") }; }
   };
   if (run.kind !== "agent" || !run.hooks) { complete(await execute()); return; }

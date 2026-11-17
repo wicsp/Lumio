@@ -12,7 +12,7 @@ import { AgentInfo, AgentTokenIssued, AgentTokenRequest, AgentRevokeRequest, Cli
 import { AssistantConfigView, AssistantConfigUpdate, AssistantToolCall, ExecutionJobListArgs, RequestId, WorkTaskListArgs, WorkAttention, WorkCommandRequest, WorkCommandResult, PlanTemplate, type WorkCommand, WorkTask, WorkTaskDetail, WorkProject, ExecutionRoutine, ExecutionRoutineCommandRequest, ExecutionRoutineInfo,
   ProjectStatus, AssistantMemory, AssistantMemoryCommandRequest, AssistantMemoryCommandResult, AssistantChatRequest, AssistantChatResult, AssistantConversation, AssistantConversationDetail, AssistantEvent, StoredArtifact, idOf } from "@lumio/schema";
 import { JobLiveView, JobActivityPage, JobActivityQuery, JobAction, JobActionReceipt, JobAttention, JobActivityCapabilities } from "@lumio/schema";
-import { JobRun, Job, JobSpec, JobStatus, RuntimeName, RuntimeInfo, Actor, OperationRequest, OperationResult, Proposal, ProposalStatus, ApiError, CheckResult, LinksResult, NoteDetail, SearchResult, type ApiErrorCode, type NoteRef } from "@lumio/schema";
+import { Job, JobSpec, JobStatus, RuntimeName, SubmitJob, RuntimeInfo, Actor, OperationRequest, OperationResult, Proposal, ProposalStatus, ApiError, CheckResult, LinksResult, NoteDetail, SearchResult, type ApiErrorCode, type NoteRef } from "@lumio/schema";
 
 export class ApiClientError extends Error {
   hubUrl?: string;
@@ -29,12 +29,9 @@ export class ApiClientError extends Error {
     this.proposal = error.proposal;
   }
 }
-export const SubmitJob = JobSpec.omit({ protocol_version: true, id: true, source: true, lease: true, created: true }).extend({
-  runtime: RuntimeName, run: JobRun, workdir: JobSpec.shape.workdir.default("~"),
-  timeout_seconds: JobSpec.shape.timeout_seconds.default(7200),
-});
+export { SubmitJob };
 export interface SubmitJobInput {
-  runtime: string; run: import("@lumio/schema").JobRun; workdir?: string; timeout_seconds?: number; gpus?: number[];
+  runtime: string; run: import("@lumio/schema").JobRun; connection?: string; workdir?: string; timeout_seconds?: number; gpus?: number[];
 }
 export interface QueryOptions { includePrivate?: boolean }
 export interface SearchOptions extends QueryOptions { type?: NoteRef["type"]; limit?: number }

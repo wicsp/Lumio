@@ -2,7 +2,7 @@ import { text as msg } from "./messages.ts";
 import { Database } from "bun:sqlite";
 import { chmodSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { JobAccess, JobResult, JobSpec, RuntimeHeartbeat } from "@lumio/schema";
+import { JobAccess, JobAccount, JobResult, JobSpec, RuntimeHeartbeat } from "@lumio/schema";
 import { RuntimeError } from "./config.ts";
 
 export type LocalJob = { spec: JobSpec; state: "queued" | "running" | "finished"; acked: number; pid: number | null; started: string | null };
@@ -15,6 +15,7 @@ export class Queue {
     chmodSync(path, 0o600);
     this.db.exec(`PRAGMA synchronous=FULL; PRAGMA secure_delete=ON;
       CREATE TABLE IF NOT EXISTS queue (id TEXT PRIMARY KEY, spec TEXT NOT NULL, state TEXT NOT NULL, acked INTEGER NOT NULL DEFAULT 0, pid INTEGER, started TEXT);
+      CREATE TABLE IF NOT EXISTS job_accounts (job TEXT PRIMARY KEY, record TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS job_access (job TEXT PRIMARY KEY, access TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY REFERENCES queue(id), result TEXT NOT NULL);`);
   }
@@ -22,7 +23,7 @@ export class Queue {
     return this.db.query<{ spec: string; state: LocalJob["state"]; acked: number; pid: number | null; started: string | null }, []>("SELECT * FROM queue ORDER BY rowid").all()
       .map((r) => ({ ...r, spec: JobSpec.parse(JSON.parse(r.spec)) }));
   }
-  receive(specs: JobSpec[], access: JobAccess[] = []) {
+  receive(specs: JobSpec[], access: JobAccess[] = [], accounts: JobAccount[] = []) {
     this.db.transaction(() => {
       for (const value of access) {
         const credential = JobAccess.parse(value);
@@ -30,12 +31,28 @@ export class Queue {
         const existing = this.jobs().find(job => job.spec.id === credential.job);
         if (!existing || existing.state === "queued") this.db.query("INSERT OR REPLACE INTO job_access VALUES(?,?)").run(credential.job, JSON.stringify(credential));
       }
+      const bindings = new Map<string, JobAccount>();
+      for (const value of accounts) {
+        const binding = JobAccount.parse(value);
+        const spec = specs.find(job => job.id === binding.job);
+        if (bindings.has(binding.job) || spec?.run.kind !== "agent" || spec.run.engine !== "codex" || !spec.run.interaction)
+          throw new RuntimeError(msg("queue.invalid_access"));
+        bindings.set(binding.job, binding);
+      }
       for (const spec of specs) {
         const existing = this.jobs().find((j) => j.spec.id === spec.id);
+        const binding = bindings.get(spec.id);
+        if (existing && existing.state !== "finished" && JSON.stringify(this.account(spec.id)) !== JSON.stringify(binding))
+          throw new RuntimeError(msg("queue.invalid_access"));
+        if (!existing && binding) this.db.query("INSERT INTO job_accounts VALUES (?,?)").run(spec.id, JSON.stringify(binding));
         if (existing && JSON.stringify(existing.spec) !== JSON.stringify(spec)) throw new RuntimeError(msg("queue.hub_redelivered_a_different_job"));
         this.db.query("INSERT OR IGNORE INTO queue(id,spec,state) VALUES (?,?,'queued')").run(spec.id, JSON.stringify(spec));
       }
     })();
+  }
+  account(id: string): JobAccount | undefined {
+    const row = this.db.query<{ record: string }, [string]>("SELECT record FROM job_accounts WHERE job=?").get(id);
+    return row ? JobAccount.parse(JSON.parse(row.record)) : undefined;
   }
   access(id: string): JobAccess | undefined {
     const row = this.db.query<{ access: string }, [string]>("SELECT access FROM job_access WHERE job=?").get(id);
@@ -51,6 +68,7 @@ export class Queue {
       this.db.query("INSERT INTO outbox VALUES (?,?)").run(parsed.job, JSON.stringify(parsed));
       this.db.query("UPDATE queue SET state='finished',pid=NULL WHERE id=?").run(parsed.job);
       this.clearAccess(parsed.job);
+      this.db.query("DELETE FROM job_accounts WHERE job=?").run(parsed.job);
     })();
   }
   outbox(): JobResult[] { return this.db.query<{ result: string }, []>("SELECT result FROM outbox ORDER BY rowid").all().map((r) => JobResult.parse(JSON.parse(r.result))); }
