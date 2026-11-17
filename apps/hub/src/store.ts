@@ -264,7 +264,15 @@ export class HubStore {
 
   registerRuntime(actor: string, registration: RuntimeRegistration, now: Date): RuntimeRegistered { return this.runtimeRegistry.register(actor, registration, now); }
   syncRuntime(actor: string, now: Date): void { this.runtimeRegistry.sync(actor, now); }
-  runtimes(now: Date): RuntimeInfo[] { return this.runtimeRegistry.list(now).map(runtime => runtime.registration.features?.includes("self_update") ? { ...runtime, update: this.runtimeUpdates.view(runtime) } : runtime); }
+  registeredRuntimes(now: Date): RuntimeInfo[] { return this.runtimeRegistry.list(now); }
+
+  runtimes(now: Date): RuntimeInfo[] {
+    const authorized = new Set(this.db.query<{ actor_id: string }, []>(
+      "SELECT DISTINCT actor_id FROM tokens WHERE revoked IS NULL",
+    ).all().map(token => token.actor_id));
+    return this.registeredRuntimes(now).filter(runtime => authorized.has(runtime.actor))
+      .map(runtime => runtime.registration.features?.includes("self_update") ? { ...runtime, update: this.runtimeUpdates.view(runtime) } : runtime);
+  }
 
   close(): void { this.db.close(); }
 }

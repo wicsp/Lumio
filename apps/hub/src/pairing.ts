@@ -46,7 +46,7 @@ export class Pairing {
         const existing = this.store.actors().find((a) => a.name === name);
         if (existing && existing.role !== "runtime") throw new HubError("CONFLICT", { key: "pairing.name_is_used_by_an_actor_with_another_role", args: [] });
         actor = existing ?? this.store.createActor(name, "runtime");
-        const registered = this.store.runtimes(this.now()).find((r) => r.registration.name === name || r.actor === actor.id);
+        const registered = this.store.registeredRuntimes(this.now()).find((r) => r.registration.name === name || r.actor === actor.id);
         if (registered && (registered.actor !== actor.id || registered.registration.name !== name)) throw new HubError("CONFLICT", { key: "pairing.runtime_registration_name_does_not_match_actor", args: [] });
       }
       const code = pairingCode(), expires = new Date(this.now().getTime() + 600_000).toISOString();
