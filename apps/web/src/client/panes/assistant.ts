@@ -15,6 +15,7 @@ import { ago } from "../format.ts";
 import { renderMarkdown } from "../utils/markdown.ts";
 import { toolCallView } from "../tool-call-view.ts";
 import type { Navigate } from "../navigation.ts";
+import { hydrateResourceCards } from "../resource-card.ts";
 import { referenceInput } from "../reference-input.ts";
 import { drafts, textDraft } from "../drafts.ts";
 import { t, translated } from "../i18n.ts";
@@ -402,6 +403,7 @@ export class AssistantPane {
       if (message.role === "assistant" && !message.content.trim()) return [];
       const content = h("div", { class: "markdown" });
       content.innerHTML = renderMarkdown(message.content);
+      if (message.role === "assistant") hydrateResourceCards(content, this.client, this.navigate);
       const block = message.role === "assistant" ? this.assistantBlock(content) : h("div", { class: "msg-tool" }, icon("terminal"), t(" Tool result"), content);
       block.dataset.message = message.id;
       return [block];
@@ -542,6 +544,7 @@ export class AssistantPane {
       progress.finish();
       this.nativeTurn = undefined;
       clearTimeout(renderTimer); renderStream();
+      if (this.active) hydrateResourceCards(content, this.client, this.navigate);
       content.classList.remove("streaming");
       if (this.active) {
         await this.inspect(request, complete);
