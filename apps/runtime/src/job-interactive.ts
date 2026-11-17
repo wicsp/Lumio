@@ -11,6 +11,7 @@ import { NativeRpc, type Wire } from "./native/rpc.ts";
 import { WorkerJobControl } from "./job-control.ts";
 import { contains, type JobEngineConfig } from "./job-engine-config.ts";
 import { text as msg } from "./messages.ts";
+import { runPi } from "./pi-job.ts";
 import { codexGitOptions } from "./stage.ts";
 
 type Start = {
@@ -95,6 +96,7 @@ function sandbox(input: Start, root: string) {
   const cwd = JSON.stringify(input.cwd);
   const extraReads = [
     input.cwd, dirname(process.execPath), ...input.gitPaths, "/private/var/empty",
+    ...(input.provider.engine === "pi" ? [input.provider.packageRoot, dirname(input.provider.node)] : []),
     ...(input.lastMessageFile ? [dirname(input.lastMessageFile)] : []),
     ...(input.env.LUMIO_SUDO_SOCKET && isAbsolute(input.env.LUMIO_SUDO_SOCKET) ? [input.env.LUMIO_SUDO_SOCKET] : []),
   ];
@@ -358,7 +360,8 @@ export async function runInteractive(start: Start): Promise<EngineResult> {
   if (start.provider.engine !== start.run.engine || process.platform !== "darwin" || !start.provider.roots.some(root => contains(root, cwd))
     || contains(cwd, start.stateDir) || contains(start.stateDir, cwd) || start.run.permissions?.access === "full") return { exit_code: 1 };
   if (start.accountKey ? start.run.engine !== "codex" || !start.credential || start.provider.key : !start.provider.key) return { exit_code: 1 };
-  const identity = start.accountKey ? { account: start.accountKey } : start.provider.key;
+  const identity = start.accountKey ? { account: start.accountKey } : start.provider.engine === "pi"
+    ? { provider: start.provider.provider, key: start.provider.key } : start.provider.key;
   const signature = createHash("sha256").update(JSON.stringify([cwd, start.run.engine, identity])).digest("hex");
   const lookup = (session: string) => join(sessions, createHash("sha256").update(session).digest("hex") + ".json");
   await mkdir(sessions, { recursive: true, mode: 0o700 });
@@ -375,7 +378,11 @@ export async function runInteractive(start: Start): Promise<EngineResult> {
   try {
     for (const key of ["tmp", "codex", "claude"]) await mkdir(join(root, key), { recursive: true, mode: 0o700 });
     const context = { start: { ...start, cwd }, root, profile: sandbox({ ...start, cwd }, root), control };
-    const result = start.provider.engine === "codex" ? await runCodex(context) : await runClaude(context);
+    const result = start.provider.engine === "pi"
+      ? (start.lastMessageFile ? await runPi({ provider: start.provider, workdir: cwd, root, job: start.job,
+        roundDir: dirname(start.lastMessageFile), profile: context.profile, run: start.run, env: scopedEnvironment(start),
+        instructions: start.instructions, control, emit, redact: start.redact }) : { exit_code: 1 })
+      : start.provider.engine === "codex" ? await runCodex(context) : await runClaude(context);
     if (result.session && result.exit_code === 0) await writeFile(lookup(result.session), JSON.stringify({ signature, job: name }), { mode: 0o600 });
     if (start.lastMessageFile && result.report) await writeFile(start.lastMessageFile, start.redact(result.report), { mode: 0o600 });
     return result;

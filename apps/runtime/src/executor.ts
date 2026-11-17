@@ -16,7 +16,7 @@ import { delimiter, dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { JobActionReceipt, JobControlTarget, JobHumanRequest, type GitState, type RuntimeRegistration } from "@lumio/schema";
 import { RunLogWriter, finalizeInterruptedLog } from "@lumio/storage/logs";
-import { ADAPTERS, splitQuestion, versionSupported, type Adapter } from "./agents.ts";
+import { ADAPTERS, PI_ACTIVITY_VERSION, splitQuestion, versionSupported, type Adapter } from "./agents.ts";
 import type { RuntimeConfig } from "./config.ts";
 import { Queue, type LocalJob } from "./queue.ts";
 import type { RuntimeJobActivity } from "./job-activity.ts";
@@ -151,6 +151,7 @@ export class Executor {
     secrets.sort((a, b) => b.length - a.length);
     let gitPaths: string[] | undefined;
     let interactive: JobEngineConfig | undefined;
+    let structuredProgress = false;
     let agent: { adapter: Adapter; version: string; lastMessageFile: string; before?: GitState } | undefined;
     if (run.kind === "command") {
       if (!this.config.allowedCommands.includes(run.argv[0]!)) { await fail(msg("executor.program_is_not_in_lumio_runtime_allowed_commands")); return; }
@@ -171,7 +172,7 @@ export class Executor {
       if (run.interaction) {
         if (activity?.supported()) interactive = await interactiveEngine(run.engine, detected.version, this.env, Boolean(account));
         if (!interactive || run.permissions?.access === "full") { await fail(msg("executor.interactive_unavailable")); return; }
-        if (run.engine === "claude-code" && run.permissions?.git) {
+        if (run.engine !== "codex" && run.permissions?.git) {
           gitPaths = gitWritePaths(workdir, this.env);
           if (!gitPaths.length) { await fail(msg("executor.git_profile_workdir")); return; }
         }
@@ -182,9 +183,10 @@ export class Executor {
         } else if (interactive.key) secrets.push(interactive.key);
         secrets.sort((a, b) => b.length - a.length);
       }
+      structuredProgress = run.engine === "pi" && detected.version === PI_ACTIVITY_VERSION;
       const lastMessageFile = join(roundDirectory, "last.txt");
       agent = { adapter, version: detected.version, lastMessageFile, before: gitState(workdir, this.env) };
-      argv = [executable, ...adapter.argv(run, { lastMessageFile, gitPaths })];
+      argv = [executable, ...adapter.argv(run, { lastMessageFile, gitPaths, structuredProgress })];
     }
     const logs = join(this.config.stateDir, "logs");
     placeholder.interactive = Boolean(interactive);
@@ -197,7 +199,7 @@ export class Executor {
       if (agent) await mkdir(roundDirectory, { recursive: true, mode: 0o700 });
       if (agent && access && Date.parse(access.expires) > Date.now()) {
         const skillFile = await installSkill(join(roundDirectory, "skills", "lumio"));
-        argv = [argv[0]!, ...agent.adapter.argv(spec.run as Extract<typeof spec.run, { kind: "agent" }>, { lastMessageFile: agent.lastMessageFile, skillFile, skillText: SKILL_TEXT, gitPaths })];
+        argv = [argv[0]!, ...agent.adapter.argv(spec.run as Extract<typeof spec.run, { kind: "agent" }>, { lastMessageFile: agent.lastMessageFile, skillFile, skillText: SKILL_TEXT, gitPaths, structuredProgress })];
       }
       if (this.stopping) return;
       if (placeholder.reason) { await finish({ job: spec.id, lease: spec.lease, started, finished: new Date().toISOString(), status: "cancelled" }); return; }
@@ -358,7 +360,7 @@ export class Executor {
         ...(split.question && ok ? { question: split.question } : {}),
         ...(requested.permission ? { permission: requested.permission } : {}),
         status: stopped ?? (ok ? (split.question || requested.permission ? "waiting_for_human" : "done") : "failed"),
-        engine: { name: agent.adapter.engine, version: agent.version, sandbox: run.kind === "agent" && run.permissions?.access === "full" ? "none" : agent.adapter.sandbox },
+        engine: { name: agent.adapter.engine, version: agent.version, sandbox: interactive ? "os" : run.kind === "agent" && run.permissions?.access === "full" ? "none" : agent.adapter.sandbox },
         ...(sessionId ? { session_id: sessionId } : {}),
         ...(agent.before || after ? { git: { ...(agent.before ? { before: agent.before } : {}), ...(after ? { after } : {}) } } : {}),
         ...problem });

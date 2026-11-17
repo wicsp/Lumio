@@ -79,7 +79,35 @@ export class JobOutput {
   private session(value: unknown) {
     if (typeof value === "string" && this.redact(value) === value && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value)) this.sessionId = value;
   }
+  private pi(row: Wire) {
+    if (row.type === "session") {
+      this.session(row.id);
+      this.report ??= "";
+    } else if (row.type === "agent_start") {
+      this.report ??= "";
+      this.emit({ type: "engine", activity: "started" });
+    } else if (row.type === "auto_retry_start") this.emit({ type: "engine", activity: "retrying" });
+    else if (row.type === "tool_execution_start") {
+      const name = row.toolName;
+      const edits = name === "edit" || name === "write";
+      const label = name === "bash" ? commandLabel(row.args?.command)
+        : edits ? name === "edit" ? "Edit" : "Write"
+        : name === "read" ? "Read" : ["find", "grep", "ls"].includes(name) ? "Search" : "Tool";
+      const kind = name === "bash" ? "command" : edits || name === "read" ? "files" : ["find", "grep", "ls"].includes(name) ? "search" : "tool";
+      const files = kind === "files" ? fileLabels([row.args?.path], this.cwd) : undefined;
+      this.start(row.toolCallId, kind, label, files);
+    } else if (row.type === "tool_execution_end") {
+      this.finish(row.toolCallId, row.isError ? "failed" : "completed");
+    } else if (row.type === "message_end" && row.message?.role === "assistant") {
+      if (row.message.stopReason === "error") { this.emit({ type: "error", category: "engine" }); return; }
+      const content = row.message.content;
+      if (!Array.isArray(content)) return;
+      const text = content.filter(part => part?.type === "text" && typeof part.text === "string").map(part => part.text).join("\n").trim();
+      if (text) { this.report = text.slice(0, 100_000); this.emit({ type: "engine", activity: "responded" }); }
+    }
+  }
   row(data: Wire) {
+    if (this.engine === "pi") { this.pi(data); return; }
     if (this.engine === "codex") {
       const item = data.item;
       if (data.type === "thread.started") this.session(data.thread_id);
