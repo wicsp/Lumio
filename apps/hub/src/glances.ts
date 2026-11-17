@@ -198,8 +198,9 @@ export class Glances {
     return this.files.path(artifact.id);
   }
 
-  async markedImage(glance: Glance) {
-    const image = await readFile(await this.image(glance));
+  async markedImage(glance: Glance, signal?: AbortSignal) {
+    const image = await readFile(await this.image(glance), { signal });
+    if (digest(image) !== glance.image?.sha256) throw invalid("glance.invalid_image");
     return withPointer(image, glance.image!, glance.pointer);
   }
 

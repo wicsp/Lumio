@@ -174,6 +174,10 @@ export class Inbox {
     return [...(window && detail ? [window, detail] : [window || detail || glance.app.name]).join(" · ")].slice(0, 200).join("");
   }
 
+  visionEnabled(owner: string): boolean {
+    return !!this.state.binding(owner, "knowledge.vision");
+  }
+
   private async glanceOriginal(glance: Glance, capture: Capture): Promise<Extracted> {
     const binding = this.state.binding(capture.owner, "knowledge.vision");
     let content = windowText(glance);

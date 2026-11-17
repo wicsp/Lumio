@@ -1,6 +1,6 @@
 import type { AssistantContext } from "@lumio/assistant";
 import { CaptureGlanceToolArgs, CaptureGlanceToolResult, toolName, type Glance } from "@lumio/schema";
-import { windowText } from "./glances.ts";
+import { windowText, type Glances } from "./glances.ts";
 import type { Inbox } from "./inbox.ts";
 import { HubError } from "./errors.ts";
 
@@ -11,7 +11,7 @@ function clip(value: string | undefined, size: number): string | undefined {
   return bytes.subarray(0, size).toString("utf8") + "\n[…truncated]";
 }
 
-export function glanceChat(glance: Glance, message: string, inbox: Inbox): ReturnType<NonNullable<AssistantContext["glance"]>["context"]> {
+export function glanceChat(glance: Glance, message: string, inbox: Inbox, glances: Glances): ReturnType<NonNullable<AssistantContext["glance"]>["context"]> {
   if (glance.lumio) return { focus: { selected: [glance.lumio], primary: glance.lumio, section: glance.lumio.module } };
   const data = {
     captured: glance.captured,
@@ -23,8 +23,23 @@ export function glanceChat(glance: Glance, message: string, inbox: Inbox): Retur
     pointed_paragraph: clip(glance.pointing.text, 5500),
     window_text: clip(windowText(glance), 4000),
   };
+  const image = glance.image;
   return {
     data,
+    ...(image && !image.purged ? { image: {
+      file: image.file,
+      sha256: image.sha256,
+      async load(signal: AbortSignal) {
+        if (!inbox.visionEnabled(glance.owner)) return;
+        try {
+          const { bytes, format } = await glances.markedImage(glance, signal);
+          if (inbox.visionEnabled(glance.owner)) return [`data:image/${format};base64,${bytes.toString("base64")}`];
+        } catch {
+          signal.throwIfAborted();
+          // An expired or unreadable screenshot leaves the recognized text available.
+        }
+      },
+    } } : {}),
     tool: {
       spec: { name: toolName("capture.glance"), description: "Save the screen capture attached to this message when the person asks to save it.",
         input_schema: CaptureGlanceToolArgs.toJSONSchema({ io: "input" }) },
