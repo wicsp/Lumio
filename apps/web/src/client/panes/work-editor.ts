@@ -10,6 +10,7 @@ import { PROJECT_STATUSES, type ResourceRef, type WorkProject, type WorkTask, ty
 import { errorText, isConflict, type Client, type HubExtras } from "../api.ts";
 import { attentionCard, attentionFor } from "../attention-card.ts";
 import { jobActivityBadge } from "../job-activity.ts";
+import { jobInteractionStatus } from "../job-interaction-settings.ts";
 import { answerCommand, commentCommand, dispatchCommand, engineTargets, formatTime, newRequestId, workPatchCommand } from "../commands.ts";
 import { nextTargetText } from "../delegate.ts";
 import { autosize, clear, confirmDialog, failure, field, h, icon, openDialog, openMenu, promptDialog, select, statusIcon, toast, type MenuItem } from "../dom.ts";
@@ -651,7 +652,7 @@ export class WorkEditor {
     if (run && stage?.kind !== "agent") { this.planStop(task, run.stage); return; }
     this.setBusy(true);
     try {
-      const [runtimes, activityCaps] = await Promise.all([this.client.runtimes(), this.client.jobActivityCapabilities().catch(() => [])]);
+      const [runtimes, activityCaps] = await Promise.all([this.client.runtimes(), this.client.jobActivityCapabilities().catch(() => undefined)]);
       const targets = engineTargets(runtimes);
       if (!this.active || this.root.closest("[hidden]")) return;
       const fixed = stage?.kind === "agent" ? stage.agent : undefined;
@@ -663,13 +664,24 @@ export class WorkEditor {
       const interactive = h("input", { type: "checkbox", name: "dispatch-interactive", checked: stage?.kind === "agent" && stage.interaction === "interactive" });
       const fixedInteractive = interactive.checked;
       const interactionHint = h("p", { class: "muted" });
+      const interactionSettings = h("button", { type: "button", class: "btn btn-quiet btn-small", hidden: true }, t("View task execution in AI settings"));
       const refreshInteraction = () => {
-        const [engine, runtime] = target.value.split("@");
-        const cap = activityCaps.find(value => value.name === runtime && value.online)?.engines.find(value => value.engine === engine);
-        const supported = Boolean(cap?.approvals && cap.questions && !(stage?.kind === "agent" && stage.access === "full"));
+        const [engine, name] = target.value.split("@");
+        const runtime = runtimes.find(value => value.registration.name === name);
+        const registered = runtime?.registration.engines.find(value => value.name === engine);
+        const reported = activityCaps?.find(value => value.runtime === runtime?.actor);
+        const cap = reported?.engines.find(value => value.engine === engine && value.version === registered?.version);
+        const fullAccess = stage?.kind === "agent" && stage.access === "full";
+        const state = runtime && registered ? jobInteractionStatus(registered.name, runtime.online && (reported?.online ?? true), cap) : undefined;
+        const supported = state === "Live questions and approvals enabled" && !fullAccess;
         interactive.disabled = fixedInteractive || !supported;
         if (!supported && !fixedInteractive) interactive.checked = false;
-        interactionHint.textContent = supported ? t("OS sandbox") : t("This Runtime does not support interactive rounds");
+        interactionHint.textContent = !target.value ? t("Choose a runtime and engine")
+          : fullAccess ? t("Live questions and approvals require a sandboxed plan step")
+          : supported ? t("OS sandbox")
+          : !activityCaps ? t("Could not load runtime capabilities")
+          : t(state ?? "Runtime has not reported interaction support");
+        interactionSettings.hidden = !target.value || supported || fullAccess || engine === "pi";
       };
       target.addEventListener("change", refreshInteraction);
       refreshInteraction();
@@ -678,12 +690,13 @@ export class WorkEditor {
         h("p", {}, ...tParts("“{0}” will be handed to the runtime as currently saved.", h("strong", {}, task.title))),
         field(t("Target"), target, fixed ? t("Set by the plan step “{0}”.", stage!.id) : undefined),
         h("label", { class: "check-field" }, interactive, t("Allow questions and approvals during this round")),
-        interactionHint,
+        interactionHint, interactionSettings,
         h("dl", { class: "meta-grid" }, h("div", {}, h("dt", {}, t("Working directory")), h("dd", {}, this.effectiveWorkdir(task))), h("div", {}, h("dt", {}, t("Time limit")), h("dd", {}, t("{0} min", task.timeout_minutes ?? 120)))),
         !targets.length && !fixed && h("div", { class: "notice" }, icon("alert"), h("span", {}, t("No device with a registered engine yet. Run lumio runtime add in a terminal to connect one."))),
         error);
       const submit = h("button", { type: "submit", form: formId, class: "btn btn-primary", disabled: !targets.length && !fixed }, icon("play"), t("Confirm"));
       const dialog = openDialog(t("Delegate a new round"), form, [submit]);
+      interactionSettings.addEventListener("click", () => { dialog.close(); this.hooks.navigate("settings", "ai"); });
       let pending = false, requestId = newRequestId(), previousTarget = "";
       form.addEventListener("submit", async event => {
         event.preventDefault();

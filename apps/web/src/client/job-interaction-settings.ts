@@ -1,0 +1,54 @@
+import type { JobEngineActivityCapability, RuntimeInfo } from "@lumio/schema";
+import type { Client } from "./api.ts";
+import { clear, h } from "./dom.ts";
+import { t } from "./i18n.ts";
+
+export function jobInteractionStatus(engine: string, online: boolean, capability?: JobEngineActivityCapability) {
+  if (!online) return "Offline";
+  if (engine === "pi") return "Live questions and approvals unavailable for this engine";
+  if (!capability) return "Runtime has not reported interaction support";
+  if (capability.sandbox === "os" && capability.approvals && capability.questions) return "Live questions and approvals enabled";
+  return "Live questions and approvals are not enabled on this runtime";
+}
+
+export class JobInteractionSettings {
+  readonly element = h("div", { class: "set-rows" });
+  private active = true;
+  private rows = h("div", { role: "status" });
+  private refresh = h("button", { type: "button", class: "btn btn-small", onclick: () => void this.load() }, t("Refresh"));
+
+  constructor(private client: Client) {
+    this.element.append(this.rows, h("div", { class: "set-row" },
+      h("a", { href: "https://github.com/wicsp/Lumio/blob/main/docs/design/execution.md#job-实时活动与同轮介入adr-0069", target: "_blank", rel: "noopener noreferrer" },
+        t("Runtime configuration instructions")), this.refresh));
+    void this.load();
+  }
+
+  dispose(): void { this.active = false; }
+
+  private async load(): Promise<void> {
+    this.refresh.disabled = true;
+    clear(this.rows, h("p", { class: "set-empty" }, t("Loading…")));
+    try {
+      const [runtimes, capabilities] = await Promise.all([this.client.runtimes(), this.client.jobActivityCapabilities()]);
+      if (!this.active) return;
+      const rows = runtimes.flatMap(runtime => {
+        const reported = capabilities.find(value => value.runtime === runtime.actor);
+        return runtime.registration.engines.map(engine => {
+          const cap = reported?.engines.find(value => value.engine === engine.name && value.version === engine.version);
+          return this.engineRow(runtime, engine.name, runtime.online && (reported?.online ?? true), cap);
+        });
+      });
+      clear(this.rows, ...(rows.length ? rows : [h("p", { class: "set-empty" }, t("No registered runtime engines"))]));
+    } catch {
+      if (this.active) clear(this.rows, h("p", { class: "set-empty" }, t("Could not load runtime capabilities")));
+    } finally { this.refresh.disabled = false; }
+  }
+
+  private engineRow(runtime: RuntimeInfo, engine: string, online: boolean, cap?: JobEngineActivityCapability): HTMLElement {
+    return h("div", { class: "set-row" },
+      h("span", { class: "set-label" }, `${engine} @ ${runtime.registration.name}`, online && cap?.progress &&
+        h("span", { class: "set-sub" }, t("Live task progress available"))),
+      h("span", { class: "set-value muted" }, t(jobInteractionStatus(engine, online, cap))));
+  }
+}
