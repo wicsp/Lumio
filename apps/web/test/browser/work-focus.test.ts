@@ -147,3 +147,28 @@ test("sending fixes the selected task before waiting for the conversation to ini
   expect(f.snapshot()?.primary?.id).toBe(second.task.id);
   expect(request.focus?.primary?.id).toBe(first.task.id);
 });
+
+test("opening a Work card clears its own unread reminders after the detail loads", async () => {
+  const f = setup();
+  const view = f.view as typeof f.view & { readSubject(id: string): void };
+  const unread = new Map([[first.task.id, ["notice:first", "notice:follow-up"]], [second.task.id, ["notice:second"]]]);
+  const reads: string[][] = [];
+  Object.assign(view, { unread, decorate() {}, refreshCounts() {},
+    session: { client: { async readNotices(_request: string, ids: string[]) { reads.push(ids); } } },
+  });
+  Object.assign(f.pane, { onOpen: (id: string) => view.readSubject(id), canRefreshDetail: () => true });
+
+  const detail = Promise.withResolvers<WorkTaskDetail>();
+  f.load(detail.promise);
+  const opening = f.pane.open(first.task.id);
+  expect(reads).toEqual([]);
+  detail.resolve(first);
+  await opening;
+  expect(reads).toEqual([["notice:first", "notice:follow-up"]]);
+  expect([...unread.keys()]).toEqual([second.task.id]);
+
+  unread.set(first.task.id, ["notice:new"]);
+  f.load({ ...first, task: { ...first.task, revision: first.task.revision + 1 } });
+  await f.pane.open(first.task.id, true, true);
+  expect(unread.get(first.task.id)).toEqual(["notice:new"]);
+});
