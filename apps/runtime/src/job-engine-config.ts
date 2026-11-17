@@ -1,5 +1,5 @@
 import { stat, realpath } from "node:fs/promises";
-import { delimiter, isAbsolute, relative, dirname } from "node:path";
+import { delimiter, isAbsolute, relative, dirname, join } from "node:path";
 import { homedir } from "node:os";
 import type { AgentRun, JobEngineActivityCapability, RuntimeRegistration } from "@lumio/schema";
 import { PI_ACTIVITY_VERSION } from "./agents.ts";
@@ -19,14 +19,15 @@ export function contains(root: string, path: string) {
 }
 
 export async function interactiveEngine(engine: AgentRun["engine"], version: string, env: NodeJS.ProcessEnv, account = false): Promise<JobEngineConfig | undefined> {
-  if (process.platform !== "darwin" || !env.LUMIO_INTERACTIVE_JOB_ROOTS || (account && engine !== "codex")) return;
+  const configuredRoots = env.LUMIO_INTERACTIVE_JOB_ROOTS;
+  if (process.platform !== "darwin" || (account ? engine !== "codex" : !configuredRoots)) return;
   const expected = engine === "pi" ? { version: PI_ACTIVITY_VERSION, command: "pi", key: "LUMIO_JOB_PI_API_KEY" } : options[engine];
   if (version !== expected.version) return;
   const executable = Bun.which(expected.command, { PATH: env.PATH ?? "" });
   if (!executable) return;
   try {
     const path = engine === "codex" ? await codexExecutable(executable) : await realpath(executable);
-    const roots = await Promise.all(env.LUMIO_INTERACTIVE_JOB_ROOTS.split(delimiter).map(async root => {
+    const roots = await Promise.all((configuredRoots ? configuredRoots.split(delimiter) : []).map(async root => {
       if (!isAbsolute(root)) throw new Error("Expected an absolute project root");
       const location = await realpath(root);
       if (!(await stat(location)).isDirectory() || contains(location, homedir())) throw new Error("Use a dedicated project directory");
@@ -54,6 +55,31 @@ export async function interactiveEngine(engine: AgentRun["engine"], version: str
     const actual = detected.stdout.toString().trim();
     if (detected.exitCode !== 0 || actual !== (engine === "codex" ? `codex-cli ${version}` : `${version} (Claude Code)`)) return;
     return { engine, executable: path, key, roots, version };
+  } catch { return; }
+}
+
+const privateHomeDirectories = [
+  ".ssh", ".gnupg", ".aws", ".kube", ".codex", ".claude", ".pi",
+  ".config/lumio", ".config/lumio-runtime", ".config/gcloud", ".local/share/lumio", ".local/share/lumio-runtime",
+  "Library/Keychains", "Library/LaunchAgents",
+];
+
+/** With no administrator roots, only a human-authorized Codex account Job can use its own workspace. */
+export async function interactiveWorkspace(workdir: string, stateDir: string, provider: JobEngineConfig, gitPaths: string[], accountBound: boolean, homeDirectory = homedir()) {
+  if (!isAbsolute(workdir) || (!provider.roots.length && (provider.engine !== "codex" || !accountBound))) return;
+  try {
+    const [cwd, state, ...git] = await Promise.all([workdir, stateDir, ...gitPaths].map(path => realpath(path)));
+    if (!cwd || !state || !(await stat(cwd)).isDirectory()) return;
+    const fold = (path: string) => process.platform === "darwin" ? path.toLowerCase() : path;
+    const overlaps = (left: string, right: string) => contains(fold(left), fold(right)) || contains(fold(right), fold(left));
+    if ([cwd, ...git].some(path => overlaps(path, state))) return;
+    if (provider.roots.length) return provider.roots.some(root => contains(root, cwd)) ? { cwd, gitPaths: git } : undefined;
+
+    const home = await realpath(homeDirectory);
+    const protectedPaths = [dirname(provider.executable), dirname(process.execPath), ...privateHomeDirectories.map(path => join(home, path))];
+    const privatePaths = await Promise.all(protectedPaths.map(path => realpath(path).catch(() => path)));
+    if ([cwd, ...git].some(path => contains(fold(path), fold(home)) || privatePaths.some(other => overlaps(path, other)))) return;
+    return { cwd, gitPaths: git };
   } catch { return; }
 }
 
