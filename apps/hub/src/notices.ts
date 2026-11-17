@@ -5,7 +5,6 @@ import {
   type Capture, type Proposal, type WorkTask,
 } from "@lumio/schema";
 import { WorkError } from "@lumio/work";
-import type { AssistantMainConversations } from "./assistant-main.ts";
 import type { Capabilities } from "./capabilities.ts";
 import type { DecisionGate, NoticeDecisionInput } from "./decision-gate.ts";
 import { HubError } from "./errors.ts";
@@ -13,7 +12,6 @@ import { text as msg } from "./messages.ts";
 import type { Notifications } from "./notifications.ts";
 import type { Resources } from "./resources.ts";
 import type { HubStore, Identity } from "./store.ts";
-import type { WorkCommands } from "./work-commands.ts";
 
 export const NOTICE_ROUTES = [
   { operation: "notices.read", method: "GET", pattern: /^\/v2\/notices$/, path: "/v2/notices" },
@@ -64,10 +62,8 @@ function inaccessible(cause: unknown): boolean {
 }
 
 interface NoticeModules {
-  assistantMain: Pick<AssistantMainConversations, "mainConversation">;
   capabilities: Capabilities;
   resources: Resources;
-  workCommands: WorkCommands;
   decisionGate: Pick<DecisionGate, "gradeNotice">;
   notifications: Notifications;
 }
@@ -250,12 +246,11 @@ export class Notices {
         const claimed = this.hub.db.query("UPDATE workbench_notice_sources SET done=1 WHERE event=? AND done=0").run(source.event);
         if (!claimed.changes || !details || (details.subject && !visible) ||
             (source.kind === "proposal" && this.hub.proposal(source.proposal)?.status !== "pending")) return;
-        const comment = this.comment(source, details, reader);
         for (const [index, owner] of source.owners.entries()) {
           const grade = grades[index]!;
           const notice = Notice.parse({
             id: newId("ntc", this.now(), randomBytes), owner, source: source.kind, event: source.event, ...grade,
-            subject: details.subject, title: details.title, summary: details.summary, comment, ai_note: details.ai_note,
+            subject: details.subject, title: details.title, summary: details.summary, ai_note: details.ai_note,
             findings: details.findings, created: source.created,
           });
           this.hub.db.query("INSERT INTO workbench_notices(id,owner,event,level,created,record) VALUES(?,?,?,?,?,?)")
@@ -271,23 +266,19 @@ export class Notices {
     this.prepared = undefined;
   }
 
-  private comment(source: Source, details: Details, identity: Identity): string | undefined {
-    // Materialize assistant discussion for the workbench. Work keeps the original round report for every client.
-    if (source.kind !== "turn" || !details.task ||
-        !source.owners.some(owner => this.modules.assistantMain.mainConversation(owner))) return;
-    try {
-      const result = this.modules.workCommands.execute({
-        request_id: "pre-read:" + digest(source.event),
-        operation: { op: "work.task.comment", args: {
-          task: details.task.task.id,
-          body: [msg("notices.pre_read", details.status, source.job), details.summary].filter(Boolean).join("\n\n"),
-        } },
-      }, identity);
-      if (result.kind === "comment") return result.comment.id;
-    } catch (cause) {
-      if (!inaccessible(cause)) throw cause;
-      this.hub.audit(identity, "work.task.comment", "deny", undefined, "pre-read");
-    }
+  /** Older notices link to the pre-read copy of a report already recorded by Work. */
+  withoutPreReadCopies(detail: WorkTaskDetail): WorkTaskDetail {
+    if (detail.comments.length < 2) return detail;
+    const events = detail.executions.filter(run => run.applied).map(run => "turn:" + run.job);
+    if (!events.length) return detail;
+    const copies = this.hub.db.query<{ id: string }, [string]>(`
+      SELECT DISTINCT json_extract(record,'$.comment') AS id FROM workbench_notices
+      WHERE event IN (SELECT value FROM json_each(?))
+      AND json_type(record,'$.comment')='text'
+    `).all(JSON.stringify(events));
+    if (!copies.length) return detail;
+    const ids = new Set(copies.map(copy => copy.id));
+    return { ...detail, comments: detail.comments.filter(comment => !ids.has(comment.id)) };
   }
 
   list(owner: string, args: NoticeListArgs): NoticeList {
