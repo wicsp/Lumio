@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { parseFrontmatter } from "@lumio/knowledge";
 import {
   AIConnection, AIProfile, AiNote, Capture, CaptureCreate, CaptureCreateResult, CaptureList, KnowledgeAIBinding,
-  KnowledgeOriginal, NoteDetail, ORIGINAL_CAPABILITY_NAME, Paper, SearchResult, SecurityReviewResult, Source, TrashListResult, TrashRestoreResult,
+  KnowledgeOriginal, NoteDetail, NoticeList, ORIGINAL_CAPABILITY_NAME, Paper, SearchResult, SecurityReviewResult, Source, TrashListResult, TrashRestoreResult,
   type AssistantModelRequest, type CaptureCommand,
 } from "@lumio/schema";
 import { readConfig } from "../src/config.ts";
@@ -400,5 +400,26 @@ test("collection listing includes previously sorted items, hides removed items a
     list = CaptureList.parse(await (await f.api(captures + "?untriaged=false")).json());
     expect(list.total).toBe(1);
     expect(list.captures.map(c => c.id)).toEqual([failed.id]);
+  } finally { await f.close(); }
+});
+
+test("removing a capture hides its unread notice until the capture is restored", async () => {
+  const f = await fixture();
+  try {
+    const kept = await f.wait((await f.create(article)).capture.id);
+    const removed = await f.wait((await f.create(article + "/remove")).capture.id);
+    const notices = async (limit = 30) =>
+      NoticeList.parse(await (await f.api(`/v2/notices?unread=true&limit=${limit}`)).json());
+    await f.hub.modules.notices.drain();
+    const before = await notices();
+    expect(before.unread).toBe(2);
+    expect(before.notices.map(notice => notice.event)).toEqual([`capture:${removed.id}`, `capture:${kept.id}`]);
+
+    expect((await f.command(removed, { op: "triage", triage: "discard" })).status).toBe(200);
+    expect(await notices(1)).toEqual({ notices: [before.notices[1]!], unread: 1 });
+
+    const restore = await f.api(`/v2/trash/${removed.entity!.id}/restore`, "POST", { request_id: randomUUID() });
+    expect(restore.status).toBe(200);
+    expect(await notices()).toEqual(before);
   } finally { await f.close(); }
 });
