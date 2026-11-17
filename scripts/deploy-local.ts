@@ -303,17 +303,22 @@ async function deploy(desktop: boolean) {
 
 if (import.meta.main) {
   const args = Bun.argv.slice(2);
-  const usage = "Usage: bun run scripts/deploy-local.ts [--desktop] [--allow-active]";
+  const usage = "Usage: bun run scripts/deploy-local.ts [--mio] [--desktop] [--allow-active]";
   if (args.length === 1 && args[0] === "--help") {
     console.log(usage);
-  } else if (new Set(args).size !== args.length || args.some(arg => !["--desktop", "--allow-active"].includes(arg))) {
+  } else if (new Set(args).size !== args.length || args.some(arg => !["--mio", "--desktop", "--allow-active"].includes(arg))) {
     console.error(usage);
     process.exitCode = 2;
   } else {
     process.umask(0o077);
     try {
       if (args.includes("--allow-active")) console.log("--allow-active is no longer needed: deployment always leaves Runtime running.");
-      await deploy(args.includes("--desktop"));
+      if (args.includes("--mio")) {
+        const { deployMio } = await import("./deploy-mio.ts");
+        await deployMio(args.includes("--desktop"));
+      } else {
+        await deploy(args.includes("--desktop"));
+      }
     } catch (error) { console.error(error); process.exitCode = 1; }
   }
 }
