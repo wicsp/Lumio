@@ -7,6 +7,17 @@ import * as entry from "../src/entry.ts";
 const assets = { js: "console.log(1)", css: ":root{--lumen:#f2b705}" };
 
 describe("page", () => {
+  test("the installed app fixes its viewport scale for an app-like touch experience", () => {
+    const html = renderPage({ apiBase: "" });
+    const viewport = /<meta name="viewport" content="([^"]+)">/.exec(html)?.[1];
+    const settings = new Map(viewport?.split(",").map(part => part.trim().split("=") as [string, string]));
+    expect(settings.get("width")).toBe("device-width");
+    expect(settings.get("initial-scale")).toBe("1");
+    expect(settings.get("minimum-scale")).toBe("1");
+    expect(settings.get("maximum-scale")).toBe("1");
+    expect(settings.get("user-scalable")).toBe("no");
+    expect(settings.get("viewport-fit")).toBe("cover");
+  });
   test("Hub-served page uses the same-origin root and carries no fixed Hub", () => {
     const html = renderPage({ apiBase: "" });
     expect(html).toContain('<meta name="lumio-api-base" content="">');

@@ -27,7 +27,7 @@ export function renderPage(options: PageOptions): string {
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Lumio</title>
 <meta name="lumio-api-base" content="${escapeAttr(options.apiBase)}">
 ${options.hub ? `<meta name="lumio-hub" content="${escapeAttr(options.hub)}">\n` : ""}<meta name="theme-color" content="#f6f7f5" media="(prefers-color-scheme: light)">
