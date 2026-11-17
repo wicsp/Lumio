@@ -32,3 +32,13 @@ export function unreachableFromPhone(hub: string): boolean {
     return host === "localhost" || host.endsWith(".localhost") || host === "0.0.0.0" || host === "::" || host === "::1" || host.startsWith("127.");
   } catch { return true; }
 }
+
+/** 是否在 iPhone/iPad 上打开（iPadOS 的 Safari 报告为 MacIntel，用触点数区分）。 */
+export function isIOSDevice(userAgent: string, platform: string, maxTouchPoints: number): boolean {
+  return /iPhone|iPad|iPod/.test(userAgent) || (platform === "MacIntel" && maxTouchPoints > 1);
+}
+
+/** 配对用的 Hub 地址默认值：Hub 报告的地址手机访问不到、而当前页面的地址可以时（例如就在手机上打开），用当前页面的地址。 */
+export function phoneHubDefault(hubUrl: string, pageOrigin: string): string {
+  return unreachableFromPhone(hubUrl) && !unreachableFromPhone(pageOrigin) ? pageOrigin : hubUrl;
+}
