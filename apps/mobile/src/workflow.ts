@@ -76,9 +76,11 @@ function fieldValue(field: Field): PlistValue {
   switch (field.type) {
     case "text": return textToken(...field.value);
     case "number": return textToken(typeof field.value === "number" ? String(field.value) : field.value);
-    case "dict": return dictionary(field.value);
+    // Nested Dictionary items wrap the serialized dictionary once more.
+    case "dict": return { Value: dictionary(field.value), WFSerializationType: "WFDictionaryFieldValue" };
     case "array": return { Value: field.value.map(item => ({ WFItemType: ITEM_TYPE[item.type], WFValue: fieldValue(item) })), WFSerializationType: "WFArrayParameterState" };
-    case "file": return { Value: field.value.value, WFSerializationType: "WFTokenAttachmentParameterState" };
+    // The form field state wraps a text-token attachment, not its raw reference.
+    case "file": return { Value: attach(field.value), WFSerializationType: "WFTokenAttachmentParameterState" };
   }
 }
 

@@ -19,6 +19,8 @@ const IDS = {
   turn: "turn_01ARZ3NDEKTSV4RRFFQ69G5FAV",
 };
 
+const screenshot = new File(["synthetic screenshot"], "Screenshot.jpg", { type: "image/jpeg" });
+
 class Exit extends Error {}
 
 function run(workflow: Workflow, options: { ocr?: string; config?: boolean; fail?: string; input?: string } = {}) {
@@ -50,13 +52,19 @@ function run(workflow: Workflow, options: { ocr?: string; config?: boolean; fail
     });
     return out;
   };
+  const unwrap = (param: Value, type: string): Value => {
+    const state = param as { WFSerializationType: string; Value: Value };
+    expect(state.WFSerializationType).toBe(type);
+    return state.Value;
+  };
+  const attachValue = (param: Value) => resolve(unwrap(param, "WFTextTokenAttachment") as Record<string, Value>);
   const evalItem = (item: { WFItemType: number; WFValue: Value }): Value => {
     switch (item.WFItemType) {
       case 0: return evalText(item.WFValue);
-      case 1: return evalDict(item.WFValue);
+      case 1: return evalDict(unwrap(item.WFValue, "WFDictionaryFieldValue"));
       case 2: return ((item.WFValue as { Value: { WFItemType: number; WFValue: Value }[] }).Value).map(evalItem);
       case 3: { const text = evalText(item.WFValue); return Number(text); }
-      case 5: return { file: resolve((item.WFValue as { Value: Record<string, Value> }).Value) };
+      case 5: return attachValue(unwrap(item.WFValue, "WFTokenAttachmentParameterState"));
       default: throw new Error(`未知类型 ${item.WFItemType}`);
     }
   };
@@ -64,7 +72,6 @@ function run(workflow: Workflow, options: { ocr?: string; config?: boolean; fail
     const items = (param as { Value: { WFDictionaryFieldValueItems: { WFItemType: number; WFKey: Value; WFValue: Value }[] } }).Value.WFDictionaryFieldValueItems;
     return Object.fromEntries(items.map(item => [evalText(item.WFKey), evalItem(item)]));
   };
-  const attachValue = (param: Value) => resolve((param as { Value: Record<string, Value> }).Value);
 
   const respond = (path: string): Value => {
     if (options.fail === path) return { error: { message: "合成错误" } };
@@ -109,7 +116,7 @@ function run(workflow: Workflow, options: { ocr?: string; config?: boolean; fail
         out = branchResult.has(p.GroupingIdentifier as string) ? branchResult.get(p.GroupingIdentifier as string) : last;
         break;
       }
-      case "takescreenshot": case "image.resize": case "image.convert": out = { image: "jpeg" }; break;
+      case "takescreenshot": case "image.resize": case "image.convert": out = screenshot; break;
       case "properties.images": out = p.WFContentItemPropertyName === "Width" ? 944 : 2046; break;
       case "extracttextfromimage": out = options.ocr ?? "合成屏幕文字"; break;
       case "text.match": {
@@ -162,6 +169,7 @@ function checkGlance(request: Request) {
   expect(request.url).toBe("http://hub.test:7420/v2/glances");
   expect(request.type).toBe("Form");
   expect(Object.keys(request.body).sort()).toEqual(["image", "meta"]);
+  expect(request.body.image).toBe(screenshot);
   const meta = GlanceCreate.parse(JSON.parse(request.body.meta as string));
   expect(meta.image).toEqual({ format: "jpeg", width: 944, height: 2046 });
   expect(meta.app.name).toBe("iPhone");
@@ -179,6 +187,20 @@ describe("iPhone 快捷指令", () => {
     expect(capture).toMatchObject({ channel: "share", glance: IDS.glance });
     expect(capture.request_id).not.toBe(meta.request_id);
     expect(notifications).toEqual(["已收藏: 已存入 Lumio"]);
+  });
+
+  test("截图在 multipart 请求里作为文件上传", async () => {
+    const { requests } = run(saveShortcut());
+    const upload = requests[0]!;
+    const meta = checkGlance(upload);
+    const form = new FormData();
+    form.set("meta", upload.body.meta as string);
+    form.set("image", upload.body.image as File);
+    const decoded = await new Response(form).formData();
+    expect(GlanceCreate.parse(JSON.parse(decoded.get("meta") as string))).toEqual(meta);
+    const image = decoded.get("image") as File;
+    expect(image).toBeInstanceOf(File);
+    expect(image).toMatchObject({ name: screenshot.name, type: screenshot.type, size: screenshot.size });
   });
 
   test("屏幕上没有文字时不带识字块", () => {
