@@ -32,6 +32,14 @@
 - **普通权限申请**（ADR 0049，H1-9）：执行器从 agent 汇报末尾的独立 `<lumio-permission>` 行提取权限，按等待人决定交回并保留理由。
 - **不做**：跨设备调用工具、上下文管理、模型路由；留给以后自研的 agent（作为执行器里的一种引擎接入）。
 
+## Job 实时活动与同轮介入（ADR 0069）
+
+- Job 2 通过登记头协商活动扩展。Runtime 用独立通道提交少量脱敏事件，以 Job、lease 和连续序号校验、补读和去重。活动与最终结果独立，活动流延迟不会重启任务或改变业务终态。
+- 心跳说明执行器连通，活动只呈现实际观察到的阶段和工具。普通活动在 Job 完成后保留 30 天，查询标明过期前缀。
+- Codex 与 Claude Code 的非交互 Job 可上报运行事件。显式互动仅在具备已验证引擎、凭据与 OS 隔离的 Runtime 提供。交互模式允许 Web 对一个正在等待的请求进行答复、批准或拒绝，Codex 支持同轮纠偏。调用与回执绑定原执行进程与轮次。
+- Runtime 管理员启用 macOS 交互执行时，用 `LUMIO_INTERACTIVE_JOB_ROOTS` 指定以冒号分隔的绝对项目根，并用 `LUMIO_JOB_CODEX_API_KEY` 或 `LUMIO_JOB_CLAUDE_API_KEY` 注入对应提供商 API 凭据。已验证的是 Codex 0.166.0 和 Claude Code 2.1.322。项目目录须在登记的根内。交互轮使用受限沙箱及独立的会话目录，阶段为全权限时须使用原非交互模式。
+- `lumio job watch <id>` 使用同一状态与事件接口。CLI 派出时可用 `lumio task continue <id> --interactive` 或 `lumio job submit --interactive` 请求交互，不能由定时例行任务启用。
+
 ## Runtime 版本与自动更新（ADR 0063，U1-0）
 
 - **期望版本对账**：Hub 为每台 Runtime 声明期望版本，默认等于 Hub 自己的版本（策略 `follow`；`manual` 时只显示落后）。期望版本只通过同步回复发给声明了 `self_update` 的 Runtime，由 Runtime 自己收敛；更新不是 Task 或 Job，Job 协议仍为 2。

@@ -19,16 +19,16 @@ export class NativeRpc {
   onEvent?: (method: string, params: Wire) => void;
   onRequest?: (method: string, id: string | number, params: Wire) => void;
   onExit?: () => void;
-  constructor(argv: string[], cwd: string, env: NodeJS.ProcessEnv) {
+  constructor(argv: string[], cwd: string, env: NodeJS.ProcessEnv, detached = true) {
     this.child = spawn(argv[0]!, argv.slice(1), {
       cwd,
       env,
       stdio: ["pipe", "pipe", "pipe"],
-      detached: true,
+      detached,
       shell: false,
     });
     this.child.stderr.on("data", () => {});
-    if (this.child.pid) this.scope = new NativeProcessScope(this.child.pid);
+    if (detached && this.child.pid) this.scope = new NativeProcessScope(this.child.pid);
     createInterface({ input: this.child.stdout }).on("line", (line) => {
       if (line.length > 4 * 1024 * 1024) {
         this.child.kill();
@@ -97,6 +97,11 @@ export class NativeRpc {
     this.send({ method: "initialized", params: {} });
   }
   async stop(): Promise<boolean> {
-    return this.scope ? await this.scope.stop() : false;
+    if (this.scope) return this.scope.stop();
+    if (this.child.exitCode !== null || this.child.signalCode !== null) return true;
+    const exited = new Promise<boolean>(resolve => this.child.once("close", () => resolve(true)));
+    this.child.kill();
+    const timer = AbortSignal.timeout(3000);
+    return Promise.race([exited, new Promise<boolean>(resolve => timer.addEventListener("abort", () => resolve(false), { once: true }))]);
   }
 }

@@ -1,4 +1,4 @@
-import { JobResult, RuntimeAck, RuntimeHeartbeat, RuntimeInfo, RuntimeRegistration, RuntimeSync, type Job } from "@lumio/schema";
+import { JOB_ACTIVITY_FEATURE, JobResult, RuntimeAck, RuntimeHeartbeat, RuntimeInfo, RuntimeRegistration, RuntimeSync, type Job } from "@lumio/schema";
 import { Jobs, type RoutineHooks } from "./jobs.ts";
 import type { authorize } from "./authorize.ts";
 import { HubError } from "./errors.ts";
@@ -19,7 +19,10 @@ export async function handleRuntime(request: Request, operation: "runtime.regist
     if (operation === "runtime.register") {
       const registration = RuntimeRegistration.safeParse(body);
       if (!registration.success) throw new HubError("INVALID", { key: "runtime.invalid_runtime_registration", args: [] });
-      return Response.json(store.registerRuntime(identity.actor.id, registration.data, now));
+      const supported = request.headers.get("X-Lumio-Features")?.split(",").some(feature => feature.trim() === JOB_ACTIVITY_FEATURE);
+      const info = store.registerRuntime(identity.actor.id, registration.data, now);
+      store.jobActivity.forget(identity.actor.id);
+      return Response.json(info, supported ? { headers: { "X-Lumio-Features": JOB_ACTIVITY_FEATURE } } : undefined);
     }
     const jobs = new Jobs(store, routines);
     if (operation === "runtime.ack") {
@@ -38,6 +41,7 @@ export async function handleRuntime(request: Request, operation: "runtime.regist
       }
       store.db.transaction(() => {
         jobs.result(identity.actor.id, result.data);
+        store.jobActivity.seal(result.data.job);
         if (onResult) onResult(jobs.get(result.data.job));
       })();
       return Response.json(result.data);

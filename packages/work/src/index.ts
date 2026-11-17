@@ -61,7 +61,7 @@ export interface WorkContext {
   id(prefix: (typeof ID_PREFIXES)[keyof typeof ID_PREFIXES]): string;
   localRuntime?: string;
   validateTarget?(target: string, source?: TargetSource): void;
-  dispatch?(task: WorkTask, input: string, round: number, to?: string, previous?: string | null, roundGrant?: StagePermissions): Job;
+  dispatch?(task: WorkTask, input: string, round: number, to?: string, previous?: string | null, roundGrant?: StagePermissions, interaction?: "interactive"): Job;
   cancel?(task: string): string | void;
   agentsForJobs?(jobs: string[]): Map<string, string>;
 }
@@ -77,7 +77,7 @@ function planPrefix(plan: HandoffPlan, stage: string): string[] {
 
 type GraphStep = { turn: Turn; plan: PlanRun; outcome?: "done"; dispatched?: DispatchedRound };
 type CheckpointDecision = { stage: string; action: "continue" | "send_back" | "finish" | "hold"; by: string };
-type GraphDispatch = { to?: string; approvedSource?: TargetSource; only?: string; comment?: string };
+type GraphDispatch = { to?: string; approvedSource?: TargetSource; only?: string; comment?: string; interaction?: "interactive" };
 
 function requestsChanges(report?: string): boolean {
   return report?.split(/\r?\n/).some(line => line.trim() === "<lumio-outcome>changes</lumio-outcome>") ?? false;
@@ -331,7 +331,7 @@ export class WorkService {
 
   /** The same safeguards apply to initial delegation, retries and automatic plan handoffs. */
   private startRound(task: WorkTask, actor: string, at: string, options: {
-    to?: string; comment?: string; automatic?: boolean; approvedSource?: TargetSource; previous?: string | null;
+    to?: string; comment?: string; automatic?: boolean; approvedSource?: TargetSource; previous?: string | null; interaction?: "interactive";
   }): { turn: Turn; dispatched?: DispatchedRound } {
     const { to, comment, automatic, approvedSource, previous } = options;
     this.checkDispatch(task, automatic);
@@ -347,7 +347,7 @@ export class WorkService {
     const snapshot = this.snapshot(task, prior), round = (latest?.round ?? 0) + 1;
     const pending = task.turn.holder === "human" ? this.store.pendingGrant(task.id) : undefined;
     const grant = pending && pending.stage === task.plan?.stage && previous !== null && prior?.job === pending.job ? pending : undefined;
-    const job = this.context.dispatch(task, snapshot, round, target, previous, grant?.permissions);
+    const job = this.context.dispatch(task, snapshot, round, target, previous, grant?.permissions, options.interaction);
     this.store.putExecution(WorkExecution.parse({ task: task.id, job: job.spec.id, round, input_revision: task.revision,
       input_snapshot: snapshot, created: at, applied: false }));
     if (grant) this.store.putPendingGrant(task.id);
@@ -492,7 +492,7 @@ export class WorkService {
           const branchRun = graphProgress({ ...run, rounds: run.rounds + branches.length - active.length }, done, stage.id);
           const result = this.startRound({ ...task, plan: branchRun }, actor, at, { automatic: true,
             previous: attempts.get(stage.id)?.branch.job ?? null,
-            ...(stage.id === first.id ? { to: options.start?.to, approvedSource: options.start?.approvedSource } : {}) });
+            ...(stage.id === first.id ? { to: options.start?.to, approvedSource: options.start?.approvedSource, interaction: options.start?.interaction } : {}) });
           const branch = workingBranches(result.turn)[0]!;
           branches.push(branch);
           dispatched ??= result.dispatched;
@@ -746,7 +746,7 @@ export class WorkService {
     return { kind: "task", task: updated };
   }
 
-  private dispatchTask(task: WorkTask, { to, comment }: { to?: string; comment?: string },
+  private dispatchTask(task: WorkTask, { to, comment, interaction }: { to?: string; comment?: string; interaction?: "interactive" },
     actor: string, at: string, caller: WorkCaller, approvedSource?: TargetSource): WorkCommandResult {
     if (caller.role === "human" && to === undefined && !task.plan && task.project && task.turn.reason !== "answer" && !this.store.pendingGrant(task.id)) {
       const id = this.project(task.project).default_plan;
@@ -765,13 +765,13 @@ export class WorkService {
       if (this.planStage(task)?.kind !== "agent") throw new WorkError("CONFLICT", { key: "work.plan_agent", args: [] });
       const retry = run.rounds > 0 && task.turn.stage === run.stage && task.turn.reason !== "review";
       const next = this.advanceGraph(task, run, completedStages(run), [], actor, at, { prefer: run.stage,
-        start: { to, comment, approvedSource, only: retry ? run.stage : undefined } });
+        start: { to, comment, interaction, approvedSource, only: retry ? run.stage : undefined } });
       const updated = this.recordTransition(task, next, actor, at, next.plan);
       return next.dispatched ? { kind: "job", ...next.dispatched } : { kind: "task", task: updated };
     }
     let started: ReturnType<WorkService["startRound"]>;
     try {
-      started = this.store.transaction(() => this.startRound(task, actor, at, { to, comment, approvedSource }));
+      started = this.store.transaction(() => this.startRound(task, actor, at, { to, comment, interaction, approvedSource }));
     } catch (cause) {
       if (!(cause instanceof PlanDispatchUnavailable)) throw cause;
       if (task.plan) started = { turn: this.failedPlanTurn(task, task.plan.stage, at, cause, cause.code) };

@@ -1696,3 +1696,25 @@ button.inbox-title:hover { text-decoration: underline; }
 .material-glance-text .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40ch; }
 .material-glance-text .field-hint { margin: 0; }
 .knowledge-ai-field + .knowledge-ai-field { margin-top: 16px; }
+
+.job-activity-timeline {
+  display: grid;
+  gap: .35rem;
+  padding: 0;
+  list-style: none;
+}
+.job-activity-event {
+  display: grid;
+  grid-template-columns: minmax(5rem, auto) 1fr;
+  gap: .7rem;
+  align-items: baseline;
+  overflow-wrap: anywhere;
+}
+.job-activity-event > time {
+  font-size: .84em;
+  font-variant-numeric: tabular-nums;
+}
+.job-activity-request { margin-block: .5rem 1rem; }
+.job-activity-request > div { min-width: 0; }
+.job-activity-request fieldset { min-width: 0; }
+.job-activity-badge { overflow-wrap: anywhere; }

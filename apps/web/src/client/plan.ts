@@ -100,6 +100,7 @@ export function permissionSummary(stage: PlanStage): string {
   const access = stage.access ?? "write";
   const parts = [access === "read" ? t("read only") : access === "full" ? t("full access, no sandbox") : t("edits working directory")];
   if (stage.git) parts.push(t("Git writes"));
+  if (stage.interaction) parts.push(t("Interactive round"));
   if (stage.secrets?.length) parts.push(t("secrets: {0}", stage.secrets.join(", ")));
   return parts.join(t(", "));
 }
@@ -125,12 +126,12 @@ export const roleLabel = (role: Role) => ({
 /** 编辑中的一步。字符串字段直接对应输入框。 */
 export interface DraftStage {
   kind: "agent" | "checkpoint"; id: string; agent: string; instruction: string; back_to: string; prompt: string;
-  access: StageAccess; git: boolean; secrets: string; before: string; after_hook: string;
+  access: StageAccess; interaction?: boolean; git: boolean; secrets: string; before: string; after_hook: string;
   before_timeout?: number; after_timeout?: number;
   /** 无法按行表示时保留原来的 after。 */
   after?: string[];
 }
-const blank = (kind: DraftStage["kind"], id: string): DraftStage => ({ kind, id, agent: "", instruction: "", back_to: "", prompt: "", access: "write", git: false, secrets: "", before: "", after_hook: "" });
+const blank = (kind: DraftStage["kind"], id: string): DraftStage => ({ kind, id, agent: "", instruction: "", back_to: "", prompt: "", access: "write", git: false, interaction: false, secrets: "", before: "", after_hook: "" });
 
 export function roleDraft(role: Role, id: string, agent: string, backTo = ""): DraftStage {
   if (role === "trial") return { ...blank("checkpoint", id), prompt: t("Trial passed? Continue to merge.") };
@@ -145,7 +146,7 @@ export function toDraft(stage: PlanStage, keepAfter = false): DraftStage {
   const after = keepAfter && stage.after ? { after: [...stage.after] } : {};
   if (stage.kind === "checkpoint") return { ...blank("checkpoint", stage.id), prompt: stage.prompt, ...after };
   return { ...blank("agent", stage.id), agent: stage.agent, instruction: stage.instruction, back_to: stage.back_to ?? "",
-    access: stage.access ?? "write", git: stage.git ?? false, secrets: (stage.secrets ?? []).join(", "),
+    access: stage.access ?? "write", git: stage.git ?? false, interaction: stage.interaction === "interactive", secrets: (stage.secrets ?? []).join(", "),
     before: stage.hooks?.before ? formatArgv(stage.hooks.before.argv) : "", after_hook: stage.hooks?.after ? formatArgv(stage.hooks.after.argv) : "",
     before_timeout: stage.hooks?.before?.timeout_minutes, after_timeout: stage.hooks?.after?.timeout_minutes, ...after };
 }
@@ -169,6 +170,7 @@ export function draftPlan(rows: readonly (readonly DraftStage[])[], options: { m
     stages.push({ kind: "agent", id, agent: stage.agent.trim(), instruction: stage.instruction.trim(),
       ...(stage.back_to ? { back_to: stage.back_to } : {}), ...edge,
       ...(stage.access !== "write" ? { access: stage.access } : {}), ...(stage.git ? { git: true } : {}),
+      ...(stage.interaction ? { interaction: "interactive" as const } : {}),
       ...(secrets.length ? { secrets } : {}),
       ...(before || afterHook ? { hooks: { ...(before ? { before } : {}), ...(afterHook ? { after: afterHook } : {}) } } : {}) });
   }
@@ -210,7 +212,7 @@ function stageItem(stage: PlanStage, state: StageState): HTMLElement {
     h("p", { class: "plan-step-sub" }, stage.kind === "agent"
       ? [stage.instruction.split("\n")[0]!.slice(0, 140), stage.back_to ? t(" · may send back to {0}", stage.back_to) : ""].join("")
       : t("Checkpoint · you decide")),
-    stage.kind === "agent" && (stage.access || stage.git || stage.secrets || stage.hooks)
+    stage.kind === "agent" && (stage.access || stage.git || stage.secrets || stage.hooks || stage.interaction)
       ? h("p", { class: "plan-step-perm" }, permissionSummary(stage), stage.hooks?.before ? t(" · before: {0}", hookText(stage.hooks.before)) : "",
         stage.hooks?.after ? t(" · after: {0}", hookText(stage.hooks.after)) : "") : null);
 }
@@ -323,6 +325,8 @@ export async function openPlanEditor(client: Client, task: WorkTask, saved: () =
       back.addEventListener("change", () => set("back_to", back.value));
       const access = select(`stage-${n}-access`, [["read", t("Read only")], ["write", t("Edit the working directory")], ["full", t("Full access (no sandbox)")]], stage.access);
       access.addEventListener("change", () => { set("access", access.value as StageAccess); refreshWarn(); });
+      const interactive = h("input", { type: "checkbox", name: `stage-${n}-interactive`, checked: stage.interaction });
+      interactive.addEventListener("change", () => set("interaction", interactive.checked));
       const git = h("input", { type: "checkbox", name: `stage-${n}-git`, checked: stage.git });
       git.addEventListener("change", () => { set("git", git.checked); refreshWarn(); });
       const secrets = h("input", { name: `stage-${n}-secrets`, value: stage.secrets, placeholder: t("e.g. github-merge"), autocomplete: "off", spellcheck: "false" });
@@ -331,11 +335,12 @@ export async function openPlanEditor(client: Client, task: WorkTask, saved: () =
       before.addEventListener("input", () => set("before", before.value));
       const afterHook = h("input", { name: `stage-${n}-after`, value: stage.after_hook, placeholder: t("e.g. bun run check"), autocomplete: "off", spellcheck: "false", class: "mono" });
       afterHook.addEventListener("input", () => set("after_hook", afterHook.value));
-      const advanced = !!(stage.access !== "write" || stage.git || stage.secrets || stage.before || stage.after_hook);
+      const advanced = !!(stage.interaction || stage.access !== "write" || stage.git || stage.secrets || stage.before || stage.after_hook);
       const details = h("details", { class: "plan-perm", open: advanced },
         h("summary", {}, t("Permissions and hooks"), h("span", { class: "muted" }, " · ", permissionSummary(draftPlanStage(stage)))),
         h("div", { class: "plan-perm-grid" },
           field(t("Access"), access),
+          h("label", { class: "check-field" }, interactive, t("Allow questions and approvals during this round")),
           h("label", { class: "check-field" }, git, h("span", {}, t("Allow Git writes (fetch, commit, push)"))),
           field(t("Secrets for this step"), secrets, t("Comma-separated names. Only this step receives them.")),
           field(t("Before the agent starts"), before, t("Optional command. If it fails, the step doesn't start and it's your turn.")),
@@ -467,5 +472,6 @@ export async function openPlanEditor(client: Client, task: WorkTask, saved: () =
 function draftPlanStage(stage: DraftStage): PlanStage {
   return { kind: "agent", id: stage.id || "x", agent: stage.agent || "x", instruction: "x",
     ...(stage.access !== "write" ? { access: stage.access } : {}), ...(stage.git ? { git: true } : {}),
+    ...(stage.interaction ? { interaction: "interactive" as const } : {}),
     ...(stage.secrets.trim() ? { secrets: stage.secrets.split(/[,\s]+/).filter(Boolean) } : {}) };
 }

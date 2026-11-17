@@ -34,6 +34,7 @@ import { ExecutionRoutines } from "@lumio/execution";
 import type { HubConfig } from "./config.ts";
 import type { HubStore, Identity } from "./store.ts";
 import { Jobs } from "./jobs.ts";
+import { JobActivity, checkJobInteraction } from "./job-activity.ts";
 import { HubError } from "./errors.ts";
 import { configuredModel } from "./assistant-model.ts";
 import type { AssistantConfiguration } from "./assistant-config.ts";
@@ -67,6 +68,7 @@ export class BusinessModules {
   readonly funAsr: FunAsr;
   readonly knowledge?: KnowledgeService;
   readonly notifications: Notifications;
+  readonly jobActivity: JobActivity;
   readonly notices: Notices;
   readonly explorations: Explorations;
   private readonly watchdog: Watchdog;
@@ -115,6 +117,7 @@ export class BusinessModules {
       },
     });
     const notifications = this.notifications = new Notifications(store, config.stateDir, { fetch: options.pushFetch, now, subject: config.publicUrl, signal: this.signal });
+    this.jobActivity = new JobActivity(store, notifications);
     this.workStore = new class extends SqliteWorkStore {
       override putTurn(change: import("@lumio/schema").TaskTurnChange): void {
         super.putTurn(change);
@@ -134,7 +137,7 @@ export class BusinessModules {
           from: change.from.stage, stage: change.to.stage, turn: change.to, checkpoint }), "allow", plan.approved.proposal, "applied");
       },
       validateTarget: (target, source) => { validateTarget(this.store, config.localRuntime, target, now(), source); },
-      dispatch: (task, input, round, to, previous, grant) => this.dispatch(task, input, round, to, now(), previous, grant),
+      dispatch: (task, input, round, to, previous, grant, interaction) => this.dispatch(task, input, round, to, now(), previous, grant, interaction),
       agentsForJobs: ids => {
         const jobs = store.executionStore.agentJobs(ids);
         if (!jobs.length) return new Map();
@@ -202,6 +205,7 @@ export class BusinessModules {
     this.reconcile();
     this.timer = setInterval(() => {
       try { this.reconcile(); } catch { /* Persisted pending results remain for the next pass. */ }
+      try { this.jobActivity.sweep(now()); } catch { /* Retry the next interval. */ }
       try { this.native.usage.tick(); } catch { /* The next tick can retry quota collection. */ }
       void this.notifications.drain().catch(() => {});
       void this.notices.drain().catch(() => { /* Pending sources are retained for the next pass. */ });
@@ -224,7 +228,7 @@ export class BusinessModules {
     this.assistantStore.putCall({ ...call, change: { ...change, undone: change.undone ?? { at: new Date().toISOString(), by: identity.actor.id } } });
     return outcome.result as WorkCommandResult;
   }
-  private dispatch(task: WorkTask, input: string, round: number, to: string | undefined, now: Date, previousJob?: string | null, grant?: AgentRun["permissions"]) {
+  private dispatch(task: WorkTask, input: string, round: number, to: string | undefined, now: Date, previousJob?: string | null, grant?: AgentRun["permissions"], interaction?: AgentRun["interaction"]) {
     const target = AgentTarget.safeParse(to);
     if (!target.success) throw new HubError("INVALID", { key: "modules.specify_an_agent_e_g_pi_server", args: [] });
     const stage = task.plan?.plan.stages.find(stage => stage.id === task.plan?.stage);
@@ -245,7 +249,12 @@ export class BusinessModules {
     const permissions = grant ? mergeStageGrant(base, grant) : base;
     const options: Pick<AgentRun, "permissions" | "hooks"> = permissions
       ? stageDispatchOptions({ ...permissions, hooks: agentStage?.hooks }, runtime, engine) : {};
-    const roundScope = roundPermissions(engine.sandbox, options.permissions, restrictedRound);
+    const mode = interaction ?? agentStage?.interaction;
+    if (mode && !checkJobInteraction(this.store, runtime.actor, { kind: "agent", engine: engine.name, prompt: input, interaction: mode, ...options }, now)) {
+      throw new PlanDispatchUnavailable({ key: "jobs.interaction_unavailable", args: [] });
+    }
+    const scope = mode ? this.store.jobActivity.engines(runtime.actor).find(capability => capability.engine === engine.name)?.sandbox ?? engine.sandbox : engine.sandbox;
+    const roundScope = roundPermissions(scope, options.permissions, restrictedRound);
     const requestHint = msg(runtime.registration.features?.includes("permission_request") && runtime.registration.features.includes("stage_permissions")
       ? "modules.round_permission_request" : "modules.round_permission_question");
     const workdir = task.workdir ?? (task.project ? this.work.project(task.project).workdir : undefined) ?? "~";
@@ -259,13 +268,13 @@ export class BusinessModules {
       throw new PlanDispatchUnavailable({ key: "work.permission_context_changed", args: [] });
     }
     let session: AgentRun["session"];
-    if (previous?.spec.run.kind === "agent" && previous.spec.run.engine === engine.name && previous.spec.runtime === runtime.actor && previous.result?.session_id) {
+    if (previous?.spec.run.kind === "agent" && previous.spec.run.engine === engine.name && previous.spec.run.interaction === mode && previous.spec.runtime === runtime.actor && previous.result?.session_id) {
       session = { id: previous.result.session_id, resume: true };
     } else if (engine.name === "pi" || engine.name === "claude-code") session = { id: randomUUID(), resume: false };
     const prefix = stage?.kind === "agent" ? `Lumio stage ID: ${stage.id}\n` : "";
     return jobs.create({ runtime: runtime.actor, workdir, timeout_seconds: (task.timeout_minutes ?? 120) * 60,
       ...(task.gpus ? { gpus: task.gpus } : {}), source: { task: task.id, round, ...(previous ? { previous: previous.spec.id } : {}) },
-      run: { kind: "agent", engine: engine.name, ...(task.model ? { model: task.model } : {}), ...(session ? { session } : {}), ...options,
+      run: { kind: "agent", engine: engine.name, ...(mode ? { interaction: mode } : {}), ...(task.model ? { model: task.model } : {}), ...(session ? { session } : {}), ...options,
         prompt: prefix + msg("modules.you_are_completing_round_of_a_user_task_work_only_in_the_working_dir", round, roundScope, input, requestHint) },
     }, now);
   }

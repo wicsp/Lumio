@@ -51,6 +51,11 @@ export const ROUTES = [
   { operation: "runtime.remove", method: "DELETE", pattern: /^\/v2\/execution\/runtimes\/([^/]+)$/, path: "/v2/execution/runtimes/<name>" },
   { operation: "runtime.privileged.status", method: "GET", pattern: /^\/v1\/runtime\/privileged\/([^/]+)$/, path: "/v1/runtime/privileged/<id>" },
   { operation: "runtime.privileged.report", method: "POST", pattern: /^\/v1\/runtime\/privileged$/, path: "/v1/runtime/privileged" },
+  { operation: "runtime.job-activity", method: "POST", pattern: /^\/v1\/runtime\/job-activity\/sync$/, path: "/v1/runtime/job-activity/sync" },
+  { operation: "job.activity.read", method: "GET", pattern: /^\/v2\/execution\/activity\/capabilities$/, path: "/v2/execution/activity/capabilities" },
+  { operation: "job.activity.attention", method: "GET", pattern: /^\/v2\/execution\/attention$/, path: "/v2/execution/attention" },
+  { operation: "job.activity.read", method: "GET", pattern: /^\/v2\/execution\/jobs\/(job_[0-9A-HJKMNP-TV-Z]{26})\/(live|events)$/, path: "/v2/execution/jobs/<job>/activity" },
+  { operation: "job.activity.actions", method: "POST", pattern: /^\/v2\/execution\/jobs\/(job_[0-9A-HJKMNP-TV-Z]{26})\/actions$/, path: "/v2/execution/jobs/<job>/actions" },
   { operation: "job.submit", method: "POST", pattern: /^\/v2\/execution\/jobs$/, path: "/v2/execution/jobs" },
   { operation: "job.cancel", method: "POST", pattern: /^\/v2\/execution\/jobs\/([^/]+)\/cancel$/, path: "/v2/execution/jobs/<job>/cancel" },
   { operation: "runtime.ack", method: "POST", pattern: /^\/v1\/runtime\/ack$/, path: "/v1/runtime/ack" },
@@ -205,6 +210,19 @@ async function startHubInstance(config: HubConfig, options: {
           if (route.operation === "runtime.privileged.status" || route.operation === "runtime.privileged.report") {
             const response = await handlePrivileged(request, route.operation, route.pattern.exec(url.pathname)?.[1], identity!, store, decide, privileged);
             status = response.status; return response;
+          }
+          if (route.operation === "runtime.job-activity" || route.operation === "job.activity.attention"
+            || route.operation === "job.activity.read" || route.operation === "job.activity.actions") {
+            const decision = decide(identity!.actor, { operation: route.operation });
+            if (decision.result !== "allow") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] });
+            const match = route.pattern.exec(url.pathname);
+            const kind = url.pathname === "/v2/execution/activity/capabilities" ? "capabilities" : route.operation === "job.activity.attention" ? "attention" : route.operation === "job.activity.actions" ? "actions"
+              : match?.[2] === "events" ? "events" : "live";
+            const response = route.operation === "runtime.job-activity"
+              ? await modules!.jobActivity.runtime(request, identity!, now())
+              : await modules!.jobActivity.human(request, identity!, match?.[1], kind, now());
+            status = response.status;
+            return response;
           }
           if (route.operation === "job.submit" || route.operation === "job.cancel") {
             const response = await handleJobs(request, route.operation, route.pattern.exec(url.pathname)?.[1], identity!, store, decide, (options.now ?? (() => new Date()))());

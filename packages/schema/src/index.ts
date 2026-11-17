@@ -11,6 +11,8 @@ export * from "./common.ts";
 export * from "./knowledge-graph.ts";
 export * from "./entities.ts";
 export * from "./job.ts";
+export * from "./job-activity.ts";
+import { JobActivityEvent, JobActivityPage, JobActivitySync, JobActivityAck, JobLiveView, JobAction, JobActionReceipt, JobAttention, JobActivityCapabilities } from "./job-activity.ts";
 export * from "./runtime-update.ts";
 export * from "./query.ts";
 export * from "./actor.ts";
@@ -106,6 +108,15 @@ export const CONTRACTS = {
   job: Job,
   "job-spec": JobSpec,
   "job-result": JobResult,
+  "job-activity-event": JobActivityEvent,
+  "job-activity-page": JobActivityPage,
+  "job-activity-sync": JobActivitySync,
+  "job-activity-ack": JobActivityAck,
+  "job-live-view": JobLiveView,
+  "job-action": JobAction,
+  "job-action-receipt": JobActionReceipt,
+  "job-attention": JobAttention,
+  "job-activity-capabilities": JobActivityCapabilities,
   "runtime-registration": RuntimeRegistration,
   "runtime-registered": RuntimeRegistered,
   "runtime-info": RuntimeInfo,

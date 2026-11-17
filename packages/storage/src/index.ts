@@ -14,3 +14,5 @@ export { workSystemActor } from "./work-system-actor.ts";
 export * from "./ai.ts";
 export * from "./speech.ts";
 export * from "./runtime-updates.ts";
+
+export { SqliteJobActivity } from "./job-activity.ts";

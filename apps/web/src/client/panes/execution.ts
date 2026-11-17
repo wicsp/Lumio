@@ -16,6 +16,7 @@ import { renderMarkdown } from "../utils/markdown.ts";
 import type { Navigate } from "../navigation.ts";
 import { editRoutine } from "./routine-editor.ts";
 import { t } from "../i18n.ts";
+import { jobActivityPanel } from "../job-activity.ts";
 
 type Mode = "jobs" | "routines" | "devices";
 const LIVE = ["queued", "assigned", "running"];
@@ -272,6 +273,7 @@ export class ExecutionPane {
         h("dl", { class: "meta-grid" }, ...meta.map(([k, v]) => h("div", {}, h("dt", {}, k), h("dd", {}, v)))),
         job.spec.run.kind === "command" && h("section", { class: "section" }, h("div", { class: "section-head" }, h("h3", {}, t("Command"))),
           h("pre", { class: "code-block" }, job.spec.run.argv.map(arg => JSON.stringify(arg)).join(" "))),
+        jobActivityPanel(this.client, job.spec.id, job.spec.workdir, job.spec.run.kind === "agent" ? job.spec.run.engine : t("Command")),
         reportSection,
         h("section", { class: "section" }, h("div", { class: "section-head" }, h("h3", {}, t("Files and logs")), h("div", { class: "detail-actions" }, h("label", { class: "check" }, includePrivate, t("Include private files")))), artifacts)));
       void readArtifacts();
