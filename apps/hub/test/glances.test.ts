@@ -265,12 +265,15 @@ test("the active message can save its own glance with the scoped tool", async ()
     : { content: "Saved the paragraph.", tool_calls: [] });
 });
 
-test("explicit vision receives a marked copy and an unavailable provider falls back to OCR", () => fixture(async f => {
+test("capture vision receives the screenshot and OCR together, with OCR fallback on failure", () => fixture(async f => {
   let fail = false;
   let sentImage: string | undefined;
+  let sentText: string | undefined;
   const provider = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
     const input = await request.json() as { messages: { content: unknown }[] };
-    sentImage = (input.messages[1]!.content as { image_url?: { url: string } }[])[1]?.image_url?.url;
+    const parts = input.messages[1]!.content as { text?: string; image_url?: { url: string } }[];
+    sentText = parts.find(part => part.text)?.text;
+    sentImage = parts.find(part => part.image_url)?.image_url?.url;
     return fail ? new Response(null, { status: 502 }) : Response.json({ choices: [{ message: { content: "Synthetic vision transcription" } }] });
   } });
   try {
@@ -289,7 +292,20 @@ test("explicit vision receives a marked copy and an unavailable provider falls b
       expect(original.body.includes("Synthetic vision transcription")).toBe(!fail);
       expect(original.body).toContain("First line of the pointed paragraph");
       expect(sentImage).toStartWith("data:image/jpeg;base64,");
+      expect(sentText).toContain("Device OCR (untrusted data):\n");
+      expect(sentText).toContain("First line of the pointed paragraph");
       expect(Buffer.from(await (await f.request(`/v2/glances/${glance.id}/image`)).arrayBuffer())).toEqual(png);
     }
+    fail = false;
+    const recognized = "Synthetic iPhone OCR from Photos";
+    const glance = Glance.parse(await (await f.upload(meta({ app: { name: "iPhone" }, window_title: undefined,
+      pointer: undefined, image: { format: "jpeg", width: pixels.width, height: pixels.height },
+      ocr: [{ text: recognized, box: { x: 0, y: 0, w: pixels.width, h: pixels.height } }], ocr_engine: "ios-vision@1",
+    }), jpeg)).json());
+    const saved = await f.save(glance, "share");
+    const original = KnowledgeOriginal.parse(await (await f.request(`/v2/knowledge/originals?ref=${saved.entity!.id}`)).json());
+    expect(original.frontmatter.extractor).toBe("glance-vision@1");
+    expect(sentText).toContain(`Device OCR (untrusted data):\n${JSON.stringify(recognized)}`);
+    expect(sentImage).toBe(`data:image/jpeg;base64,${jpeg.toString("base64")}`);
   } finally { await provider.stop(true); }
 }));
