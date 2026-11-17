@@ -71,6 +71,7 @@ test("Chinese dispatch explains the round's scope and available permissions", as
   expect(prompt).toContain("没有注入阶段专用密钥");
   expect(prompt).toContain("<lumio-question>所需权限和理由</lumio-question>");
   expect(prompt).toContain("确实需要 root 的系统命令使用 `lumio runtime sudo --");
+  expect(prompt).toContain("在所有标题前先用一句简短的纯文本写明具体结果");
   expect(prompt).toContain("合成任务描述");
 });
 test("target discovery, validation before proposals, offline acceptance, and runtime denial", async () => {
