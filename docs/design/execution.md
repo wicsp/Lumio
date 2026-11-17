@@ -38,6 +38,7 @@
 - 心跳说明执行器连通，活动只呈现实际观察到的阶段和工具。普通活动在 Job 完成后保留 30 天，查询标明过期前缀。
 - Codex、Claude Code 与 Pi 1.5.0 的非交互 Job 可上报运行事件。显式互动仅在具备已验证引擎、凭据与 OS 隔离的 Runtime 提供。交互模式允许 Web 对一个正在等待的请求进行答复、批准或拒绝，Codex 支持同轮纠偏。调用与回执绑定原执行进程与轮次。
 - 复用人类同机 Codex 登录的 Job 默认使用任务或项目指定的具体工作目录。Runtime 管理员可用 `LUMIO_INTERACTIVE_JOB_ROOTS` 进一步限制这些目录。仅用 API 密钥的 Codex Job、Claude Code 和 Pi 交互 Job 继续由该变量指定允许的项目根。已验证版本是 macOS 上的 Codex 0.166.0、Claude Code 2.1.322 和 Pi 1.5.0。交互轮使用受限沙箱及独立的会话目录，阶段为全权限时须使用原非交互模式。
+- macOS Codex 交互轮由 Runtime 的 Seatbelt 执行隔离。目录内操作直接运行，Git 元数据默认只读。需要创建 worktree 的开发轮从仓库根目录派出并授予 Git 权限，worktree 建在授权的工作目录内。
 - 显式派出 Codex 交互轮次的人可以复用自己在同一 Runtime 上已登录的 AI 连接。唯一可用的连接自动选用，多连接时由人选择。Hub 保存该轮的授权快照，Runtime 通过协商后的现有同步接口取到快照，沿用原生通道管理的登录和刷新。注销、重新登录、切换连接或认证代次后，旧轮不得交付新决定或恢复会话。无可用连接时仍支持管理员已明确配置的 `LUMIO_JOB_CODEX_API_KEY`。Claude Agent SDK 路径沿用 `LUMIO_JOB_CLAUDE_API_KEY`。
 - Pi 普通轮次从 JSON 事件读取实时工具进度和最终回复。交互轮次使用独立会话与执行器配置的目录许可，通过 Pi RPC 同轮提问，并在 Shell 或文件修改前按次请人决定。执行器通过 `LUMIO_JOB_PI_MODEL` 选择 `提供商/模型`，初期支持 OpenAI、Anthropic、OpenRouter 和 Google。可沿用执行器上的提供商环境密钥，也可用 `LUMIO_JOB_PI_API_KEY` 指定。交互进程只加载 Lumio 自带的扩展，提供商密钥不传给 Shell 工具。
 - `lumio job watch <id>` 使用同一状态与事件接口。CLI 派出时可用 `lumio task continue <id> --interactive` 或 `lumio job submit --interactive` 请求交互，不能由定时例行任务启用。
