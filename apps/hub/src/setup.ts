@@ -169,6 +169,7 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
     ...(config.publicUrl ? { LUMIO_PUBLIC_URL: config.publicUrl } : {}),
   };
   if (!config.publicUrl) delete serviceEnv.LUMIO_PUBLIC_URL;
+  if (env.LUMIO_IMAGE_HOSTING_PRIVATE_ORIGINS) Object.assign(serviceEnv, { LUMIO_IMAGE_HOSTING_PRIVATE_ORIGINS: env.LUMIO_IMAGE_HOSTING_PRIVATE_ORIGINS });
   if (env.LUMIO_TRUSTED_PROXY) Object.assign(serviceEnv, { LUMIO_TRUSTED_PROXY: env.LUMIO_TRUSTED_PROXY });
   await privateFile(envFile, environmentText(serviceEnv));
   const diagnostics = { platform, uid: options.uid ?? process.getuid?.() ?? -1, run, find, fetch: fetcher };

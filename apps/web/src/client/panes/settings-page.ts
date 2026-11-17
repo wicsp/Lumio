@@ -1,3 +1,4 @@
+import { imageHostingSettings } from "../image-hosting-settings.ts";
 /**
  * 设置页（ADR 0028）：二级菜单。桌面左侧是分类，右侧是当前分类的内容；
  * 窄屏先显示分类列表，点进分类后用返回键回到列表。地址是 `#settings/<分类>`。
@@ -157,9 +158,13 @@ export class SettingsPane {
         return { element: page(this.group("", t("Agents outside Lumio that can read your tasks and notes and make small changes. They can't mark tasks done, delegate, approve, or read private notes."), agents.element)),
           dispose: () => agents.dispose() };
       }
-      case "data":
-        return { element: page(this.group(t("Recently deleted"), t("Deleted tasks, projects, notes and conversations stay here for 30 days."), h("div", { class: "set-rows" },
-          h("a", { class: "set-row set-link", href: "#trash" }, icon("trash", "icon set-row-icon"), h("span", { class: "set-label" }, t("Open Recently deleted")), icon("chevron"))))) };
+      case "data": {
+        const images = imageHostingSettings(this.session.client);
+        return { element: page(this.group(t("Image hosting"), t("Upload note images to your storage and show images from approved HTTPS origins."), images.element),
+          this.group(t("Recently deleted"), t("Deleted tasks, projects, notes and conversations stay here for 30 days."), h("div", { class: "set-rows" },
+            h("a", { class: "set-row set-link", href: "#trash" }, icon("trash", "icon set-row-icon"), h("span", { class: "set-label" }, t("Open Recently deleted")), icon("chevron"))))),
+          dispose: images.dispose };
+      }
       case "about": {
         const version = h("span", { class: "set-value mono" }, "…");
         void this.hubHealth().then(health => { if (this.active) version.textContent = "version" in health && health.version ? health.version : "—"; });

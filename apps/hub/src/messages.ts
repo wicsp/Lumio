@@ -4,6 +4,16 @@ const locale = new AsyncLocalStorage<Language>();
 export const withLanguage = <T>(lang: Language, action: () => T): T => locale.run(lang, action);
 
 export const en = {
+  "image-hosting.settings-read": "Could not read the image hosting settings.",
+  "image-hosting.settings-write": "Could not save the image hosting settings.",
+  "image-hosting.settings-invalid": "Check the image hosting endpoint and settings.",
+  "image-hosting.conflict": "Image hosting settings changed. Reload and try again.",
+  "image-hosting.missing-credentials": "Enter the credentials for this image host.",
+  "image-hosting.bad-url": "The image address must be a stable HTTPS link on an allowed preview origin.",
+  "image-hosting.disabled": "Configure an upload destination in Image hosting settings first.",
+  "image-hosting.note": "Only an editable public note can receive an image.",
+  "image-hosting.upload-invalid": "Choose one PNG, JPEG, GIF, WebP, or AVIF image up to 10 MiB.",
+  "image-hosting.upstream": "The image host did not confirm the upload. Check the destination before retrying.",
   "glance.invalid": "Invalid screen capture request",
   "glance.invalid_image": "Screenshot format, size or dimensions do not match the request",
   "glance.invalid_retention": "Screenshot retention must be an integer number of days from 1 to 3650",
@@ -966,6 +976,16 @@ ${String(p0)}${String(p1)}`,
   "Run tailscale serve status to check": "Run tailscale serve status to check",
 };
 export const zh: typeof en = {
+  "image-hosting.settings-read": "无法读取图床设置。",
+  "image-hosting.settings-write": "无法保存图床设置。",
+  "image-hosting.settings-invalid": "请检查图床上传地址及设置。",
+  "image-hosting.conflict": "图床设置已被修改。请重新加载后再试。",
+  "image-hosting.missing-credentials": "请输入此图床的凭据。",
+  "image-hosting.bad-url": "图片地址须为已允许预览来源上的长期 HTTPS 链接。",
+  "image-hosting.disabled": "请先在图床设置中配置上传目的地。",
+  "image-hosting.note": "只有可编辑的公开笔记可以上传图片。",
+  "image-hosting.upload-invalid": "请选择一张不超过 10 MiB 的 PNG、JPEG、GIF、WebP 或 AVIF 图片。",
+  "image-hosting.upstream": "图床未确认上传结果。重试前请先检查图床。",
   "glance.invalid": "无效的所见请求",
   "glance.invalid_image": "截图格式、大小或尺寸与声明不符",
   "glance.invalid_retention": "截图保留天数须是 1 到 3650 之间的整数",

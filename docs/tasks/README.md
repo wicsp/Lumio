@@ -67,6 +67,7 @@
 | [E1-0](E1-0-project-default-target.md) | 项目默认执行者与 Today「委托」（ADR 0044；E1-1 契约 Claude，E1-2/E1-3 后端 Codex，E1-4 Web Claude） | 见任务说明 | — |
 | [H1-0](H1-0-handoff-graph.md) | 交接图、阶段权限与可选钩子（ADR 0049；H1-1 立即可做，H1-2 契约 Claude，H1-3～H1-6 后端 Codex，H1-7 Web Claude） | 见任务说明 | — |
 | [K3-1 至 K3-3](K3-0-knowledge-graph.md) | 全库知识图谱：一次读出链接图的 Hub 接口与 Web 图谱视图（ADR 0040，Implemented） | Claude + Codex | 完成 |
+| [K5-0](K5-0-note-image-hosting.md) | 内置笔记图床与 Markdown 图片预览（ADR 0073） | Codex | — |
 | [K4-1 至 K4-4](K4-0-sources-and-ai-notes.md) | 知识来源 `derived_from`、`lumio:` 资源链接与独立的 AI 笔记（ADR 0051，Implemented） | Claude + Codex | 完成 |
 | [S1-0](S1-0-speech.md) | 内置语音输入（ADR 0055，Accepted；S1-1 预研 Codex，S1-2 契约 Claude，S1-3 Hub Codex，S1-4 Web Claude；纠错与语音合成在后） | 见任务说明 | — |
 | [G1-0](G1-0-gamepad.md) | 用手柄操作 Lumio：手柄模式与提示条、两层焦点导航、审批长按确认、按住说话（无新 ADR） | G1-1～G1-3 Codex | G1-4 依赖 S1-4 |

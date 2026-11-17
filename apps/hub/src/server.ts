@@ -29,6 +29,7 @@ import { SpeechSessions, type SpeechSocketData } from "./speech.ts";
 import type { FunAsrOptions } from "./fun-asr.ts";
 import type { JevFetch } from "./jev.ts";
 import { AssistantConfiguration } from "./assistant-config.ts";
+import { ImageHosting, type ImageHostingSend } from "./image-hosting.ts";
 import { InboxProxySettings } from "./inbox-proxy-settings.ts";
 import { configuredModel } from "./assistant-model.ts";
 import { V2_ROUTES, handleV2 } from "./v2.ts";
@@ -90,6 +91,7 @@ async function startHubInstance(config: HubConfig, options: {
   assistantFetch?: typeof fetch;
   paperFetch?: PaperFetch;
   inbox?: InboxOptions;
+  imageHostingSend?: ImageHostingSend;
   pushFetch?: typeof fetch;
   quotaFetch?: typeof fetch;
   jevFetch?: JevFetch;
@@ -132,6 +134,7 @@ async function startHubInstance(config: HubConfig, options: {
       action => watch.exclusive(action), (path, message) => watch.issue(path, message), options.now ?? (() => new Date()));
     const now = options.now ?? (() => new Date());
     const inboxProxy = await InboxProxySettings.open(config.stateDir);
+    modules.imageHosting = await ImageHosting.open(config, store, options.imageHostingSend);
     modules.glances = new Glances(config, store, modules.artifacts, action => watch.exclusive(action), () => server.port!, now);
     const inbox = modules.inbox = new Inbox(config, store, modules.ai, () => modules!.trash,
       action => watch.exclusive(action), now, (path, message) => watch.issue(path, message), inboxProxy, options.inbox,
@@ -171,7 +174,7 @@ async function startHubInstance(config: HubConfig, options: {
           const file = options.web?.files.get(url.pathname);
           if (file && ["GET", "HEAD"].includes(request.method)) {
             status = 200;
-            return webFileResponse(file, request.method, options.web!.csp);
+            return webFileResponse(file, request.method, options.web!.csp, modules!.imageHosting.previewOrigins());
           }
           if (url.pathname === "/" && !options.web) { status = 404; return Response.json(ApiError.parse({ error: { code: "NOT_FOUND", message: msg("server.endpoint_not_found") } }), { status }); }
           if(url.pathname.startsWith("/v2/native-mcp/")){const response=await modules!.native.mcpHandle(request);status=response.status;return response;}
@@ -324,8 +327,8 @@ async function startHubInstance(config: HubConfig, options: {
     modules.native.setPort(server.port!);
     modules.inbox.start();
     modules.glances.start();
-  } catch (cause) { modules?.stop(); await modules?.glances?.stop(); await modules?.inbox?.stop(); await modules?.trash?.stop(); await modules?.notices.stop(); await modules?.explorations.stop(); await modules?.notifications.stop(); await vaultWatch?.stop(); store.close(); throw cause; }
-  return { server, store, modules: modules!, async stop() { modules?.stop(); await modules?.native.stop(); await server.stop(true); await modules?.glances?.stop(); await modules?.inbox.stop(); await modules?.speech.drain(); await modules?.trash?.stop(); await modules?.notices.stop(); await modules?.explorations.stop(); await modules?.notifications.stop(); await modules?.artifacts.drain(); await vaultWatch?.stop(); store.close(); } };
+  } catch (cause) { modules?.stop(); await modules?.imageHosting?.stop(); await modules?.glances?.stop(); await modules?.inbox?.stop(); await modules?.trash?.stop(); await modules?.notices.stop(); await modules?.explorations.stop(); await modules?.notifications.stop(); await vaultWatch?.stop(); store.close(); throw cause; }
+  return { server, store, modules: modules!, async stop() { modules?.stop(); await modules?.native.stop(); await server.stop(true); await modules?.imageHosting?.stop(); await modules?.glances?.stop(); await modules?.inbox.stop(); await modules?.speech.drain(); await modules?.trash?.stop(); await modules?.notices.stop(); await modules?.explorations.stop(); await modules?.notifications.stop(); await modules?.artifacts.drain(); await vaultWatch?.stop(); store.close(); } };
 }
 
 /** One Hub or offline migration owns a state directory. OS locks disappear on crashes, without deleting lock files. */

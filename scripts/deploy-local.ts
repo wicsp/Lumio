@@ -268,7 +268,7 @@ async function deploy(desktop: boolean) {
     }
     const hubConfig = join(backup, "hub-config");
     mkdirSync(hubConfig);
-    for (const name of ["config.json", "capture-proxy.json", "push-vapid.pem"]) {
+    for (const name of ["config.json", "capture-proxy.json", "image-hosting.json", "push-vapid.pem"]) {
       const source = join(hubState, name);
       if (!existsSync(source) || !lstatSync(source).isFile()) continue;
       const target = join(hubConfig, name);

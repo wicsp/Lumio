@@ -10,6 +10,7 @@ import type { BusinessModules } from "./modules.ts";
 import { HubError } from "./errors.ts";
 import type { HubStore, Identity } from "./store.ts";
 import type { authorize } from "./authorize.ts";
+import { IMAGE_HOSTING_ROUTES } from "./image-hosting.ts";
 import { GLANCE_ROUTES } from "./glances.ts";
 import { INBOX_ROUTES } from "./inbox.ts";
 import { NOTICE_ROUTES } from "./notices.ts";
@@ -21,6 +22,7 @@ import { updateRuntime } from "./runtime-updates.ts";
 export const V2_ROUTES = [
   ...INBOX_ROUTES,
   ...GLANCE_ROUTES,
+  ...IMAGE_HOSTING_ROUTES,
   { operation: "security.review", method: "POST", pattern: /^\/v2\/security\/review$/, path: "/v2/security/review" },
   ...NOTICE_ROUTES,
   { operation: "explorations.read", method: "GET", pattern: /^\/v2\/explorations$/, path: "/v2/explorations" },
@@ -96,6 +98,11 @@ export async function handleV2(request: Request, server: Pick<Bun.Server<undefin
       return await modules.securityReview(request);
     }
     const url = new URL(request.url), id = route.pattern.exec(url.pathname)?.[1];
+    if (route.operation === "knowledge.image-settings" || route.operation === "knowledge.image-upload") {
+      if (identity.actor.role !== "human") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] });
+      if (route.operation === "knowledge.image-upload") server.timeout(request, 50);
+      return await modules.imageHosting.handle(request, id);
+    }
     if (route.operation === "explorations.read" || route.operation === "explorations.command") {
       const response = await modules.explorations.handle(request, id, identity);
       audited = true;
