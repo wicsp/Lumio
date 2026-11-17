@@ -20,9 +20,9 @@ test("codex: workspace-write sandbox, JSON events, last message file; resume use
   expect(ADAPTERS.codex.sandbox).toBe("os");
 });
 
-test("claude: print mode with JSON output and no interactive permission prompts; new vs resume session", () => {
+test("claude: print mode with streaming JSON output and no interactive permission prompts; new vs resume session", () => {
   const c = (fields: object) => ADAPTERS["claude-code"].argv(run({ engine: "claude-code", ...fields }), ctx);
-  expect(c({})).toEqual(["-p", "做事", "--output-format", "json", "--permission-mode", "bypassPermissions"]);
+  expect(c({})).toEqual(["-p", "做事", "--output-format", "stream-json", "--verbose", "--permission-mode", "bypassPermissions"]);
   expect(c({ session: { id: "u-1", resume: false } }).slice(-2)).toEqual(["--session-id", "u-1"]);
   expect(c({ session: { id: "u-1", resume: true } }).slice(-2)).toEqual(["--resume", "u-1"]);
   expect(ADAPTERS["claude-code"].parse('log line\n{"type":"result","result":"好了","session_id":"u-2"}\n', undefined, run()))

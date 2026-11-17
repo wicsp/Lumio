@@ -1,6 +1,6 @@
 # Job 实时进度与同轮人工介入
 
-- 依据：[ADR 0069](../adr/0069-job-live-progress-and-control.md)（Proposed，获批准后实施）
+- 依据：[ADR 0069](../adr/0069-job-live-progress-and-control.md)（2026-11-17 人类批准，PR #235）
 - 必读：[设计总览](../DESIGN.md)、[Execution](../design/execution.md)、[Work](../design/work.md)、
   [Assistant](../design/assistant.md)、[安全](../design/security.md)、[Web](../design/web.md)。
 

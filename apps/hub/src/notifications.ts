@@ -125,6 +125,7 @@ export class WebPushChannel implements NotificationChannel {
       if (subscribed(PushDevice.parse(JSON.parse(row.device)), event)) await this.deliver(row, event);
     }
   }
+  currentTime(): Date { return this.now(); }
   async test(owner: string): Promise<PushTestResult> {
     const event = NotificationEvent.parse({ id: `test:${randomBytes(16).toString("hex")}`, owner, kind: "turn.review", title: "Lumio", path: "#settings", created: this.now().toISOString() });
     const results: boolean[] = [];
@@ -167,6 +168,9 @@ export class Notifications {
     if (change.to.holder !== "human" || !(RESPONSE_REASONS as readonly string[]).includes(change.to.reason)) return;
     this.broadcast(`turn:${task.id}:${sequence}`, `turn.${change.to.reason}` as NotificationEvent["kind"], task.title, `#work/${task.id}`, change.at);
   }
+  jobRequest(job: string, request: string, created: string): void {
+    this.broadcast(`job:${job}:${request}`, "turn.answer", "Lumio · Agent", `#execution/${job}`, created);
+  }
   proposal(proposal: Proposal, title?: string): void {
     // The freeform reason/argv/question are never notification content.
     this.broadcast(`proposal:${proposal.id}`, "proposal.pending", title ?? "Lumio", "#approvals", proposal.created);
@@ -185,6 +189,14 @@ export class Notifications {
       const data = JSON.parse(row.event);
       if ("kind" in data) {
         const event = NotificationEvent.parse(data);
+        const job = /^#execution\/(job_[0-9A-HJKMNP-TV-Z]{26})$/.exec(event.path)?.[1];
+        if (job && event.kind === "turn.answer") {
+          const pending = this.store.jobActivity.state(job).pending;
+          const active = this.store.executionStore.get(job);
+          const same = pending && createHash("sha256").update(`job:${job}:${pending.id}:${event.owner}`).digest("hex") === event.id;
+          if (!same || !active || active.result || this.store.executionStore.cancelRequested(job)
+            || Date.parse(pending!.expires) <= this.push.currentTime().getTime()) continue;
+        }
         await Promise.allSettled(this.channels.map(channel => Promise.resolve().then(() => channel.send(event))));
       } else {
         await this.push.send(WorkbenchPush.parse(data));

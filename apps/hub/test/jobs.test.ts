@@ -4,7 +4,9 @@ beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_
 afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { cp, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { JobActionReceipt, JobActivityAck, JobActivityPage, JobActivitySync, JobAttention, JobLiveView } from "@lumio/schema";
+import { cp, mkdir, writeFile, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ApiError, Job, JobResult, RuntimeAck, RuntimeInfo, RuntimeRegistered, RuntimeSync, StoredArtifact, RunLogEvent, BackupManifest } from "@lumio/schema";
@@ -40,10 +42,11 @@ async function exists(path: string) { try { await readFile(path); return true; }
 async function localCount(query: string) {
   try { const db = new Database(join(runtimeState, "runtime.sqlite"), { readonly: true }); try { return db.query<{ count: number }, []>(query).get()!.count; } finally { db.close(); } } catch { return -1; }
 }
-async function startRuntime(url = base(), binary?: string) {
+async function startRuntime(url = base(), binary?: string, extraEnv?: Record<string, string>) {
   const child = Bun.spawn(binary ? [binary] : [process.execPath, new URL("../../runtime/src/main.ts", import.meta.url).pathname], { env: {
     HOME: temp, PATH: temp, LUMIO_HUB_URL: url, LUMIO_TOKEN: runtime, LUMIO_RUNTIME_NAME: "server", LUMIO_RUNTIME_MAX_CONCURRENT: "1", LUMIO_RUNTIME_POLL_SECONDS: "0.03",
     LUMIO_RUNTIME_STATE_DIR: runtimeState, LUMIO_RUNTIME_ALLOWED_COMMANDS: process.execPath,
+    ...extraEnv,
   }, stdout: "pipe", stderr: "pipe" });
   daemons.push(child); output.push(new Response(child.stdout).text()); errors.push(new Response(child.stderr).text());
   await eventually(async () => {
@@ -302,3 +305,157 @@ test("compiled runtime preserves the durable-start worker path", async () => {
   const job = await submit(); await eventually(async () => (await get(job.spec.id)).status === "done");
   expect((await get(job.spec.id)).result!.exit_code).toBe(0);
 }, 20_000);
+
+test("Job activity is authorized, contiguous, idempotent and cannot replace a final result", async () => {
+  const path = "/v1/runtime/job-activity/sync";
+  const registrationResponse = await fetch(base() + "/v1/runtime/register", {
+    method: "POST", headers: { Authorization: `Bearer ${runtime}`, "X-Lumio-Features": "job-activity" },
+    body: JSON.stringify(registration),
+  });
+  expect(registrationResponse.headers.get("X-Lumio-Features")).toBe("job-activity");
+  expect((await request(path, runtime, JobActivitySync.parse({ type: "register", platform: "synthetic", engines: [] }))).status).toBe(200);
+  await request("/v1/runtime/register", other, { ...registration, name: "other" });
+  const job = await submit(), id = job.spec.id, url = `/v2/execution/jobs/${id}`;
+  expect((await request(`${url}/live`, agent)).status).toBe(403);
+  expect((await request(`${url}/events`, runtime)).status).toBe(403);
+  await request("/v1/runtime/ack", runtime, { accepted: [id] });
+  const time = new Date().toISOString();
+  const sync = JobActivitySync.parse({ type: "job", job: id, lease: job.spec.lease, events: [
+    { sequence: 1, event: { type: "phase", phase: "preparing", at: time } },
+    { sequence: 2, event: { type: "tool_started", at: time, tool: { id: "compile", label: "bun test", kind: "command" } } },
+  ], receipts: [] });
+  if (sync.type !== "job") throw new Error("Expected job sync");
+  expect((await request(path, other, sync)).status).toBe(403);
+  expect((await request(path, runtime, { ...sync, lease: "incorrect-lease-00001" })).status).toBe(403);
+  const gap = await request(path, runtime, { ...sync, events: sync.events.slice(1) });
+  expect(gap.status).toBe(409);
+  expect(JobActivityAck.parse(await gap.json())).toMatchObject({ acknowledged: 0, conflict: true });
+  for (let i = 0; i < 2; i++) {
+    const ack = JobActivityAck.parse(await (await request(path, runtime, sync)).json());
+    expect(ack).toMatchObject({ acknowledged: 2, conflict: false });
+  }
+  const live = JobLiveView.parse(await (await request(`${url}/live`)).json());
+  expect(live).toMatchObject({ started: time, sequence: 2, active_tools: [{ label: "bun test" }] });
+  const first = JobActivityPage.parse(await (await request(`${url}/events?limit=1`)).json());
+  expect(first).toMatchObject({ next_after: 1, has_more: true, gap: false });
+  expect(JobActivityPage.parse(await (await request(`${url}/events?after=1`)).json()).events).toEqual(sync.events.slice(1));
+  await request("/v1/runtime/results", runtime, JobResult.parse({ job: id, lease: job.spec.lease, status: "done", finished: time }));
+  const late = JobActivityAck.parse(await (await request(path, runtime, { ...sync, events: [
+    { sequence: 3, event: { type: "phase", phase: "finishing", at: time } },
+  ] })).json());
+  expect(late).toMatchObject({ acknowledged: 3, cancel: true });
+  expect(JobLiveView.parse(await (await request(`${url}/live`)).json())).toMatchObject({ status: "done", active_tools: [], pending: null });
+});
+
+test("same-round prompts require the original turn, never submit twice, and stop with Job cancellation", async () => {
+  const path = "/v1/runtime/job-activity/sync";
+  await request("/v1/runtime/register", runtime, { ...registration, engines: [{ name: "codex", version: "0.166.0", sandbox: "os" }] });
+  await request(path, runtime, { type: "register", platform: "darwin", engines: [
+    { engine: "codex", version: "0.166.0", progress: true, sandbox: "os", approvals: true, questions: true, steer: true },
+  ] });
+  const job = Job.parse(await (await request("/v2/execution/jobs", human, {
+    runtime: "server", run: { kind: "agent", engine: "codex", interaction: "interactive", prompt: "fixture" },
+  })).json());
+  const id = job.spec.id, url = `/v2/execution/jobs/${id}`;
+  await request("/v1/runtime/ack", runtime, { accepted: [id] });
+  const target = { instance: randomUUID(), session: "session-one", turn: "turn-one" };
+  const pending = {
+    kind: "question", id: randomUUID(), target, expires: new Date(Date.now() + 60_000).toISOString(),
+    questions: [{ id: "test-path", text: "Which fixture?", options: ["small", "large"], multiple: false }],
+  };
+  const sync = { type: "job", job: id, lease: job.spec.lease, events: [], receipts: [], target, pending };
+  expect((await request(path, runtime, sync)).status).toBe(200);
+  expect(JobAttention.parse(await (await request("/v2/execution/attention")).json())).toEqual([
+    { job: id, task: null, kind: "question", expires: pending.expires },
+  ]);
+  const action = {
+    action: "answer", prompt_id: pending.id, target, answers: [{ question: "test-path", values: ["small"] }], request_id: randomUUID(),
+  };
+  expect((await request(`${url}/actions`, agent, action)).status).toBe(403);
+  expect((await request(`${url}/actions`, human, { ...action, target: { ...target, turn: "stale" } })).status).toBe(409);
+  expect((await request(`${url}/actions`, human, { ...action, answers: [{ question: "test-path", values: ["typo"] }] })).status).toBe(400);
+  const first = await request(`${url}/actions`, human, action);
+  expect(first.status).toBe(202);
+  const queued = JobActionReceipt.parse(await first.json());
+  expect(queued.state).toBe("queued");
+  expect(await (await request(`${url}/actions`, human, action)).json()).toEqual(queued);
+  expect((await request(`${url}/actions`, human, { ...action, request_id: randomUUID() })).status).toBe(409);
+  expect(JobActivityAck.parse(await (await request(path, runtime, sync)).json())).toMatchObject({ actions: [action] });
+  const apply = { request_id: action.request_id, state: "applied", at: new Date().toISOString() };
+  expect(JobActivityAck.parse(await (await request(path, runtime, { ...sync, pending: null, receipts: [apply] })).json())).toMatchObject({
+    actions: [], receipts: [{ request_id: action.request_id, state: "applied" }],
+  });
+  const nextPrompt = { ...pending, id: randomUUID(), expires: new Date(Date.now() - 5000).toISOString() };
+  expect((await request(path, runtime, { ...sync, pending: nextPrompt })).status).toBe(200);
+  expect((await request(`${url}/actions`, human, { ...action, prompt_id: nextPrompt.id, request_id: randomUUID() })).status).toBe(409);
+  await request(`${url}/cancel`, human, {});
+  expect((await request(`${url}/actions`, human, { ...action, request_id: randomUUID() })).status).toBe(409);
+  expect(JobActivityAck.parse(await (await request(path, runtime, sync)).json())).toMatchObject({ actions: [], cancel: true });
+  expect(JobAttention.parse(await (await request("/v2/execution/attention")).json())).toEqual([]);
+});
+
+async function activityRuntime() {
+  const bin = join(temp, "agents"), project = join(temp, "project");
+  await mkdir(bin); await mkdir(project);
+  const engine = await readFile(new URL("./fixtures/job-activity-engine.ts", import.meta.url), "utf8");
+  for (const name of ["codex", "claude"]) {
+    await writeFile(join(bin, name), `#!${process.execPath}\n${engine}`, { mode: 0o700 });
+  }
+  await startRuntime(undefined, undefined, {
+    PATH: `${bin}:/usr/bin:/bin`, LUMIO_INTERACTIVE_JOB_ROOTS: project,
+    LUMIO_JOB_CODEX_API_KEY: "synthetic-codex-key", LUMIO_JOB_CLAUDE_API_KEY: "synthetic-claude-key",
+  });
+  await eventually(async () => {
+    const list = await (await request("/v2/execution/activity/capabilities")).json() as { engines: unknown[] }[];
+    return !!list[0]?.engines.length;
+  });
+  return project;
+}
+
+test("a dispatched headless Job shows the first tool before completion through the actual Runtime", async () => {
+  const project = await activityRuntime();
+  const result = await request("/v2/execution/jobs", human, { runtime: "server", workdir: project, run: { kind: "agent", engine: "codex", prompt: "Review fixture" } });
+  expect(result.status).toBe(200);
+  const id = Job.parse(await result.json()).spec.id, url = `/v2/execution/jobs/${id}`;
+  await eventually(async () => {
+    const live = JobLiveView.parse(await (await request(`${url}/live`)).json());
+    return live.status === "running" && live.active_tools.some(tool => tool.label === "bun test");
+  }, 5000);
+  await eventually(async () => (await get(id)).status === "done");
+  expect((await get(id)).result?.report).toBe("Report from the synthetic Codex");
+  await eventually(async () => JobLiveView.parse(await (await request(`${url}/live`)).json()).phase === "finishing");
+  const page = JobActivityPage.parse(await (await request(`${url}/events`)).json());
+  expect(JSON.stringify(page)).not.toContain("fixture_only");
+});
+
+test.skipIf(process.platform !== "darwin")("Codex App Server and the Claude Agent SDK apply same-round answers and approvals", async () => {
+  const project = await activityRuntime();
+  for (const engine of ["codex", "claude-code"] as const) {
+    const response = await request("/v2/execution/jobs", human, {
+      runtime: "server", workdir: project, run: { kind: "agent", engine, prompt: "Run synthetic interaction", interaction: "interactive" },
+    });
+    expect(response.status).toBe(200);
+    const id = Job.parse(await response.json()).spec.id, url = `/v2/execution/jobs/${id}`;
+    const view = async () => JobLiveView.parse(await (await request(`${url}/live`)).json());
+    const waitFor = async (kind: "question" | "approval") => {
+      await eventually(async () => {
+        const live = await view();
+        if (["failed", "unknown", "done"].includes(live.status)) { const r = (await get(id)).result; throw new Error(JSON.stringify({ report: r?.report, error: r?.error, log: r?.log ? await readFile(r.log, "utf8").catch(() => "") : "" })); }
+        return live.pending?.kind === kind;
+      });
+      return (await view()).pending!;
+    };
+    const q = await waitFor("question");
+    if (q.kind !== "question") throw new Error("Expected question");
+    const answer = { action: "answer", target: q.target, prompt_id: q.id, request_id: randomUUID(), answers: [{ question: q.questions[0]!.id, values: ["Yes"] }] };
+    expect((await request(`${url}/actions`, human, answer)).status).toBe(202);
+    const a = await waitFor("approval");
+    if (a.kind !== "approval") throw new Error("Expected approval");
+    expect(a.can_approve).toBe(true);
+    const approve = { action: "approve", target: a.target, prompt_id: a.id, request_id: randomUUID() };
+    expect((await request(`${url}/actions`, human, approve)).status).toBe(202);
+    await eventually(async () => (await get(id)).status === "done");
+    expect((await get(id)).result?.report).toBe(`Fixture answer=Yes decision=${engine === "codex" ? "accept" : "allow"}`);
+    await eventually(async () => (await view()).receipts.filter(receipt => receipt.state === "applied").length === 2);
+  }
+}, 30_000);

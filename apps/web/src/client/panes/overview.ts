@@ -3,7 +3,7 @@
  * 然后是 agent 在做的和在等外部的（ADR 0032）；旁边是 agent 动态与项目进度。
  * 各区块独立加载失败；不在这里放统计大字。
  */
-import type { Job, Notice, Proposal, WorkAttention, WorkProject, WorkTask } from "@lumio/schema";
+import type { Job, JobAttention, Notice, Proposal, WorkAttention, WorkProject, WorkTask } from "@lumio/schema";
 import { openResource } from "../resources.ts";
 import { noticePreview, noticeTitle } from "../workbench-assist.ts";
 import { errorText, type Client, type HubExtras } from "../api.ts";
@@ -19,6 +19,7 @@ import { taskTurnMenu } from "../turn-menu.ts";
 import { locale, t } from "../i18n.ts";
 import { turnGroup, turnIcon, turnText } from "../turn.ts";
 import { isWorkProposal, proposalCard } from "../proposal-card.ts";
+import { jobActivityBadge } from "../job-activity.ts";
 
 const LIVE = ["queued", "assigned", "running"];
 const DAY = 86_400_000;
@@ -57,8 +58,8 @@ export class OverviewPane {
 
   private async load(): Promise<void> {
     const generation = ++this.generation;
-    const [tasks, projects, jobs, approvals, attention, notices] = await Promise.allSettled([this.client.workTasks(), this.client.workProjects(), this.client.jobs(), this.client.proposals("pending"), this.hub.attention(),
-      this.client.notices({ unread: true, limit: 30 })]);
+    const [tasks, projects, jobs, approvals, attention, notices, liveAttention] = await Promise.allSettled([this.client.workTasks(), this.client.workProjects(), this.client.jobs(), this.client.proposals("pending"), this.hub.attention(),
+      this.client.notices({ unread: true, limit: 30 }), this.client.jobAttention()]);
     if (!this.active || generation !== this.generation) return;
     const taskData = tasks.status === "fulfilled" ? tasks.value : undefined;
     const projectData = projects.status === "fulfilled" ? projects.value : [];
@@ -80,7 +81,8 @@ export class OverviewPane {
     const attentionJobs = executionGroups(jobData ?? [], taskData, attentionData).needs
       .filter(job => attentionData === undefined || !job.spec.source?.task);
 
-    const needCount = (attentionData?.length ?? 0) + attentionJobs.length + (approvalData?.length ?? 0);
+    const liveRequests = liveAttention.status === "fulfilled" ? liveAttention.value : [];
+    const needCount = liveRequests.length + (attentionData?.length ?? 0) + attentionJobs.length + (approvalData?.length ?? 0);
     const parts = taskData ? [
       needCount ? t(needCount === 1 ? "{0} needs you" : "{0} need you", needCount) : "",
       t(mine.length === 1 ? "{0} to-do" : "{0} to-dos", mine.length),
@@ -92,7 +94,7 @@ export class OverviewPane {
       this.ask(),
       h("div", { class: "today-grid" },
         h("div", { class: "today-col" },
-          this.needsYou(approvalData, attentionJobs, approvals.status === "rejected" ? approvals.reason : undefined, taskData ?? [], attentionData ?? []),
+          this.needsYou(approvalData, attentionJobs, approvals.status === "rejected" ? approvals.reason : undefined, taskData ?? [], attentionData ?? [], liveRequests),
           notices.status === "fulfilled" ? this.pending(pendingNotices(notices.value.notices)) : null,
           focus.length || tasks.status === "rejected" ? this.section("due", t("Due today"), focus.length, () => this.navigate("work", "tasks"),
             tasks.status === "rejected" ? failure(errorText(tasks.reason)) : this.taskList(focus, projectData, "")) : null,
@@ -193,10 +195,14 @@ export class OverviewPane {
     return group;
   }
 
-  private needsYou(approvals: Proposal[] | undefined, jobs: Job[], error: unknown, tasks: WorkTask[], rounds: WorkAttention[]): HTMLElement | null {
+  private needsYou(approvals: Proposal[] | undefined, jobs: Job[], error: unknown, tasks: WorkTask[], rounds: WorkAttention[], liveRequests: JobAttention): HTMLElement | null {
     if (error) return this.section("needs", t("Needs you"), 0, undefined, failure(errorText(error)));
     const context = { client: this.client, hub: this.hub, navigate: this.navigate, changed: () => { this.changed(); setTimeout(() => void this.load(), 1200); } };
     const cards = [
+      ...liveRequests.map(request => this.needCard(request.job, request.kind === "approval" ? "approvals" : "help", "ochre",
+        tasks.find(task => task.id === request.task)?.title ?? t("Agent run"), t("Expires at {0}", formatTime(request.expires)),
+        request.kind === "approval" ? t("Waiting for your approval") : t("Agent has a question"), t("View run"),
+        () => this.navigate("execution", request.job))),
       ...rounds.map(item => attentionCard(item, context, "today")),
       ...(approvals ?? []).filter(isWorkProposal).map(p => proposalCard(p, context)),
       ...(approvals ?? []).filter(p => !isWorkProposal(p)).map(p => this.needCard(p.id, "approvals", "ochre",
@@ -229,7 +235,8 @@ export class OverviewPane {
     return h("div", { class: "today-rows" }, ...shown.map(job => h("button", { type: "button", class: "today-row", "data-pad-row": job.spec.id, onclick: () => this.navigate("execution", job.spec.id) },
       statusIcon(job.status),
       h("span", { class: "row-main" }, h("span", { class: "row-title" }, jobTitle(job, tasks)),
-        h("span", { class: "row-sub" }, `${job.spec.run.kind === "agent" ? job.spec.run.engine : t("Command")}${t(" · ")}${JOB_LABELS[job.status] ?? job.status}`)),
+        h("span", { class: "row-sub" }, job.spec.run.kind === "agent" ? job.spec.run.engine : t("Command"), " · ",
+          LIVE.includes(job.status) ? jobActivityBadge(this.client, job.spec.id, JOB_LABELS[job.status] ?? job.status) : JOB_LABELS[job.status] ?? job.status)),
       h("span", { class: "row-time", title: formatTime(job.spec.created) }, ago(job.spec.created)))));
   }
 

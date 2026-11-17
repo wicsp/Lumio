@@ -2,6 +2,7 @@ import { AI_NOTE_CAPABILITY_NAMES, CAPABILITIES, ORIGINAL_CAPABILITY_NAME } from
 
 /** Executable spellings shared by command parsing, --help and generated skill documentation. */
 export const WORK_OPTIONS = {
+  interactive: { type: "boolean" },
   ready: { type: "boolean" }, blocked: { type: "boolean" }, tag: { type: "string" },
   query: { type: "string" }, json: { type: "boolean" }, to: { type: "string" }, description: { type: "string" },
   file: { type: "string" }, status: { type: "string" }, project: { type: "string" }, parent: { type: "string" },
@@ -29,7 +30,7 @@ export const COMMANDS: CommandDefinition[] = [
   def("task update", "<id>", ["patch", "revision", ...body, ...taskFields, ...write], "work.task.update"),
   def("task list", "", ["project", "status", "turn", "query", "ready", "blocked", "tag", "parent"], "work.task.list"), def("task show", "<id>", [], "work.task.show"),
   def("task edit", "<id>", ["file", "revision", ...write]),
-  def("task continue", "<id>", ["to", "comment", "revision", ...write], "work.task.dispatch", { aliases: ["task dispatch"] }),
+  def("task continue", "<id>", ["to", "comment", "revision", "interactive", ...write], "work.task.dispatch", { aliases: ["task dispatch"] }),
   def("task hand", "<id>", ["to", "note", "revision", ...write], "work.task.hand", { required: ["to"] }),
   ...["finish", "cancel", "reopen"].map(action => def(`task ${action}`, "<id>", ["revision", ...write])),
   def("task comment", "<id> [<text>]", ["file", ...write], "work.task.comment"),
@@ -41,7 +42,8 @@ export const COMMANDS: CommandDefinition[] = [
   def("project edit", "<id>", ["file", "revision", ...write]), def("project status", "<id> [<status>]", ["status", "revision", ...write]),
   def("plan-template list"), def("plan-template save", "<name>", ["file", "template", ...write], undefined, { required: ["file"] }), def("plan-template delete", "<id>", write),
   def("job list", "", ["status", "task", "routine", "limit"], "execution.job.list"), def("job show", "<id>", [], "execution.job.show"),
-  def("job submit", "", ["runtime", "workdir", "timeout", "gpus", "agent", "model", "session", "resume"], undefined, { required: ["runtime"], tail: "-- <program-or-prompt> [args...]" }),
+  def("job watch", "<id>"),
+  def("job submit", "", ["runtime", "workdir", "timeout", "gpus", "agent", "model", "session", "resume", "interactive"], undefined, { required: ["runtime"], tail: "-- <program-or-prompt> [args...]" }),
   def("job cancel", "<id>"), def("job artifacts", "<id>", ["include-private"]), def("job download", "<id>", ["output", "include-private"], undefined, { required: ["output"] }),
   def("routine list", "", [], "execution.routine.list"),
   def("routine new", "<title>", ["schedule", "timezone", "to", "context", ...body, ...write], undefined, { aliases: ["routine create"], required: ["schedule", "to"] }),
@@ -64,7 +66,7 @@ export const COMMANDS: CommandDefinition[] = [
   def("hub backup", "<destination>"), def("hub backup business", "<new-directory>"), def("hub backup verify", "<directory>"), def("hub restore business", "<backup-directory> <new-state-directory>"),
   def("hub assistant setup", "", ["base-url", "model", "api-key-stdin", "skip-check"]), def("hub assistant status"), def("hub assistant clear"),
 ];
-const booleans = new Set(["ready", "blocked", "json", "help", "online", "include-private", "dry-run", "resume", "stream", "server", "yes", "api-key-stdin", "skip-check", "uninstall"]);
+const booleans = new Set(["ready", "blocked", "json", "help", "online", "include-private", "dry-run", "resume", "interactive", "stream", "server", "yes", "api-key-stdin", "skip-check", "uninstall"]);
 export function commandUsage(command: CommandDefinition, json = true): string {
   return [command.path, command.positional, ...(command.options ?? []).map(name => {
     const option = `--${name}${booleans.has(name) ? "" : ` <${name}>`}`;

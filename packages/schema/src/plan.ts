@@ -43,6 +43,7 @@ export const PlanAgentStage = z.strictObject({
   instruction: z.string().min(1).max(4000).describe("这一阶段要做什么；与任务描述等一起交给 agent（ADR 0032 第 6 节）"),
   back_to: PlanStageId.optional().describe("agent 汇报打回（<lumio-outcome>changes</lumio-outcome>）时回到哪个 agent 阶段；缺省表示不能打回，按交付处理"),
   after: After,
+  interaction: z.literal("interactive").optional(),
   ...StagePermissionsShape,
   hooks: z.strictObject({ before: PlanHook.optional(), after: PlanHook.optional() }).optional()
     .describe("before 失败不启动 agent；after 失败按这一轮失败处理"),

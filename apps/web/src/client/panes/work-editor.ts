@@ -9,6 +9,7 @@
 import { PROJECT_STATUSES, type ResourceRef, type WorkProject, type WorkTask, type WorkTaskDetail, type WorkCommandRequest } from "@lumio/schema";
 import { errorText, isConflict, type Client, type HubExtras } from "../api.ts";
 import { attentionCard, attentionFor } from "../attention-card.ts";
+import { jobActivityBadge } from "../job-activity.ts";
 import { answerCommand, commentCommand, dispatchCommand, engineTargets, formatTime, newRequestId, workPatchCommand } from "../commands.ts";
 import { nextTargetText } from "../delegate.ts";
 import { autosize, clear, confirmDialog, failure, field, h, icon, openDialog, openMenu, promptDialog, select, statusIcon, toast, type MenuItem } from "../dom.ts";
@@ -200,8 +201,11 @@ export class WorkEditor {
       const turnBtn = h("button", { type: "button", class: "prop-btn", title: t("Who has the task now") }, turnIcon(turnGroup(r)), h("span", {}, turnText(r)));
       turnBtn.addEventListener("click", () => this.pickTurn(turnBtn));
       row(t("Turn"), "clock", turnBtn);
-      const job = r.turn.reason === "working" ? r.turn.job : undefined;
-      if (job) row(t("Current round"), "execution", h("button", { type: "button", class: "prop-btn", onclick: () => this.hooks.navigate("execution", job) }, icon("execution"), h("span", {}, t("View run"))));
+      const jobs = r.turn.reason === "working" ? (r.turn.parallel?.map(branch => ({ job: branch.job, agent: branch.agent }))
+        ?? (r.turn.job ? [{ job: r.turn.job, agent: r.turn.holder }] : [])) : [];
+      for (const { job, agent } of jobs) row(t("Current round"), "execution",
+        h("button", { type: "button", class: "prop-btn", onclick: () => this.hooks.navigate("execution", job) },
+          icon("execution"), h("span", {}, agent, " · ", jobActivityBadge(this.client, job, t("View run")))));
     } else {
       const statusBtn = h("button", { type: "button", class: "prop-btn" }, statusIcon(r.status), h("span", {}, PROJECT_LABELS[r.status] ?? r.status));
       statusBtn.addEventListener("click", () => openMenu(statusBtn,
@@ -647,7 +651,8 @@ export class WorkEditor {
     if (run && stage?.kind !== "agent") { this.planStop(task, run.stage); return; }
     this.setBusy(true);
     try {
-      const targets = engineTargets(await this.client.runtimes());
+      const [runtimes, activityCaps] = await Promise.all([this.client.runtimes(), this.client.jobActivityCapabilities().catch(() => [])]);
+      const targets = engineTargets(runtimes);
       if (!this.active || this.root.closest("[hidden]")) return;
       const fixed = stage?.kind === "agent" ? stage.agent : undefined;
       const options = fixed ? [[fixed, targets.find(x => x.target === fixed)?.label ?? fixed] as [string, string]] : targets.map(x => [x.target, x.label] as [string, string]);
@@ -655,10 +660,25 @@ export class WorkEditor {
       const preferred = fixed ?? (suggested && targets.some(x => x.target === suggested) ? suggested : targets.find(x => x.online)?.target) ?? "";
       const target = select("dispatch-target", fixed ? options : [["", t("Choose a runtime and engine")], ...options], preferred);
       target.required = true; target.disabled = !!fixed;
+      const interactive = h("input", { type: "checkbox", name: "dispatch-interactive", checked: stage?.kind === "agent" && stage.interaction === "interactive" });
+      const fixedInteractive = interactive.checked;
+      const interactionHint = h("p", { class: "muted" });
+      const refreshInteraction = () => {
+        const [engine, runtime] = target.value.split("@");
+        const cap = activityCaps.find(value => value.name === runtime && value.online)?.engines.find(value => value.engine === engine);
+        const supported = Boolean(cap?.approvals && cap.questions && !(stage?.kind === "agent" && stage.access === "full"));
+        interactive.disabled = fixedInteractive || !supported;
+        if (!supported && !fixedInteractive) interactive.checked = false;
+        interactionHint.textContent = supported ? t("OS sandbox") : t("This Runtime does not support interactive rounds");
+      };
+      target.addEventListener("change", refreshInteraction);
+      refreshInteraction();
       const formId = `dispatch-${newRequestId()}`, error = h("div", { role: "alert" });
       const form = h("form", { id: formId, class: "form-stack" },
         h("p", {}, ...tParts("“{0}” will be handed to the runtime as currently saved.", h("strong", {}, task.title))),
         field(t("Target"), target, fixed ? t("Set by the plan step “{0}”.", stage!.id) : undefined),
+        h("label", { class: "check-field" }, interactive, t("Allow questions and approvals during this round")),
+        interactionHint,
         h("dl", { class: "meta-grid" }, h("div", {}, h("dt", {}, t("Working directory")), h("dd", {}, this.effectiveWorkdir(task))), h("div", {}, h("dt", {}, t("Time limit")), h("dd", {}, t("{0} min", task.timeout_minutes ?? 120)))),
         !targets.length && !fixed && h("div", { class: "notice" }, icon("alert"), h("span", {}, t("No device with a registered engine yet. Run lumio runtime add in a terminal to connect one."))),
         error);
@@ -668,10 +688,11 @@ export class WorkEditor {
       form.addEventListener("submit", async event => {
         event.preventDefault();
         if (pending) return;
-        if (previousTarget && previousTarget !== target.value) requestId = newRequestId();
-        previousTarget = target.value; pending = true; submit.disabled = true;
+        const selection = JSON.stringify([target.value, interactive.checked]);
+        if (previousTarget && previousTarget !== selection) requestId = newRequestId();
+        previousTarget = selection; pending = true; submit.disabled = true;
         try {
-          const result = await this.client.workCommand(dispatchCommand(task, target.value, requestId));
+          const result = await this.client.workCommand(dispatchCommand(task, target.value, requestId, interactive.checked));
           dialog.close();
           toast(t("Dispatched to {0}", target.value), "ok", result.kind === "job" ? {
             label: t("View run"), run: () => this.hooks.navigate("execution", result.job.spec.id, "from-dispatch-toast"),

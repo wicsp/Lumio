@@ -70,11 +70,11 @@ const claude: Adapter = {
   argv(run, ctx) {
     const session = run.session ? (run.session.resume ? ["--resume", run.session.id] : ["--session-id", run.session.id]) : [];
     // 无人值守：不允许交互式确认，否则一遇到权限询问就卡住。隔离级别如实声明为 none。
-    return ["-p", run.prompt, ...(ctx.skillText ? ["--append-system-prompt", ctx.skillText] : []), "--output-format", "json", "--permission-mode", "bypassPermissions",
+    return ["-p", run.prompt, ...(ctx.skillText ? ["--append-system-prompt", ctx.skillText] : []), "--output-format", "stream-json", "--verbose", "--permission-mode", "bypassPermissions",
       ...(run.model ? ["--model", run.model] : []), ...session];
   },
   parse(stdout) {
-    // --output-format json 输出一个 JSON 对象；容忍前后有日志行。
+    // 流式输出的最后一条 result 包含报告；兼容同格式的单条测试结果。
     for (const line of stdout.split("\n").reverse()) {
       try {
         const result = JSON.parse(line) as { type?: string; result?: unknown; session_id?: unknown };

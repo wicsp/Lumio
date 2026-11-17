@@ -5,10 +5,12 @@ import { SudoGate } from "./sudo.ts";
 import { privateFile } from "./service.ts";
 import { join } from "node:path";
 import { mkdir } from "node:fs/promises";
-import { RuntimeAck, RuntimeRegistered, RuntimeRegistration, RuntimeSync } from "@lumio/schema";
+import { JOB_ACTIVITY_FEATURE, RuntimeAck, RuntimeRegistered, RuntimeRegistration, RuntimeSync } from "@lumio/schema";
 import type { RuntimeConfig } from "./config.ts";
 import { detectEngines } from "./engines.ts";
 import { Queue } from "./queue.ts";
+import { RuntimeJobActivity } from "./job-activity.ts";
+import { jobEngineCapabilities } from "./job-engine-config.ts";
 import { Executor } from "./executor.ts";
 import { RoutinePlans } from "./routines.ts";
 import { RuntimeArchives } from "./archive.ts";
@@ -65,16 +67,19 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
     ...(platform ? { version, platform, install } : {}), features: ["stage_permissions", "hooks", "permission_request", ...(helper ? ["privileged_helper" as const] : []), ...(platform ? ["self_update" as const] : [])] });
   const queue = new Queue(config.stateDir);
   const plans = new RoutinePlans(queue);
+  const activity = new RuntimeJobActivity(queue, send);
+  const activityWake = new Wake();
   const archives = options.archive ?? new RuntimeArchives(config, queue, fetcher, log);
   const now = options.now ?? (() => new Date());
   let actor: string | undefined;
   const sudo = new SudoGate(config, queue, () => actor, fetcher, signal, log);
-  const executor = new Executor(queue, config, options.env ?? process.env, () => { events.notify(); deliveries.notify(); archiveWake.notify(); }, registration.engines, sudo);
-  let registered = false, disconnected = false;
+  const executor = new Executor(queue, config, options.env ?? process.env, () => { events.notify(); deliveries.notify(); archiveWake.notify(); }, registration.engines, sudo, activity);
+  let registered = false, disconnected = false, activityNegotiated = false;
+  let nextActivityRegistration = 0;
   let backoff = Math.min(config.pollSeconds, 60);
   async function send(path: string, body: unknown) {
     return fetcher(`${config.url}${path}`, {
-      method: "POST", headers: { Authorization: `Bearer ${config.token}`, "Content-Type": "application/json", ...(path === "/v1/runtime/sync" ? { "X-Lumio-Features": "job-access" } : {}) },
+      method: "POST", headers: { Authorization: `Bearer ${config.token}`, "Content-Type": "application/json", ...(path === "/v1/runtime/sync" ? { "X-Lumio-Features": "job-access" } : path === "/v1/runtime/register" ? { "X-Lumio-Features": JOB_ACTIVITY_FEATURE } : {}) },
       body: JSON.stringify(body), redirect: "error", signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
     });
   }
@@ -110,6 +115,7 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
   }
   let delivering: Promise<void> | undefined;
   let archiving: Promise<void> | undefined;
+  let publishing: Promise<void> | undefined;
   let deliveryFailure: unknown;
   let native:Promise<void>|undefined;
   let nativeBusy = () => false;
@@ -121,6 +127,7 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
     await executor.recover();
     if((options.env??process.env).LUMIO_NATIVE_SESSIONS==="1")native=runNativeChannel(config,signal,options.env??process.env, { attach: busy => { nativeBusy = busy; }, switching: () => updater?.restarting ?? false }).catch(()=>{log(msg("native.channel_failed"));});
     delivering = deliver().catch((cause) => { deliveryFailure = cause; shutdown.abort(); });
+    publishing = activity.run(signal, (ms, stopped) => activityWake.wait(ms, stopped)).catch(() => {});
     archiving = (async () => {
       while (!signal.aborted) {
         let next = Math.min(config.pollSeconds, 60) * 1000;
@@ -140,6 +147,9 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
           const info = RuntimeRegistered.parse(await response.json());
           actor = info.actor;
           await privateFile(join(config.stateDir, "registered.json"), JSON.stringify(info));
+          activity.disable();
+          activityNegotiated = response.headers.get("X-Lumio-Features") === JOB_ACTIVITY_FEATURE;
+          nextActivityRegistration = 0;
           registered = true;
           log(msg("runtime.runtime_registered"));
           if (disconnected) log(msg("runtime.hub_connection_restored"));
@@ -153,14 +163,19 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
           const accepted = queue.jobs().filter((j) => !j.acked).map((j) => j.spec.id);
           if (accepted.length) {
             await post("/v1/runtime/ack", RuntimeAck.parse({ accepted }), RuntimeAck);
-            queue.ack(accepted); deliveries.notify(); justAcked = true;
+            queue.ack(accepted); deliveries.notify(); events.notify(); justAcked = true;
           }
           executor.cancel(sync.cancel);
           if (actor) plans.replace(sync.routines, actor, now());
           await updater?.reconcile(sync.update, () => queue.heartbeat().running.length > 0 || nativeBusy());
         }
         backoff = Math.min(config.pollSeconds, 60);
-        if (!claudeUsage && Date.now() >= nextClaudeUsage) {
+        if (registered && activityNegotiated && !activity.supported() && Date.now() >= nextActivityRegistration) {
+        nextActivityRegistration = Date.now() + 5000;
+        await activity.register(await jobEngineCapabilities(registration.engines, options.env ?? process.env)).catch(() => {});
+        activityWake.notify();
+      }
+      if (!claudeUsage && Date.now() >= nextClaudeUsage) {
           nextClaudeUsage = Date.now() + 15_000;
           claudeUsage = publishClaudeUsage(config, fetcher, signal, claudeSentAt).catch(() => {}).finally(() => { claudeUsage = undefined; });
         }
@@ -183,6 +198,7 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
     await sudo.close();
     await delivering;
     await archiving;
+    await publishing;
     await native;
     await claudeUsage;
     await updater?.close();

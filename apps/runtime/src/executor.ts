@@ -12,11 +12,14 @@ import { mkdir, readFile, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import type { GitState, RuntimeRegistration } from "@lumio/schema";
+import { JobActionReceipt, JobControlTarget, JobHumanRequest, type GitState, type RuntimeRegistration } from "@lumio/schema";
 import { RunLogWriter, finalizeInterruptedLog } from "@lumio/storage/logs";
 import { ADAPTERS, splitQuestion, versionSupported, type Adapter } from "./agents.ts";
 import type { RuntimeConfig } from "./config.ts";
 import { Queue, type LocalJob } from "./queue.ts";
+import type { RuntimeJobActivity } from "./job-activity.ts";
+import { JobOutput } from "./job-output.ts";
+import { interactiveEngine, type JobEngineConfig } from "./job-engine-config.ts";
 
 type Engines = RuntimeRegistration["engines"];
 /** agent 的 stdout 最多保留这么多字节用于解析（完整输出照旧写入日志）。 */
@@ -58,12 +61,13 @@ export function jobEnv(env: NodeJS.ProcessEnv, lumioExecutable?: string): NodeJS
   if (lumioExecutable) childEnv.PATH = [dirname(lumioExecutable), env.PATH].filter(Boolean).join(delimiter);
   return childEnv;
 }
+type RunningJob = { child: ChildProcess; stop?: Promise<void>; reason?: "timeout" | "cancelled"; interactive?: boolean; forced?: boolean };
 export class Executor {
-  private running = new Map<string, { child: ChildProcess; stop?: Promise<void>; reason?: "timeout" | "cancelled" }>();
+  private running = new Map<string, RunningJob>();
   private pending = new Set<Promise<void>>();
   private stopping = false;
   constructor(private queue: Queue, private config: RuntimeConfig, private env: NodeJS.ProcessEnv, private wake: () => void,
-    private engines: Engines = [], private sudo?: SudoGate) {}
+    private engines: Engines = [], private sudo?: SudoGate, private activity?: RuntimeJobActivity) {}
   async recover() {
     for (const job of this.queue.jobs().filter((j) => j.state === "running")) {
       if (job.pid && groupExists(job.pid)) await killGroup(job.pid);
@@ -85,29 +89,49 @@ export class Executor {
     if (!run || run.stop) return;
     this.sudo?.end(id);
     run.reason = reason;
-    run.stop = run.child.pid ? killGroup(run.child.pid) : Promise.resolve();
+    run.stop = (async () => {
+      if (!run.child.pid) return;
+      if (run.interactive && run.child.connected) {
+        try { run.child.send({ kind: "stop" }); } catch { /* force independently */ }
+        const deadline = Date.now() + 6000;
+        while (run.child.exitCode === null && run.child.signalCode === null && Date.now() < deadline) await sleep(50);
+        if (run.child.exitCode === 0 && !groupExists(run.child.pid)) return;
+      }
+      run.forced = !!run.interactive;
+      await killGroup(run.child.pid);
+    })();
   }
   pump() {
     if (this.stopping) return;
     for (const job of this.queue.jobs()) {
-      if (this.running.size >= this.config.registration.max_concurrent) break;
+      if (this.pending.size >= this.config.registration.max_concurrent) break;
       if (job.state !== "queued" || !job.acked) continue;
       // start() is synchronous, preventing the next pump from selecting the same job.
       this.queue.start(job.spec.id, new Date().toISOString());
-      const pending = this.execute(job).finally(() => { this.pending.delete(pending); this.wake(); });
+      const slot: RunningJob = { child: {} as ChildProcess };
+      this.running.set(job.spec.id, slot);
+      const pending = this.execute(job, slot).finally(() => {
+        this.running.delete(job.spec.id);
+        this.pending.delete(pending);
+        this.wake();
+      });
       this.pending.add(pending);
     }
   }
-  private async execute(job: LocalJob) {
+  private async execute(job: LocalJob, placeholder: RunningJob) {
     const access = this.queue.access(job.spec.id);
     const secrets = [this.config.token, this.env.LUMIO_TOKEN ?? "", access?.token ?? ""].filter(Boolean);
     const redact = (value: string) => secrets.reduce((text, secret) => text.replaceAll(secret, "[REDACTED]"), value);
     const roundDirectory = join(this.config.stateDir, "agent-config", job.spec.id);
     const spec = job.spec, started = this.queue.jobs().find((j) => j.spec.id === spec.id)!.started!;
     let trace: RunLogWriter | undefined;
+    const activity = this.activity;
+    activity?.record(spec.id, { type: "phase", phase: "preparing" });
     const finish = async (fields: Parameters<Queue["finish"]>[0]) => {
       try { if (trace) { await trace.append("status", { status: fields.status }); await trace.close(); } }
       catch { fields = { ...fields, status: fields.status === "cancelled" || fields.status === "unknown" ? fields.status : "failed", error: msg("executor.could_not_seal_run_log") }; }
+      if (fields.status === "failed") activity?.record(spec.id, { type: "error", category: "engine" });
+      activity?.record(spec.id, { type: "phase", phase: "finishing" });
       const unavailable = this.sudo?.unavailableFor(spec.id);
       this.queue.finish({ ...fields, ...(unavailable ? { privileged_unavailable: { program: redact(unavailable) } } : {}),
         ...(fields.report === undefined ? {} : { report: redact(fields.report) }),
@@ -123,6 +147,7 @@ export class Executor {
     secrets.push(...Object.values(injected).filter((value): value is string => !!value));
     secrets.sort((a, b) => b.length - a.length);
     let gitPaths: string[] | undefined;
+    let interactive: JobEngineConfig | undefined;
     let agent: { adapter: Adapter; version: string; lastMessageFile: string; before?: GitState } | undefined;
     if (run.kind === "command") {
       if (!this.config.allowedCommands.includes(run.argv[0]!)) { await fail(msg("executor.program_is_not_in_lumio_runtime_allowed_commands")); return; }
@@ -140,14 +165,23 @@ export class Executor {
         gitPaths = gitWritePaths(workdir, this.env);
         if (!gitPaths.length) { await fail(msg("executor.git_profile_workdir")); return; }
       }
+      if (run.interaction) {
+        if (activity?.supported()) interactive = await interactiveEngine(run.engine, detected.version, this.env);
+        if (!interactive || run.permissions?.access === "full") { await fail(msg("executor.interactive_unavailable")); return; }
+        if (run.engine === "claude-code" && run.permissions?.git) {
+          gitPaths = gitWritePaths(workdir, this.env);
+          if (!gitPaths.length) { await fail(msg("executor.git_profile_workdir")); return; }
+        }
+        secrets.push(interactive.key);
+        secrets.sort((a, b) => b.length - a.length);
+      }
       const lastMessageFile = join(roundDirectory, "last.txt");
       agent = { adapter, version: detected.version, lastMessageFile, before: gitState(workdir, this.env) };
       argv = [executable, ...adapter.argv(run, { lastMessageFile, gitPaths })];
     }
     const logs = join(this.config.stateDir, "logs");
-    // Synchronous reservation above is counted even while mkdir awaits.
-    const placeholder: { child: ChildProcess; stop?: Promise<void>; reason?: "timeout" | "cancelled" } = { child: {} as ChildProcess };
-    this.running.set(spec.id, placeholder);
+    placeholder.interactive = Boolean(interactive);
+    const parser = run.kind === "agent" ? new JobOutput(run.engine, workdir, event => activity?.record(spec.id, event), redact) : undefined;
     let report = "", stdoutAll = "";
     const log = join(logs, `${spec.id}.log`), completion = join(logs, `${spec.id}.exit.json`);
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -172,8 +206,47 @@ export class Executor {
       const workerArgs = process.argv[1]?.endsWith(".ts") ? [process.argv[1], "--job-worker"] : ["--job-worker"];
       // Agent CLI calls use the binary installed beside the compiled Runtime.
       const childEnv = jobEnv(this.env, agent && workerArgs.length === 1 ? process.execPath : undefined);
-      const child = spawn(process.execPath, workerArgs, { detached: true, stdio: ["pipe", "pipe", "pipe"], env: childEnv, shell: false });
+      const child = spawn(process.execPath, workerArgs, { detached: true, stdio: ["pipe", "pipe", "pipe", "ipc"], env: childEnv, shell: false });
       placeholder.child = child;
+      activity?.begin(spec.id);
+      const awaiting = new Map<string, (state: JobActionReceipt["state"]) => void>();
+      let openPrompt: JobHumanRequest | null = null;
+      child.on("message", value => {
+        if (!value || typeof value !== "object") return;
+        if ("phase" in value && (value.phase === "before_hook" || value.phase === "engine" || value.phase === "after_hook")) {
+          activity?.record(spec.id, { type: "phase", phase: value.phase });
+          return;
+        }
+        if (!interactive || !activity || !("kind" in value)) return;
+        if (value.kind === "action-result" && "request_id" in value && "state" in value) {
+          const result = JobActionReceipt.safeParse({ request_id: value.request_id, state: value.state, at: new Date().toISOString() });
+          if (result.success) awaiting.get(result.data.request_id)?.(result.data.state);
+        }
+        if (value.kind !== "control" || !("target" in value) || !("pending" in value)) return;
+        const target = JobControlTarget.nullable().safeParse(value.target), pending = JobHumanRequest.nullable().safeParse(value.pending);
+        if (!target.success || !pending.success) return;
+        if (pending.data && pending.data.id !== openPrompt?.id) activity.record(spec.id, { type: "request_opened", prompt_id: pending.data.id });
+        if (!pending.data && openPrompt) {
+          const closed = "closed" in value && value.closed && typeof value.closed === "object"
+            && "outcome" in value.closed ? value.closed.outcome : "unknown";
+          if (closed === "answered" || closed === "approved" || closed === "denied" || closed === "expired" || closed === "cancelled" || closed === "unknown") {
+            activity.record(spec.id, { type: "request_closed", prompt_id: openPrompt.id, outcome: closed });
+          }
+        }
+        openPrompt = pending.data;
+        activity.control(spec.id, {
+          target: target.data, pending: pending.data,
+          cancel: () => this.stop(spec.id, "cancelled"),
+          apply: action => new Promise(resolve => {
+            const finish = (state: JobActionReceipt["state"]) => { clearTimeout(timer); awaiting.delete(action.request_id); resolve(state); };
+            const timer = setTimeout(() => finish("unknown"), 5000);
+            awaiting.set(action.request_id, finish);
+            if (!child.connected || placeholder.reason) { finish("rejected"); return; }
+            try { child.send({ kind: "action", action }, error => { if (error) finish("unknown"); }); } catch { finish("unknown"); }
+          }),
+        });
+      });
+      child.once("close", () => { for (const resolve of awaiting.values()) resolve("unknown"); });
       const exited = new Promise<void>((resolve, reject) => { child.once("error", reject); child.once("close", () => resolve()); });
       child.stdin!.on("error", () => {});
       if (!child.pid) { await exited; throw new Error("spawn"); }
@@ -198,10 +271,14 @@ export class Executor {
         if (agent && stdoutAll.length < MAX_AGENT_STDOUT) stdoutAll += text;
         if (chunk.length) write(chunk, "stdout");
       };
-      child.stdout!.on("data", (chunk: Buffer) => stdout(stdoutRedactor.push(chunk)));
+      child.stdout!.on("data", (chunk: Buffer) => {
+        parser?.push(chunk);
+        stdout(stdoutRedactor.push(chunk));
+      });
       child.stderr!.on("data", (chunk: Buffer) => { const clean = stderrRedactor.push(chunk); if (clean.length) write(clean, "stderr"); });
       child.stdin!.end(JSON.stringify({ spec: { ...spec, workdir }, argv, completion, hookEnv: childEnv,
         lastMessageFile: agent?.lastMessageFile, hookReportFile: agent ? join(roundDirectory, "hook-report.txt") : undefined,
+        ...(interactive ? { interactive: { provider: interactive, stateDir: this.config.stateDir, gitPaths: gitPaths ?? [], instructions: access ? SKILL_TEXT : undefined } } : {}),
         redactions: secrets, env: { ...childEnv, ...injected, ...this.sudo?.begin(spec),
         ...(run.kind === "agent" && access && Date.parse(access.expires) > Date.now() ? { LUMIO_HUB_URL: this.config.url, LUMIO_TOKEN: access.token } : {}), ...(spec.gpus ? { CUDA_VISIBLE_DEVICES: spec.gpus.join(",") } : {}) } }));
       const deadline = Date.now() + spec.timeout_seconds * 1000;
@@ -214,20 +291,22 @@ export class Executor {
       await exited;
       await placeholder.stop;
       stdout(stdoutRedactor.push(Buffer.alloc(0), true));
+      parser?.push(Buffer.alloc(0), true);
       const stderrTail = stderrRedactor.push(Buffer.alloc(0), true); if (stderrTail.length) write(stderrTail, "stderr");
       const tail = decoder.end();
       report = (report + tail).slice(-4000);
       if (agent && stdoutAll.length < MAX_AGENT_STDOUT) stdoutAll += tail;
       output.end(); await written;
       if (this.stopping) return;
-      let result: { exit_code?: number; signal?: string; error?: string } = {};
+      let result: { unknown?: boolean; interrupted?: boolean; exit_code?: number; signal?: string; error?: string } = {};
       try { result = JSON.parse(await readFile(completion, "utf8")); } catch { result.error = msg("executor.program_did_not_provide_exit_status"); }
       await rm(completion, { force: true });
-      const ok = !placeholder.reason && !outputError && result.exit_code === 0;
-      const stopped = placeholder.reason === "cancelled" ? "cancelled" : undefined;
+      const ok = !placeholder.reason && !result.unknown && !outputError && result.exit_code === 0;
+      const stopped = result.unknown || placeholder.forced ? "unknown" : placeholder.reason === "cancelled" ? "cancelled" : undefined;
+      const { unknown: _unconfirmed, interrupted: _interrupted, ...exit } = result;
       const problem = placeholder.reason === "timeout" ? { error: "timeout" } : outputError ? { error: msg("executor.could_not_write_log") } : {};
       if (!agent) {
-        await finish({ job: spec.id, lease: spec.lease, started, finished: new Date().toISOString(), ...result, report, log,
+        await finish({ job: spec.id, lease: spec.lease, started, finished: new Date().toISOString(), ...exit, report, log,
           status: stopped ?? (ok ? "done" : "failed"), ...problem });
         return;
       }
@@ -235,22 +314,23 @@ export class Executor {
       try { lastMessage = await readFile(agent.lastMessageFile, "utf8"); } catch { /* 只有 codex 写这个文件 */ }
       await rm(agent.lastMessageFile, { force: true });
       const parsed = agent.adapter.parse(stdoutAll, lastMessage === undefined ? undefined : redact(lastMessage), run as Extract<typeof run, { kind: "agent" }>);
-      const finalReport = parsed.report ?? report;
+      const finalReport = parser?.report === undefined ? parsed.report ?? report : redact(parser.report);
+      const sessionId = parser?.sessionId ?? parsed.sessionId;
       const requested = ok && spec.source?.task ? splitPermissionRequest(finalReport) : { report: finalReport, permission: undefined };
       const split = splitQuestion(requested.report);
       const after = gitState(workdir, this.env);
-      await finish({ job: spec.id, lease: spec.lease, started, finished: new Date().toISOString(), ...result, log,
+      await finish({ job: spec.id, lease: spec.lease, started, finished: new Date().toISOString(), ...exit, log,
         report: split.report.slice(0, MAX_REPORT),
         ...(split.question && ok ? { question: split.question } : {}),
         ...(requested.permission ? { permission: requested.permission } : {}),
         status: stopped ?? (ok ? (split.question || requested.permission ? "waiting_for_human" : "done") : "failed"),
         engine: { name: agent.adapter.engine, version: agent.version, sandbox: run.kind === "agent" && run.permissions?.access === "full" ? "none" : agent.adapter.sandbox },
-        ...(parsed.sessionId ? { session_id: parsed.sessionId } : {}),
+        ...(sessionId ? { session_id: sessionId } : {}),
         ...(agent.before || after ? { git: { ...(agent.before ? { before: agent.before } : {}), ...(after ? { after } : {}) } } : {}),
         ...problem });
     } catch {
       if (!this.stopping) await finish({ job: spec.id, lease: spec.lease, started, finished: new Date().toISOString(), status: "failed", error: msg("executor.could_not_execute_program"), report, log });
-    } finally { await rm(roundDirectory, { recursive: true, force: true }); await trace?.close().catch(() => {}); this.sudo?.end(spec.id); if (timer) clearTimeout(timer); this.running.delete(spec.id); }
+    } finally { activity?.end(spec.id); await rm(roundDirectory, { recursive: true, force: true }); await trace?.close().catch(() => {}); this.sudo?.end(spec.id); if (timer) clearTimeout(timer); this.running.delete(spec.id); }
   }
   async shutdown() {
     this.stopping = true;

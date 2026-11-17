@@ -2,6 +2,8 @@ import { randomBytes } from "node:crypto";
 import { newId } from "@lumio/foundation";
 import { ExecutionJobs, type RoutineHooks } from "@lumio/execution";
 import { JobStatus } from "@lumio/schema";
+import { SubmitJob } from "@lumio/execution";
+import { checkJobInteraction } from "./job-activity.ts";
 import type { HubStore, Identity } from "./store.ts";
 import type { authorize } from "./authorize.ts";
 import { HubError } from "./errors.ts";
@@ -27,6 +29,13 @@ export async function handleJobs(request: Request, operation: "job.submit" | "jo
     const jobs = new Jobs(store);
     if (operation === "job.submit") {
       let body: unknown; try { body = await request.json(); } catch { throw new HubError("INVALID", { key: "runtime.request_body_must_be_json", args: [] }); }
+      const input = SubmitJob.safeParse(body);
+      if (input.success && input.data.run.kind === "agent" && input.data.run.interaction) {
+        const runtime = store.runtimes(now).find(runtime => runtime.registration.name === input.data.runtime);
+        if (!runtime || !checkJobInteraction(store, runtime.actor, input.data.run, now)) {
+          throw new HubError("INVALID", { key: "jobs.interaction_unavailable", args: [] });
+        }
+      }
       return Response.json(jobs.submit(body, now));
     }
     if (operation === "jobs") {

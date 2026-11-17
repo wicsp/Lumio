@@ -1,7 +1,6 @@
 # Execution：执行器、Job、日志与 Routine
 
 > 现行设计分册，只写现在生效的规则；总览、跨模块规则与写法见 [`../DESIGN.md`](../DESIGN.md)。
-> Job 实时进度与同轮人工介入见 [ADR 0069](../adr/0069-job-live-progress-and-control.md)（Proposed，待批准）。
 
 ## 日志与托管文件（ADR 0025）
 
@@ -32,6 +31,14 @@
   在执行器环境中通过 `LUMIO_SECRET_<名称>` 配置阶段密钥（名称中的 `-` 写成大写 `H`，例如 `LUMIO_SECRET_githubHmerge`），同名变量只注入声明它的 agent 轮次，汇报和日志脱敏。前后钩子以执行器账号在工作目录按 argv 运行，输出进入轮次日志，失败或超时结束该轮。
 - **普通权限申请**（ADR 0049，H1-9）：执行器从 agent 汇报末尾的独立 `<lumio-permission>` 行提取权限，按等待人决定交回并保留理由。
 - **不做**：跨设备调用工具、上下文管理、模型路由；留给以后自研的 agent（作为执行器里的一种引擎接入）。
+
+## Job 实时活动与同轮介入（ADR 0069）
+
+- Job 2 通过登记头协商活动扩展。Runtime 用独立通道提交少量脱敏事件，以 Job、lease 和连续序号校验、补读和去重。活动与最终结果独立，活动流延迟不会重启任务或改变业务终态。
+- 心跳说明执行器连通，活动只呈现实际观察到的阶段和工具。普通活动在 Job 完成后保留 30 天，查询标明过期前缀。
+- Codex 与 Claude Code 的非交互 Job 可上报运行事件。显式互动仅在具备已验证引擎、凭据与 OS 隔离的 Runtime 提供。交互模式允许 Web 对一个正在等待的请求进行答复、批准或拒绝，Codex 支持同轮纠偏。调用与回执绑定原执行进程与轮次。
+- Runtime 管理员启用 macOS 交互执行时，用 `LUMIO_INTERACTIVE_JOB_ROOTS` 指定以冒号分隔的绝对项目根，并用 `LUMIO_JOB_CODEX_API_KEY` 或 `LUMIO_JOB_CLAUDE_API_KEY` 注入对应提供商 API 凭据。已验证的是 Codex 0.166.0 和 Claude Code 2.1.322。项目目录须在登记的根内。交互轮使用受限沙箱及独立的会话目录，阶段为全权限时须使用原非交互模式。
+- `lumio job watch <id>` 使用同一状态与事件接口。CLI 派出时可用 `lumio task continue <id> --interactive` 或 `lumio job submit --interactive` 请求交互，不能由定时例行任务启用。
 
 ## Runtime 版本与自动更新（ADR 0063，U1-0）
 

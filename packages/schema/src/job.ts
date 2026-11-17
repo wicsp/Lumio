@@ -30,6 +30,7 @@ export const AgentRun = z.strictObject({
   kind: z.literal("agent"),
   engine: z.enum(AGENTS),
   model: z.string().min(1).optional(),
+  interaction: z.literal("interactive").optional(),
   prompt: z.string().min(1).describe("Hub 组装好的完整输入：任务内容、你新写的部分、固定说明"),
   session: z
     .strictObject({ id: SessionId, resume: z.boolean().describe("true：接着这个会话继续；false：用这个 ID 新建") })
@@ -184,7 +185,7 @@ export const RoutineSpec = z.strictObject({
   timezone: z.string().min(1),
   lease: z.string().min(16).describe("这份计划的凭据；由它触发的每一轮回报都带上它"),
   template: z.strictObject({
-    run: AgentRun,
+    run: AgentRun.refine(run => !run.interaction, "Routines are unattended"),
     workdir: z.string().min(1),
     gpus: z.array(z.number().int().nonnegative()).optional(),
     timeout_seconds: z.number().int().positive(),
