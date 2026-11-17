@@ -1,6 +1,6 @@
 /**
  * 设置 → AI 模型 →「资料摘要」（ADR 0057，I1-5）：选择给 Inbox 资料写卡片的 Profile（`knowledge.summary` 用途绑定），
- * 以及可选的看图 Profile（`knowledge.vision`，ADR 0066 第 6 节，C1-5）：只用于整理桌面小助手存下的截图。
+ * 以及可选的看图 Profile（`knowledge.vision`，ADR 0066 第 6 节）：用于收藏转录，也允许 DeepSeek Flash 对话看图。
  * 只能选 API 方式（引擎 lumio）的 Profile；模型是否支持图像由人判断，Hub 调用失败时退回本机识字结果。
  */
 import type { AIConfiguration, KnowledgeAIBinding } from "@lumio/schema";
@@ -47,11 +47,10 @@ export class KnowledgeAISettings {
       ? t("Writes the short card for each saved item, and the deep read when you ask. The extracted text is sent to this model's service.")
       : t("Add an API profile first. Codex sessions can't write cards."),
       profile => toast(profile ? t("New saves will get an AI card.") : t("AI cards are off. Saved items still go into the Inbox.")));
-    // 看图（ADR 0066 第 6 节）：可选，只用于把桌面小助手的截图整理成原文；不绑定时用本机识字的结果。
     const vision = this.field("knowledge.vision", t("Screenshot model"), profiles, byId, (connection) => connection
-      ? t("Optional. Desktop helper screenshots you save (with the pointer marked) are sent to {0} to tidy them into text; the model must accept images. Chat-only screenshots aren't sent.", connection)
-      : t("Optional. Off: saved screenshots use the text your Mac recognized on its own, and no screenshot leaves this Hub."),
-      profile => toast(profile ? t("Saved screenshots will be tidied by this model.") : t("Screenshots stay on this Hub.")));
+      ? t("Saved screenshots are sent to {0} for transcription. When you ask about a screenshot with official DeepSeek Flash, DeepSeek receives the screenshot, recognized text and your question.", connection)
+      : t("When off, screenshots stay on this Hub and Lumio uses the text recognized on your device."),
+      profile => toast(profile ? t("Screenshot vision is on.") : t("Screenshots stay on this Hub.")));
     clear(this.element, h("div", { class: "set-form-wrap" }, summary, vision));
   }
 
