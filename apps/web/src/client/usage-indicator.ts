@@ -2,7 +2,8 @@
  * 侧栏 AI 用量指示器：在侧栏底部、账号上方，每个开启监控的连接一行。
  * 订阅额度显示各窗口中最少的剩余百分比，细条依次是从短到长的窗口；API 余额显示余额。
  * 每条细条上有一根竖线，表示离该窗口重置还剩的时间占比：亮条越过竖线说明额度撑得到重置，没到说明会提前用完。
- * 平时是灰色，低于监控阈值变黄，用完变红；收起侧栏时只剩一个圆环，表示最紧张的额度。
+ * 平时是灰色，低于监控阈值变黄，用完变红。收起侧栏时每个连接仍各占一行，只是去掉名称和数值、细条缩到栏宽，
+ * 竖线照常画；鼠标移上去立即浮出与展开状态相同的完整列表。
  * 点一行弹出详情（各窗口剩余与重置时间、刷新、去设置）。数据复用 ADR 0052 的用量接口，不新增契约。
  */
 import type { AIConnection, AIQuotaView, AIQuotaWindow } from "@lumio/schema";
@@ -61,22 +62,17 @@ export function usageGlance(connection: AIConnection, usage: AIQuotaView, now = 
   return { ...base, level, remaining, bars, resets, value: `${remaining}%` };
 }
 
-/** 收起侧栏时的圆环：颜色取最严重的一行，弧长取订阅额度里最少的剩余；只有 API 余额时画满。 */
-export function usageRing(glances: readonly UsageGlance[]): { level: UsageLevel; remaining: number } | undefined {
-  if (!glances.length) return undefined;
-  const level = glances.reduce<UsageLevel>((worst, g) => SEVERITY[g.level] > SEVERITY[worst] ? g.level : worst, "ok");
-  const values = glances.flatMap(g => g.remaining === undefined ? [] : [g.remaining]);
-  return { level, remaining: values.length ? Math.min(...values) : level === "empty" ? 0 : 100 };
-}
-
 const LEVEL_LABEL: Record<UsageLevel, string> = { ok: "", low: "Running low", empty: "Used up", issue: "Usage unavailable" };
-const RING_R = 9, RING_C = 2 * Math.PI * RING_R;
+/** 收起侧栏时悬停浮层的出现、消失延迟：出现要快；消失留一点时间让鼠标移进浮层。 */
+const HOVER_IN = 40, HOVER_OUT = 160;
 const MIN_INTERVAL = 30_000, CONFIG_TTL = 10 * 60_000;
 
 export class UsageIndicator {
   readonly element = h("div", { class: "usage-glance", hidden: true });
   private rows = h("div", { class: "usage-rows", role: "group", "aria-label": t("AI usage") });
-  private ring = h("button", { type: "button", class: "usage-ring", onclick: () => this.openSettings() });
+  /** 收起侧栏时悬停浮出的完整列表，内容与展开状态的各行相同。 */
+  private hover = h("div", { class: "menu usage-hover", role: "group", "aria-label": t("AI usage"), hidden: true });
+  private hoverTimer?: ReturnType<typeof setTimeout>;
   private connections = new Map<string, AIConnection>();
   private usage = new Map<string, AIQuotaView>();
   private configAt = 0;
@@ -87,7 +83,12 @@ export class UsageIndicator {
   private timer = setInterval(() => void this.refresh(), 60_000);
 
   constructor(private client: Client, private openSettings: () => void) {
-    this.element.append(this.rows, this.ring);
+    this.element.append(this.rows);
+    const enter = () => this.scheduleHover(true), leave = () => this.scheduleHover(false);
+    this.element.addEventListener("mouseenter", enter);
+    this.element.addEventListener("mouseleave", leave);
+    this.hover.addEventListener("mouseenter", enter);
+    this.hover.addEventListener("mouseleave", leave);
     void this.refresh(true);
   }
 
@@ -123,24 +124,7 @@ export class UsageIndicator {
     const glances = this.glances();
     this.element.hidden = !glances.length;
     clear(this.rows, ...glances.map(g => this.row(g)));
-    const ring = usageRing(glances);
-    if (ring) {
-      const ns = "http://www.w3.org/2000/svg";
-      const svg = document.createElementNS(ns, "svg");
-      svg.setAttribute("viewBox", "0 0 24 24"); svg.setAttribute("aria-hidden", "true");
-      const circle = (cls: string, dash?: string) => {
-        const c = document.createElementNS(ns, "circle");
-        for (const [k, v] of Object.entries({ cx: "12", cy: "12", r: String(RING_R), class: cls })) c.setAttribute(k, v);
-        if (dash) c.setAttribute("stroke-dasharray", dash);
-        return c;
-      };
-      svg.append(circle("usage-ring-track"), circle("usage-ring-fill", `${(RING_C * ring.remaining) / 100} ${RING_C}`));
-      clear(this.ring, svg);
-      this.ring.dataset.level = ring.level;
-      const summary = glances.map(g => `${g.name} ${g.value}`).join(" · ");
-      this.ring.title = summary;
-      this.ring.setAttribute("aria-label", t("AI usage: {0}", summary));
-    }
+    if (!this.hover.hidden) this.fillHover(glances);
     if (this.popover) {
       const view = this.usage.get(this.popover.connection), connection = this.connections.get(this.popover.connection);
       if (view && connection && glances.some(g => g.connection === connection.id)) this.fillPopover(this.popover.element, connection, view);
@@ -148,11 +132,12 @@ export class UsageIndicator {
     }
   }
 
-  private row(g: UsageGlance): HTMLElement {
+  /** 一行用量。onOpen 缺省时点开详情并锚定在这一行；悬停浮层里的行改为锚定到侧栏上对应的那一行。 */
+  private row(g: UsageGlance, onOpen?: () => void): HTMLElement {
     const label = [g.name, g.value, t(LEVEL_LABEL[g.level])].filter(Boolean).join(" · ");
     const button = h("button", { type: "button", class: "usage-row", "data-level": g.level, "data-connection": g.connection,
-      title: label, "aria-label": label, "aria-haspopup": "dialog", "aria-expanded": String(this.popover?.connection === g.connection),
-      onclick: () => this.toggle(button, g.connection) },
+      "aria-label": label, "aria-haspopup": "dialog", "aria-expanded": String(this.popover?.connection === g.connection),
+      onclick: () => onOpen ? onOpen() : this.toggle(button, g.connection) },
       h("span", { class: "usage-name" }, g.name),
       h("span", { class: "usage-bars", "aria-hidden": "true" }, ...g.bars.map((value, index) => {
         const fill = h("i");
@@ -165,12 +150,48 @@ export class UsageIndicator {
           bar.append(marker);
         }
         return bar;
-      })),
+      }), ...(g.bars.length ? [] : [h("span", { class: "usage-dot" })])),
       h("span", { class: "usage-value" }, g.level === "issue" ? icon("alert") : g.value));
     return button;
   }
 
+  private collapsed(): boolean {
+    return !!this.element.closest(".sidebar-collapsed") && matchMedia("(min-width: 861px)").matches;
+  }
+
+  private scheduleHover(show: boolean): void {
+    clearTimeout(this.hoverTimer);
+    if (show && (!this.collapsed() || this.popover)) return;
+    if (show === !this.hover.hidden) return;
+    this.hoverTimer = setTimeout(() => show ? this.showHover() : this.hideHover(), show ? HOVER_IN : HOVER_OUT);
+  }
+
+  private showHover(): void {
+    const glances = this.glances();
+    if (!glances.length) return;
+    if (!this.hover.isConnected) document.body.append(this.hover);
+    this.hover.hidden = false;
+    this.fillHover(glances);
+  }
+
+  private hideHover(): void {
+    clearTimeout(this.hoverTimer);
+    this.hover.hidden = true;
+  }
+
+  private fillHover(glances: UsageGlance[]): void {
+    clear(this.hover, ...glances.map(g => this.row(g, () => {
+      this.hideHover();
+      const anchor = this.rows.querySelector<HTMLElement>(`[data-connection="${CSS.escape(g.connection)}"]`);
+      if (anchor) this.toggle(anchor, g.connection);
+    })));
+    const rect = this.rows.getBoundingClientRect();
+    this.hover.style.left = `${rect.right + 8}px`;
+    this.hover.style.top = `${Math.max(8, Math.min(rect.bottom - this.hover.offsetHeight + 6, window.innerHeight - this.hover.offsetHeight - 8))}px`;
+  }
+
   private toggle(anchor: HTMLElement, id: string): void {
+    this.hideHover();
     const same = this.popover?.connection === id;
     this.popover?.close();
     if (same) return;
@@ -239,6 +260,8 @@ export class UsageIndicator {
   dispose(): void {
     this.disposed = true;
     clearInterval(this.timer);
+    this.hideHover();
+    this.hover.remove();
     this.popover?.close();
   }
 }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { AIConnection, AIQuotaView } from "@lumio/schema";
-import { timeLeftOf, usageGlance, usageRing } from "../../src/client/usage-indicator.ts";
+import { timeLeftOf, usageGlance } from "../../src/client/usage-indicator.ts";
 
 const at = "2026-11-10T12:00:00+08:00";
 const connection = (kind: "codex-account" | "claude-code-subscription" | "deepseek", name: string, id: string) => AIConnection.parse({
@@ -44,17 +44,6 @@ describe("sidebar usage indicator", () => {
     expect(usageGlance(codex, view(codex.id, { status: "offline", snapshot: { source: "codex", sampled_at: at, windows: windows(50, 20) } })))
       .toMatchObject({ level: "ok", remaining: 50 });
   });
-  test("the collapsed ring takes the worst level and the smallest remaining share", () => {
-    const glances = [
-      usageGlance(claude, view(claude.id, { snapshot: { source: "claude-code", sampled_at: at, windows: windows(30, 20) } }))!,
-      usageGlance(codex, view(codex.id, { attention: true, snapshot: { source: "codex", sampled_at: at, windows: windows(88, 42) } }))!,
-      usageGlance(deepseek, view(deepseek.id, { status: "error" }))!,
-    ];
-    expect(usageRing(glances)).toEqual({ level: "low", remaining: 12 });
-    expect(usageRing([glances[2]!])).toEqual({ level: "issue", remaining: 100 });
-    expect(usageRing([])).toBeUndefined();
-  });
-
   test("each bar carries the share of its window left before reset", () => {
     const now = Date.parse(at);
     const glance = usageGlance(codex, view(codex.id, { snapshot: { source: "codex", sampled_at: at, windows: [

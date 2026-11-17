@@ -356,7 +356,6 @@ export const ZH: Record<string, string> = {
   "AccessKey Secret": "AccessKey Secret",
   "Enter a valid AccessKey ID and Secret.": "请输入有效的 AccessKey ID 和 Secret。",
   "AI usage": "AI 用量",
-  "AI usage: {0}": "AI 用量：{0}",
   "Running low": "即将用完",
   "Used up": "已用完",
   "Usage unavailable": "暂无用量",
