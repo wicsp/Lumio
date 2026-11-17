@@ -40,8 +40,8 @@ export const AIQuotaSettings = z.strictObject({
   monitor: z.boolean(),
   claude_mode: z.enum(["sample", "background"]).optional(),
   thresholds: z.strictObject({ CNY: Threshold.optional(), USD: Threshold.optional(), remaining_percent: Percentage.optional() }),
-  /** API 余额的监控阈值（ADR 0071）：余额不低于它时细条满格，低于时按比例缩短。只影响显示。 */
-  full_balance: z.strictObject({ CNY: Threshold.optional(), USD: Threshold.optional() }).optional(),
+  /** API 余额的监控阈值（ADR 0071）：侧栏显示的那笔余额不低于它时细条满格，低于时按比例缩短。只影响显示，不分币种。 */
+  full_balance: Threshold.optional(),
 });
 export const ClaudeQuotaBinding = z.strictObject({ connection: idOf("aic"), generation: z.string().uuid() });
 export const ClaudeQuotaBindings = z.array(ClaudeQuotaBinding);
