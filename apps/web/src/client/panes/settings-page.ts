@@ -6,7 +6,7 @@ import { imageHostingSettings } from "../image-hosting-settings.ts";
  */
 import type { RuntimeInfo } from "@lumio/schema";
 import { errorText, type Session } from "../api.ts";
-import { clear, h, icon } from "../dom.ts";
+import { clear, confirmDialog, h, icon, toast } from "../dom.ts";
 import { ago } from "../format.ts";
 import { formatTime } from "../commands.ts";
 import { helperState, installCommandBlock } from "../privileged-helper.ts";
@@ -40,6 +40,8 @@ export class SettingsPane {
   private title = h("h1", { class: "bar-title" }, t("Settings"));
   private shown?: SettingsSection;
   private health?: Promise<Health>;
+  private runtimeRows?: HTMLElement;
+  private runtimeLoad = 0;
 
   constructor(owner: HTMLElement, private session: Session, private name: string, private logout: () => void,
     private back: () => void, private navigate: (section?: SettingsSection) => void, initial?: string, private gamepad?: GamepadInput) {
@@ -67,6 +69,7 @@ export class SettingsPane {
     this.title.textContent = picked ? t(SETTINGS_SECTIONS.find(s => s.key === picked)!.label) : t("Settings");
     if (key === this.shown) return;
     if (this.shown === "devices") {
+      this.runtimeRows = undefined;
       this.built.get("devices")?.dispose?.();
       this.built.delete("devices");
     }
@@ -143,6 +146,7 @@ export class SettingsPane {
         clear(hubRows, this.row(t("Address"), h("span", { class: "set-value mono" }, location.host)), this.row(t("Status"), h("span", { class: "set-value muted" }, t("Checking…"))));
         clear(runtimeRows, h("p", { class: "set-empty" }, t("Loading…")));
         void this.loadHub(hubRows);
+        this.runtimeRows = runtimeRows;
         void this.loadRuntimes(runtimeRows);
         const proxy = captureProxySettings(this.session.client);
         return { element: page(this.group(t("Hub"), undefined, hubRows),
@@ -313,23 +317,53 @@ export class SettingsPane {
       this.row(t("Status"), status));
   }
 
+  private async removeRuntime(name: string, button: HTMLButtonElement): Promise<void> {
+    if (button.disabled) return;
+    button.disabled = true;
+    try {
+      const confirmed = await confirmDialog({
+        title: t("Remove {0}?", name),
+        message: t("This revokes the runtime’s access to this Hub. Any running jobs may be interrupted. Job history is kept."),
+        confirm: t("Remove"),
+        danger: true,
+      });
+      if (!confirmed || !this.active || !button.isConnected) return;
+      await this.session.client.removeRuntime(name);
+      if (this.active) {
+        toast(t("Removed {0}.", name));
+        const rows = this.runtimeRows;
+        if (rows?.isConnected) await this.loadRuntimes(rows);
+      }
+    } catch (error) {
+      if (this.active && button.isConnected) toast(t("Could not remove {0}. {1}", name, errorText(error)), "error");
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   private async loadRuntimes(rows: HTMLElement): Promise<void> {
+    const request = ++this.runtimeLoad;
+    const current = () => this.active && this.runtimeRows === rows && this.runtimeLoad === request;
     let runtimes: RuntimeInfo[];
     try { runtimes = await this.session.client.runtimes(); } catch (error) {
-      if (this.active) clear(rows, h("p", { class: "set-empty" }, errorText(error)));
+      if (current()) clear(rows, h("p", { class: "set-empty" }, errorText(error)));
       return;
     }
-    if (!this.active) return;
+    if (!current()) return;
     if (!runtimes.length) { clear(rows, h("p", { class: "set-empty" }, t("No runtimes yet. Run lumio runtime add <name> to pair a machine."))); return; }
     clear(rows, ...runtimes.flatMap(runtime => {
+      const name = runtime.registration.name;
       const helper = helperState(runtime.registration);
+      const remove = h("button", { type: "button", class: "btn btn-quiet btn-small set-danger", "aria-label": t("Remove runtime {0}", name),
+        onclick: () => void this.removeRuntime(name, remove) }, t("Remove"));
       const row = h("div", { class: "set-row" },
         h("span", { class: `connection-dot${runtime.online ? "" : " off"}` }),
-        h("span", { class: "set-label" }, runtime.registration.name,
+        h("span", { class: "set-label" }, name,
           h("span", { class: "set-sub" }, runtime.registration.engines.map(engine => engine.name).join(", ") || t("No agents")),
           h("span", { class: "set-sub" }, helper === "installed" ? t("Administrator helper: installed")
             : helper === "missing" ? t("Administrator helper: not installed") : t("Administrator helper: unknown (update this runtime to see)"))),
-        h("span", { class: "set-value muted" }, runtime.online ? t("Online") : t("Last seen {0}", ago(runtime.last_seen))));
+        h("span", { class: "set-value muted" }, runtime.online ? t("Online") : t("Last seen {0}", ago(runtime.last_seen))),
+        remove);
       if (helper !== "missing") return [row];
       // 没装助手时说明它的用途，并给出可复制的安装命令（ADR 0020）。
       return [row, h("div", { class: "set-row helper-row" },
