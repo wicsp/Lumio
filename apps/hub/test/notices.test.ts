@@ -80,7 +80,7 @@ async function stream(response: Response) {
   return (await response.text()).trim().split("\n").map(line => AssistantEvent.parse(JSON.parse(line)));
 }
 
-test("round pre-read waits for the main turn, preserves the terminal frame, and survives duplicate delivery and restart", async () => {
+test("round pre-read waits for the main turn and only notifies about the original Work report", async () => {
   const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
   const requests: AssistantModelRequest[] = [];
   const receiver = pushReceiver(), pushes: unknown[] = [];
@@ -112,7 +112,9 @@ test("round pre-read waits for the main turn, preserves the terminal frame, and 
     await f.hub.modules.notices.drain();
     expect(await f.list()).toEqual({ notices: [], unread: 0 });
     const taskBefore = await f.detail(subject.id);
-    expect(taskBefore.comments.some(comment => comment.author === f.hub.store.assistantActor().id)).toBe(false);
+    expect(taskBefore.comments).toHaveLength(1);
+    expect(taskBefore.comments[0]?.author).toBe(f.runtime.actor.id);
+    expect(taskBefore.comments[0]?.body).toContain(report);
     expect(JSON.stringify(requests[0])).not.toContain(report);
 
     release.resolve();
@@ -127,10 +129,9 @@ test("round pre-read waits for the main turn, preserves the terminal frame, and 
     });
     const taskAfter = await f.detail(subject.id);
     expect(taskAfter.task.revision).toBe(taskBefore.task.revision);
-    const comment = taskAfter.comments.find(comment => comment.id === notice.comment);
-    expect(comment).toMatchObject({ author: f.hub.store.assistantActor().id });
-    expect(comment?.body).toContain(report);
-    expect(f.hub.store.db.query("SELECT token_label FROM audit WHERE token_label='assistant-pre-read' AND operation='work.task.comment'").all()).toHaveLength(1);
+    expect(taskAfter.comments).toEqual(taskBefore.comments);
+    expect(notice.comment).toBeUndefined();
+    expect(f.hub.store.db.query("SELECT token_label FROM audit WHERE token_label='assistant-pre-read' AND operation='work.task.comment'").all()).toHaveLength(0);
     await f.hub.modules.notifications.drain();
     expect(pushes).toEqual([{ kind: "turn.review", title: subject.title, path: "#work/" + subject.id }]);
 
@@ -155,9 +156,31 @@ test("round pre-read waits for the main turn, preserves the terminal frame, and 
     expect((await f.list("?unread=false")).notices[0]?.read).toBeDefined();
     expect((await sent.submit()).status).toBe(200);
     await f.hub.modules.notices.drain();
-    expect((await f.detail(subject.id)).comments.filter(comment => comment.author === f.hub.store.assistantActor().id)).toHaveLength(1);
+    expect((await f.detail(subject.id)).comments).toEqual(taskBefore.comments);
     expect((await f.list()).notices).toHaveLength(1);
   } finally { release.resolve(); await f.close(); }
+});
+
+test("Work hides historical pre-read copies by notice ID and keeps separately posted comments", async () => {
+  const f = await fixture();
+  try {
+    const task = await f.task("Synthetic task with an old pre-read");
+    const job = await f.dispatch(task.id);
+    const report = "Synthetic completed round report.";
+    expect((await (await f.result(job, report)).submit()).status).toBe(200);
+    await f.hub.modules.notices.drain();
+    const original = (await f.detail(task.id)).comments[0]!;
+    const notice = (await f.list()).notices[0]!;
+    const body = `Assistant pre-read · delivered · [Execution round](lumio:${job.spec.id})\n\n${report}`;
+    const action = { request_id: randomUUID(), operation: { op: "work.task.comment" as const, args: { task: task.id, body } } };
+    const copy = f.hub.modules.workCommands.execute(action, { actor: f.hub.store.assistantActor(), label: "assistant-pre-read" });
+    const discussion = await f.command("work.task.comment", { task: task.id, body });
+    if (copy.kind !== "comment" || discussion.kind !== "comment") throw new Error("Expected comments");
+    f.hub.store.db.query("UPDATE workbench_notices SET record=json_set(record,'$.comment',?) WHERE id=?").run(copy.comment.id, notice.id);
+
+    expect((await f.detail(task.id)).comments.map(comment => comment.id)).toEqual([original.id, discussion.comment.id]);
+    expect(f.hub.modules.workStore.comments(task.id)).toHaveLength(3);
+  } finally { await f.close(); }
 });
 
 function jevAnswer(level: NoticeLevel, confidence = 0.94) {

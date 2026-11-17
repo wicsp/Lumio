@@ -5,7 +5,7 @@ import type { WorkCommands } from "./work-commands.ts";
 import { WorkError, type WorkService } from "@lumio/work";
 import type { ExecutionRoutines } from "@lumio/execution";
 import { assertNoteVisible } from "./trash.ts";
-import { AI_NOTE_CAPABILITY_NAMES, KnowledgeAiNoteCommand, ORIGINAL_CAPABILITY_NAME, capability, RESPONSE_REASONS, CAPABILITIES, toolName, WorkCommandRequest, WorkAttention, type CapabilityChange, type CapabilityNameOf } from "@lumio/schema";
+import { AI_NOTE_CAPABILITY_NAMES, KnowledgeAiNoteCommand, ORIGINAL_CAPABILITY_NAME, capability, RESPONSE_REASONS, CAPABILITIES, toolName, WorkCommandRequest, WorkAttention, type CapabilityChange, type CapabilityNameOf, type WorkTaskDetail } from "@lumio/schema";
 import type { AssistantTool } from "@lumio/assistant";
 import { KnowledgeService } from "@lumio/knowledge";
 import { FileKnowledgeRepository, readKnowledgeDocument, showOriginal, type SqliteAssistantStore } from "@lumio/storage";
@@ -20,6 +20,7 @@ import { text as msg } from "./messages.ts";
 interface CapabilityModules {
   workCommands: WorkCommands;
   work: WorkService;
+  workTaskDetail(id: string): WorkTaskDetail;
   routines: ExecutionRoutines;
   aiNotes?: AiNotes;
   resources: Resources;
@@ -166,7 +167,7 @@ export class Capabilities {
       const work = this.modules.work, jobs = new Jobs(this.store);
       switch (name as CapabilityNameOf) {
         case "work.task.list": result = work.tasks(args); break;
-        case "work.task.show": result = work.detail(String(args.task)); break;
+        case "work.task.show": result = this.modules.workTaskDetail(String(args.task)); break;
         case "work.project.list": result = work.projects().filter(value => !args.status || value.status === args.status); break;
         case "work.project.show": result = work.project(String(args.project)); break;
         case "work.attention.list": result = this.attention(); break;

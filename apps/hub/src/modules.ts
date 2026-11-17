@@ -93,6 +93,10 @@ export class BusinessModules {
   private readonly stopped = new AbortController();
   private readonly timer: ReturnType<typeof setInterval>;
   readonly signal = this.stopped.signal;
+  workTaskDetail(id: string) {
+    return this.notices.withoutPreReadCopies(this.work.detail(id));
+  }
+
   securityReview(request: Request) {
     return reviewSecurity(request, this.config, this.work, this.store);
   }
