@@ -244,10 +244,10 @@ kbd { padding: 0 5px; border: 1px solid var(--line); border-bottom-width: 2px; b
 .usage-row[data-level="low"] .usage-track > i { background: var(--ochre); }
 .usage-row[data-level="empty"] { color: var(--red); }
 .usage-row[data-level="empty"] .usage-track > i { background: var(--red); }
-.usage-dot { display: none; width: 6px; height: 6px; margin: 0 auto; border-radius: 50%; background: var(--ink-4); }
-.usage-row[data-level="low"] .usage-dot { background: var(--ochre); }
-.usage-row[data-level="empty"] .usage-dot { background: var(--red); }
-.usage-row[data-level="issue"] .usage-dot { background: none; box-shadow: inset 0 0 0 1.5px var(--ink-4); }
+/* 没有百分比可画（API 余额、读不到）时画一条虚线细条，保持每行都是条。 */
+.usage-bar-dashed .usage-track { --dash: var(--ink-4); background: repeating-linear-gradient(90deg, var(--dash) 0 4px, transparent 4px 7px); opacity: .7; }
+.usage-row[data-level="low"] .usage-bar-dashed .usage-track { --dash: var(--ochre); opacity: 1; }
+.usage-row[data-level="empty"] .usage-bar-dashed .usage-track { --dash: var(--red); opacity: 1; }
 /* 收起侧栏时的悬停浮层：与展开状态的各行一致，宽度对齐展开的侧栏。 */
 .menu.usage-hover { position: fixed; z-index: 60; width: 236px; padding: 4px; display: flex; flex-direction: column; gap: 1px; }
 .menu.usage-hover[hidden] { display: none; }
@@ -258,12 +258,11 @@ kbd { padding: 0 5px; border: 1px solid var(--line); border-bottom-width: 2px; b
 .usage-pop .ai-quota-window { margin: 0; }
 .usage-pop .button-row { margin-top: 2px; }
 @media (min-width: 861px) {
-  /* 收起：每个连接仍占一行，去掉名称和数值，细条缩到栏宽、竖线照常；无细条的连接（API 余额、读不到）显示一个点。 */
+  /* 收起：每个连接仍占一行，去掉名称和数值，细条缩到栏宽、竖线照常；无百分比的连接画虚线细条。 */
   .sidebar-collapsed .sidebar .usage-glance { border-top-color: transparent; }
   .sidebar-collapsed .sidebar .usage-row { height: 16px; padding: 0 5px; gap: 0; }
   .sidebar-collapsed .sidebar .usage-row :is(.usage-name, .usage-value) { display: none; }
   .sidebar-collapsed .sidebar .usage-bars { gap: 2px; }
-  .sidebar-collapsed .sidebar .usage-dot { display: block; }
 }
 .who { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--r-sm); }
 .who-avatar { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--ink); color: var(--paper); font-size: 11px; font-weight: 600; }

@@ -150,7 +150,7 @@ export class UsageIndicator {
           bar.append(marker);
         }
         return bar;
-      }), ...(g.bars.length ? [] : [h("span", { class: "usage-dot" })])),
+      }), ...(g.bars.length ? [] : [h("span", { class: "usage-bar usage-bar-dashed" }, h("span", { class: "usage-track" }))])),
       h("span", { class: "usage-value" }, g.level === "issue" ? icon("alert") : g.value));
     return button;
   }
