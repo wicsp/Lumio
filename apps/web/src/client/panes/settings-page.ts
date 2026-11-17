@@ -15,6 +15,8 @@ import { LANGS, THEMES } from "../settings.ts";
 import { AISettings } from "../ai-settings.ts";
 import { AgentsSettings } from "../agents-settings.ts";
 import { captureProxySettings } from "../capture-proxy-settings.ts";
+import { IPHONE_SHORTCUTS, pairingUrl, shortcutInstallUrl, unreachableFromPhone } from "../iphone-setup.ts";
+import { qrSvg } from "../qr-code.ts";
 import type { GamepadInput } from "../gamepad-input.ts";
 import { GamepadSettings } from "../gamepad-settings.ts";
 import { NotificationSettings } from "../notification-settings.ts";
@@ -142,7 +144,8 @@ export class SettingsPane {
           this.group(t("Capture proxy"), t("Use an HTTP or HTTPS proxy reachable from the Hub to fetch Inbox links."), proxy.element),
           this.group(t("Runtimes"), t("Machines that run agents for this Hub."), runtimeRows),
           this.group(t("Browser extension"), t("Save the page you're reading to the Inbox with one click."), this.extensionPairing()),
-          this.group(t("Desktop helper"), t("Tap the capture key in any Mac app to save what you're pointing at; hold it to ask the assistant. The screenshot of the front window goes to this Hub only when you press the key."), this.desktopPairing())),
+          this.group(t("Desktop helper"), t("Tap the capture key in any Mac app to save what you're pointing at; hold it to ask the assistant. The screenshot of the front window goes to this Hub only when you press the key."), this.desktopPairing()),
+          this.group(t("iPhone"), t("Double-tap the back of the iPhone to save what's on screen; press the Action Button to ask the assistant about it. Works with any computer that shows this page."), this.iphoneSetup())),
           dispose: proxy.dispose };
       }
       case "agents": {
@@ -185,6 +188,46 @@ export class SettingsPane {
   private desktopPairing(): HTMLElement {
     return this.pairing("desktop", t("Pair a Mac"), t("Install Lumio Capture (apps/desktop), then create a code here."),
       t("In the menu bar, choose Lumio → 配对… and enter both. The code works once, until {0}."));
+  }
+
+  /** iPhone 快捷指令（apps/mobile）：扫码安装，再扫码配对；手机只需相机，电脑是什么系统都行。 */
+  private iphoneSetup(): HTMLElement {
+    const installs = h("div", { class: "qr-row" }, ...IPHONE_SHORTCUTS.map(item => {
+      const url = shortcutInstallUrl(item.name);
+      return h("figure", { class: "qr-card" }, qrSvg(url, item.name),
+        h("figcaption", {}, h("a", { href: url, target: "_blank", rel: "noopener" }, item.name),
+          h("span", { class: "set-sub" }, item.use === "save" ? t("Bind to Back Tap") : t("Bind to the Action Button"))));
+    }));
+    const result = h("div", { class: "set-pairing", role: "status" });
+    const button = h("button", { type: "button", class: "btn btn-small" }, t("Create pairing QR code"));
+    button.addEventListener("click", () => void (async () => {
+      button.disabled = true; clear(result);
+      try {
+        const invite = await this.session.client.clientInvite(`iphone@${new Date().toISOString().slice(0, 10)}`);
+        const address = h("input", { class: "mono set-input-wide", type: "url", value: invite.hub_url, "aria-label": t("Hub address the iPhone can reach") });
+        const code = h("div", { class: "qr-row" });
+        const warning = h("p", { class: "field-hint inbox-error" });
+        const draw = () => {
+          const hub = address.value.trim(), unreachable = unreachableFromPhone(hub);
+          warning.textContent = unreachable ? t("The iPhone can't reach this address. Use this computer's LAN or Tailscale address.") : "";
+          if (unreachable) clear(code); else clear(code, h("figure", { class: "qr-card" }, qrSvg(pairingUrl(hub, invite.code), t("Pairing QR code"))));
+        };
+        address.addEventListener("input", draw);
+        draw();
+        clear(result,
+          h("div", { class: "set-row set-row-stack" }, h("span", { class: "set-label" }, t("Hub address the iPhone can reach")), address),
+          warning, code,
+          h("p", { class: "field-hint" }, t("Scan with the iPhone camera after adding Lumio 收藏. The code works once, until {0}.").replace("{0}", formatTime(invite.expires))));
+      } catch (error) {
+        clear(result, h("p", { class: "field-hint inbox-error" }, errorText(error)));
+      } finally { button.disabled = false; }
+    })());
+    return h("div", { class: "set-rows" },
+      h("div", { class: "set-row set-row-stack" }, h("span", { class: "set-label" }, t("1. Add the shortcuts"),
+        h("span", { class: "set-sub" }, t("Scan each code with the iPhone camera and tap Add Shortcut."))), installs),
+      h("div", { class: "set-row" }, h("span", { class: "set-label" }, t("2. Pair"),
+        h("span", { class: "set-sub" }, t("Create a code here, then scan it. No typing on the phone."))), button),
+      result);
   }
 
   private pairing(kind: "browser" | "desktop", label: string, sub: string, hint: string): HTMLElement {
