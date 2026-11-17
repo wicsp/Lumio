@@ -5,8 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PNG } from "pngjs";
 import { encode } from "jpeg-js";
-import { AIConnection, AIProfile, AssistantMain, Capture, CaptureCreateResult, Glance, GlanceCreate, KnowledgeOriginal, AssistantModelRequest } from "@lumio/schema";
+import { AIConnection, AIProfile, AssistantMain, AssistantChatResult, AssistantChatRequest, Capture, CaptureCreateResult, Glance, GlanceCreate, KnowledgeOriginal, AssistantModelRequest, type AssistantModelResponse } from "@lumio/schema";
 import { backupBusiness, verifyBusinessBackup } from "@lumio/storage";
+import type { AssistantModel } from "@lumio/assistant";
+import { ChatCompletionsModel } from "../src/assistant-model.ts";
 import { readConfig } from "../src/config.ts";
 import { startHub } from "../src/server.ts";
 import { pointGlance } from "../src/glance-pointing.ts";
@@ -37,13 +39,14 @@ async function fixture(action: (f: Awaited<ReturnType<typeof setup>>) => Promise
   } finally { await rm(root, { recursive: true, force: true }); }
 }
 
-async function setup(root: string, model?: (input: AssistantModelRequest) => { content: string; tool_calls: { id: string; name: string; args: Record<string, unknown> }[] }) {
+async function setup(root: string, model?: AssistantModel | ((input: AssistantModelRequest) => AssistantModelResponse)) {
   const vault = join(root, "vault"), state = join(root, "state");
   await mkdir(vault);
   let now = new Date(at);
   const config = readConfig({ HOME: root, LUMIO_VAULT: vault, LUMIO_STATE_DIR: state, LUMIO_HUB_LISTEN: "127.0.0.1:0",
     LUMIO_GLANCE_RETENTION_DAYS: "1", LUMIO_LANG: "zh" });
-  const hub = await startHub(config, { now: () => now, log() {}, ...(model ? { assistantModel: { complete: async input => model(input) } } : {}) });
+  const assistantModel = typeof model === "function" ? { complete: async (input: AssistantModelRequest) => model(input) } : model;
+  const hub = await startHub(config, { now: () => now, log() {}, assistantModel });
   const token = (role: "human" | "agent" | "runtime", name: string) => {
     hub.store.createActor(name, role);
     return hub.store.createToken(name, name);
@@ -175,6 +178,73 @@ test("the main chat attaches a glance, scopingly offers capture, and keeps text 
     const snapshots = f.hub.store.db.query<{ request: string }, []>("SELECT request FROM assistant_contexts ORDER BY step").all();
     expect(snapshots.map(row => AssistantModelRequest.parse(JSON.parse(row.request)))).toEqual(modelCalls);
   }, input => { modelCalls.push(input); return { content: "Synthetic explanation.", tool_calls: [] }; });
+});
+
+test("iPhone questions send the screenshot, OCR and question to DeepSeek Flash when screenshot vision is enabled", async () => {
+  type WireMessage = { role: string; content: string | ({ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } })[] };
+  const requests: { model: string; messages: WireMessage[] }[] = [];
+  const fetcher = (async (_url, options) => {
+    requests.push(JSON.parse(String(options?.body)));
+    return Response.json({ choices: [{ message: { role: "assistant", content: "Synthetic scene description" }, finish_reason: "stop" }] });
+  }) as typeof fetch;
+  const model = new ChatCompletionsModel({ baseUrl: "https://api.deepseek.com/v1", model: "deepseek-flash", credential: () => undefined }, fetcher);
+  const question = "What is in this picture?";
+  const recognized = "Synthetic iPhone OCR text";
+  const dataUrl = `data:image/jpeg;base64,${jpeg.toString("base64")}`;
+  await fixture(async f => {
+    const main = AssistantMain.parse(await (await f.request("/v2/assistant/main", "POST", { request_id: randomUUID() })).json());
+    const upload = async (withOCR = true) => Glance.parse(await (await f.upload(meta({
+      app: { name: "iPhone" }, window_title: undefined, pointer: undefined,
+      image: { format: "jpeg", width: pixels.width, height: pixels.height },
+      ocr: withOCR ? [{ text: recognized, box: { x: 0, y: 0, w: pixels.width, h: pixels.height } }] : [],
+      ocr_engine: withOCR ? "ios-vision@1" : undefined,
+    }), jpeg)).json());
+    const ask = async (glance: Glance, override?: string) => {
+      const response = await f.request("/v2/assistant/chat", "POST", AssistantChatRequest.parse({
+        conversation: main.conversation, request_id: randomUUID(), message: question, glance: glance.id, model: override,
+      }));
+      expect(response.status).toBe(200);
+      const result = AssistantChatResult.parse(await response.json());
+      expect(result.turn.status).toBe("done");
+      return result;
+    };
+    const userContent = () => requests.at(-1)?.messages.findLast(message => message.role === "user")?.content;
+
+    await ask(await upload());
+    expect(userContent()).toBe(question);
+
+    const connection = AIConnection.parse(await (await f.request("/v2/ai/connections", "POST", {
+      name: "Synthetic DeepSeek", kind: "deepseek", host: "hub", base_url: "https://api.deepseek.com/v1",
+    })).json());
+    const profile = AIProfile.parse(await (await f.request("/v2/ai/profiles", "POST", {
+      name: "Synthetic vision model", connection: connection.id, model: "deepseek-flash", engine: "lumio", thinking: "default",
+    })).json());
+    expect((await f.request("/v2/ai/knowledge-bindings", "PUT", { request_id: randomUUID(), profile: profile.id, purpose: "knowledge.vision" })).status).toBe(200);
+
+    const glance = await upload();
+    const result = await ask(glance);
+    expect(requests.at(-1)?.model).toBe("deepseek-flash");
+    expect(requests.at(-1)?.messages[0]?.content).toContain(recognized);
+    expect(userContent()).toEqual([{ type: "text", text: question }, { type: "image_url", image_url: { url: dataUrl } }]);
+    const snapshot = f.hub.store.db.query<{ request: string }, [string]>("SELECT request FROM assistant_contexts WHERE turn=?").get(result.turn.id)!;
+    const context = AssistantModelRequest.parse(JSON.parse(snapshot.request));
+    expect(context.messages[0]?.content).toContain(glance.image!.file);
+    expect(context.messages[0]?.content).toContain(glance.image!.sha256);
+    expect(snapshot.request).not.toContain(dataUrl);
+
+    await ask(await upload(false), "deepseek-v4-flash");
+    expect(requests.at(-1)?.messages[0]?.content).not.toContain(recognized);
+    expect(userContent()).toEqual([{ type: "text", text: question }, { type: "image_url", image_url: { url: dataUrl } }]);
+
+    await ask(await upload(), "deepseek-v4-pro");
+    expect(userContent()).toBe(question);
+    const expired = await upload();
+    f.advance();
+    await f.hub.modules.glances.sweep();
+    await ask(expired);
+    expect(userContent()).toBe(question);
+    expect(requests.at(-1)?.messages[0]?.content).toContain(recognized);
+  }, model);
 });
 
 test("the active message can save its own glance with the scoped tool", async () => {

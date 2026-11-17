@@ -27,6 +27,7 @@ const object = (value: unknown): Record<string, unknown> => {
 };
 interface Call { id: string; name: string; arguments: string }
 const MAX_BYTES = 4 * 1024 * 1024;
+const DEEPSEEK_IMAGE_MODELS = new Set(["deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"]);
 
 /** Legacy requests keep their prior non-thinking default; Profiles explicitly opt in. */
 export function modelRequestOptions(baseUrl:string,input?:Pick<AssistantModelRequest,"thinking"|"reasoning_effort">):Record<string,unknown>{
@@ -50,18 +51,30 @@ function rejected(status: number): AssistantError {
 /** HTTP stays in the Hub adapter. No provider, model, tool or retries are enabled implicitly. */
 export class ChatCompletionsModel implements AssistantModel {
   constructor(private readonly config: ModelConfiguration, private readonly fetcher: typeof fetch = fetch) {}
+  supportsImages(model = this.config.model): boolean {
+    return new URL(this.config.baseUrl).origin === "https://api.deepseek.com" && DEEPSEEK_IMAGE_MODELS.has(model);
+  }
   async complete(raw: AssistantModelRequest, options: Parameters<AssistantModel["complete"]>[1]): Promise<AssistantModelResponse> {
     const input = AssistantModelRequest.parse(raw);
     const signal = AbortSignal.any([...(options.signal ? [options.signal] : []), AbortSignal.timeout(120_000)]);
     const url = new URL(this.config.baseUrl);
     const showReasoning = url.origin === "https://api.deepseek.com" && input.thinking === "on";
+    const images = options.screenImages ?? [];
+    const screenMessage = images.length && this.supportsImages(input.model)
+      ? input.messages.findLastIndex(message => message.role === "user") : -1;
     let response: Response | undefined;
     try {
       const key = this.config.credential();
       response = await this.fetcher(`${this.config.baseUrl}/chat/completions`, { method: "POST", redirect: "error", signal,
         headers: { "Content-Type": "application/json", Accept: "text/event-stream", ...(key ? { Authorization: `Bearer ${key}` } : {}) },
         body: JSON.stringify({ model: input.model ?? this.config.model, stream: true, ...modelRequestOptions(this.config.baseUrl,input),
-          messages: input.messages.map(message => ({ role: message.role, content: message.content,...message.continuation,
+          messages: input.messages.map((message, index) => ({
+            role: message.role,
+            content: index === screenMessage ? [
+              { type: "text", text: message.content },
+              ...images.map(url => ({ type: "image_url", image_url: { url } })),
+            ] : message.content,
+            ...message.continuation,
             ...(message.tool_call_id ? { tool_call_id: message.tool_call_id } : {}),
             ...(message.tool_calls?.length ? { tool_calls: message.tool_calls.map(call => ({ id: call.id, type: "function", function: { name: call.name, arguments: JSON.stringify(call.args) } })) } : {}),
           })),

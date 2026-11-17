@@ -196,7 +196,7 @@ export class BusinessModules {
       text: msg, now, id, toolActor: store.assistantActor(),
       glance: {
         claim: (owner, glance, message) => { this.glances.claim(glance, owner, "message", message); },
-        context: (owner, glance, message) => glanceChat(this.glances.get(glance, owner), message, this.inbox),
+        context: (owner, glance, message) => glanceChat(this.glances.get(glance, owner), message, this.inbox, this.glances),
       },
       resolveModel: (profile, owner) => this.ai.model(owner, profile),
       workbench: new AssistantWorkbenchAnchors(this, store, this.assistantMain, this.notices),

@@ -82,6 +82,7 @@ export class WorkbenchAssistant extends AssistantService {
 
   private trackResults(model: AssistantModel): AssistantModel {
     return {
+      supportsImages: name => model.supportsImages?.(name) ?? false,
       complete: (input, options) => {
         const scope = this.scope.getStore();
         if (scope) {
