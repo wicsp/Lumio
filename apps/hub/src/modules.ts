@@ -41,7 +41,7 @@ import { configuredModel } from "./assistant-model.ts";
 import type { AssistantConfiguration } from "./assistant-config.ts";
 import { Capabilities } from "./capabilities.ts";
 import { authorize } from "./authorize.ts";
-import { workdirInVault } from "./execution-policy.ts";
+import { requireLocalInteractiveWorkdir, workdirInVault } from "./execution-policy.ts";
 
 function roundPermissions(sandbox: "os" | "none", permissions: AgentRun["permissions"], planned: boolean): string {
   const access = permissions?.access ?? "write";
@@ -265,7 +265,8 @@ export class BusinessModules {
     const requestHint = msg(runtime.registration.features?.includes("permission_request") && runtime.registration.features.includes("stage_permissions")
       ? "modules.round_permission_request" : "modules.round_permission_question");
     const workdir = task.workdir ?? (task.project ? this.work.project(task.project).workdir : undefined) ?? "~";
-    if (this.config.vault && runtime.registration.name === this.config.localRuntime && workdirInVault(this.config.vault, workdir)) {
+    if (mode) requireLocalInteractiveWorkdir(this.config, runtime.registration.name, workdir);
+    else if (this.config.vault && runtime.registration.name === this.config.localRuntime && workdirInVault(this.config.vault, workdir)) {
       throw new HubError("INVALID", { key: "modules.working_directory_must_be_outside_the_knowledge_directory", args: [] });
     }
     const jobs = new Jobs(this.store);

@@ -225,7 +225,7 @@ async function startHubInstance(config: HubConfig, options: {
             return response;
           }
           if (route.operation === "job.submit" || route.operation === "job.cancel") {
-            const response = await handleJobs(request, route.operation, route.pattern.exec(url.pathname)?.[1], identity!, store, decide, (options.now ?? (() => new Date()))());
+            const response = await handleJobs(request, route.operation, route.pattern.exec(url.pathname)?.[1], identity!, store, decide, (options.now ?? (() => new Date()))(), config);
             status = response.status; return response;
           }
           if (route.operation === "runtime.register" || route.operation === "runtime.sync" || route.operation === "runtime.ack" || route.operation === "runtime.results" || route.operation === "runtimes") {

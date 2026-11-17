@@ -7,6 +7,8 @@ import { authorizeJobAccount, sameJobAccount } from "./job-accounts.ts";
 import { checkJobInteraction } from "./job-activity.ts";
 import type { HubStore, Identity } from "./store.ts";
 import type { authorize } from "./authorize.ts";
+import { requireLocalInteractiveWorkdir } from "./execution-policy.ts";
+import type { HubConfig } from "./config.ts";
 import { HubError } from "./errors.ts";
 
 export { SubmitJob } from "@lumio/execution";
@@ -22,7 +24,7 @@ export class Jobs extends ExecutionJobs {
 }
 
 export async function handleJobs(request: Request, operation: "job.submit" | "jobs" | "job.show" | "job.cancel",
-  id: string | undefined, identity: Identity, store: HubStore, decide: typeof authorize, now: Date): Promise<Response> {
+  id: string | undefined, identity: Identity, store: HubStore, decide: typeof authorize, now: Date, config: Pick<HubConfig, "localRuntime" | "stateDir" | "vault">): Promise<Response> {
   const decision = decide(identity.actor, { operation });
   let execution = "applied";
   try {
@@ -39,6 +41,7 @@ export async function handleJobs(request: Request, operation: "job.submit" | "jo
       if (run.kind !== "agent" || !run.interaction) return Response.json(jobs.submit(body, now));
       return store.db.transaction(() => {
         const runtime = store.runtimes(now).find(runtime => runtime.registration.name === input.data.runtime);
+        requireLocalInteractiveWorkdir(config, input.data.runtime, input.data.workdir);
         const selection = identity.actor.role === "human" ? { owner: identity.actor.id, connection } : undefined;
         const binding = runtime && authorizeJobAccount(store, runtime, run, selection);
         if (!runtime || !checkJobInteraction(store, runtime.actor, run, now, Boolean(binding))) {
