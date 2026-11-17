@@ -37,6 +37,14 @@ type Details = Pick<Notice, "title" | "subject" | "summary" | "findings" | "ai_n
 type Grade = Pick<Notice, "level" | "graded">;
 type Prepared = { source: Source; details: Details | undefined; grades: Grade[] };
 type Row = { record: string };
+const captureEventPrefix = "capture:";
+// Follow the Inbox's current state so existing notices also disappear on removal and return on undo.
+const visibleNotice = `(event NOT GLOB '${captureEventPrefix}*' OR EXISTS (
+  SELECT 1 FROM inbox_captures AS capture
+  WHERE capture.id=substr(workbench_notices.event, ${captureEventPrefix.length + 1})
+    AND capture.owner=workbench_notices.owner
+    AND coalesce(json_extract(capture.record,'$.capture.triage'),'')<>'discard'
+))`;
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const invalid = () => new HubError("INVALID", { key: "notices.invalid", args: [] });
 const ref = (module: ResourceRef["module"], id: string) => ResourceRef.parse({ module, id });
@@ -112,7 +120,7 @@ export class Notices {
 
   capture(capture: Capture): void {
     if (capture.state !== "ready") return;
-    this.enqueue({ kind: "capture", event: "capture:" + capture.id, entity: capture.entity?.id,
+    this.enqueue({ kind: "capture", event: captureEventPrefix + capture.id, entity: capture.entity?.id,
       owners: [capture.owner], created: capture.updated });
   }
 
@@ -285,13 +293,13 @@ export class Notices {
   list(owner: string, args: NoticeListArgs): NoticeList {
     const { unread, level, limit } = NoticeListArgs.parse(args);
     const rows = this.hub.db.query<Row, [string, string | null, string | null, number | null, number | null, number]>(`
-      SELECT record FROM workbench_notices WHERE owner=?
+      SELECT record FROM workbench_notices WHERE owner=? AND ${visibleNotice}
       AND ((? IS NULL AND level<>'silent') OR level=?)
       AND (? IS NULL OR (read_at IS NULL)=?)
       ORDER BY created DESC,id DESC LIMIT ?
     `).all(owner, level ?? null, level ?? null, unread === undefined ? null : Number(unread), unread === undefined ? null : Number(unread), limit);
     const count = this.hub.db.query<{ count: number }, [string]>(
-      "SELECT count(*) AS count FROM workbench_notices WHERE owner=? AND level<>'silent' AND read_at IS NULL",
+      `SELECT count(*) AS count FROM workbench_notices WHERE owner=? AND level<>'silent' AND read_at IS NULL AND ${visibleNotice}`,
     ).get(owner)!.count;
     return NoticeList.parse({ notices: rows.map(row => JSON.parse(row.record)), unread: count });
   }
@@ -344,7 +352,7 @@ export class Notices {
 
   announce(owner: string, send: (notice: Notice) => void): void {
     for (const row of this.hub.db.query<Row, [string]>(`
-      SELECT record FROM workbench_notices WHERE owner=? AND level='important' AND read_at IS NULL AND announced=0
+      SELECT record FROM workbench_notices WHERE owner=? AND level='important' AND read_at IS NULL AND announced=0 AND ${visibleNotice}
       ORDER BY created,id LIMIT 20
     `).all(owner)) {
       const notice = Notice.parse(JSON.parse(row.record));
