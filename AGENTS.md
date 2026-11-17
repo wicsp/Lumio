@@ -31,8 +31,8 @@
    人类验收在合并后的 `main` 上进行；正式发布从 `main` 上已验收的提交打 `v*` 标签。本机部署方法见 [主线开发与本机部署](docs/local-deployment.md)。
 9. **按交代做；没交代后续时走默认流程。**（ADR 0049）由谁 review、何时合并与部署，以 Lumio 交接计划或人的安排为准。
    - 任务说明或 Lumio 阶段说明交代了什么就做什么。
-   - 人直接交代改动、没有交代后续时，默认：推 PR → 立即合并 → 在运行日常实例的机器（macsp）上从 `main` 部署 7420 → 汇报 → 留意 `main` 上这次合并的 CI。
-     不在这台机器上时只合并，并在汇报里说明需要部署。**不自行找其他 agent review。**
+   - 人直接交代改动、没有交代后续时，默认：推 PR → 立即合并 → 从 `main` 部署日常实例 → 汇报 → 留意 `main` 上这次合并的 CI。
+     日常 Hub 迁到 Mio 的环境从开发机用 `bun run scripts/deploy-local.ts --mio`。仍使用 Mac 7420 的环境在 macsp 上运行同一脚本。缺少部署访问权限时汇报待部署。**不自行找其他 agent review。**
    - **Claude Code、Codex 和其他 agent 部署、重部署或回退日常实例 7420，一律使用仓库的 `bun run scripts/deploy-local.ts`。** 回退代码时先把修复或 revert 合入 `main`，再运行同一脚本。
      不得用单个 app 的构建产物替换安装，也不得把任何构建直接输出或复制到 `~/.local/bin/lumio`、`lumio-hub` 或 `lumio-runtime`。脚本负责完整构建、备份、原子替换、Hub 重启和验收；只要求 Hub 空闲，Runtime 通过 `self_update` 自行等空闲更新，脚本不重启 Runtime（U1-5）。
    - `main` 上的 CI 失败时：能很快修好就直接修；修不好就 revert 该 PR、重新部署，并在汇报里说明。会话结束前 CI 还没出结果时，在汇报里说明。

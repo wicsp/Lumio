@@ -1,6 +1,8 @@
 # 主线开发与本机部署
 
-从最新的 `origin/main` 建立功能分支。每个 PR 在本地 `bun run check` 通过（以及安排了的 review 通过）后合入 `main`，CI 在合并后于 `main` 上运行，失败时修复或 revert 对应 PR（PR #188）；由谁 review、何时合并由 Lumio 交接计划或人类安排，没有安排时按 `AGENTS.md` 第 9 条的默认流程（ADR 0049）。本机只维护一个日常实例，监听 `127.0.0.1:7420`，始终从 `main` 的已提交版本构建：PR 合并后重新部署，人类在日常实例上验收；发现问题时继续修复或 revert 对应 PR。含数据迁移的 PR 合并和部署前先停下交回人确认。隔离测试使用临时目录、临时端口和合成数据。
+从最新的 `origin/main` 建立功能分支。每个 PR 在本地 `bun run check` 通过（以及安排了的 review 通过）后合入 `main`，CI 在合并后于 `main` 上运行，失败时修复或 revert 对应 PR（PR #188）；由谁 review、何时合并由 Lumio 交接计划或人类安排，没有安排时按 `AGENTS.md` 第 9 条的默认流程（ADR 0049）。日常实例从 `main` 的已提交版本构建。PR 合并后部署，由人类在日常实例上验收；发现问题时继续修复或 revert 对应 PR。含数据迁移的 PR 合并和部署前先停下交回人确认。隔离测试使用临时目录、临时端口和合成数据。
+
+## macsp 的本机 7420 部署
 
 在 macsp 上以 LaunchAgent 所有者身份，从仓库运行：
 
@@ -31,6 +33,22 @@ bun run scripts/deploy-local.ts
 自建内网 MinIO、WebDAV 等必须提供带有效 TLS 证书的上传地址，并由部署者在 Hub 服务环境中用 `LUMIO_IMAGE_HOSTING_PRIVATE_ORIGINS` 显式列出需要访问的 HTTPS 来源（逗号分隔）。WebDAV 的目标父目录需已存在。自定义 HTTP 的凭据、表单额外字段和查询参数均只写入 Hub。
 
 `image-hosting.json` 在 Hub 状态目录中，按 `0600` 保存。部署备份保留这份安装配置。图片文件由图床保管，使用图床自己的备份策略。
+
+## Mio 的 NixOS 部署
+
+日常 Hub 已迁移到 Mio 时，开发机通过 SSH 发布新版本，Mac 继续运行执行器和 Lumio Capture。
+
+从装有仓库固定 Bun 版本的开发机运行：
+
+```sh
+bun run scripts/deploy-local.ts --mio
+```
+
+脚本使用已有的管理员 SSH 别名 `mio`，验证主机密钥。需要改用已配置过主机密钥的公网地址时，通过 `LUMIO_MIO_SSH_HOSTNAME` 指定。脚本从最新 `origin/main` 构建带 Web 的 Linux x64 程序和供 Apple Silicon Mac Runtime 使用的签名更新包。
+
+Mio 用现有的 Nix 动态加载器和 systemd 单元运行 Hub、Mio Runtime 与 HTTPS 代理。应用部署持部署锁，校验传输哈希并验证业务快照，等 Hub 助手和 Mio Runtime 空闲，切换到新程序。脚本核对回环和公网 HTTPS 的版本与资源，并等待 Mio Runtime 上报新版本。失败时恢复旧程序和期望版本并重新验收。Mio 的部署备份在 `/var/lib/lumio-mio-trial-staging/` 下，各次部署使用独立目录。
+
+Mac 执行器独立连接 Mio，可以信任开发机的构建公钥后按现有机制更新。用 `--mio --desktop` 可同时在开发机签名安装 Lumio Capture，需 Xcode 和已有的签名身份。程序更新使用上述部署命令，系统配置变更按 NixOS 的系统流程处理。
 
 ## 在 Web 设置资料抓取代理（I1-3b）
 
