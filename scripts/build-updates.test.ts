@@ -34,3 +34,25 @@ test("deployment waits for Hub turns but does not block on Runtime jobs", async 
     db.exec("INSERT INTO assistant_turns VALUES ('running')"); expect(() => assertHubIdle(path)).toThrow("Hub assistant");
   } finally { db.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+test.skipIf(process.platform !== "darwin")("macOS signed development archives contain only the program", async () => {
+  const root = await mkdtemp(join(tmpdir(), "lumio-macos-update-"));
+  try {
+    const key = await buildSigningKey(join(root, "keys"));
+    const updates = join(root, "updates");
+    const version = "0.2.3-dev.local.1";
+    await publishBuildUpdates({
+      root: updates, build: root, version, commit: "1".repeat(40), key: key.privateKey, platforms: ["darwin-arm64"],
+      compile: async (_, path) => {
+        await writeFile(path, "synthetic program");
+        expect(Bun.spawnSync(["xattr", "-w", "com.lumio.test", "metadata", path]).exitCode).toBe(0);
+      },
+      run: async (argv) => { expect(Bun.spawnSync(argv).exitCode).toBe(0); },
+    });
+    const listed = Bun.spawnSync(["tar", "-tzf", join(updates, version, "lumio-darwin-arm64.tar.gz")]);
+    expect(listed.exitCode).toBe(0);
+    expect(listed.stdout.toString().trim()).toBe("lumio");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

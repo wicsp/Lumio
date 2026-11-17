@@ -38,6 +38,8 @@ bun run scripts/deploy-local.ts
 
 日常 Hub 已迁移到 Mio 时，开发机通过 SSH 发布新版本，Mac 继续运行执行器和 Lumio Capture。
 
+正式 vault 位于 Mio 的 `/var/lib/lumio-mio-trial/vault`，Git 元数据在其中的 `.git`。知识文件和 Git 历史从 Mio 管理，业务数据通过 Hub 的业务备份命令备份。
+
 从装有仓库固定 Bun 版本的开发机运行：
 
 ```sh
