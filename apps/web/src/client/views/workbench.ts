@@ -303,7 +303,7 @@ export class WorkbenchView {
     this.current = mounted;
     this.clearHighlights();
     this.dock?.pageChanged();
-    if (id) this.readSubject(id);
+    if (id && section !== "work") this.readSubject(id);
     this.padNavigation.routeChanged(!!id && section !== "settings");
     if (intent) mounted.pane.intent?.(intent);
   }
@@ -318,7 +318,8 @@ export class WorkbenchView {
     if (section === "overview") pane = new OverviewPane(target, client, this.session.hub, navigate, this.name, changed);
     else if (section === "settings") pane = new SettingsPane(target, this.session, this.name, () => void this.signOut(), () => this.leaveSettings(), sub => void this.go("settings", sub), id, this.gamepad);
     else if (section === "knowledge") pane = new KnowledgePane(target, client, id, () => this.dock?.pageChanged());
-    else if (section === "work") pane = new WorkPane(target, client, this.session.hub, this.workMode, id, navigate, changed, resetSharing => this.dock?.pageChanged(resetSharing));
+    else if (section === "work") pane = new WorkPane(target, client, this.session.hub, this.workMode, id, navigate, changed,
+      resetSharing => this.dock?.pageChanged(resetSharing), openedId => this.readSubject(openedId));
     else if (section === "execution") pane = new ExecutionPane(target, client, this.session.hub, id, navigate, changed);
     else if (section === "assistant") pane = new AssistantPane(target, client, this.session.hub, navigate, id);
     else if (section === "trash") pane = new TrashPane(target, client, navigate, changed);
