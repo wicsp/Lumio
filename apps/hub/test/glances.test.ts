@@ -59,8 +59,8 @@ async function setup(root: string, model?: (input: AssistantModelRequest) => { c
     if (image) form.set("image", new Blob([Uint8Array.from(image)], { type: `image/${input.image!.format}` }), "sample");
     return request("/v2/glances", "POST", form, auth);
   };
-  const save = async (glance: Glance) => {
-    const result = await request("/v2/inbox/captures", "POST", { request_id: randomUUID(), channel: "desktop", glance: glance.id });
+  const save = async (glance: Glance, channel: "desktop" | "share" = "desktop") => {
+    const result = await request("/v2/inbox/captures", "POST", { request_id: randomUUID(), channel, glance: glance.id });
     expect(result.status).toBe(202);
     return await ready(CaptureCreateResult.parse(await result.json()).capture.id);
   };
@@ -108,6 +108,36 @@ test("checked upload is owner-only, idempotent, transferred on save, and follows
   expect((await f.request(image)).status).toBe(404);
   expect((await f.request(`/v2/trash/${source}/restore`, "POST", { request_id: randomUUID() })).status).toBe(200);
   expect(Buffer.from(await (await f.request(image)).arrayBuffer())).toEqual(png);
+}));
+
+test("an iPhone share without a window title becomes an Inbox source with its screenshot", () => fixture(async f => {
+  const captured = "2026-11-16T08:00:00+08:00";
+  const input = GlanceCreate.parse({
+    request_id: randomUUID(), captured, app: { name: "iPhone" },
+    image: { format: "jpeg", width: pixels.width, height: pixels.height },
+    ocr: [{ text: "Synthetic iPhone text", box: { x: 0, y: 0, w: pixels.width, h: pixels.height } }],
+    ocr_engine: "ios-vision@1",
+  });
+  const glance = Glance.parse(await (await f.upload(input, jpeg)).json());
+  const saved = await f.save(glance, "share");
+  expect(saved).toMatchObject({ state: "ready", channel: "share", kind: "text" });
+  const source = saved.entity!.id!;
+  const original = KnowledgeOriginal.parse(await (await f.request(`/v2/knowledge/originals?ref=${source}`)).json());
+  expect(original.frontmatter.captured).toBe(captured);
+  expect(original.frontmatter.glance).toEqual({
+    id: glance.id, app: { name: "iPhone" }, screenshot: glance.image!.file, pointing: "none",
+  });
+  expect(original.body).toContain("Synthetic iPhone text");
+  expect(f.hub.modules.artifacts.get(glance.image!.file).owner).toEqual({ module: "knowledge", id: source });
+}));
+
+test("glance provenance without a screenshot can still be saved", () => fixture(async f => {
+  const input = meta({ image: undefined, pointer: undefined, ocr: [], ocr_engine: undefined, selection_text: "Synthetic selection" });
+  const glance = Glance.parse(await (await f.upload(input)).json());
+  const saved = await f.save(glance);
+  const original = KnowledgeOriginal.parse(await (await f.request(`/v2/knowledge/originals?ref=${saved.entity!.id}`)).json());
+  expect(original.frontmatter.glance).toEqual({ id: glance.id, app: glance.app, window: "Window", pointing: "selection" });
+  expect(original.body).toContain("Synthetic selection");
 }));
 
 test("same URL captures distinct paragraphs, the local workbench uploads no screen bytes, and unused images can be deleted", () => fixture(async f => {

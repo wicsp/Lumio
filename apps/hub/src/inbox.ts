@@ -326,10 +326,15 @@ export class Inbox {
         if (!value.plan) {
           const now = this.now();
           const entityId = newId(extracted!.note.kind === "paper" ? "pap" : "src", now, randomBytes);
+          const screenshot = glance?.image && !glance.image.purged ? glance.image.file : undefined;
           value.plan = await this.files.prepare(capture, extracted!, entityId, now, glance && {
             captured: glance.captured,
-            glance: { id: glance.id, app: glance.app, window: glance.window_title, screenshot: glance.image?.purged ? undefined : glance.image?.file,
-              pointing: glance.pointing.method },
+            // The YAML round trip must preserve these fields. Omit absent optional keys.
+            glance: {
+              id: glance.id, app: glance.app, pointing: glance.pointing.method,
+              ...(glance.window_title !== undefined && { window: glance.window_title }),
+              ...(screenshot && { screenshot }),
+            },
           });
           this.state.put(value);
         }
