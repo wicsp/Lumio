@@ -1,0 +1,13 @@
+{
+  "name": "@lumio/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun run build.ts",
+    "test": "bun test test"
+  },
+  "dependencies": {
+    "@lumio/schema": "workspace:*"
+  }
+}
