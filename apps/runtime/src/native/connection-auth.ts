@@ -9,6 +9,7 @@ import { codexWindows } from "./quota.ts";
 
 type Command = Extract<NativeRuntimeCommand, { type: "connection_auth" }>;
 type Metadata = { owner: string; generation: number; account?: string };
+export type CodexJobCredential = { accessToken: string; chatgptAccountId: string; chatgptPlanType: null };
 type Material = { accessToken: string; chatgptAccountId: string; expires: number; account: string };
 type Account = { rpc?: NativeRpc; pending?: { id: string; view: NativeConnectionView }; chain: Promise<unknown> };
 
@@ -151,12 +152,12 @@ export class ConnectionAuth {
       }
     });
   }
-  async access(connection: string, owner: string, binding: NativeAccountBinding, rejected?: string) {
+  async access(connection: string, owner: string, binding: NativeAccountBinding, rejected?: string, exactGeneration = false): Promise<CodexJobCredential> {
     return this.serialize(connection, async account => {
       if (account.pending) throw new NativeError("native.login_required");
       const verified = await this.verify(connection, owner, account, rejected);
       if (!verified) throw new NativeError("native.login_required");
-      if (verified.binding.account !== binding.account || verified.binding.generation < binding.generation)
+      if (verified.binding.account !== binding.account || (exactGeneration ? verified.binding.generation !== binding.generation : verified.binding.generation < binding.generation))
         throw new NativeError("native.account_changed");
       return { accessToken: verified.material.accessToken, chatgptAccountId: verified.material.chatgptAccountId, chatgptPlanType: null };
     });

@@ -1,3 +1,4 @@
+import { ConnectionAuth } from "./native/connection-auth.ts";
 import {runNativeChannel} from "./native/channel.ts";
 import { publishClaudeUsage } from "./claude-usage.ts";
 import { withLanguage, text as msg } from "./messages.ts";
@@ -5,7 +6,7 @@ import { SudoGate } from "./sudo.ts";
 import { privateFile } from "./service.ts";
 import { join } from "node:path";
 import { mkdir } from "node:fs/promises";
-import { JOB_ACTIVITY_FEATURE, RuntimeAck, RuntimeRegistered, RuntimeRegistration, RuntimeSync } from "@lumio/schema";
+import { JOB_ACCOUNT_FEATURE, JOB_ACTIVITY_FEATURE, RuntimeAck, RuntimeRegistered, RuntimeRegistration, RuntimeSync } from "@lumio/schema";
 import type { RuntimeConfig } from "./config.ts";
 import { detectEngines } from "./engines.ts";
 import { Queue } from "./queue.ts";
@@ -73,13 +74,15 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
   const now = options.now ?? (() => new Date());
   let actor: string | undefined;
   const sudo = new SudoGate(config, queue, () => actor, fetcher, signal, log);
-  const executor = new Executor(queue, config, options.env ?? process.env, () => { events.notify(); deliveries.notify(); archiveWake.notify(); }, registration.engines, sudo, activity);
-  let registered = false, disconnected = false, activityNegotiated = false;
+  const env = options.env ?? process.env;
+  const accounts = env.LUMIO_NATIVE_SESSIONS === "1" ? new ConnectionAuth(config.stateDir, { codex: env.LUMIO_NATIVE_CODEX }) : undefined;
+  const executor = new Executor(queue, config, options.env ?? process.env, () => { events.notify(); deliveries.notify(); archiveWake.notify(); }, registration.engines, sudo, activity, accounts);
+  let registered = false, disconnected = false, activityNegotiated = false, accountNegotiated = false;
   let nextActivityRegistration = 0;
   let backoff = Math.min(config.pollSeconds, 60);
   async function send(path: string, body: unknown) {
     return fetcher(`${config.url}${path}`, {
-      method: "POST", headers: { Authorization: `Bearer ${config.token}`, "Content-Type": "application/json", ...(path === "/v1/runtime/sync" ? { "X-Lumio-Features": "job-access" } : path === "/v1/runtime/register" ? { "X-Lumio-Features": JOB_ACTIVITY_FEATURE } : {}) },
+      method: "POST", headers: { Authorization: `Bearer ${config.token}`, "Content-Type": "application/json", ...(path === "/v1/runtime/sync" ? { "X-Lumio-Features": accountNegotiated ? `job-access, ${JOB_ACCOUNT_FEATURE}` : "job-access" } : path === "/v1/runtime/register" ? { "X-Lumio-Features": accounts ? `${JOB_ACTIVITY_FEATURE}, ${JOB_ACCOUNT_FEATURE}` : JOB_ACTIVITY_FEATURE } : {}) },
       body: JSON.stringify(body), redirect: "error", signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
     });
   }
@@ -125,7 +128,7 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
   try {
     await sudo.start();
     await executor.recover();
-    if((options.env??process.env).LUMIO_NATIVE_SESSIONS==="1")native=runNativeChannel(config,signal,options.env??process.env, { attach: busy => { nativeBusy = busy; }, switching: () => updater?.restarting ?? false }).catch(()=>{log(msg("native.channel_failed"));});
+    if (accounts) native = runNativeChannel(config, signal, env, { attach: busy => { nativeBusy = busy; }, switching: () => updater?.restarting ?? false }, accounts).catch(()=>{log(msg("native.channel_failed"));});
     delivering = deliver().catch((cause) => { deliveryFailure = cause; shutdown.abort(); });
     publishing = activity.run(signal, (ms, stopped) => activityWake.wait(ms, stopped)).catch(() => {});
     archiving = (async () => {
@@ -148,7 +151,9 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
           actor = info.actor;
           await privateFile(join(config.stateDir, "registered.json"), JSON.stringify(info));
           activity.disable();
-          activityNegotiated = response.headers.get("X-Lumio-Features") === JOB_ACTIVITY_FEATURE;
+          const features = response.headers.get("X-Lumio-Features")?.split(",").map(value => value.trim()) ?? [];
+          activityNegotiated = features.includes(JOB_ACTIVITY_FEATURE);
+          accountNegotiated = activityNegotiated && !!accounts && features.includes(JOB_ACCOUNT_FEATURE);
           nextActivityRegistration = 0;
           registered = true;
           log(msg("runtime.runtime_registered"));
@@ -159,7 +164,7 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
           const report = updater?.heartbeat();
           const sync = await post("/v1/runtime/sync", { ...queue.heartbeat(), ...(report ? { update: report } : {}) }, RuntimeSync);
           await updater?.install.confirm(version);
-          queue.receive(sync.jobs, sync.access);
+          queue.receive(sync.jobs, sync.access, sync.accounts);
           const accepted = queue.jobs().filter((j) => !j.acked).map((j) => j.spec.id);
           if (accepted.length) {
             await post("/v1/runtime/ack", RuntimeAck.parse({ accepted }), RuntimeAck);
@@ -172,7 +177,7 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
         backoff = Math.min(config.pollSeconds, 60);
         if (registered && activityNegotiated && !activity.supported() && Date.now() >= nextActivityRegistration) {
         nextActivityRegistration = Date.now() + 5000;
-        await activity.register(await jobEngineCapabilities(registration.engines, options.env ?? process.env)).catch(() => {});
+        await activity.register(await jobEngineCapabilities(registration.engines, env, accountNegotiated)).catch(() => {});
         activityWake.notify();
       }
       if (!claudeUsage && Date.now() >= nextClaudeUsage) {

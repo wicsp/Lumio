@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import type { AgentRun, JobEngineActivityCapability, RuntimeRegistration } from "@lumio/schema";
 import { codexExecutable } from "./native/isolation.ts";
 
-export type JobEngineConfig = { engine: "codex" | "claude-code"; executable: string; key: string; roots: string[]; version: string };
+export type JobEngineConfig = { engine: "codex" | "claude-code"; executable: string; key?: string; roots: string[]; version: string };
 const options = {
   codex: { version: "0.166.0", command: "codex", key: "LUMIO_JOB_CODEX_API_KEY" },
   "claude-code": { version: "2.1.322", command: "claude", key: "LUMIO_JOB_CLAUDE_API_KEY" },
@@ -14,10 +14,10 @@ export function contains(root: string, path: string) {
   return part !== ".." && !part.startsWith("../") && !isAbsolute(part);
 }
 
-export async function interactiveEngine(engine: AgentRun["engine"], version: string, env: NodeJS.ProcessEnv): Promise<JobEngineConfig | undefined> {
+export async function interactiveEngine(engine: AgentRun["engine"], version: string, env: NodeJS.ProcessEnv, account = false): Promise<JobEngineConfig | undefined> {
   if (process.platform !== "darwin" || engine === "pi") return;
-  const expected = options[engine], key = env[expected.key]?.trim();
-  if (version !== expected.version || !key || key.length > 2048 || !env.LUMIO_INTERACTIVE_JOB_ROOTS) return;
+  const expected = options[engine], key = account ? undefined : env[expected.key]?.trim();
+  if (version !== expected.version || (account ? engine !== "codex" : !key || key.length > 2048) || !env.LUMIO_INTERACTIVE_JOB_ROOTS) return;
   const executable = Bun.which(expected.command, { PATH: env.PATH ?? "" });
   if (!executable) return;
   try {
@@ -36,12 +36,13 @@ export async function interactiveEngine(engine: AgentRun["engine"], version: str
   } catch { return; }
 }
 
-export async function jobEngineCapabilities(engines: RuntimeRegistration["engines"], env: NodeJS.ProcessEnv): Promise<JobEngineActivityCapability[]> {
+export async function jobEngineCapabilities(engines: RuntimeRegistration["engines"], env: NodeJS.ProcessEnv, account = false): Promise<JobEngineActivityCapability[]> {
   return Promise.all(engines.map(async engine => {
     const config = await interactiveEngine(engine.name, engine.version, env);
+    const reuse = account && engine.name === "codex" && (config || await interactiveEngine(engine.name, engine.version, env, true));
     return {
-      engine: engine.name, version: engine.version, progress: engine.name !== "pi", sandbox: config ? "os" : engine.sandbox,
-      approvals: !!config, questions: !!config, steer: config?.engine === "codex",
+      engine: engine.name, version: engine.version, progress: engine.name !== "pi", sandbox: config || reuse ? "os" : engine.sandbox,
+      approvals: !!config, questions: !!config, steer: config?.engine === "codex", ...(reuse ? { account_reuse: true as const } : {}),
     };
   }));
 }

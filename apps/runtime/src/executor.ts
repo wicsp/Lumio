@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import type { CodexJobCredential, ConnectionAuth } from "./native/connection-auth.ts";
 import { splitPermissionRequest } from "./permission-request.ts";
 import { gitWritePaths, stageSecrets } from "./stage.ts";
 import { CredentialRedactor } from "./redact.ts";
@@ -67,7 +69,7 @@ export class Executor {
   private pending = new Set<Promise<void>>();
   private stopping = false;
   constructor(private queue: Queue, private config: RuntimeConfig, private env: NodeJS.ProcessEnv, private wake: () => void,
-    private engines: Engines = [], private sudo?: SudoGate, private activity?: RuntimeJobActivity) {}
+    private engines: Engines = [], private sudo?: SudoGate, private activity?: RuntimeJobActivity, private accounts?: ConnectionAuth) {}
   async recover() {
     for (const job of this.queue.jobs().filter((j) => j.state === "running")) {
       if (job.pid && groupExists(job.pid)) await killGroup(job.pid);
@@ -120,6 +122,7 @@ export class Executor {
   }
   private async execute(job: LocalJob, placeholder: RunningJob) {
     const access = this.queue.access(job.spec.id);
+    const account = this.queue.account(job.spec.id);
     const secrets = [this.config.token, this.env.LUMIO_TOKEN ?? "", access?.token ?? ""].filter(Boolean);
     const redact = (value: string) => secrets.reduce((text, secret) => text.replaceAll(secret, "[REDACTED]"), value);
     const roundDirectory = join(this.config.stateDir, "agent-config", job.spec.id);
@@ -166,13 +169,17 @@ export class Executor {
         if (!gitPaths.length) { await fail(msg("executor.git_profile_workdir")); return; }
       }
       if (run.interaction) {
-        if (activity?.supported()) interactive = await interactiveEngine(run.engine, detected.version, this.env);
+        if (activity?.supported()) interactive = await interactiveEngine(run.engine, detected.version, this.env, Boolean(account));
         if (!interactive || run.permissions?.access === "full") { await fail(msg("executor.interactive_unavailable")); return; }
         if (run.engine === "claude-code" && run.permissions?.git) {
           gitPaths = gitWritePaths(workdir, this.env);
           if (!gitPaths.length) { await fail(msg("executor.git_profile_workdir")); return; }
         }
-        secrets.push(interactive.key);
+        if (account) {
+          if (!this.accounts || !await activity?.authorized(spec)) { await fail(msg("executor.account_unavailable")); return; }
+          try { await this.accounts.access(account.connection, account.owner, account, undefined, true); }
+          catch { await fail(msg("executor.account_unavailable")); return; }
+        } else if (interactive.key) secrets.push(interactive.key);
         secrets.sort((a, b) => b.length - a.length);
       }
       const lastMessageFile = join(roundDirectory, "last.txt");
@@ -211,6 +218,9 @@ export class Executor {
       activity?.begin(spec.id);
       const awaiting = new Map<string, (state: JobActionReceipt["state"]) => void>();
       let openPrompt: JobHumanRequest | null = null;
+      const cancel = () => this.stop(spec.id, "cancelled");
+      if (account) activity?.control(spec.id, { target: null, pending: null, cancel, apply: async () => "rejected" });
+      let credentialRequest = false;
       child.on("message", value => {
         if (!value || typeof value !== "object") return;
         if ("phase" in value && (value.phase === "before_hook" || value.phase === "engine" || value.phase === "after_hook")) {
@@ -218,6 +228,28 @@ export class Executor {
           return;
         }
         if (!interactive || !activity || !("kind" in value)) return;
+        if (value.kind === "job-credential" && account && "id" in value && typeof value.id === "string") {
+          if (credentialRequest) return;
+          const id = value.id, rejected = "rejected" in value && typeof value.rejected === "string" && /^[a-f0-9]{64}$/.test(value.rejected) ? value.rejected : undefined;
+          credentialRequest = true;
+          void (async () => {
+            let material: CodexJobCredential | undefined;
+            try {
+              if (!placeholder.reason && await activity.authorized(spec)) {
+                material = await this.accounts?.access(account.connection, account.owner, account, rejected, true);
+              }
+              if (material) {
+                secrets.push(material.accessToken);
+                for (const secret of [material.accessToken, JSON.stringify(material.accessToken).slice(1, -1)]) {
+                  stdoutRedactor.add(secret); stderrRedactor.add(secret);
+                }
+              }
+            } catch { material = undefined; }
+            finally { credentialRequest = false; }
+            if (child.connected && !placeholder.reason) child.send({ kind: "job-credential", id, material }, () => {});
+          })().catch(() => {});
+          return;
+        }
         if (value.kind === "action-result" && "request_id" in value && "state" in value) {
           const result = JobActionReceipt.safeParse({ request_id: value.request_id, state: value.state, at: new Date().toISOString() });
           if (result.success) awaiting.get(result.data.request_id)?.(result.data.state);
@@ -236,7 +268,7 @@ export class Executor {
         openPrompt = pending.data;
         activity.control(spec.id, {
           target: target.data, pending: pending.data,
-          cancel: () => this.stop(spec.id, "cancelled"),
+          cancel,
           apply: action => new Promise(resolve => {
             const finish = (state: JobActionReceipt["state"]) => { clearTimeout(timer); awaiting.delete(action.request_id); resolve(state); };
             const timer = setTimeout(() => finish("unknown"), 5000);
@@ -278,7 +310,9 @@ export class Executor {
       child.stderr!.on("data", (chunk: Buffer) => { const clean = stderrRedactor.push(chunk); if (clean.length) write(clean, "stderr"); });
       child.stdin!.end(JSON.stringify({ spec: { ...spec, workdir }, argv, completion, hookEnv: childEnv,
         lastMessageFile: agent?.lastMessageFile, hookReportFile: agent ? join(roundDirectory, "hook-report.txt") : undefined,
-        ...(interactive ? { interactive: { provider: interactive, stateDir: this.config.stateDir, gitPaths: gitPaths ?? [], instructions: access ? SKILL_TEXT : undefined } } : {}),
+        ...(interactive ? { interactive: { provider: interactive, stateDir: this.config.stateDir, gitPaths: gitPaths ?? [], instructions: access ? SKILL_TEXT : undefined,
+          ...(account ? { accountKey: createHash("sha256").update(JSON.stringify([account.connection, account.owner, account.account, account.generation])).digest("hex") } : {}),
+        } } : {}),
         redactions: secrets, env: { ...childEnv, ...injected, ...this.sudo?.begin(spec),
         ...(run.kind === "agent" && access && Date.parse(access.expires) > Date.now() ? { LUMIO_HUB_URL: this.config.url, LUMIO_TOKEN: access.token } : {}), ...(spec.gpus ? { CUDA_VISIBLE_DEVICES: spec.gpus.join(",") } : {}) } }));
       const deadline = Date.now() + spec.timeout_seconds * 1000;

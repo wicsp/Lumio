@@ -1,3 +1,4 @@
+import { authorizeJobAccount, sameJobAccount, type JobAccountSelection } from "./job-accounts.ts";
 import { reviewSecurity } from "./security-review.ts";
 import { Resources } from "./resources.ts";
 import { AssistantWorkbenchAnchors } from "./assistant-workbench-anchors.ts";
@@ -6,7 +7,7 @@ import {AIConfigurationService} from "./ai-config.ts";
 import { DecisionGate } from "./decision-gate.ts";
 import type { JevFetch } from "./jev.ts";
 import {NativeAssistant} from "./native-assistant.ts";
-import { SqliteAIStore, SqliteSpeechStore } from "@lumio/storage";
+import { SqliteSpeechStore } from "@lumio/storage";
 import { FunAsr, type FunAsrOptions } from "./fun-asr.ts";
 import { SpeechConfiguration } from "./speech-config.ts";
 import { KnowledgeService } from "@lumio/knowledge";
@@ -137,7 +138,7 @@ export class BusinessModules {
           from: change.from.stage, stage: change.to.stage, turn: change.to, checkpoint }), "allow", plan.approved.proposal, "applied");
       },
       validateTarget: (target, source) => { validateTarget(this.store, config.localRuntime, target, now(), source); },
-      dispatch: (task, input, round, to, previous, grant, interaction) => this.dispatch(task, input, round, to, now(), previous, grant, interaction),
+      dispatch: (task, input, round, to, previous, grant, interaction, account) => this.dispatch(task, input, round, to, now(), previous, grant, interaction, account),
       agentsForJobs: ids => {
         const jobs = store.executionStore.agentJobs(ids);
         if (!jobs.length) return new Map();
@@ -161,7 +162,7 @@ export class BusinessModules {
     this.assistantStore = new SqliteAssistantStore(store.db);
     this.assistantMain = new AssistantMainConversations(store, this.assistantStore);
     this.workbench = new WorkbenchTools(this.assistantMain, this.assistantStore, this.resources);
-    this.ai=new AIConfigurationService(new SqliteAIStore(store.db),config.assistantModel);
+    this.ai=new AIConfigurationService(store.aiStore,config.assistantModel);
     this.ai.migrateLegacy(store.actors().filter(actor => actor.role === "human").map(actor => actor.id));
     this.ai.store.installConversationPurge();
     this.decisionGate = new DecisionGate(this.ai.decisionGate, {
@@ -228,7 +229,7 @@ export class BusinessModules {
     this.assistantStore.putCall({ ...call, change: { ...change, undone: change.undone ?? { at: new Date().toISOString(), by: identity.actor.id } } });
     return outcome.result as WorkCommandResult;
   }
-  private dispatch(task: WorkTask, input: string, round: number, to: string | undefined, now: Date, previousJob?: string | null, grant?: AgentRun["permissions"], interaction?: AgentRun["interaction"]) {
+  private dispatch(task: WorkTask, input: string, round: number, to: string | undefined, now: Date, previousJob?: string | null, grant?: AgentRun["permissions"], interaction?: AgentRun["interaction"], account?: JobAccountSelection) {
     const target = AgentTarget.safeParse(to);
     if (!target.success) throw new HubError("INVALID", { key: "modules.specify_an_agent_e_g_pi_server", args: [] });
     const stage = task.plan?.plan.stages.find(stage => stage.id === task.plan?.stage);
@@ -250,7 +251,9 @@ export class BusinessModules {
     const options: Pick<AgentRun, "permissions" | "hooks"> = permissions
       ? stageDispatchOptions({ ...permissions, hooks: agentStage?.hooks }, runtime, engine) : {};
     const mode = interaction ?? agentStage?.interaction;
-    if (mode && !checkJobInteraction(this.store, runtime.actor, { kind: "agent", engine: engine.name, prompt: input, interaction: mode, ...options }, now)) {
+    const intent: AgentRun = { kind: "agent", engine: engine.name, prompt: input, ...(mode ? { interaction: mode } : {}), ...options };
+    const binding = authorizeJobAccount(this.store, runtime, intent, account);
+    if (mode && !checkJobInteraction(this.store, runtime.actor, intent, now, Boolean(binding))) {
       throw new PlanDispatchUnavailable({ key: "jobs.interaction_unavailable", args: [] });
     }
     const scope = mode ? this.store.jobActivity.engines(runtime.actor).find(capability => capability.engine === engine.name)?.sandbox ?? engine.sandbox : engine.sandbox;
@@ -268,15 +271,17 @@ export class BusinessModules {
       throw new PlanDispatchUnavailable({ key: "work.permission_context_changed", args: [] });
     }
     let session: AgentRun["session"];
-    if (previous?.spec.run.kind === "agent" && previous.spec.run.engine === engine.name && previous.spec.run.interaction === mode && previous.spec.runtime === runtime.actor && previous.result?.session_id) {
+    if (previous?.spec.run.kind === "agent" && sameJobAccount(this.store, previous, binding) && previous.spec.run.engine === engine.name && previous.spec.run.interaction === mode && previous.spec.runtime === runtime.actor && previous.result?.session_id) {
       session = { id: previous.result.session_id, resume: true };
     } else if (engine.name === "pi" || engine.name === "claude-code") session = { id: randomUUID(), resume: false };
     const prefix = stage?.kind === "agent" ? `Lumio stage ID: ${stage.id}\n` : "";
-    return jobs.create({ runtime: runtime.actor, workdir, timeout_seconds: (task.timeout_minutes ?? 120) * 60,
+    const job = jobs.create({ runtime: runtime.actor, workdir, timeout_seconds: (task.timeout_minutes ?? 120) * 60,
       ...(task.gpus ? { gpus: task.gpus } : {}), source: { task: task.id, round, ...(previous ? { previous: previous.spec.id } : {}) },
       run: { kind: "agent", engine: engine.name, ...(mode ? { interaction: mode } : {}), ...(task.model ? { model: task.model } : {}), ...(session ? { session } : {}), ...options,
         prompt: prefix + msg("modules.you_are_completing_round_of_a_user_task_work_only_in_the_working_dir", round, roundScope, input, requestHint) },
     }, now);
+    if (binding) this.store.jobActivity.bindAccount({ ...binding, job: job.spec.id });
+    return job;
   }
   reconcile(): void {
     const jobs = new Jobs(this.store);

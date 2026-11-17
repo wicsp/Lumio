@@ -12,6 +12,7 @@ export async function runNativeChannel(
   signal: AbortSignal,
   env: NodeJS.ProcessEnv = process.env,
   updates?: { attach: (busy: () => boolean) => void; switching: () => boolean },
+  accounts = new ConnectionAuth(config.stateDir, { codex: env.LUMIO_NATIVE_CODEX }),
 ) {
   await mkdir(config.stateDir, { recursive: true, mode: 0o700 });
   const store = new NativeLocalStore(config.stateDir);
@@ -55,7 +56,6 @@ export async function runNativeChannel(
       }
     })();
   };
-  const accounts = new ConnectionAuth(config.stateDir, { codex: env.LUMIO_NATIVE_CODEX });
   const manager = new NativeManager(store, config.stateDir, flush, {
     runtimeName: config.registration.name,
     codex: env.LUMIO_NATIVE_CODEX,

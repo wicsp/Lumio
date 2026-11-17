@@ -1,7 +1,8 @@
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
 import { basename } from "node:path";
-import { writeFileSync } from "node:fs";
+import { existsSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 const engine = basename(process.argv[1]!).includes("claude") ? "claude-code" : "codex";
 const send = (value: unknown) => process.stdout.write(JSON.stringify(value) + "\n");
@@ -35,7 +36,16 @@ const notify = (method: string, params: Record<string, unknown>) => send({ metho
 const resolved = (requestId: string) => notify("serverRequest/resolved", { threadId: thread, requestId });
 const request = (id: string, method: string, params: Record<string, unknown>) => send({ id, method, params: { threadId: thread, turnId: turn, ...params } });
 const questions = [{ id: "question", question: "Use the small fixture?", header: "Fixture", options: [{ label: "Yes", description: "Small" }] }];
-let decision = "", answer = "";
+let decision = "", answer = "", externalToken = "", serial = 0;
+const broker = process.env.CODEX_HOME?.includes("/native-accounts/");
+const auth = join(process.env.CODEX_HOME ?? "/var/empty", "auth.json");
+const accountId = "fixture-account";
+function saveAuth() {
+  const claims = { sub: "fixture-codex-user", exp: Math.floor(Date.now() / 1000) + 3600, fixture: ++serial };
+  writeFileSync(auth, JSON.stringify({ auth_mode: "chatgpt", tokens: {
+    access_token: `eyJhbGciOiJub25lIn0.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.fixture-job-login`, account_id: accountId,
+  } }), { mode: 0o600 });
+}
 for await (const line of input) {
   let data: any;
   try { data = JSON.parse(line); } catch { continue; }
@@ -43,17 +53,32 @@ for await (const line of input) {
     const reply = (result: Record<string, unknown>) => send({ id: data.id, result });
     switch (data.method) {
       case "initialize": reply({ userAgent: "fixture" }); break;
-      case "account/login/start": reply({ type: "apiKey" }); break;
-      case "account/read": reply({ account: { type: "apiKey" } }); break;
+      case "account/login/start":
+        if (data.params.type === "chatgptAuthTokens" && data.params.chatgptAccountId === accountId) {
+          externalToken = data.params.accessToken;
+          reply({ type: "chatgptAuthTokens" });
+        } else reply({ type: "apiKey" });
+        break;
+      case "account/read":
+        if (broker && existsSync(auth) && data.params.refreshToken) saveAuth();
+        reply({ account: (broker && existsSync(auth)) || externalToken ? { type: "chatgpt", accountId } : { type: "apiKey" } });
+        break;
+      case "account/logout": rmSync(auth, { force: true }); reply({}); break;
+      case "model/list": reply({ data: [] }); break;
       case "thread/start":
       case "thread/resume": reply({ thread: { id: thread }, approvalPolicy: "on-request", approvalsReviewer: "user" }); break;
       case "turn/start":
         reply({ turn: { id: turn, status: "inProgress" } });
         notify("turn/started", { threadId: thread, turn: { id: turn } });
-        request("question-request", "item/tool/requestUserInput", { itemId: "question", questions });
+        if (externalToken) send({ id: "fixture-refresh", method: "account/chatgptAuthTokens/refresh", params: { reason: "unauthorized" } });
+        else request("question-request", "item/tool/requestUserInput", { itemId: "question", questions });
         break;
       case "turn/steer": reply({ turnId: turn }); break;
       case "turn/interrupt": reply({}); notify("turn/completed", { threadId: thread, turn: { id: turn, status: "interrupted" } }); break;
+    }
+    if (data.id === "fixture-refresh" && data.result?.accessToken && data.result.accessToken !== externalToken) {
+      externalToken = data.result.accessToken;
+      request("question-request", "item/tool/requestUserInput", { itemId: "question", questions });
     }
     if (data.id === "question-request") {
       answer = data.result?.answers?.question?.answers?.[0] ?? "";
@@ -63,7 +88,7 @@ for await (const line of input) {
     if (data.id === "approval-request") {
       decision = data.result?.decision ?? "";
       resolved(data.id);
-      notify("item/completed", { threadId: thread, turnId: turn, item: { type: "agentMessage", text: `Fixture answer=${answer} decision=${decision}` } });
+      notify("item/completed", { threadId: thread, turnId: turn, item: { type: "agentMessage", text: `Fixture answer=${answer} decision=${decision}${externalToken ? ` token=${externalToken}` : ""}` } });
       notify("turn/completed", { threadId: thread, turn: { id: turn, status: "completed" } });
     }
     continue;

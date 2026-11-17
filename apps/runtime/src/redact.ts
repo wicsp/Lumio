@@ -3,6 +3,10 @@ export class CredentialRedactor {
   private pending = Buffer.alloc(0);
   private readonly values: Buffer[];
   constructor(secrets: string[]) { this.values = [...new Set(secrets.filter(Boolean))].map(value => Buffer.from(value)); }
+  add(secret: string) {
+    const value = Buffer.from(secret);
+    if (value.length && !this.values.some(item => item.equals(value))) this.values.push(value);
+  }
   push(chunk: Buffer, final = false): Buffer {
     this.pending = Buffer.concat([this.pending, chunk]);
     const output: Buffer[] = [], reserve = final ? 0 : Math.max(0, ...this.values.map(value => value.length - 1));

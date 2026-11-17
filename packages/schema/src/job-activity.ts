@@ -55,6 +55,7 @@ export const JobActionReceipt = z.strictObject({
 export const JobEngineActivityCapability = z.strictObject({
   engine: z.enum(AGENTS), version: token, progress: z.boolean(), sandbox: SandboxLevel,
   approvals: z.boolean(), questions: z.boolean(), steer: z.boolean(),
+  account_reuse: z.literal(true).optional(),
 });
 export const JobLiveView = z.strictObject({
   job: jobId, status: JobStatus, created: Timestamp, assigned: Timestamp.nullable(), started: Timestamp.nullable(),
@@ -68,6 +69,7 @@ const jobSync = z.strictObject({
   type: z.literal("job"), job: jobId, lease: z.string().min(16).max(256), events: z.array(JobActivityRecord).max(JOB_ACTIVITY_BATCH),
   receipts: z.array(JobActionReceipt).max(JOB_ACTIVITY_BATCH), target: JobControlTarget.nullable().optional(),
   pending: JobHumanRequest.nullable().optional(),
+  authorization_check: z.literal(true).optional(),
 });
 export const JobActivitySync = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("register"), platform: token, engines: z.array(JobEngineActivityCapability).max(8) }),
@@ -82,6 +84,7 @@ export const JobAttention = z.array(z.strictObject({ job: jobId, task: idOf("tas
 
 export const JobActivityCapabilities = z.array(z.strictObject({
   runtime: idOf("act"), name: z.string(), online: z.boolean(), engines: z.array(JobEngineActivityCapability).max(8),
+  codex_connections: z.array(z.strictObject({ id: idOf("aic"), name: z.string().min(1).max(100) })).optional(),
 }));
 export type JobActivityEvent = z.infer<typeof JobActivityEvent>;
 export type JobActivityRecord = z.infer<typeof JobActivityRecord>;

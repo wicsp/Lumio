@@ -3,6 +3,7 @@ import { newId } from "@lumio/foundation";
 import { ExecutionJobs, type RoutineHooks } from "@lumio/execution";
 import { JobStatus } from "@lumio/schema";
 import { SubmitJob } from "@lumio/execution";
+import { authorizeJobAccount, sameJobAccount } from "./job-accounts.ts";
 import { checkJobInteraction } from "./job-activity.ts";
 import type { HubStore, Identity } from "./store.ts";
 import type { authorize } from "./authorize.ts";
@@ -30,13 +31,27 @@ export async function handleJobs(request: Request, operation: "job.submit" | "jo
     if (operation === "job.submit") {
       let body: unknown; try { body = await request.json(); } catch { throw new HubError("INVALID", { key: "runtime.request_body_must_be_json", args: [] }); }
       const input = SubmitJob.safeParse(body);
-      if (input.success && input.data.run.kind === "agent" && input.data.run.interaction) {
+      if (!input.success) return Response.json(jobs.submit(body, now));
+      const { run, connection } = input.data;
+      if (connection && (run.kind !== "agent" || !run.interaction || identity.actor.role !== "human")) {
+        throw new HubError("INVALID", { key: "jobs.account_unavailable", args: [] });
+      }
+      if (run.kind !== "agent" || !run.interaction) return Response.json(jobs.submit(body, now));
+      return store.db.transaction(() => {
         const runtime = store.runtimes(now).find(runtime => runtime.registration.name === input.data.runtime);
-        if (!runtime || !checkJobInteraction(store, runtime.actor, input.data.run, now)) {
+        const selection = identity.actor.role === "human" ? { owner: identity.actor.id, connection } : undefined;
+        const binding = runtime && authorizeJobAccount(store, runtime, run, selection);
+        if (!runtime || !checkJobInteraction(store, runtime.actor, run, now, Boolean(binding))) {
           throw new HubError("INVALID", { key: "jobs.interaction_unavailable", args: [] });
         }
-      }
-      return Response.json(jobs.submit(body, now));
+        if (binding && run.session?.resume) {
+          const prior = jobs.list().findLast(job => job.spec.runtime === runtime.actor && job.result?.session_id === run.session!.id);
+          if (!prior || !sameJobAccount(store, prior, binding)) throw new HubError("INVALID", { key: "jobs.account_unavailable", args: [] });
+        }
+        const job = jobs.submit(body, now);
+        if (binding) store.jobActivity.bindAccount({ ...binding, job: job.spec.id });
+        return Response.json(job);
+      })();
     }
     if (operation === "jobs") {
       const params = new URL(request.url).searchParams;

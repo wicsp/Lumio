@@ -5,7 +5,7 @@ afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_L
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
-import { JobActionReceipt, JobActivityAck, JobActivityPage, JobActivitySync, JobAttention, JobLiveView } from "@lumio/schema";
+import { AIConnection, JOB_ACCOUNT_FEATURE, JobActivityCapabilities, NativeConnectionView, WorkCommandRequest, WorkCommandResult, JobActionReceipt, JobActivityAck, JobActivityPage, JobActivitySync, JobAttention, JobLiveView } from "@lumio/schema";
 import { cp, mkdir, writeFile, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,8 +25,8 @@ const registration = { protocol_version: 2, name: "server", engines: [], tags: [
 const heartbeat = { running: [], queued: [], outbox: 0 };
 const base = () => `http://127.0.0.1:${port}`;
 const boot = (listen = 0) => startHub({ ...readConfig({ LUMIO_VAULT: vault, LUMIO_STATE_DIR: state }), port: listen }, { log: () => {} });
-async function request(path: string, token = human, body?: unknown) {
-  return fetch(`${base()}${path}`, { method: body === undefined ? "GET" : "POST", headers: { "Accept-Language": "zh", Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+async function request(path: string, token = human, body?: unknown, features?: string) {
+  return fetch(`${base()}${path}`, { method: body === undefined ? "GET" : "POST", headers: { "Accept-Language": "zh", Authorization: `Bearer ${token}`, "Content-Type": "application/json", ...(features ? { "X-Lumio-Features": features } : {}) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 }
 async function get(id: string) { return Job.parse(await (await request(`/v2/execution/jobs/${id}`)).json()); }
 async function submit(mode = "quiet", path = join(temp, "calls"), delay = 0, fields: object = {}, extra = "literal") {
@@ -61,7 +61,7 @@ async function startRuntime(url = base(), binary?: string, extraEnv?: Record<str
 async function stop(child: ReturnType<typeof Bun.spawn>, signal: NodeJS.Signals = "SIGTERM") { child.kill(signal); await child.exited; daemons = daemons.filter((d) => d !== child); }
 function alive(pid: number) { try { process.kill(pid, 0); return true; } catch { return false; } }
 beforeEach(async () => {
-  temp = await mkdtemp(join(tmpdir(), "lumio-jobs-")); state = join(temp, "hub"); vault = join(temp, "vault"); runtimeState = join(temp, "runtime"); output = []; errors = [];
+  temp = await mkdtemp(join(await realpath(tmpdir()), "lumio-jobs-")); state = join(temp, "hub"); vault = join(temp, "vault"); runtimeState = join(temp, "runtime"); output = []; errors = [];
   await cp(new URL("../../../fixtures/query-vault", import.meta.url).pathname, vault, { recursive: true });
   const store = await HubStore.open(state);
   for (const [name, role] of [["owner", "human"], ["agent", "agent"], ["server", "runtime"], ["other", "runtime"]] as const) store.createActor(name, role);
@@ -394,7 +394,7 @@ test("same-round prompts require the original turn, never submit twice, and stop
   expect(JobAttention.parse(await (await request("/v2/execution/attention")).json())).toEqual([]);
 });
 
-async function activityRuntime() {
+async function activityRuntime(reuse = false) {
   const bin = join(temp, "agents"), project = join(temp, "project");
   await mkdir(bin); await mkdir(project);
   const engine = await readFile(new URL("./fixtures/job-activity-engine.ts", import.meta.url), "utf8");
@@ -403,7 +403,8 @@ async function activityRuntime() {
   }
   await startRuntime(undefined, undefined, {
     PATH: `${bin}:/usr/bin:/bin`, LUMIO_INTERACTIVE_JOB_ROOTS: project,
-    LUMIO_JOB_CODEX_API_KEY: "synthetic-codex-key", LUMIO_JOB_CLAUDE_API_KEY: "synthetic-claude-key",
+    ...(reuse ? { LUMIO_NATIVE_SESSIONS: "1", LUMIO_NATIVE_CODEX: join(bin, "codex") }
+      : { LUMIO_JOB_CODEX_API_KEY: "synthetic-codex-key", LUMIO_JOB_CLAUDE_API_KEY: "synthetic-claude-key" }),
   });
   await eventually(async () => {
     const list = await (await request("/v2/execution/activity/capabilities")).json() as { engines: unknown[] }[];
@@ -459,3 +460,100 @@ test.skipIf(process.platform !== "darwin")("Codex App Server and the Claude Agen
     await eventually(async () => (await view()).receipts.filter(receipt => receipt.state === "applied").length === 2);
   }
 }, 30_000);
+
+test.skipIf(process.platform !== "darwin")("an existing Codex login drives a Work Job through refresh, questions and approval and is revoked on logout", async () => {
+  const project = await activityRuntime(true);
+  const connection = AIConnection.parse(await (await request("/v2/ai/connections", human, {
+    name: "Fixture Codex", host: "server", kind: "codex-account",
+  })).json());
+  const auth = `/v2/ai/connections/${connection.id}/auth`;
+  const connect = async () => NativeConnectionView.parse(await (await request(auth)).json());
+  const codexHome = join(runtimeState, "native-accounts", connection.id, "codex");
+  await mkdir(codexHome, { recursive: true, mode: 0o700 });
+  const claims = Buffer.from(JSON.stringify({ sub: "fixture-codex-user", exp: Math.floor(Date.now() / 1000) + 3600, fixture: 0 })).toString("base64url");
+  await writeFile(join(codexHome, "auth.json"), JSON.stringify({ auth_mode: "chatgpt", tokens: {
+    access_token: `eyJhbGciOiJub25lIn0.${claims}.fixture-job-login`, account_id: "fixture-account",
+  } }), { mode: 0o600 });
+  let authState: NativeConnectionView | undefined;
+  await eventually(async () => (authState = await connect()).state === "ready")
+    .catch(() => { throw new Error(`Fixture sign-in failed: ${authState?.state} (${authState?.error ?? "no error"})`); });
+  const capabilities = JobActivityCapabilities.parse(await (await request("/v2/execution/activity/capabilities")).json());
+  expect(capabilities[0]).toMatchObject({ codex_connections: [{ id: connection.id, name: connection.name }],
+    engines: expect.arrayContaining([expect.objectContaining({ engine: "codex", account_reuse: true, approvals: false })]) });
+
+  const work = async (op: string, args: object) => {
+    const response = await request("/v2/work/commands", human, WorkCommandRequest.parse({ request_id: randomUUID(), operation: { op, args } }));
+    const body = await response.json();
+    if (!response.ok) throw new Error(JSON.stringify(body));
+    return WorkCommandResult.parse(body);
+  };
+  const task = await work("work.task.create", { title: "Synthetic Codex account", workdir: project });
+  if (task.kind !== "task") throw new Error("Expected fixture task");
+  const dispatched = await work("work.task.dispatch", { task: task.task.id, to: "codex@server", expected_revision: task.task.revision, interaction: "interactive" });
+  if (dispatched.kind !== "job") throw new Error("Expected an assigned job");
+  const id = dispatched.job.spec.id, path = `/v2/execution/jobs/${id}`;
+  expect(JSON.stringify(dispatched)).not.toContain(connection.id);
+  const live = async (job = path) => JobLiveView.parse(await (await request(`${job}/live`)).json());
+  await eventually(async () => (await live()).pending?.kind === "question", 9000).catch(async () => {
+    const state = await live(), job = await get(id);
+    const logPath = job.result?.log ?? join(runtimeState, "logs", `${id}.log`);
+    throw new Error(JSON.stringify({ status: state.status, phase: state.phase, pending: state.pending?.kind,
+      report: job.result?.report, error: job.result?.error, log: await readFile(logPath, "utf8").catch(() => "") }));
+  });
+  expect((await live()).capability).toMatchObject({ approvals: true, questions: true, steer: true });
+  const q = (await live()).pending!;
+  if (q.kind !== "question") throw new Error("Expected question");
+  expect((await request(`${path}/actions`, human, { action: "answer", request_id: randomUUID(), prompt_id: q.id, target: q.target,
+    answers: [{ question: q.questions[0]!.id, values: ["Yes"] }] })).status).toBe(202);
+  await eventually(async () => (await live()).pending?.kind === "approval");
+  const approve = (await live()).pending!;
+  expect((await request(`${path}/actions`, human, { action: "approve", request_id: randomUUID(), prompt_id: approve.id, target: approve.target })).status).toBe(202);
+  await eventually(async () => (await get(id)).status === "done");
+  const { result } = await get(id);
+  expect(result?.report).toBe("Fixture answer=Yes decision=accept token=[REDACTED]");
+  expect(await readFile(result!.log!, "utf8")).not.toContain("fixture-job-login");
+  expect((await request(`${path}/events`)).ok).toBe(true);
+
+  const response = await request("/v2/execution/jobs", human, { runtime: "server", workdir: project, connection: connection.id,
+    run: { kind: "agent", engine: "codex", prompt: "Test revoked consent", interaction: "interactive" } });
+  expect(response.status).toBe(200);
+  const revoking = Job.parse(await response.json()).spec.id, revokedPath = `/v2/execution/jobs/${revoking}`;
+  await eventually(async () => (await live(revokedPath)).pending?.kind === "question");
+  const pending = (await live(revokedPath)).pending!;
+  expect(NativeConnectionView.parse(await (await request(auth, human, { action: "logout", request_id: randomUUID() })).json()).state).toBe("signed_out");
+  expect((await request(`${revokedPath}/actions`, human, { action: "deny", request_id: randomUUID(), prompt_id: pending.id, target: pending.target })).status).toBe(409);
+  await eventually(async () => (await get(revoking)).status === "cancelled");
+  expect((await live(revokedPath)).pending).toBeNull();
+}, 30_000);
+
+test("job account selection and the Runtime-only binding reject foreign owners and ambiguous connections", async () => {
+  const primary = RuntimeRegistered.parse(await (await request("/v1/runtime/register", runtime, { ...registration,
+    engines: [{ name: "codex", version: "0.166.0", sandbox: "os" }],
+  })).json());
+  expect((await request("/v1/runtime/job-activity/sync", runtime, { type: "register", platform: "darwin", engines: [
+    { engine: "codex", version: "0.166.0", progress: true, sandbox: "os", approvals: false, questions: false, steer: false, account_reuse: true },
+  ] })).ok).toBe(true);
+  const make = async (name: string, token = human) => AIConnection.parse(await (await request("/v2/ai/connections", token,
+    { name, kind: "codex-account", host: "server" })).json());
+  const foreign = hub!.store.createActor("another-human", "human"), otherHuman = hub!.store.createToken("another-human", foreign.name);
+  const first = await make("First"), second = await make("Second"), invalid = await make("Other human's connection", otherHuman);
+  for (const account of [first, second, invalid]) hub!.store.aiStore.putQuota(account.id, {
+    settings: { monitor: true, thresholds: {} }, status: "waiting", binding: JSON.stringify([primary.actor, "a".repeat(64), 1]),
+  });
+  const caps = JobActivityCapabilities.parse(await (await request("/v2/execution/activity/capabilities")).json());
+  expect(caps[0]!.codex_connections?.map(connection => connection.id).sort()).toEqual([first.id, second.id].sort());
+  const submit = (connection?: string, token = human) => request("/v2/execution/jobs", token, { runtime: "server", connection,
+    run: { kind: "agent", engine: "codex", interaction: "interactive", prompt: "Synthetic delegated work" } });
+  expect((await submit()).status).toBe(400);
+  expect((await submit(invalid.id)).status).toBe(400);
+  expect((await submit(first.id, agent)).status).toBe(403);
+  const job = Job.parse(await (await submit(first.id)).json());
+  expect(JSON.stringify(await get(job.spec.id))).not.toContain(first.id);
+  const old = RuntimeSync.parse(await (await request("/v1/runtime/sync", runtime, heartbeat)).json());
+  expect(old.jobs).toEqual([]);
+  expect(old.accounts).toBeUndefined();
+  const sync = RuntimeSync.parse(await (await request("/v1/runtime/sync", runtime, heartbeat, JOB_ACCOUNT_FEATURE)).json());
+  expect(sync.jobs.map(job => job.id)).toEqual([job.spec.id]);
+  expect(sync.accounts).toEqual([{ job: job.spec.id, connection: first.id, owner: first.owner, account: "a".repeat(64), generation: 1, revision: first.revision }]);
+  expect(JSON.stringify(sync.jobs)).not.toContain(first.id);
+});

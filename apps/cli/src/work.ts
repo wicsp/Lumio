@@ -38,7 +38,7 @@ export async function runWork(kind: "task" | "project", args: string[], log: (li
     throw new Error(usage());
   }
   if (kind === "task" && ["status", "assign", "ack"].includes(action)) throw new Error(msg("work.use_turn_commands"));
-  if (values.interactive !== undefined && (kind !== "task" || action !== "continue")) throw new Error(usage());
+  if ((values.interactive !== undefined || values.connection !== undefined) && (kind !== "task" || action !== "continue" || (values.connection !== undefined && !values.interactive))) throw new Error(usage());
   const client = workClient();
   const emit = (value: unknown) => log(values.json ? JSON.stringify(value) : typeof value === "string" ? value : JSON.stringify(value, null, 2));
   const send = async (op: string, payload: Record<string, unknown>): Promise<WorkCommandResult> => client.workCommand(WorkCommandRequest.parse({
@@ -112,7 +112,7 @@ export async function runWork(kind: "task" | "project", args: string[], log: (li
     return 0;
   }
   if (action === "continue" && kind === "task") {
-    const result = await send("work.task.dispatch", { task: reference, to: values.to, comment: values.comment, ...(values.interactive ? { interaction: "interactive" } : {}), expected_revision: values.revision === undefined ? current.revision : Number(values.revision) });
+    const result = await send("work.task.dispatch", { task: reference, to: values.to, comment: values.comment, connection: values.connection, ...(values.interactive ? { interaction: "interactive" } : {}), expected_revision: values.revision === undefined ? current.revision : Number(values.revision) });
     if (values.json) emit(result.kind === "job" ? result.job : result);
     else if (result.kind === "job") {
       log(values.to === undefined && result.target

@@ -6,13 +6,14 @@ import { newId } from "@lumio/foundation";
 import { AgentInfo, AgentTokenIssued, JobAccess, type JobSpec, Actor, Proposal, type ProposalOperation, type ProposalStatus, type ActorRole, RuntimeRegistration, RuntimeRegistered, RuntimeInfo } from "@lumio/schema";
 import { HubError } from "./errors.ts";
 import { ExecutionRuntimes, RuntimeUpdates } from "@lumio/execution";
-import { workSystemActor, SqliteRuntimeRegistry, SqliteExecutionStore, SqliteRuntimeUpdates, SqliteJobActivity } from "@lumio/storage";
+import { workSystemActor, SqliteRuntimeRegistry, SqliteExecutionStore, SqliteRuntimeUpdates, SqliteJobActivity, SqliteAIStore } from "@lumio/storage";
 import { version } from "./version.ts";
 
 export interface Identity { actor: Actor; label: string; job?: string }
 export class HubStore {
   proposalCreated: ((proposal: Proposal) => void) | undefined;
   readonly executionStore: SqliteExecutionStore;
+  readonly aiStore: SqliteAIStore;
   readonly jobActivity: SqliteJobActivity;
   readonly runtimeUpdates: RuntimeUpdates;
   runtimeVersion = version;
@@ -20,10 +21,11 @@ export class HubStore {
   private constructor(public readonly db: Database) {
     this.runtimeRegistry = new ExecutionRuntimes(new SqliteRuntimeRegistry(db));
     this.runtimeUpdates = new RuntimeUpdates(new SqliteRuntimeUpdates(db), () => this.runtimeVersion);
-    this.jobActivity = new SqliteJobActivity(db);
     this.executionStore = new SqliteExecutionStore(db, {
       runtimes: (now) => this.runtimes(now), syncRuntime: (actor, now) => this.runtimeRegistry.sync(actor, now),
     });
+    this.jobActivity = new SqliteJobActivity(db);
+    this.aiStore = new SqliteAIStore(db);
   }
 
   static async open(stateDir: string): Promise<HubStore> {

@@ -54,7 +54,7 @@ import {
 } from "./work.ts";
 import { ApiError, OperationRequest, OperationResult } from "./api.ts";
 import { AiNote, Asset, Experiment, Idea, Paper, Post, Source } from "./entities.ts";
-import { ExecutionTarget, Job, JobResult, JobSpec, RuntimeAck, RuntimeHeartbeat, RuntimeInfo, RuntimeRegistered, RuntimeRegistration, RuntimeSync } from "./job.ts";
+import { ExecutionTarget, Job, JobResult, JobSpec, SubmitJob, RuntimeAck, RuntimeHeartbeat, RuntimeInfo, RuntimeRegistered, RuntimeRegistration, RuntimeSync } from "./job.ts";
 import { ExecutionRuntimeUpdateCommandRequest, ReleaseManifest, RuntimeUpdateDirective, RuntimeUpdateReport } from "./runtime-update.ts";
 import { Operation } from "./operation.ts";
 import { PrivilegedApproval, PrivilegedReport, PrivilegedStatus } from "./privileged.ts";
@@ -107,6 +107,7 @@ export const CONTRACTS = {
   "resource-summary": ResourceSummary,
   job: Job,
   "job-spec": JobSpec,
+  "submit-job": SubmitJob,
   "job-result": JobResult,
   "job-activity-event": JobActivityEvent,
   "job-activity-page": JobActivityPage,

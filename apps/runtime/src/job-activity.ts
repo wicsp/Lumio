@@ -1,5 +1,5 @@
 import { JOB_ACTIVITY_BATCH, JOB_ACTIVITY_MAX_BODY, JobActivityAck, JobActivityRecord, JobActionReceipt,
-  type JobAction, type JobHumanRequest, type JobControlTarget, type JobEngineActivityCapability, type JobActivitySync } from "@lumio/schema";
+  type JobAction, type JobHumanRequest, type JobControlTarget, type JobEngineActivityCapability, type JobActivitySync, type JobSpec } from "@lumio/schema";
 import type { LocalJob, Queue } from "./queue.ts";
 import type { JobActivityPayload } from "./job-output.ts";
 
@@ -26,6 +26,15 @@ export class RuntimeJobActivity {
   }
   disable() { this.enabled = false; }
   supported() { return this.enabled; }
+  async authorized(spec: JobSpec): Promise<boolean> {
+    if (!this.enabled) return false;
+    try {
+      const response = await this.send(PATH, { type: "job", job: spec.id, lease: spec.lease, events: [], receipts: [], authorization_check: true });
+      if (!response.ok) return false;
+      const ack = JobActivityAck.parse(await response.json());
+      return ack.type === "job" && !ack.conflict && !ack.cancel;
+    } catch { return false; }
+  }
   begin(job: string) { this.active.add(job); }
   end(job: string) { this.active.delete(job); this.controls.delete(job); }
   control(job: string, state: Control) { this.controls.set(job, state); }
