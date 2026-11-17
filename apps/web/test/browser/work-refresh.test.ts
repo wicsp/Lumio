@@ -14,7 +14,7 @@ afterEach(() => {
 });
 
 function fixture() {
-  Object.defineProperty(globalThis, "document", { configurable: true, value: { activeElement: {} } });
+  Object.defineProperty(globalThis, "document", { configurable: true, value: { activeElement: { matches: () => true } } });
   const editor = { dirty: false, isBusy: false, hasUnsentComment: false, refreshRelatedTasks: async (_canApply: () => boolean) => {} };
   let focused = false, reloads = 0, listLoads = 0;
   const pane = Object.assign(Object.create(WorkPane.prototype), {
@@ -31,6 +31,13 @@ test("returning from trash refreshes a clean task despite its populated saved ti
   const f = fixture();
   f.pane.liveRefresh();
   expect(f.listLoads()).toBe(1); expect(f.reloads()).toBe(1);
+});
+
+test("a button that keeps focus after a click does not block refreshing the task detail", () => {
+  const f = fixture();
+  Object.defineProperty(globalThis, "document", { configurable: true, value: { activeElement: { matches: () => false } } });
+  f.focus(true); f.pane.liveRefresh();
+  expect(f.reloads()).toBe(1);
 });
 
 test("live refresh protects unsaved edits, pending actions, focused controls and unposted discussion", () => {
