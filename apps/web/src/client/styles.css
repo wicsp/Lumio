@@ -237,7 +237,8 @@ kbd { padding: 0 5px; border: 1px solid var(--line); border-bottom-width: 2px; b
 .usage-bar { position: relative; display: block; height: 3px; }
 .usage-track { display: block; height: 100%; border-radius: 2px; background: var(--sunken); overflow: hidden; }
 .usage-reset { position: absolute; top: -2px; bottom: -2px; width: 1.5px; margin-left: -0.75px; border-radius: 1px; background: var(--ink-2); }
-.usage-track > i { display: block; height: 100%; border-radius: 2px; background: var(--ink-4); }
+/* 充足时用低饱和的灰绿，不抢眼；偏紧变黄、用完变红。 */
+.usage-track > i { display: block; height: 100%; border-radius: 2px; background: color-mix(in srgb, var(--green) 45%, var(--ink-4)); }
 .usage-value { flex: none; min-width: 34px; display: inline-flex; justify-content: flex-end; font-variant-numeric: tabular-nums; }
 .usage-value .icon { width: 13px; height: 13px; color: var(--ink-4); }
 .usage-row[data-level="low"] { color: var(--ochre); }

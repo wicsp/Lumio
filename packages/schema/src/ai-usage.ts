@@ -39,7 +39,8 @@ export const AIQuotaSnapshot = z.discriminatedUnion("source", [
 export const AIQuotaSettings = z.strictObject({
   monitor: z.boolean(),
   claude_mode: z.enum(["sample", "background"]).optional(),
-  thresholds: z.strictObject({ CNY: Threshold.optional(), USD: Threshold.optional(), remaining_percent: Percentage.optional() }),
+  /** balance：API 余额低于它时提醒，不分币种，按显示的那笔余额判断（ADR 0071）；remaining_percent：订阅额度剩余低于它时提醒。 */
+  thresholds: z.strictObject({ balance: Threshold.optional(), remaining_percent: Percentage.optional() }),
   /** API 余额的监控阈值（ADR 0071）：侧栏显示的那笔余额不低于它时细条满格，低于时按比例缩短。只影响显示，不分币种。 */
   full_balance: Threshold.optional(),
 });

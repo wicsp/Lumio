@@ -19,9 +19,10 @@ test("quota contracts preserve decimal amounts, validate ranges, and allow old n
   const balance = { source: "deepseek" as const, sampled_at: "2026-11-10T01:00:00+08:00", available: true, balances: [amount] };
   expect(AIQuotaSnapshot.parse(balance)).toEqual(balance);
   expect(AIQuotaSnapshot.safeParse({ ...balance, balances: [amount, amount] }).success).toBe(false);
-  expect(AIQuotaSettings.safeParse({ monitor: true, thresholds: { CNY: "-1" } }).success).toBe(false);
+  expect(AIQuotaSettings.safeParse({ monitor: true, thresholds: { balance: "-1" } }).success).toBe(false);
   expect(AIQuotaSettings.safeParse({ monitor: true, thresholds: { remaining_percent: 100.1 } }).success).toBe(false);
-  expect(AIQuotaSettings.safeParse({ monitor: true, thresholds: {}, full_balance: "10" }).success).toBe(true);
+  expect(AIQuotaSettings.safeParse({ monitor: true, thresholds: { balance: "5" }, full_balance: "10" }).success).toBe(true);
+  expect(AIQuotaSettings.safeParse({ monitor: true, thresholds: { CNY: "5" } }).success).toBe(false);
   expect(AIQuotaSettings.safeParse({ monitor: true, thresholds: {}, full_balance: "-1" }).success).toBe(false);
   expect(AIQuotaSettings.safeParse({ monitor: true, thresholds: {}, full_balance: "ten" }).success).toBe(false);
   expect(NativeRuntimeMessage.safeParse({ type: "hello", protocol: 1, instance: "old", version: "1", isolation: "macos-seatbelt" }).success).toBe(true);
