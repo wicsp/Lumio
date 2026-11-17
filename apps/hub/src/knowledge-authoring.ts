@@ -1,5 +1,7 @@
+import { boundedText } from "./bounded-body.ts";
+import type { SemanticSearch } from "./semantic-search.ts";
 import { EDITING_ROUTES, KnowledgeEditing } from "./knowledge-editing.ts";
-import { KnowledgeCreateRequest, KnowledgeTemplateRequest, PaperResolveRequest, PaperResolveResult } from "@lumio/schema";
+import { KnowledgeCreateRequest, KnowledgeTemplateRequest, PaperResolveRequest, PaperResolveResult, type KnowledgeCreateResult } from "@lumio/schema";
 import { randomBytes } from "node:crypto";
 import { CoreError, newId } from "@lumio/foundation";
 import { knowledgeTemplate, parsePaperInput, parseArxivMetadata, parseCrossrefMetadata, generateCitekey, rewriteBibtexKey } from "@lumio/knowledge";
@@ -19,17 +21,7 @@ export const KNOWLEDGE_ROUTES = [
 type Operation = typeof KNOWLEDGE_ROUTES[number]["operation"];
 export type PaperFetch = (url: string, init: RequestInit) => Promise<Response>;
 
-export async function boundedText(body: ReadableStream<Uint8Array> | null, limit: number): Promise<string> {
-  if (!body) return "";
-  const reader = body.getReader(), chunks: Uint8Array[] = []; let size = 0;
-  try {
-    while (true) {
-      const { done, value } = await reader.read(); if (done) break;
-      size += value.byteLength; if (size > limit) throw new Error("BODY_LIMIT"); chunks.push(value);
-    }
-    return Buffer.concat(chunks).toString("utf8");
-  } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
-}
+export { boundedText } from "./bounded-body.ts";
 
 /** Only fixed scholarly providers; redirects are checked before any next request. */
 export async function resolvePaper(input: PaperResolveRequest, fetcher: PaperFetch = fetch, timeoutMs = 15000): Promise<PaperResolveResult> {
@@ -79,8 +71,8 @@ export class KnowledgeAuthoring {
   private creations?: KnowledgeCreationStore;
   private editing?: KnowledgeEditing;
   constructor(private config: HubConfig, private store: HubStore, private exclusive: <T>(action: () => Promise<T>) => Promise<T>,
-    private issue: (path: string, message: string) => void, private fetcher?: PaperFetch) {
-    if (config.vault) { this.creations = new KnowledgeCreationStore(store.db, config.vault); this.editing = new KnowledgeEditing(config, store, exclusive, issue); }
+    private issue: (path: string, message: string) => void, private fetcher?: PaperFetch, semantic?: SemanticSearch) {
+    if (config.vault) { this.creations = new KnowledgeCreationStore(store.db, config.vault); this.editing = new KnowledgeEditing(config, store, exclusive, issue, semantic); }
   }
   async handle(request: Request, operation: Operation, identity: Identity, decide: typeof authorize, now: Date): Promise<Response> {
     const decision = decide(identity.actor, { operation });
@@ -110,17 +102,21 @@ export class KnowledgeAuthoring {
     }
     const parsed = KnowledgeCreateRequest.safeParse(body);
     if (!parsed.success) throw new HubError("INVALID", { key: "knowledge.invalid", args: [] }, { reason: "invalid-note" });
+    return Response.json(await this.create(identity, parsed.data, now), { status: 201 });
+  }
+
+  async create(identity: Identity, input: KnowledgeCreateRequest, now: Date): Promise<KnowledgeCreateResult> {
+    if (!this.creations || identity.actor.role !== "human") throw new HubError("INVALID", { key: "knowledge.no_vault", args: [] });
     try {
-      const result = await this.exclusive(() => this.creations!.create(identity.actor.id, parsed.data, { now, newId: prefix => newId(prefix, now, randomBytes), tz: "UTC" }, {
+      return await this.exclusive(() => this.creations!.create(identity.actor.id, input, { now, newId: prefix => newId(prefix, now, randomBytes), tz: "UTC" }, {
         finalize: async (note, bytes) => {
           await updateIndex(this.config.vault, { stateDir: this.config.stateDir });
           const git = await openVaultGit(this.config.vault);
           if (git) try { await git.add(note.path, bytes); await git.commit([note.path], "lumio: create knowledge note", { "Lumio-Actor": identity.actor.id }); }
           catch { this.issue(note.path, msg("knowledge.commit_failed")); }
         },
-        audit: note => this.store.audit(identity, operation, "allow", undefined, `created:${note.id}`),
+        audit: note => this.store.audit(identity, "knowledge.create", "allow", undefined, `created:${note.id}`),
       }));
-      return Response.json(result, { status: 201 });
     } catch (cause) {
       if (cause instanceof HubError) throw cause;
       if (cause instanceof CoreError) {

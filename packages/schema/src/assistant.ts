@@ -56,6 +56,7 @@ export const AssistantTurn = z.strictObject({
   created: Timestamp,
   finished: Timestamp.optional().describe("轮次结束时间"),
   error: z.string().optional().describe("失败原因"),
+  idea: idOf("idea").optional().describe("已保存的语音想法（ADR 0074）"),
 });
 
 export const ToolCallStatus = z.enum(["prepared", "running", "succeeded", "failed", "unknown"]);
@@ -182,7 +183,11 @@ export const AssistantChatRequest = z.strictObject({
   model: z.string().min(1).optional().describe("指定模型；缺省由应用决定"),
   focus: FocusSnapshot.optional().describe("人此刻在看什么；只接受主对话（ADR 0060 第 1 节）"),
   glance: idOf("gln").optional().describe("全局捕获键的所见；只接受主对话，与 focus 互斥，所见须属于发消息的人且未被使用（ADR 0066 第 4 节）"),
-}).refine(v => v.focus === undefined || v.glance === undefined, { message: "focus 与 glance 不能同时出现", path: ["glance"] });
+  record_idea: z.literal(true).optional().describe("长按口述，先保存人写的 Idea，再由助手判断是否回答（ADR 0074）"),
+}).refine(v => v.focus === undefined || v.glance === undefined, { message: "focus 与 glance 不能同时出现", path: ["glance"] })
+  .refine(v => !v.record_idea || (!!v.conversation && !!v.glance && v.message.length <= 50_000), {
+    message: "语音想法需要主对话、所见和不超过 5 万字符的转录", path: ["record_idea"],
+  });
 
 /** 完整对话：对话对象、消息、轮次。 */
 export const AssistantConversationDetail = z.strictObject({
@@ -248,6 +253,7 @@ export const ASSISTANT_REASONING_DELTA_LIMIT = 65_536;
 export const AssistantEvent = z.discriminatedUnion("type", [
   z.strictObject({type:z.literal("native"),turn:idOf("turn"),event:NativeEventData}),
   z.strictObject({ type: z.literal("model_waiting"), turn: idOf("turn") }),
+  z.strictObject({ type: z.literal("idea_saved"), turn: idOf("turn"), idea: idOf("idea") }),
   z.strictObject({ type: z.literal("reasoning"), turn: idOf("turn"), delta: z.string().min(1).max(ASSISTANT_REASONING_DELTA_LIMIT) }),
   z.strictObject({ type: z.literal("token"), turn: idOf("turn"), delta: z.string() }),
   z.strictObject({ type: z.literal("tool"), turn: idOf("turn"), tool: AssistantToolCall }),

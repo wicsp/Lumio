@@ -93,7 +93,7 @@ for (const [op, args, reason] of [
 test("catalog tools validate arguments, preserve identity, expose todo/create/comment, and return a clear denial to the model", async () => {
   let step = 0, created = "";
   model = { async complete(input) {
-    expect(input.tools.map(value => value.name)).toEqual(CAPABILITIES.map(value => toolName(value.name)));
+    expect(input.tools.map(value => value.name)).toEqual([...CAPABILITIES.map(value => toolName(value.name)), toolName("knowledge.idea.discussion")]);
     if (step++ === 0) return { content: "", tool_calls: [{ id: "provider-1", name: toolName("work.task.list"), args: { status: "todo" } }] };
     if (step === 2) { expect(JSON.parse(input.messages.at(-1)!.content)).toEqual([]); return { content: "", tool_calls: [{ id: "provider-2", name: toolName("work.task.create"), args: { title: "From conversation" } }] }; }
     if (step === 3) { created = JSON.parse(input.messages.at(-1)!.content).task.id; return { content: "", tool_calls: [{ id: "provider-3", name: toolName("work.task.comment"), args: { task: created, body: "Synthetic comment" } }] }; }

@@ -332,6 +332,9 @@ export async function handleV2(request: Request, server: Pick<Bun.Server<undefin
     const native = conversation ? conversation.native_session : undefined;
     const main = !!conversation && !native && modules.assistantMain.isMain(owner, conversation.id);
     if ((parsed.data.focus || parsed.data.glance) && !main) throw new HubError("INVALID", { key: "v2.invalid_assistant_request_parameters", args: [] });
+    if (parsed.data.record_idea && decide(identity.actor, { operation: "knowledge.create" }).result !== "allow") {
+      throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] });
+    }
     if (parsed.data.glance) {
       const glance = modules.glances.get(parsed.data.glance, owner);
       const receipt = modules.assistantStore.receipt(owner, parsed.data.request_id);

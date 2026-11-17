@@ -1,6 +1,6 @@
 /** ADR 0034 §1–5, approved 2026-11-06. Claude draft, reviewed against the approved scope. */
 import { z } from "zod";
-import { RequestId, SafeRelativePath, Id } from "./common.ts";
+import { RequestId, SafeRelativePath, Id, DerivedFrom } from "./common.ts";
 import { Paper, Source, Idea } from "./entities.ts";
 
 export const KnowledgeNoteKind = z.enum(["paper", "video", "web", "idea"]);
@@ -30,9 +30,11 @@ export const KnowledgeCreateRequest = z.strictObject({
     z.strictObject({ kind: z.literal("paper"), ...paperFields, tags: Tags, status: ReadingStatus.optional(), bibtex: z.string().max(100000).optional() }),
     z.strictObject({ kind: z.literal("video"), ...sourceFields }),
     z.strictObject({ kind: z.literal("web"), ...sourceFields }),
-    z.strictObject({ kind: z.literal("idea"), title: Title, tags: Tags }),
+    z.strictObject({ kind: z.literal("idea"), title: Title.optional(), tags: Tags, derived_from: z.array(DerivedFrom).max(100).optional() }),
   ]),
   body: z.string().max(500000),
+}).refine(({note, body}) => note.kind !== "idea" || !!note.title || !!body.trim(), {
+  message: "没有标题的想法需要正文", path: ["body"],
 });
 export const KnowledgeCreateResult = z.strictObject({ id: Id, path: SafeRelativePath, metadata: z.union([Paper, Source, Idea]) });
 export type KnowledgeTemplateRequest = z.infer<typeof KnowledgeTemplateRequest>;

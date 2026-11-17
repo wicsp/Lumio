@@ -147,7 +147,7 @@ export class AISettings {
     this.newProfile.title = hasChatConnection ? "" : t("Add a chat connection first.");
     clear(this.profileRows, ...(this.config.profiles.length ? this.config.profiles.map(profile => this.item(
       profile.engine === "codex" ? "terminal" : profile.engine === "speech" ? "mic" : "assistant", profile.name, profileSummary(profile, byId.get(profile.connection)),
-      () => profile.engine === "speech" ? this.speech.rename(profile) : this.editProfile(profile)))
+      () => profile.engine === "speech" ? this.speech.rename(profile) : profile.engine === "embedding" ? this.knowledge.element.scrollIntoView() : this.editProfile(profile)))
       : [h("p", { class: "set-empty" }, hasChatConnection ? t("No profiles yet. Create one to choose a model for the assistant.") : t("Add a chat connection first, then create a profile."))]));
     this.renderConnections();
   }
@@ -173,7 +173,7 @@ export class AISettings {
   }
 
   private renderDefault(): void {
-    const profiles = this.config.profiles.filter(profile => profile.engine !== "speech");
+    const profiles = this.config.profiles.filter(profile => profile.engine === "lumio" || profile.engine === "codex");
     const owner = profiles[0]?.owner;
     if (!owner) {
       clear(this.defaultRows, h("p", { class: "set-empty" }, t("Add a chat connection and create a profile to choose a default.")));

@@ -140,6 +140,7 @@ import ServiceManagement
         submission = Task {
             defer { submission = nil }
             var uploaded: Hub.Glance?
+            var savedIdea: String?
             do {
                 let screen = try await capture.value
                 try Task.checkCancellation()
@@ -161,16 +162,24 @@ import ServiceManagement
                 } else {
                     let conversation = try await hub.mainConversation()
                     let url = hub.conversationURL(conversation)
-                    panel.show("正在等助手回答…", seconds: nil, url: url)
-                    try await hub.chat(ChatRequest(conversation: conversation, message: transcript, glance: glance.id)) { state in
-                        let confirmation = state.needsApproval ? "\n需要你确认" : ""
-                        let reply = state.reply.isEmpty && !state.finished ? "正在等助手回答…" : state.reply
-                        panel.show(reply + confirmation, seconds: state.finished ? 25 : nil, url: url, expandable: !state.reply.isEmpty)
+                    panel.show("正在保存想法…", seconds: nil, url: url)
+                    try await hub.chat(ChatRequest(conversation: conversation, message: transcript, glance: glance.id, recordIdea: true)) { state in
+                        savedIdea = state.idea ?? savedIdea
+                        let status = savedIdea == nil ? "正在保存想法…" : "已记下想法"
+                        let reply = state.reply.isEmpty ? status : "\(status)\n\n\(state.reply)"
+                        let target = state.reply.isEmpty ? savedIdea.map(hub.noteURL) ?? url : url
+                        panel.show(reply, seconds: state.finished ? 25 : nil, url: target, expandable: !state.reply.isEmpty)
                     }
                 }
             } catch {
                 if let uploaded { try? await hub.discard(uploaded) }
-                if !Task.isCancelled { panel.show(error.localizedDescription, sound: sound ? "Basso" : nil) }
+                if !Task.isCancelled {
+                    if let savedIdea {
+                        panel.show("已记下想法\n\n助手回复中断：\(error.localizedDescription)", seconds: 25, url: hub.noteURL(savedIdea))
+                    } else {
+                        panel.show(error.localizedDescription, sound: sound ? "Basso" : nil)
+                    }
+                }
             }
         }
     }

@@ -108,6 +108,8 @@ files/     attachments/  drawings/（Excalidraw）  templates/  originals/（资
 
 ## 在 Lumio 里新建与编辑笔记（ADR 0034 §1–5、0035 §1–8；本地验收中）
 
+- Idea 支持自由正文和可选的输入标题。省略标题时保存首行临时标题与稳定 ID。口述想法保留转录、段落和来源，并链接原讨论（ADR 0074）。
+
 - **只对 human 开放**：新建与编辑接口不授予 agent / runtime。human 可新建论文、视频、网页、想法。
 - **可编辑范围**：合法、公开的 paper / source / idea / experiment / post 可在 Web 里直接编辑标题与正文；私密笔记和元数据不合法的笔记保持只读。
 - **不覆盖外部修改**：保存带 SHA-256 版本检查与可恢复的幂等回执；检测到外部更新时冲突，保留草稿并提供比较。保留未知元数据，保存后更新索引与链接。
@@ -131,4 +133,4 @@ files/     attachments/  drawings/（Excalidraw）  templates/  originals/（资
 - 索引用 WAL，遇锁最多等 5 秒；Hub 与本地 CLI 可同时使用。
 - 没有 ID 的笔记照样能搜到，结果**不带 `id`**，只能按文件名引用。
 - **原文与语义检索**（ADR 0057，I1）：原文进单独的全文表，结果指向所属实体并标明命中原文。每条知识按"标题 + 卡片"（笔记按标题与正文）存一个向量于 `index.sqlite`（可重建，换模型整体重算），
-  直接算余弦相似度；`knowledge.search` 与相关推荐用 RRF 融合全文与向量，附阅读状态与入库时间；未配置 `knowledge.embedding` 时只用全文。私密实体不生成向量、不送模型。分块检索暂不做。
+  直接算余弦相似度；`knowledge.search` 与相关推荐用 RRF 融合全文与向量，附阅读状态与入库时间；未配置 `knowledge.embedding` 时只用全文。私密实体不生成向量、不送模型。可选用百炼连接的向量 Profile（ADR 0074）。分块检索暂不做。

@@ -166,7 +166,7 @@ export class AssistantPane {
   private loadProfiles(): Promise<void> {
     return this.profileLoad ??= this.client.aiConfiguration().then(config => {
       if (!this.active) return;
-      this.profiles = config.profiles.filter(profile => profile.engine !== "speech"); // 语音 Profile 不能用于聊天（ADR 0055）
+      this.profiles = config.profiles.filter(profile => profile.engine === "lumio" || profile.engine === "codex"); // 语音 Profile 不能用于聊天（ADR 0055）
       this.connections = config.connections;
       this.profilesLoaded = true;
       this.renderProfiles();

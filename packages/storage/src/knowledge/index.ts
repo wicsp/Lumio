@@ -17,3 +17,5 @@ export * from "./editing.ts";
 export * from "./trash.ts";
 
 export { isOriginalPath, readOriginalFile, writeOriginal } from "./originals.ts";
+
+export * from "./index/semantic.ts";

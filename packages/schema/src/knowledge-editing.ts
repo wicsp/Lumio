@@ -10,7 +10,7 @@ export const KnowledgeUpdateResult = KnowledgeDocument.extend({ request_id: Requ
 export const KnowledgeContext = z.strictObject({ title: z.string().max(500), text: z.string().max(20000), focus: z.string().max(4000) });
 export const KnowledgeRelatedRequest = KnowledgeContext.extend({ exclude_id: Id.optional() });
 export const KnowledgeRelatedHit = z.strictObject({ note: NoteRef, snippet: z.string().max(200) });
-export const KnowledgeRelatedResult = z.strictObject({ method: z.literal("lexical"), hits: z.array(KnowledgeRelatedHit).max(5) });
+export const KnowledgeRelatedResult = z.strictObject({ method: z.enum(["lexical", "hybrid"]), hits: z.array(KnowledgeRelatedHit).max(5) });
 export const KnowledgeReferencesRequest = z.strictObject({ source_id: Id.optional(), source_kind: KnowledgeNoteKind.optional(), query: z.string().trim().max(200), context: KnowledgeContext.optional() }).refine(v => !!v.source_id !== !!v.source_kind, "Specify one source").refine(v => !!v.query || !!v.context, "Empty queries need context");
 export const KnowledgeReferencesResult = z.strictObject({ hits: z.array(KnowledgeRelatedHit.extend({ insert_text: z.string().min(1).max(10000) })).max(10) });
 export type KnowledgeDocument = z.infer<typeof KnowledgeDocument>;

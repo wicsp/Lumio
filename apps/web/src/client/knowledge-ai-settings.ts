@@ -51,7 +51,44 @@ export class KnowledgeAISettings {
       ? t("Saved screenshots are sent to {0} for transcription. When you ask about a screenshot with official DeepSeek Flash, DeepSeek receives the screenshot, recognized text and your question.", connection)
       : t("When off, screenshots stay on this Hub and Lumio uses the text recognized on your device."),
       profile => toast(profile ? t("Screenshot vision is on.") : t("Screenshots stay on this Hub.")));
-    clear(this.element, h("div", { class: "set-form-wrap" }, summary, vision));
+    const vectors = this.config.profiles.filter(profile => profile.engine === "embedding" && !!byId.get(profile.connection)?.base_url);
+    const embedding = this.field("knowledge.embedding", t("Semantic search"), vectors, byId, connection => connection
+      ? t("Public note text and search queries are sent to {0} to match by meaning.", connection)
+      : t("Full-text search is active. Select an embedding profile to search by meaning."),
+      profile => toast(profile ? t("Semantic indexing will start in the background.") : t("Full-text search is active.")));
+    clear(this.element, h("div", { class: "set-form-wrap" }, summary, vision, embedding, this.newEmbeddingProfile(vectors) ?? null));
+  }
+
+  private newEmbeddingProfile(profiles: AIConfiguration["profiles"]): HTMLElement | undefined {
+    const connections = this.config.connections.filter(item => item.base_url && ["dashscope", "doubao", "openai-compatible"].includes(item.kind));
+    if (!connections.length) return;
+    const connection = h("select", {}, ...connections.map(item => h("option", { value: item.id }, item.name)));
+    const model = h("input", { type: "text", required: true, spellcheck: "false", value: connections[0]?.kind === "dashscope" ? "text-embedding-v4" : "" });
+    connection.addEventListener("change", () => { model.value = connections.find(item => item.id === connection.value)?.kind === "dashscope" ? "text-embedding-v4" : ""; });
+    const button = h("button", { type: "submit", class: "btn" }, t("Enable semantic search"));
+    const message = h("div", { role: "status" });
+    const form = h("form", { class: "form-stack" },
+      h("label", { class: "field" }, h("span", { class: "field-label" }, t("Connection")), connection),
+      h("label", { class: "field" }, h("span", { class: "field-label" }, t("Embedding model")), model),
+      h("p", { class: "field-hint" }, t("Enabling sends public note text and search queries to the selected service.")), button, message);
+    form.addEventListener("submit", event => {
+      event.preventDefault();
+      const name = model.value.trim();
+      if (!name || button.disabled) return;
+      button.disabled = true;
+      void (async () => {
+        let profile = profiles.find(row => row.connection === connection.value && row.model === name);
+        if (!profile) {
+          profile = await this.client.saveAIProfile({ name, model: name, connection: connection.value, engine: "embedding", thinking: "default" });
+          this.config = { ...this.config, profiles: [...this.config.profiles, profile] };
+        }
+        const bound = this.bindings.find(item => item.purpose === "knowledge.embedding");
+        this.bindings = await this.client.saveKnowledgeBinding({ request_id: newRequestId(), purpose: "knowledge.embedding", profile: profile.id,
+          ...(bound ? { expected_revision: bound.revision } : {}) });
+        if (this.active) { this.render(); toast(t("Semantic indexing will start in the background.")); }
+      })().catch(cause => { clear(message, failure(errorText(cause))); button.disabled = false; });
+    });
+    return h("details", { class: "knowledge-ai-field" }, h("summary", {}, t("Add an embedding profile")), form);
   }
 
   private field(purpose: KnowledgeAIBinding["purpose"], label: string, profiles: AIConfiguration["profiles"], byId: Map<string, AIConfiguration["connections"][number]>,

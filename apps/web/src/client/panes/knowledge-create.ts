@@ -46,7 +46,8 @@ export class KnowledgeCreate {
     const draft = this.state.fields.get(this.kind) ?? {};
     const input = (name: string, type = "text", required = false) => h("input", { type, name, required, value: draft[name] ?? "", autocomplete: "off", ...(name === "title" ? { maxlength: 500 } : {}), ...(type === "number" ? { min: 1000, max: 9999, step: 1 } : {}) });
     const status = () => field(t("Reading status"), select("status", [["to-read", t("To read")], ["reading", t("Reading")], ["read", t("Read")]], draft.status ?? "to-read"));
-    const title = field(t("Title"), input("title", "text", true));
+    const title = field(t("Title"), input("title", "text", this.kind !== "idea"),
+      this.kind === "idea" ? t("Optional. The first line becomes the title when left blank.") : undefined);
     const tags = field(t("Tags"), input("tags"), t("Separate tags with commas."));
     if (this.kind === "paper") {
       const source = input("paper_input"); source.placeholder = t("arXiv ID, DOI or paper link");

@@ -26,10 +26,16 @@ test("body beginning with frontmatter syntax cannot set metadata; unsafe filenam
   for (const title of ["...", "???", "中".repeat(100)]) expect(() => renderKnowledgeNote({ ...request, note: { kind: "idea", title, tags: [] } }, ctx)).toThrow();
   expect(renderKnowledgeNote({ ...request, note: { kind: "idea", title: "../../safe", tags: [] } }, ctx).relativePath).toBe("research/ideas/safe.md");
 });
-test("versioned bilingual templates contain headings only, no AI content or links", () => {
+test("versioned bilingual templates start Ideas blank and give other notes headings only", () => {
   for (const kind of ["paper", "video", "web", "idea"] as const) for (const locale of ["en", "zh"] as const) {
     const result = knowledgeTemplate({ kind, locale }, key => key);
-    expect(result.version).toBe("1"); expect(result.body).toStartWith("## ");
+    if (kind === "idea") {
+      expect(result.version).toBe("2");
+      expect(result.body).toBe("");
+      continue;
+    }
+    expect(result.version).toBe("1");
+    expect(result.body).toStartWith("## ");
     expect(result.body).not.toContain("[["); expect(result.body).not.toContain("lumio:ai");
   }
 });
