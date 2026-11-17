@@ -36,11 +36,11 @@ test("runtime add supports human text and strict JSON; login-code uses a label; 
   const client = ClientInvite.parse({ name: "cli@synthetic", code, expires: runtime.expires, hub_url: runtime.hub_url, command: `lumio login https://synthetic.example --code ${code}` });
   const requests: string[] = [];
   const fetcher = (async (url: URL, init: RequestInit) => {
-    requests.push(url.pathname); expect(new Headers(init.headers).get("Authorization")).toBe("Bearer synthetic-human");
+    requests.push(url.pathname); expect(url.origin).toBe("https://synthetic.example"); expect(new Headers(init.headers).get("Authorization")).toBe("Bearer synthetic-human");
     if (init.method === "DELETE") { expect(url.pathname).toBe("/v2/execution/runtimes/server"); return new Response(null, { status: 204 }); }
     expect(JSON.parse(String(init.body))).toEqual({ name: url.pathname.includes("runtime") ? "server" : "cli@synthetic" }); return Response.json(url.pathname.includes("runtime") ? runtime : client);
   }) as unknown as typeof fetch;
-  const logs: string[] = [], options = { home, fetch: fetcher, log: (l: string) => logs.push(l) };
+  const logs: string[] = [], options = { home, env: {}, fetch: fetcher, log: (l: string) => logs.push(l) };
   await runPairing(["runtime", "add", "server"], options); expect(logs.shift()).toContain("10 分钟"); expect(logs.shift()).toBe(runtime.command);
   await runPairing(["runtime", "add", "server", "--json"], options); expect(RuntimeInvite.parse(JSON.parse(logs.shift()!))).toEqual(runtime);
   await runPairing(["login-code", "--name", "cli@synthetic"], options); expect(logs.shift()).toBe(client.command);
