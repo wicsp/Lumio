@@ -1,6 +1,7 @@
 # Execution：执行器、Job、日志与 Routine
 
 > 现行设计分册，只写现在生效的规则；总览、跨模块规则与写法见 [`../DESIGN.md`](../DESIGN.md)。
+> Job 实时进度与同轮人工介入见 [ADR 0069](../adr/0069-job-live-progress-and-control.md)（Proposed，待批准）。
 
 ## 日志与托管文件（ADR 0025）
 
