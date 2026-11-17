@@ -2,7 +2,7 @@ import {
   MODULE_ID_PREFIXES, ResourceRef, toolName, WorkbenchAction,
   type AssistantConversation, type AssistantMessage, type AssistantModelMessage, type AssistantModelRequest, type FocusSnapshot,
 } from "@lumio/schema";
-import { boundedHistory, type HistoryEntry } from "./history.ts";
+import { boundedHistory, compactTurn, workReceipt, type HistoryEntry } from "./history.ts";
 
 export interface AssistantWorkbenchScope {
   owner: string;
@@ -132,7 +132,7 @@ interface HistoricalTurn extends Pick<HistoryEntry, "status" | "calls"> {
 
 /** Resources actually discussed/read, including old turns whose original page anchor was unrelated. */
 function discussedRefs(turn: HistoricalTurn): ResourceRef[] {
-  const refs: ResourceRef[] = [];
+  const refs: ResourceRef[] = [], effects: ResourceRef[] = [];
   for (const call of turn.calls) {
     if (call.status !== "succeeded" || call.private_read) continue;
     if (["knowledge.note.show", "work.task.show", "work.project.show"].some(name => toolName(name) === call.name)) {
@@ -145,11 +145,15 @@ function discussedRefs(turn: HistoricalTurn): ResourceRef[] {
       const id = result?.item?.id ?? result?.note?.id ?? result?.id;
       if (typeof id === "string") refs.push(...referencedIds(id));
     }
+    const receipt = workReceipt(call);
+    // Recheck write targets before disclosing their historical receipts, even if the reply omitted the ID.
+    const target = receipt?.kind === "proposal" ? call.args.task : receipt?.id;
+    if (typeof target === "string") effects.push(...referencedIds(target));
     const shown = navigatedTopic(call.name, call.args);
     if (shown) refs.push(shown);
   }
   for (const message of turn.records) if (message.role !== "tool") refs.push(...referencedIds(message.content));
-  return unique([...refs, ...turn.anchors]).slice(0, budgets.anchors);
+  return unique([...unique([...refs, ...turn.anchors]).slice(0, budgets.anchors), ...effects]);
 }
 
 export function navigatedTopic(name: string, args: Record<string, unknown>): ResourceRef | undefined {
@@ -372,7 +376,13 @@ export class WorkbenchResources {
     return { anchors: clarify ? [] : anchors, focus: safeFocus, clarify };
   }
 
-  async context(resolution: Resolution, history: readonly HistoricalTurn[], fragments: readonly AssistantFragment[]) {
+  async precedingExchange(history: readonly HistoricalTurn[], turn: string | undefined) {
+    const preceding = turn && history.find(entry => entry.records[0]!.turn === turn);
+    if (!preceding || !(await this.visible(discussedRefs(preceding)))) return;
+    return compactTurn({ ...preceding, index: 0 }, true);
+  }
+
+  async context(resolution: Resolution, history: readonly HistoricalTurn[], fragments: readonly AssistantFragment[], precedingTurn?: string) {
     const anchors = [];
     const related = [];
     const contentLimit = Math.min(budgets.anchorContentBytes, Math.floor(budgets.anchorBytes / Math.max(1, resolution.anchors.length)) - 900);
@@ -412,7 +422,8 @@ export class WorkbenchResources {
     for (const { turn, index } of new Map([...recent, ...matching].map(item => [item.index, item])).values()) {
       if (await this.visible(discussedRefs(turn))) eligible.push({ ...turn, index });
     }
-    const included = boundedHistory(eligible, budgets.historyBytes);
+    const included = boundedHistory(eligible, budgets.historyBytes, precedingTurn);
+    const precedingAvailable = precedingTurn !== undefined && eligible.some(entry => entry.records[0]!.turn === precedingTurn);
     const notices = await this.adapter.pendingNotices?.(this.scope.owner, this.actor, this.signal, this.scope) ?? [];
     const visibleNotices = [];
     for (const notice of notices.slice(0, 20)) if (await this.read(notice.ref)) visibleNotices.push(compactSummary(notice));
@@ -420,6 +431,9 @@ export class WorkbenchResources {
       messages: included.messages,
       data: {
         compact_turns: included.compact_turns,
+        preceding_turn: precedingAvailable ? {
+          id: precedingTurn, compacted: included.compact_turns.some(turn => turn.turn === precedingTurn),
+        } : null,
         history: { complete: included.included === history.length && !included.compact_turns.length,
           included_turns: included.included, compacted_turns: included.compact_turns.length, omitted_turns: history.length - included.included },
         focus: resolution.focus,
