@@ -5,8 +5,11 @@ import { App } from "./app.ts";
 import { lang, t } from "./i18n.ts";
 import { applyTheme } from "./theme.ts";
 import { sharedCapture, stashShare } from "./panes/inbox.ts";
+import { preventPageZoom, trackViewport } from "./viewport.ts";
 
 applyTheme();
+preventPageZoom();
+trackViewport();
 document.documentElement.lang = lang() === "zh" ? "zh-CN" : "en";
 const root = document.getElementById("app");
 if (!root) throw new Error(t("Missing #app element"));
