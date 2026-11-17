@@ -6,9 +6,11 @@ import { WorkEditor } from "../../src/client/panes/work-editor.ts";
 import { WorkbenchView } from "../../src/client/views/workbench.ts";
 import { MainDock } from "../../src/client/main-dock.ts";
 import { buildFocus, type FocusInput } from "../../src/client/workbench-assist.ts";
+import type { Client, HubExtras } from "../../src/client/api.ts";
 
 class ElementStub extends EventTarget {
   children: unknown[] = [];
+  private listeners = new Map<string, EventListener[]>();
   value = ""; scrollTop = 0; hidden = false; innerHTML = ""; textContent = "";
   classList = { add() {}, remove() {}, toggle() {} };
   setAttribute() {}
@@ -17,12 +19,19 @@ class ElementStub extends EventTarget {
   querySelectorAll() { return []; }
   querySelector() { return null; }
   remove() {}
+  override addEventListener(type: string, callback: EventListenerOrEventListenerObject | null, options?: boolean | AddEventListenerOptions) {
+    super.addEventListener(type, callback, options);
+    if (typeof callback === "function") this.listeners.set(type, [...this.listeners.get(type) ?? [], callback]);
+  }
+  userInput(type: string) {
+    for (const listener of this.listeners.get(type) ?? []) listener({ type, isTrusted: true } as Event);
+  }
 }
 let restore: () => void;
 beforeEach(() => {
   const values = {
     document: { documentElement: { lang: "en" }, createElement: () => new ElementStub(), createElementNS: () => new ElementStub() },
-    window: { getSelection: () => null }, Node: ElementStub,
+    window: Object.assign(new EventTarget(), { getSelection: () => null }), Node: ElementStub,
     location: { hash: "#work/tasks" }, history: { replaceState() {} },
   };
   const old = Object.keys(values).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const);
@@ -156,7 +165,7 @@ test("opening a Work card clears its own unread reminders after the detail loads
   Object.assign(view, { unread, decorate() {}, refreshCounts() {},
     session: { client: { async readNotices(_request: string, ids: string[]) { reads.push(ids); } } },
   });
-  Object.assign(f.pane, { onOpen: (id: string) => view.readSubject(id), canRefreshDetail: () => true });
+  Object.assign(f.pane, { onReadSubject: (id: string) => view.readSubject(id), canRefreshDetail: () => true });
 
   const detail = Promise.withResolvers<WorkTaskDetail>();
   f.load(detail.promise);
@@ -171,4 +180,33 @@ test("opening a Work card clears its own unread reminders after the detail loads
   f.load({ ...first, task: { ...first.task, revision: first.task.revision + 1 } });
   await f.pane.open(first.task.id, true, true);
   expect(unread.get(first.task.id)).toEqual(["notice:new"]);
+});
+
+test("interacting with a visible Work detail acknowledges the open card", async () => {
+  const root = new ElementStub();
+  const reads: string[] = [];
+  const client = { workProjects: async () => [], workTasks: async () => [], workTask: async () => first } as unknown as Client;
+  const pane = new WorkPane(root as unknown as HTMLElement, client, {} as HubExtras, "tasks", undefined,
+    () => {}, () => {}, undefined, id => reads.push(id));
+  Object.assign(pane, { renderEditor() {} });
+  const detail = Reflect.get(pane, "detailLayout") as ElementStub;
+  try {
+    detail.userInput("click");
+    expect(reads).toEqual([]);
+    await pane.open(first.task.id);
+    expect(reads).toEqual([first.task.id]);
+    reads.length = 0;
+
+    root.userInput("wheel");
+    detail.userInput("scroll");
+    detail.dispatchEvent(new Event("click"));
+    expect(reads).toEqual([]);
+    for (const type of ["click", "wheel", "touchmove", "keydown", "pointerdown"]) {
+      detail.userInput(type);
+      expect(reads.pop()).toBe(first.task.id);
+    }
+    root.hidden = true;
+    detail.userInput("click");
+    expect(reads).toEqual([]);
+  } finally { pane.dispose(); }
 });

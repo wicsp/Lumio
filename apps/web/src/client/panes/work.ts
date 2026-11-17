@@ -50,7 +50,12 @@ export class WorkPane {
 
   constructor(private root: HTMLElement, private client: Client, private hub: HubExtras, private mode: Mode, initialId: string | undefined,
     private navigate: Navigate, private changed: () => void, private focusChanged?: (resetSharing: boolean) => void,
-    private onOpen?: (id: string) => void) {
+    private onReadSubject?: (id: string) => void) {
+    const readOnInput = (event: Event) => { if (event.isTrusted) this.markDetailRead(); };
+    // Listen for user input, since a refresh can also move the scroll position.
+    for (const type of ["pointerdown", "click", "wheel", "touchmove", "keydown"]) {
+      this.detailLayout.addEventListener(type, readOnInput, { capture: true, passive: true });
+    }
     this.query.placeholder = mode === "tasks" ? t("Search tasks") : t("Search projects");
     this.statusButton.addEventListener("click", () => this.pickStatusFilter());
     this.projectButton.addEventListener("click", () => this.pickProjectFilter());
@@ -320,9 +325,15 @@ export class WorkPane {
     clear(this.dock);
   }
 
+  private markDetailRead(): void {
+    if (!this.active || this.root.hidden) return;
+    const detail = this.focus;
+    if (detail) this.onReadSubject?.(detail.id);
+  }
+
   async open(id: string, quiet = false, live = false): Promise<void> {
     if (!quiet && id === this.selected && this.editor) {
-      if (!this.root.hidden) this.onOpen?.(id);
+      this.markDetailRead();
       return;
     }
     if (!quiet && (!(await this.beforeLeave()) || !this.active)) return;
@@ -352,7 +363,7 @@ export class WorkPane {
       this.displayed = object;
       this.renderEditor(object, id);
       this.focusChanged?.(false);
-      if (!quiet && !this.root.hidden) this.onOpen?.(id);
+      if (!quiet) this.markDetailRead();
       if (quiet) this.detail.scrollTop = scroll;
     } catch (error) {
       if (!live && this.active && generation === this.detailGeneration) {
