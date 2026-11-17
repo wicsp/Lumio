@@ -1,4 +1,4 @@
-import { attach, asType, dictionary, f, HAS_NO_VALUE, HAS_VALUE, key, shortcutInput, text, Workflow, type Ref } from "./workflow.ts";
+import { attach, asType, dictionary, f, HAS_NO_VALUE, HAS_VALUE, key, shortcutInput, text, variable, Workflow, type Ref } from "./workflow.ts";
 
 /**
  * iPhone 上的全局捕获（ADR 0066 第 1 节提到的"轻点背面 + 快捷指令"弱化版）。
@@ -19,6 +19,7 @@ import { attach, asType, dictionary, f, HAS_NO_VALUE, HAS_VALUE, key, shortcutIn
 export const CONFIG_PATH = "Lumio/config.json";
 export const OCR_ENGINE = "ios-vision@1";
 export const APP_NAME = "iPhone";
+export const SHORTCUT_REVISION = 3;
 /** 识字块单块上限是 5000 个 UTF-16 码元；正则按字符截，留出余量给表情等代理对。 */
 export const OCR_MAX_CHARS = 2400;
 /** 截图长边上限，与 GLANCE_LIMITS.max_image_edge 一致。 */
@@ -70,8 +71,8 @@ function loadConfig(w: Workflow): Config {
 /** 本次运行的请求 ID 前缀：`ios-<毫秒时间>-<随机数>`，各请求再加后缀，满足 RequestId 的格式。 */
 function requestBase(w: Workflow): { id: Ref; captured: Ref } {
   const now = w.add("date", { WFDateActionMode: "Current Date" }, "Date");
-  const stamp = w.add("format.date", { WFDate: attach(now), WFDateFormatStyle: "Custom", WFDateFormat: "yyyyMMddHHmmssSSS" }, "Formatted Date");
-  const captured = w.add("format.date", { WFDate: attach(now), WFDateFormatStyle: "ISO 8601", WFISO8601IncludeTime: true }, "Formatted Date");
+  const stamp = w.add("format.date", { WFDate: text(now), WFDateFormatStyle: "Custom", WFDateFormat: "yyyyMMddHHmmssSSS" }, "Formatted Date");
+  const captured = w.add("format.date", { WFDate: text(now), WFDateFormatStyle: "ISO 8601", WFISO8601IncludeTime: true }, "Formatted Date");
   const random = w.add("number.random", { WFRandomNumberMinimum: 100000, WFRandomNumberMaximum: 999999 }, "Random Number");
   const id = w.add("gettext", { WFTextActionText: text("ios-", stamp, "-", random) }, "Text");
   return { id, captured };
@@ -98,20 +99,25 @@ function uploadGlance(w: Workflow, config: Config, base: { id: Ref; captured: Re
     ["app", f.dict(["name", f.text(APP_NAME)])],
     ["image", f.dict(["format", f.text("jpeg")], ["width", f.number(shot.width)], ["height", f.number(shot.height)])],
   ];
-  const meta = w.when(shot.ocrText, HAS_VALUE, () => {
-    w.add("dictionary", {
-      WFItems: dictionary([
-        ...common,
-        ["ocr", f.array(f.dict(
-          ["text", f.text(shot.ocrText)],
-          ["box", f.dict(["x", f.number(0)], ["y", f.number(0)], ["w", f.number(shot.width)], ["h", f.number(shot.height)])],
-        ))],
-        ["ocr_engine", f.text(OCR_ENGINE)],
-      ]),
-    }, "Dictionary");
-  }, () => {
-    w.add("dictionary", { WFItems: dictionary(common) }, "Dictionary");
+  // Shortcuts can resolve the End If output to empty when a multipart field consumes it.
+  // Save either branch's dictionary explicitly and convert it to JSON text before uploading.
+  const metaName = "Glance Metadata";
+  const setMeta = (fields: Parameters<typeof dictionary>[0]) => {
+    const meta = w.add("dictionary", { WFItems: dictionary(fields) }, "Dictionary");
+    w.add("setvariable", { WFVariableName: metaName, WFInput: attach(meta) });
+  };
+  setMeta(common);
+  w.when(shot.ocrText, HAS_VALUE, () => {
+    setMeta([
+      ...common,
+      ["ocr", f.array(f.dict(
+        ["text", f.text(shot.ocrText)],
+        ["box", f.dict(["x", f.number(0)], ["y", f.number(0)], ["w", f.number(shot.width)], ["h", f.number(shot.height)])],
+      ))],
+      ["ocr_engine", f.text(OCR_ENGINE)],
+    ]);
   });
+  const meta = w.add("detect.text", { WFInput: attach(variable(metaName)) }, "Text");
   const response = w.add("downloadurl", {
     WFURL: text(config.hub, "/v2/glances"),
     WFHTTPMethod: "POST",
@@ -145,6 +151,7 @@ function postJson(w: Workflow, config: Config, path: string, body: [string, Retu
 
 export function saveShortcut(): Workflow {
   const w = new Workflow(PAIR_SHORTCUT_NAME);
+  w.add("comment", { WFCommentActionText: `Lumio iPhone · v${SHORTCUT_REVISION}` });
   pairFromInput(w);
   const shot = glance(w);
   const config = loadConfig(w);
@@ -163,6 +170,7 @@ export function saveShortcut(): Workflow {
 
 export function askShortcut(): Workflow {
   const w = new Workflow("Lumio 问一问");
+  w.add("comment", { WFCommentActionText: `Lumio iPhone · v${SHORTCUT_REVISION}` });
   pairFromInput(w);
   const shot = glance(w);
   const config = loadConfig(w);
