@@ -686,7 +686,7 @@ export class WorkEditor {
           ...choices.map(choice => h("option", { value: choice.id }, choice.name)));
         connection.value = choices.some(choice => choice.id === selected) ? selected : "";
         const fullAccess = stage?.kind === "agent" && stage.access === "full";
-        const state = runtime && registered ? jobInteractionStatus(registered.name, runtime.online && (reported?.online ?? true), cap, choices.length) : undefined;
+        const state = runtime && registered ? jobInteractionStatus(runtime.online && (reported?.online ?? true), cap, choices.length) : undefined;
         const supported = state === "Live questions and approvals enabled" && !fullAccess;
         interactive.disabled = fixedInteractive || !supported;
         if (!supported && !fixedInteractive) interactive.checked = false;
@@ -698,7 +698,7 @@ export class WorkEditor {
           : !activityCaps ? t("Could not load runtime capabilities")
           : t(state ?? "Runtime has not reported interaction support");
         updateConnectionField();
-        interactionSettings.hidden = !target.value || supported || fullAccess || engine === "pi";
+        interactionSettings.hidden = !target.value || supported || fullAccess;
       };
       target.addEventListener("change", refreshInteraction);
       interactive.addEventListener("change", refreshInteraction);

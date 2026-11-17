@@ -3,9 +3,8 @@ import type { Client } from "./api.ts";
 import { clear, h } from "./dom.ts";
 import { t } from "./i18n.ts";
 
-export function jobInteractionStatus(engine: string, online: boolean, capability?: JobEngineActivityCapability, codexConnections = 0) {
+export function jobInteractionStatus(online: boolean, capability?: JobEngineActivityCapability, codexConnections = 0) {
   if (!online) return "Offline";
-  if (engine === "pi") return "Live questions and approvals unavailable for this engine";
   if (!capability) return "Runtime has not reported interaction support";
   if (capability.sandbox === "os" && ((capability.approvals && capability.questions) || (capability.account_reuse && codexConnections))) return "Live questions and approvals enabled";
   if (capability.account_reuse) return "Sign in to Codex in Connections to enable live interaction";
@@ -20,7 +19,7 @@ export class JobInteractionSettings {
 
   constructor(private client: Client) {
     this.element.append(this.rows, h("div", { class: "set-row" },
-      h("a", { href: "https://github.com/wicsp/Lumio/blob/main/docs/design/execution.md#job-实时活动与同轮介入adr-0069", target: "_blank", rel: "noopener noreferrer" },
+      h("a", { href: "https://github.com/wicsp/Lumio/blob/main/docs/design/execution.md", target: "_blank", rel: "noopener noreferrer" },
         t("Runtime configuration instructions")), this.refresh));
     void this.load();
   }
@@ -53,6 +52,6 @@ export class JobInteractionSettings {
         h("span", { class: "set-sub" }, t("Live task progress available")), online && (connections.length > 0
         ? h("span", { class: "set-sub" }, t("Existing Codex connections: {0}", connections.join(", ")))
         : cap?.approvals && cap.questions && h("span", { class: "set-sub" }, t("Uses the runtime’s API key")))),
-      h("span", { class: "set-value muted" }, t(jobInteractionStatus(engine, online, cap, connections.length))));
+      h("span", { class: "set-value muted" }, t(jobInteractionStatus(online, cap, connections.length))));
   }
 }

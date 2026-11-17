@@ -7,23 +7,30 @@ const codex = JobEngineActivityCapability.parse({
 });
 
 test("live progress alone does not enable questions and approvals", () => {
-  expect(jobInteractionStatus("codex", true, { ...codex, approvals: false, questions: false, steer: false }))
+  expect(jobInteractionStatus(true, { ...codex, approvals: false, questions: false, steer: false }))
     .toBe("Live questions and approvals are not enabled on this runtime");
-  expect(jobInteractionStatus("codex", true, { ...codex, questions: false }))
+  expect(jobInteractionStatus(true, { ...codex, questions: false }))
     .toBe("Live questions and approvals are not enabled on this runtime");
-  expect(jobInteractionStatus("codex", true, { ...codex, sandbox: "none" }))
+  expect(jobInteractionStatus(true, { ...codex, sandbox: "none" }))
     .toBe("Live questions and approvals are not enabled on this runtime");
 });
 
 test("distinguishes an online interactive engine from an offline or unreported runtime", () => {
-  expect(jobInteractionStatus("codex", true, codex)).toBe("Live questions and approvals enabled");
-  expect(jobInteractionStatus("codex", false, codex)).toBe("Offline");
-  expect(jobInteractionStatus("claude-code", true)).toBe("Runtime has not reported interaction support");
-  expect(jobInteractionStatus("pi", true)).toBe("Live questions and approvals unavailable for this engine");
+  expect(jobInteractionStatus(true, codex)).toBe("Live questions and approvals enabled");
+  expect(jobInteractionStatus(false, codex)).toBe("Offline");
+  expect(jobInteractionStatus(true)).toBe("Runtime has not reported interaction support");
 });
 
 test("a Runtime can offer interaction via an existing Codex connection without API key capability", () => {
   const accountOnly = JobEngineActivityCapability.parse({ ...codex, approvals: false, questions: false, steer: false, account_reuse: true });
-  expect(jobInteractionStatus("codex", true, accountOnly, 0)).toBe("Sign in to Codex in Connections to enable live interaction");
-  expect(jobInteractionStatus("codex", true, accountOnly, 1)).toBe("Live questions and approvals enabled");
+  expect(jobInteractionStatus(true, accountOnly, 0)).toBe("Sign in to Codex in Connections to enable live interaction");
+  expect(jobInteractionStatus(true, accountOnly, 1)).toBe("Live questions and approvals enabled");
+});
+
+
+test("Pi uses reported runtime capabilities for the existing interaction option", () => {
+  const pi = JobEngineActivityCapability.parse({ ...codex, engine: "pi", version: "1.5.0", steer: false });
+  expect(jobInteractionStatus(true, pi)).toBe("Live questions and approvals enabled");
+  expect(jobInteractionStatus(true, { ...pi, approvals: false, questions: false, sandbox: "none" }))
+    .toBe("Live questions and approvals are not enabled on this runtime");
 });

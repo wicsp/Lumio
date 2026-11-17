@@ -62,7 +62,6 @@ export const ZH: Record<string, string> = {
   "Live task progress available": "可查看实时进度",
   "Live questions and approvals enabled": "已启用同轮问答和审批",
   "Live questions and approvals are not enabled on this runtime": "该执行器尚未启用同轮问答和审批",
-  "Live questions and approvals unavailable for this engine": "该引擎不支持同轮问答和审批",
   "Live questions and approvals require a sandboxed plan step": "同轮问答和审批需要该计划步骤在沙箱中运行",
   "Runtime has not reported interaction support": "执行器尚未上报交互能力",
   "Could not load runtime capabilities": "无法读取执行器能力",
