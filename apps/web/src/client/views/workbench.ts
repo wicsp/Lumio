@@ -319,7 +319,7 @@ export class WorkbenchView {
     else if (section === "settings") pane = new SettingsPane(target, this.session, this.name, () => void this.signOut(), () => this.leaveSettings(), sub => void this.go("settings", sub), id, this.gamepad);
     else if (section === "knowledge") pane = new KnowledgePane(target, client, id, () => this.dock?.pageChanged());
     else if (section === "work") pane = new WorkPane(target, client, this.session.hub, this.workMode, id, navigate, changed,
-      resetSharing => this.dock?.pageChanged(resetSharing), openedId => this.readSubject(openedId));
+      resetSharing => this.dock?.pageChanged(resetSharing), subject => this.readSubject(subject));
     else if (section === "execution") pane = new ExecutionPane(target, client, this.session.hub, id, navigate, changed);
     else if (section === "assistant") pane = new AssistantPane(target, client, this.session.hub, navigate, id);
     else if (section === "trash") pane = new TrashPane(target, client, navigate, changed);
@@ -373,7 +373,7 @@ export class WorkbenchView {
     }
   }
 
-  /** 打开了提醒指向的对象：这些提醒算看过了。 */
+  /** 标记当前对象上已经看到的未读提醒。 */
   private readSubject(id: string): void {
     const ids = this.unread.get(id);
     if (!ids?.length) return;
