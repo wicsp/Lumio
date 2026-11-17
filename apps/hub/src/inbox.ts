@@ -39,7 +39,7 @@ const requestKey = (capture: string, command: CaptureCommand) =>
 
 export interface InboxOptions {
   network?: CaptureNetwork;
-  vision?: (owner: string, profile: string, image: { bytes: Buffer; format: string }, signal: AbortSignal) => Promise<string>;
+  vision?: AIConfigurationService["describeImage"];
   model?: (owner: string, profile: string) => SummaryModel;
 }
 
@@ -180,13 +180,14 @@ export class Inbox {
 
   private async glanceOriginal(glance: Glance, capture: Capture): Promise<Extracted> {
     const binding = this.state.binding(capture.owner, "knowledge.vision");
-    let content = windowText(glance);
+    const recognizedText = windowText(glance);
+    let content = recognizedText;
     let extractor = "glance-ocr@1";
     if (binding && glance.image && !glance.image.purged) {
       try {
         const image = await this.glances.markedImage(glance);
         const signal = AbortSignal.any([this.stopping.signal, AbortSignal.timeout(30_000)]);
-        const result = (await (this.options.vision ?? this.ai.describeImage.bind(this.ai))(capture.owner, binding.profile!, image, signal)).trim();
+        const result = (await (this.options.vision ?? this.ai.describeImage.bind(this.ai))(capture.owner, binding.profile!, image, recognizedText, signal)).trim();
         if (result) {
           content = result.slice(0, CAPTURE_LIMITS.max_content_chars);
           extractor = "glance-vision@1";
