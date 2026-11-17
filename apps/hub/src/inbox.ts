@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import {
   CAPTURE_LIMITS, Capture, CaptureCommand, CaptureCreate, CaptureCreateResult, CaptureList, CaptureListArgs, CaptureProxyUpdate,
-  KnowledgeAIBinding, KnowledgeAIBindingUpdate, type CaptureError, type NoteRef, type Glance, type CaptureGlanceToolArgs, type CaptureGlanceToolResult,
+  KnowledgeAIBinding, KnowledgeAIBindingUpdate, KnowledgeAiNoteCreateArgs, type CaptureError, type NoteRef, type Glance, type CaptureGlanceToolArgs, type CaptureGlanceToolResult,
 } from "@lumio/schema";
 import { CoreError, newId } from "@lumio/foundation";
 import { noteById, readKnowledgeDocument, showOriginal, type NoteTrashMove } from "@lumio/storage";
@@ -14,7 +14,7 @@ import { CaptureFailure, type CaptureNetwork } from "./inbox-fetch.ts";
 import { InboxFiles } from "./inbox-files.ts";
 import type { InboxProxySettings } from "./inbox-proxy-settings.ts";
 import { inboxConflict, inboxMissing, InboxStore, type StoredCapture } from "./inbox-store.ts";
-import { summarizeOriginal, type SummaryModel } from "./inbox-summary.ts";
+import { captureCardTitle, summarizeOriginal, type SummaryModel } from "./inbox-summary.ts";
 import { boundedText } from "./knowledge-authoring.ts";
 import { text as msg } from "./messages.ts";
 import type { HubStore, Identity } from "./store.ts";
@@ -31,6 +31,8 @@ export const INBOX_ROUTES = [
   { operation: "inbox.bindings", method: "PUT", pattern: /^\/v2\/ai\/knowledge-bindings$/, path: "/v2/ai/knowledge-bindings" },
 ] as const;
 type InboxOperation = typeof INBOX_ROUTES[number]["operation"];
+
+const photoExtractor = "glance-photo@1";
 
 const invalid = (key = "inbox.invalid") => new HubError("INVALID", { key, args: [] });
 const busy = (capture: Capture) => capture.state === "queued" || capture.state === "extracting" || capture.card === "pending";
@@ -187,14 +189,15 @@ export class Inbox {
       try {
         const image = await this.glances.markedImage(glance);
         const signal = AbortSignal.any([this.stopping.signal, AbortSignal.timeout(30_000)]);
-        const result = (await (this.options.vision ?? this.ai.describeImage.bind(this.ai))(capture.owner, binding.profile!, image, recognizedText, signal)).trim();
-        if (result) {
-          content = result.slice(0, CAPTURE_LIMITS.max_content_chars);
-          extractor = "glance-vision@1";
+        const describe = this.options.vision ?? this.ai.describeImage.bind(this.ai);
+        const result = await describe(capture.owner, binding.profile, image, recognizedText, this.config.captureSummaryLanguage, signal);
+        if (result.body.trim()) {
+          content = result.body.slice(0, CAPTURE_LIMITS.max_content_chars);
+          extractor = result.kind === "photo" ? photoExtractor : "glance-vision@1";
         }
       } catch { this.stopping.signal.throwIfAborted(); }
     }
-    const body = [
+    const body = extractor === photoExtractor ? `## ${msg("glance.photo_description")}\n\n${content}\n` : [
       glance.pointing.text ? `## ${msg("glance.pointed_paragraph")}\n\n${glance.pointing.text}` : undefined,
       `## ${msg("glance.window_text")}\n\n${content || glance.window_title || glance.app.name}`,
     ].filter(Boolean).join("\n\n") + "\n";
@@ -248,7 +251,11 @@ export class Inbox {
       const note = await noteById(this.config.vault, capture.entity.id, this.indexOptions);
       if (!note) throw inboxMissing();
       if (action.op === "summarize") {
-        if (!this.state.binding(owner, "knowledge.summary")) throw invalid("inbox.summary_unconfigured");
+        if (!this.state.binding(owner, "knowledge.summary")) {
+          const photo = action.depth === "card" && capture.glance &&
+            (await showOriginal(this.config.vault, note.id!, this.indexOptions)).frontmatter.extractor === photoExtractor;
+          if (!photo) throw invalid("inbox.summary_unconfigured");
+        }
         value.summary = action.depth;
         patch = { card: "pending", error: undefined, entity: note };
       } else if (action.triage === "discard") {
@@ -345,14 +352,14 @@ export class Inbox {
         }
         const plan = value.plan;
         await this.files.publish(capture, plan);
-        const configured = !!this.state.binding(capture.owner, "knowledge.summary");
+        const createCard = plan.extraction.extractor === photoExtractor || !!this.state.binding(capture.owner, "knowledge.summary");
         value.ownsEntity ??= plan.entityBytes !== undefined;
         value.summary = "card";
         this.hub.db.transaction(() => {
           value.plan = undefined;
           const ready = this.update(value, {
             state: "ready", entity: plan.entity, title: plan.entity.title, original: plan.original, error: undefined,
-            card: configured ? "pending" : capture.ai_note ? capture.card : "none",
+            card: createCard ? "pending" : capture.ai_note ? capture.card : "none",
           });
           if (glance && ready.entity?.id) {
             this.glances.transfer(glance.id, ready.id, ready.entity.id, this.hub.recoveryIdentity(capture.owner).actor,
@@ -373,22 +380,27 @@ export class Inbox {
     const { capture } = value, owner = capture.owner;
     const actor: Identity = { actor: this.hub.inboxActor(), label: "inbox-summary" };
     try {
-      const binding = this.state.binding(owner, "knowledge.summary");
-      if (!binding) { this.update(value, { card: capture.ai_note ? "ready" : "none", error: undefined }); return; }
-      const id = value.cardId ??= newId("ain", this.now(), randomBytes);
-      this.state.put(value);
       if (!capture.entity?.id) throw inboxMissing();
       assertNoteVisible(this.hub.db, capture.entity.id);
-      assertNoteVisible(this.hub.db, id);
       const original = await showOriginal(this.config.vault, capture.entity.id, this.indexOptions);
+      const photo = value.summary !== "deep" && original.frontmatter.extractor === photoExtractor;
+      const binding = photo ? undefined : this.state.binding(owner, "knowledge.summary");
+      if (!photo && !binding) { this.update(value, { card: capture.ai_note ? "ready" : "none", error: undefined }); return; }
+      const id = value.cardId ??= newId("ain", this.now(), randomBytes);
+      this.state.put(value);
+      assertNoteVisible(this.hub.db, id);
       const existing = await noteById(this.config.vault, id, this.indexOptions);
       const revision = existing ? (await readKnowledgeDocument(this.config.vault, id, this.indexOptions)).revision : undefined;
       if (!revision && capture.ai_note) throw inboxMissing();
-      const provider = this.options.model ? this.options.model(owner, binding.profile) : this.ai.model(owner, binding.profile);
-      const input = await summarizeOriginal(this.config, capture, original.body, value.summary ?? "card", provider, this.stopping.signal, value.glanceReason);
+      const input = binding ? await summarizeOriginal(this.config, capture, original.body, value.summary ?? "card",
+        (this.options.model ?? this.ai.model.bind(this.ai))(owner, binding.profile), this.stopping.signal, value.glanceReason)
+        : KnowledgeAiNoteCreateArgs.parse({ title: captureCardTitle(capture), body: original.body.trim(),
+          derived_from: [capture.entity.id, capture.id, ...(capture.url ? [capture.url] : [])] });
       await this.exclusive(async () => {
-        const current = this.state.binding(owner, "knowledge.summary");
-        if (current?.profile !== binding.profile || current.revision !== binding.revision) throw inboxConflict();
+        if (binding) {
+          const current = this.state.binding(owner, "knowledge.summary");
+          if (current?.profile !== binding.profile || current.revision !== binding.revision) throw inboxConflict();
+        }
         assertNoteVisible(this.hub.db, capture.entity!.id!);
         assertNoteVisible(this.hub.db, id);
         const now = this.now();

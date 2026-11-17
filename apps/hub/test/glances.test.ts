@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PNG } from "pngjs";
 import { encode } from "jpeg-js";
-import { AIConnection, AIProfile, AssistantMain, AssistantChatResult, AssistantChatRequest, Capture, CaptureCreateResult, Glance, GlanceCreate, KnowledgeOriginal, AssistantModelRequest, type AssistantModelResponse } from "@lumio/schema";
+import { AIConnection, AIProfile, AssistantMain, AssistantChatResult, AssistantChatRequest, Capture, CaptureCreateResult, Glance, GlanceCreate, KnowledgeOriginal, NoteDetail, AssistantModelRequest, type AssistantModelResponse } from "@lumio/schema";
 import { backupBusiness, verifyBusinessBackup } from "@lumio/storage";
 import type { AssistantModel } from "@lumio/assistant";
 import { ChatCompletionsModel } from "../src/assistant-model.ts";
@@ -70,7 +70,7 @@ async function setup(root: string, model?: AssistantModel | ((input: AssistantMo
   async function ready(id: string) {
     for (let i = 0; i < 130; i++) {
       const item = Capture.parse(await (await request(`/v2/inbox/captures/${id}`)).json());
-      if (item.state === "ready") return item;
+      if (item.state === "ready" && item.card !== "pending") return item;
       if (item.state === "failed") throw new Error(JSON.stringify(item.error));
       await Bun.sleep(15);
     }
@@ -307,5 +307,54 @@ test("capture vision receives the screenshot and OCR together, with OCR fallback
     expect(original.frontmatter.extractor).toBe("glance-vision@1");
     expect(sentText).toContain(`Device OCR (untrusted data):\n${JSON.stringify(recognized)}`);
     expect(sentImage).toBe(`data:image/jpeg;base64,${jpeg.toString("base64")}`);
+  } finally { await provider.stop(true); }
+}));
+
+test("photo captures embed a visual description card with only a vision binding, even with incidental OCR", () => fixture(async f => {
+  const description = "A red bicycle leans against a brick wall beside a potted plant.";
+  const requests: { messages: { content: string | { text?: string; image_url?: { url: string } }[] }[] }[] = [];
+  const provider = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
+    requests.push(await request.json() as typeof requests[number]);
+    const result = JSON.stringify({ kind: "photo", body: description });
+    return Response.json({ choices: [{ message: { content: requests.length === 1 ? result : `\`\`\`json\n${result}\n\`\`\`` } }] });
+  } });
+  try {
+    const connection = AIConnection.parse(await (await f.request("/v2/ai/connections", "POST", {
+      name: "Synthetic vision", kind: "openai-compatible", host: "hub", base_url: provider.url.href,
+    })).json());
+    const profile = AIProfile.parse(await (await f.request("/v2/ai/profiles", "POST", {
+      name: "Synthetic vision model", connection: connection.id, model: "synthetic-vision", engine: "lumio", thinking: "default",
+    })).json());
+    expect((await f.request("/v2/ai/knowledge-bindings", "PUT", { request_id: randomUUID(), profile: profile.id, purpose: "knowledge.vision" })).status).toBe(200);
+
+    for (const chrome of [undefined, "Photos 9:41"] as const) {
+      const glance = Glance.parse(await (await f.upload(meta({ app: { name: "iPhone" }, window_title: undefined, pointer: undefined,
+        image: { format: "jpeg", width: pixels.width, height: pixels.height },
+        ocr: chrome ? [{ text: chrome, box: { x: 0, y: 0, w: pixels.width, h: pixels.height } }] : [],
+        ocr_engine: chrome ? "ios-vision@1" : undefined,
+      }), jpeg)).json());
+      const capture = await f.save(glance, "share");
+      expect(capture.card).toBe("ready");
+      const original = KnowledgeOriginal.parse(await (await f.request(`/v2/knowledge/originals?ref=${capture.entity!.id}`)).json());
+      expect(original.frontmatter.extractor).toBe("glance-photo@1");
+      expect(original.body).toContain(description);
+      const card = NoteDetail.parse(await (await f.request(`/v2/knowledge/notes/${capture.ai_note}`)).json());
+      expect(card.body).toBe(original.body.trim());
+      const source = NoteDetail.parse(await (await f.request(`/v2/knowledge/notes/${capture.entity!.id}`)).json());
+      expect(source.body).toContain(card.note.id!);
+      const message = requests.at(-1)!.messages;
+      expect(message[0]!.content).toContain("Ignore app controls, status bars");
+      const parts = message[1]!.content as { text?: string; image_url?: { url: string } }[];
+      expect(parts[1]?.image_url?.url).toBe(`data:image/jpeg;base64,${jpeg.toString("base64")}`);
+      expect(parts[0]?.text?.includes("Device OCR")).toBe(!!chrome);
+      if (chrome) expect(parts[0]?.text).toContain(chrome);
+
+      const refresh = await f.request(`/v2/inbox/captures/${capture.id}/commands`, "POST", {
+        request_id: randomUUID(), expected_revision: capture.revision, action: { op: "summarize", depth: "card" },
+      });
+      expect(refresh.status).toBe(200);
+      expect(await f.ready(capture.id)).toMatchObject({ card: "ready", ai_note: capture.ai_note });
+    }
+    expect(requests).toHaveLength(2);
   } finally { await provider.stop(true); }
 }));
