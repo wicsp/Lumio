@@ -1,8 +1,9 @@
+import { markdownImageAt, previewImageUrl } from "./markdown-images.ts";
 /**
  * 安全 Markdown 渲染（ADR 0026）：纯函数，不依赖 DOM，便于测试。
  *
  * 支持安全的 Markdown 子集、管道表格及 LaTeX 公式。
- * 原文中的 HTML 一律转义；外部链接只允许 http(s)；图片不加载，只显示替代文字；
+ * 原文中的 HTML 一律转义；外部链接只允许 http(s)；图片仅在显式允许的来源加载；
  * 相对 .md 链接与 wikilink 变成工作台内的跳转（data-note），不是浏览器导航。
  * `lumio:<ID>` 链接变成资源跳转（data-resource，ADR 0051），由工作台按可见性打开。
  */
@@ -58,16 +59,16 @@ export function renderMath(tex: string, display: boolean): string | undefined {
   return result;
 }
 
-export function renderRichBlock(block: RichBlock, source: string): string {
+export function renderRichBlock(block: RichBlock, source: string, imageOrigins?: ReadonlySet<string>): string {
   if (block.kind === "math") {
     const math = renderMath(block.tex, true);
     return math ? `<div class="math-display">${math}</div>` : `<pre class="math-source">${escapeHtml(source.slice(block.from, block.to))}</pre>`;
   }
-  const cell = (value: string, index: number, tag: "th" | "td") => `<${tag}${tag === "th" ? ' scope="col"' : ""}${block.align[index] ? ` class="align-${block.align[index]}"` : ""}>${renderInline(value)}</${tag}>`;
+  const cell = (value: string, index: number, tag: "th" | "td") => `<${tag}${tag === "th" ? ' scope="col"' : ""}${block.align[index] ? ` class="align-${block.align[index]}"` : ""}>${renderInline(value, imageOrigins)}</${tag}>`;
   return `<div class="markdown-table" tabindex="0" role="region" aria-label="${escapeHtml(t("Table"))}"><table><thead><tr>${block.header.map((value, index) => cell(value, index, "th")).join("")}</tr></thead><tbody>${block.rows.map(row => `<tr>${row.map((value, index) => cell(value, index, "td")).join("")}</tr>`).join("")}</tbody></table></div>`;
 }
 
-export function renderInline(text: string): string {
+export function renderInline(text: string, imageOrigins?: ReadonlySet<string>): string {
   let out = "";
   for (let i = 0; i < text.length;) {
     const math = mathAt(text, i);
@@ -77,6 +78,15 @@ export function renderInline(text: string): string {
       i = math.to; continue;
     }
     if (text[i] === "\\" && /[\\`*{}[\]()#+\-.!_$|>【】]/.test(text[i + 1] ?? "")) { out += escapeHtml(text[i + 1]!); i += 2; continue; }
+    const image = text.startsWith("![", i) ? markdownImageAt(text, i) : undefined;
+    if (image) {
+      const src = previewImageUrl(image.url, imageOrigins);
+      out += src
+        ? '<img class="note-image" src="' + escapeHtml(src) + '" alt="' + escapeHtml(image.alt) + '" loading="lazy" decoding="async" referrerpolicy="no-referrer">'
+        : '<span class="img-placeholder">[' + escapeHtml(t("Image: {0}", image.alt || t("Untitled"))) + ']</span>';
+      i = image.to;
+      continue;
+    }
     INLINE.lastIndex = i;
     const m = INLINE.exec(text);
     if (!m) { out += escapeHtml(text[i++]!); continue; }
@@ -93,25 +103,26 @@ export function renderInline(text: string): string {
       else if (external) out += `<a href="${escapeHtml(external)}" target="_blank" rel="noopener noreferrer nofollow">${escapeHtml(m[5]!)}</a>`;
       else if (note) out += `<a href="#" class="note-link" data-note="${escapeHtml(note)}">${escapeHtml(m[5]!)}</a>`;
       else out += escapeHtml(m[5]!);
-    } else out += `<strong>${renderInline(m[7]!)}</strong>`;
+    } else out += `<strong>${renderInline(m[7]!, imageOrigins)}</strong>`;
   }
   return out;
 }
 
 const LIST_ITEM = /^\s*([-*+]|\d+\.)\s+/;
 
-export function renderMarkdown(source: string): string {
+export function renderMarkdown(source: string, imageOrigins?: ReadonlySet<string>): string {
+  const inline = (text: string) => renderInline(text, imageOrigins);
   source = source.replace(/\r\n?/g, "\n");
   const lines = source.split("\n"), blocks = new Map(richBlocks(source).map(block => [block.from, block]));
   const offsets: number[] = []; let offset = 0;
   for (const line of lines) { offsets.push(offset); offset += line.length + 1; }
   const out: string[] = []; let paragraph: string[] = [];
-  const flush = () => { if (paragraph.length) out.push(`<p>${paragraph.map(renderInline).join("<br>")}</p>`); paragraph = []; };
+  const flush = () => { if (paragraph.length) out.push(`<p>${paragraph.map(inline).join("<br>")}</p>`); paragraph = []; };
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
     const block = blocks.get(offsets[i]!);
     if (block) {
-      flush(); out.push(renderRichBlock(block, source));
+      flush(); out.push(renderRichBlock(block, source, imageOrigins));
       while (i + 1 < lines.length && offsets[i + 1]! < block.to) i++;
       continue;
     }
@@ -129,14 +140,14 @@ export function renderMarkdown(source: string): string {
       i--; out.push(`<pre><code>${escapeHtml(code.join("\n"))}</code></pre>`); continue;
     }
     const heading = /^(#{1,6})\s+(.*)$/.exec(line);
-    if (heading) { flush(); const level = Math.min(heading[1]!.length + 1, 6); out.push(`<h${level}>${renderInline(heading[2]!)}</h${level}>`); continue; }
+    if (heading) { flush(); const level = Math.min(heading[1]!.length + 1, 6); out.push(`<h${level}>${inline(heading[2]!)}</h${level}>`); continue; }
     const list = /^\s*([-*+]|\d+\.)\s+/.exec(line);
     if (list) {
       flush(); const ordered = /\d/.test(list[1]!); const items: string[] = [];
-      while (i < lines.length && /^\s*([-*+]|\d+\.)\s+/.test(lines[i]!)) items.push(`<li>${renderInline(lines[i++]!.replace(/^\s*([-*+]|\d+\.)\s+/, ""))}</li>`);
+      while (i < lines.length && /^\s*([-*+]|\d+\.)\s+/.test(lines[i]!)) items.push(`<li>${inline(lines[i++]!.replace(/^\s*([-*+]|\d+\.)\s+/, ""))}</li>`);
       i--; out.push(`<${ordered ? "ol" : "ul"}>${items.join("")}</${ordered ? "ol" : "ul"}>`); continue;
     }
-    if (line.startsWith(">")) { flush(); out.push(`<blockquote>${renderInline(line.replace(/^>\s?/, ""))}</blockquote>`); continue; }
+    if (line.startsWith(">")) { flush(); out.push(`<blockquote>${inline(line.replace(/^>\s?/, ""))}</blockquote>`); continue; }
     if (!line.trim()) { flush(); continue; }
     paragraph.push(line);
   }

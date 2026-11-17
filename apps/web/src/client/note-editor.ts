@@ -1,3 +1,5 @@
+import { markdownImageAt } from "./utils/markdown-images.ts";
+import { NoteImages, type NoteImageUpload } from "./note-images.ts";
 import { Compartment, EditorState, Prec, StateField, type Range } from "@codemirror/state";
 import { EditorView, Decoration, WidgetType, keymap, type DecorationSet } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
@@ -20,6 +22,8 @@ type Hit = KnowledgeReferencesResult["hits"][number];
 type ReferenceCompletion = Completion & { hit: Hit; terms: string[] };
 interface Options {
     value: string;
+    imageOrigins?: ReadonlySet<string>;
+    imageUpload?: NoteImageUpload;
     change: (text: string, position: number, composing: boolean) => void;
     context: (position: number) => void;
     references?: (query: string, position: number) => Promise<KnowledgeReferencesResult>;
@@ -74,6 +78,7 @@ export class NoteEditor {
     private outlineTimer?: ReturnType<typeof setTimeout>;
     private lock = new Compartment();
     private active = true;
+    private images?: NoteImages;
     private callbackMuted = false;
     private queryGeneration = 0;
     private targets = new Map<string, string>();
@@ -89,6 +94,10 @@ export class NoteEditor {
     };
     private cardKey = (event: KeyboardEvent) => { if (event.key === "Escape") this.hideCard(); };
     constructor(private options: Options) {
+        if (options.imageUpload) {
+            this.images = new NoteImages(options.imageUpload, () => this.view);
+            this.root.append(this.images.element);
+        }
         this.root.append(this.editor, this.help, this.card, this.refs);
         document.addEventListener("pointermove", this.dismissCard);
         document.addEventListener("pointerdown", this.dismissCard);
@@ -101,6 +110,7 @@ export class NoteEditor {
         this.view = new EditorView({ parent: this.editor, state: EditorState.create({ doc: options.value, selection: { anchor: options.embed ? initialNoteCursor(options.value) : 0 }, extensions: [
                     this.lock.of(EditorState.readOnly.of(false)), EditorView.contentAttributes.of({ "aria-label": t("Note body"), spellcheck: "true" }),
                     EditorView.cspNonce.of(document.querySelector<HTMLMetaElement>('meta[name="lumio-style-nonce"]')?.content ?? ""),
+                    ...(this.images ? [this.images.extension] : []),
                     history(), markdown(), chineseQuoteInput, EditorView.lineWrapping, field,
                     Prec.highest(keymap.of([{ key: "Mod-s", run: () => { if (this.view.composing)
                                 return false; options.save?.(); return true; } }, { key: "Shift-Enter", run: () => this.applySelectedFootnote() }, ...completionKeymap.map(binding => ({ ...binding, run: binding.run ? ((view: EditorView) => view.composing ? false : binding.run!(view)) : undefined }))])),
@@ -180,6 +190,7 @@ export class NoteEditor {
     setReadOnly(locked: boolean): void { this.view.dispatch({ effects: this.lock.reconfigure(EditorState.readOnly.of(locked)) }); }
     focus(position = this.position): void { this.view.dispatch({ selection: { anchor: position }, effects: EditorView.scrollIntoView(position) }); this.view.focus(); }
     destroy(): void {
+        this.images?.dispose();
         this.active = false; clearTimeout(this.outlineTimer); this.queryGeneration++; this.hideCard(); this.view.destroy();
         document.removeEventListener("pointermove", this.dismissCard);
         document.removeEventListener("pointerdown", this.dismissCard);
@@ -217,10 +228,17 @@ export class NoteEditor {
             }, anchor => this.showLink(anchor.outerHTML, from, anchor, true)) }));
             previews.push({ from, to });
         };
-        for (const block of blocks) preview(block.from, block.to, renderRichBlock(block, text), true, t(block.kind === "table" ? "Edit table" : "Edit formula"));
+        for (const block of blocks) preview(block.from, block.to, renderRichBlock(block, text, this.options.imageOrigins), true, t(block.kind === "table" ? "Edit table" : "Edit formula"));
         for (const formula of formulas) {
             const html = renderMath(formula.tex, formula.display);
             if (html) preview(formula.from, formula.to, html, false, t("Edit formula"));
+        }
+        if (this.options.imageOrigins?.size) for (const match of text.matchAll(/!\[/g)) {
+            if (escapedAt(text, match.index) || isBlocked(match.index)) continue;
+            const image = markdownImageAt(text, match.index);
+            if (!image || previews.some(range => image.from < range.to && image.to > range.from)) continue;
+            const html = renderInline(text.slice(image.from, image.to), this.options.imageOrigins);
+            preview(image.from, image.to, html, false, t("Edit image link"));
         }
         if (this.options.embed) {
             const embed = this.options.embed;

@@ -27,6 +27,11 @@ import { SideRail, type RailEntry } from "../side-rail.ts";
 import { refOf } from "../workbench-assist.ts";
 import { glanceThumb } from "../glance-view.ts";
 
+function noteImageOrigins(): ReadonlySet<string> {
+  const configured = document.querySelector<HTMLMetaElement>('meta[name="lumio-image-origins"]');
+  return new Set(configured?.content.split(" ").filter(Boolean));
+}
+
 const TYPE_LABEL: Record<string, string> = translated({ paper: "Paper", idea: "Idea", experiment: "Experiment", source: "Source", post: "Post", asset: "Asset", "ai-note": "AI", project: "Old project", task: "Old task", routine: "Old routine" });
 const POINTING = translated({ selection: "Saved the selected text", region: "Saved the area you circled", point: "Saved the paragraph you pointed at", none: "Saved the whole window" });
 const EDITABLE = new Set(["paper", "source", "idea", "experiment", "post", "ai-note"]);
@@ -56,6 +61,7 @@ function linkSections(links: LinksResult): HTMLElement[] {
 }
 
 export class KnowledgePane {
+  private readonly imageOrigins = noteImageOrigins();
   private graphMode = false;
   private graphHost = h("section", { class: "knowledge-graph-view", "aria-label": t("Knowledge graph"), hidden: true });
   private graphView?: KnowledgeGraphView;
@@ -267,7 +273,7 @@ export class KnowledgePane {
     const kindLabel = note.note.type === "source" && fm.kind === "video" ? t("Video") : note.note.type === "source" && fm.kind === "web" ? t("Web page") : TYPE_LABEL[note.note.type] ?? note.note.type;
     const attribution = [Array.isArray(fm.authors) ? fm.authors.filter(value => typeof value === "string").join(", ") : typeof fm.author === "string" ? fm.author : "", typeof fm.year === "number" ? String(fm.year) : typeof fm.site === "string" ? fm.site : ""].filter(Boolean).join(" · ");
     const body = h("div", { class: "markdown" });
-    body.innerHTML = renderMarkdown(note.body); // renderMarkdown 已转义全部原文，只生成受控标签
+    body.innerHTML = renderMarkdown(note.body, note.note.path.startsWith("life/") ? undefined : this.imageOrigins); // renderMarkdown 已转义全部原文，只生成受控标签
     hydrateAiEmbeds(body, this.client, { open: id => void this.open(id) });
     const ai = note.note.type === "ai-note";
     const model = ai && typeof fm.model === "string" ? fm.model : "";
@@ -421,7 +427,9 @@ export class KnowledgePane {
       }
       this.linksRevision=doc.revision;
       const context=()=>writingContext(title.value,this.editor?.value??doc.document.body,this.editor?.position??0);
-      this.editor=new NoteEditor({value:saver.body,change:(text,position,composing)=>{this.saver!.change(title.value,text);clearTimeout(this.saveTimer);if(!composing&&!this.saver!.error)this.saveTimer=setTimeout(()=>void this.saver?.save(),800);this.recommend(writingContext(title.value,text,position));},context:()=>this.recommend(context()),
+      this.editor=new NoteEditor({value:saver.body, imageOrigins:this.imageOrigins, imageUpload:{
+        settings:()=>this.client.imageHostingSettings(), send:(file,signal)=>this.client.uploadNoteImage(note.note.id!,file,signal),
+      },change:(text,position,composing)=>{this.saver!.change(title.value,text);clearTimeout(this.saveTimer);if(!composing&&!this.saver!.error)this.saveTimer=setTimeout(()=>void this.saver?.save(),800);this.recommend(writingContext(title.value,text,position));},context:()=>this.recommend(context()),
         referenceContext:position=>writingContext(title.value,this.editor!.value,position),references:(query,position)=>this.client.noteReferences({source_id:note.note.id!,query,context:writingContext(title.value,this.editor!.value,position)}),open:ref=>void this.open(this.resolveReference(ref)),embed:(id,label,edit)=>aiNoteCard(this.client,id,label,{open:target=>void this.open(target),edit}),save:()=>{clearTimeout(this.saveTimer);if(!this.saver?.error)void this.saver?.save();},outlineChanged:()=>this.outline.refresh()});
       const titleChanged = (composing: boolean) => {
         if (!composing && /[\r\n]/.test(title.value)) title.value = title.value.replace(/[\r\n]+/g, " ");

@@ -1,3 +1,4 @@
+import { ImageHostingSettings, ImageHostingUpdate, ImageUploadResult } from "./image-hosting.ts";
 import { AIQuotaSnapshot, AIQuotaSettings, AIQuotaView, AIQuotaViews, AliyunBillingUpdate, ClaudeQuotaBindings, ClaudeQuotaSample, ClaudeBackgroundResult } from "./ai-usage.ts";
 import {AIConnection,AIConnectionInput,AIProfile,AIProfileInput,AIUsageBinding,AIConfiguration,AIConfigurationDelete,AIConfigurationDeleted,AIModel,AIRuntime,NativeAccountBinding,NativeConnectionAction,NativeConnectionView,NativeSession,NativeRuntimeView,NativeApproval,NativeAction,NativeCreate,NativeEventData,NativeEventRecord,NativeRuntimeCommand,NativeRuntimeMessage,NativeMCPRequest,NativeMCPResult} from "./ai.ts";
 import { KnowledgeDocument, KnowledgeUpdateRequest, KnowledgeUpdateResult, KnowledgeContext, KnowledgeRelatedRequest, KnowledgeRelatedResult, KnowledgeReferencesRequest, KnowledgeReferencesResult } from "./knowledge-editing.ts";
@@ -229,6 +230,9 @@ export const CONTRACTS = {
   capture: Capture,
   "capture-list": CaptureList,
   "capture-command": CaptureCommand,
+  "image-hosting-settings": ImageHostingSettings,
+  "image-hosting-update": ImageHostingUpdate,
+  "image-upload-result": ImageUploadResult,
   "capture-proxy-settings": CaptureProxySettings,
   "capture-proxy-update": CaptureProxyUpdate,
   "original-frontmatter": OriginalFrontmatter,
@@ -268,3 +272,5 @@ export * from "./speech.ts";
 export * from "./inbox.ts";
 export * from "./workbench.ts";
 export * from "./glance.ts";
+
+export * from "./image-hosting.ts";

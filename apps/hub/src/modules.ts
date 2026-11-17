@@ -27,6 +27,7 @@ import { mergeStageGrant, PlanDispatchUnavailable, WorkService } from "@lumio/wo
 import type { AssistantContext, AssistantModel, AssistantTool } from "@lumio/assistant";
 import { AssistantMainConversations } from "./assistant-main.ts";
 import { glanceChat } from "./glance-chat.ts";
+import type { ImageHosting } from "./image-hosting.ts";
 import type { Glances } from "./glances.ts";
 import { WorkbenchAssistant } from "./workbench-assistant.ts";
 import { WorkbenchTools } from "./workbench-tools.ts";
@@ -85,6 +86,7 @@ export class BusinessModules {
   trash!: Trash;
   inbox!: Inbox;
   glances!: Glances;
+  imageHosting!: ImageHosting;
   assistantConfig!: AssistantConfiguration;
   readonly assistantStore: SqliteAssistantStore;
   readonly routineStore: SqliteRoutineStore;

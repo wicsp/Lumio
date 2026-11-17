@@ -111,6 +111,7 @@ files/     attachments/  drawings/（Excalidraw）  templates/  originals/（资
 - **可编辑范围**：合法、公开的 paper / source / idea / experiment / post 可在 Web 里直接编辑标题与正文；私密笔记和元数据不合法的笔记保持只读。
 - **不覆盖外部修改**：保存带 SHA-256 版本检查与可恢复的幂等回执；检测到外部更新时冲突，保留草稿并提供比较。保留未知元数据，保存后更新索引与链接。
 - **原文就是 Markdown**：编辑器保留原始 Markdown；`[[` 候选插入的链接统一保存为标准 Markdown 链接，脚注保存为 Markdown 上标脚注，文末编号按首次出现排列。
+- **图床**（ADR 0073）：公开可编辑笔记的图片由人通过 Hub 上传到配置的图床，正文只保存标准 Markdown 图片地址。笔记的编辑、删除和备份不管理图床对象。
 - **相关推荐**：词法匹配，最多 5 篇、默认 3 篇，附命中片段；`[[` 空查询使用所在段落作上下文，输入后搜索标题与正文。
 - 界面与交互细节见 [`apps/web/README.md`](../../apps/web/README.md)。
 

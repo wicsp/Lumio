@@ -1753,3 +1753,9 @@ button.inbox-title:hover { text-decoration: underline; }
 .qr { width: 128px; height: 128px; border-radius: var(--r-sm); }
 .qr-bg { fill: #fff; }
 .qr-fg { fill: #000; }
+
+.note-image { max-width: 100%; max-height: min(70vh, 720px); object-fit: contain; vertical-align: middle; border-radius: 4px; }
+.note-image-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-block: 4px 8px; }
+
+.image-hosting-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 12px; }
+.image-hosting-fields > * { min-width: 0; }

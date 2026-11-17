@@ -18,6 +18,20 @@ bun run scripts/deploy-local.ts
 
 对外发布时，人类在日常实例上验收后，从 `main` 上已验收的提交推送正式 `v*` 标签。Release workflow 校验提交属于主线，重跑全量检查并创建 GitHub Release。带预发布后缀的版本标为预发布，不成为 Latest。
 
+## 在 Web 设置笔记图床（K5-0）
+
+打开「设置 → 数据 → 图床」。使用 Cloudflare R2 时选择 R2，填写：
+
+- S3 上传地址 `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`（有区域限制时使用控制台给出的地址），区域 `auto`，以及现有存储桶名称。
+- 通过 R2 控制台生成仅限该桶的对象读写凭据，填写 Access Key ID 和 Secret Access Key。
+- 图片访问地址前缀使用现有 uPic 的 HTTPS 交付域名。桶根直接映射到交付域名时，前缀无需包含桶名。对象路径前缀可用 `lumio`，也可与现有图床的目录结构一致。
+
+保存后按提示刷新页面。打开一个公开可编辑的知识笔记，选择或粘贴一张 PNG，确认编辑器插入 Markdown、图片可显示并且刷新后仍可访问。只想预览旧图片时，在预览来源中填现有域名并保留「关闭上传」。
+
+自建内网 MinIO、WebDAV 等必须提供带有效 TLS 证书的上传地址，并由部署者在 Hub 服务环境中用 `LUMIO_IMAGE_HOSTING_PRIVATE_ORIGINS` 显式列出需要访问的 HTTPS 来源（逗号分隔）。WebDAV 的目标父目录需已存在。自定义 HTTP 的凭据、表单额外字段和查询参数均只写入 Hub。
+
+`image-hosting.json` 在 Hub 状态目录中，按 `0600` 保存。部署备份保留这份安装配置。图片文件由图床保管，使用图床自己的备份策略。
+
 ## 在 Web 设置资料抓取代理（I1-3b）
 
 打开「设置 → Hub 与执行器 → 资料抓取代理」，选择「使用自定义代理」，填入 Hub 所在机器可访问的地址，例如 macsp 本地代理的 `http://127.0.0.1:7890`。HTTP 和 HTTPS 网址都使用这个代理。`NO_PROXY` 可选，用逗号分隔直连目标。保存后可立即重试抓取。选择「跟随 Hub 服务环境」可恢复下文的部署配置。

@@ -1,3 +1,4 @@
+import { ImageHostingSettings, ImageHostingUpdate, ImageUploadResult } from "@lumio/schema";
 import { SecurityReviewRequest, SecurityReviewResult, Glance } from "@lumio/schema";
 import { Capture, CaptureCommand, CaptureList, CaptureListArgs, CaptureProxySettings, CaptureProxyUpdate, KnowledgeAIBinding, KnowledgeAIBindingUpdate, CaptureCreate, CaptureCreateResult, KnowledgeAiNoteCommand, KnowledgeAiNoteResult, KnowledgeOriginal, KnowledgeOriginalShowArgs, ResourceSummary } from "@lumio/schema";
 import {AIConnection,AIConnectionInput,AIProfile,AIProfileInput,AIConfiguration,AIRuntime,NativeConnectionAction,NativeConnectionView,NativeSession,NativeCreate,NativeAction,NativeEventRecord} from "@lumio/schema";
@@ -44,15 +45,16 @@ export function createClient(options: { url: string; token?: string; language?: 
     if (status === undefined) { try { error.hubUrl = new URL(base).origin; } catch { /* invalid URL */ } }
     return error;
   }
-  async function request<T>(path: string, params: Record<string, string>, schema: { parse(value: unknown): T }, body?: unknown, method?: string): Promise<T> {
+  async function request<T>(path: string, params: Record<string, string>, schema: { parse(value: unknown): T }, body?: unknown, method?: string, signal?: AbortSignal): Promise<T> {
     let status: number | undefined;
     try {
       const url = new URL(`${base}${path}`);
       for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+      const multipart = body instanceof FormData ? body : undefined;
       const response = await fetcher(url, {
         method: method ?? (body === undefined ? "GET" : "POST"),
-        headers: { ...(options.language ? { "Accept-Language": options.language } : {}), ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}), ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }), redirect: "error",
+        headers: { ...(options.language ? { "Accept-Language": options.language } : {}), ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}), ...(body === undefined || multipart ? {} : { "Content-Type": "application/json" }) },
+        ...(body === undefined ? {} : { body: multipart ?? JSON.stringify(body) }), ...(signal ? { signal } : {}), redirect: "error",
       });
       status = response.status;
       if (response.status === 204 && response.ok) return schema.parse(undefined);
@@ -161,6 +163,17 @@ export function createClient(options: { url: string; token?: string; language?: 
     /** 任意 Lumio ID 的可见摘要（ADR 0051）：对话与任务另带被知识引用的次数。 */
     resource(id: string, options: QueryOptions = {}) {
       return request(`/v2/resources/${encodeURIComponent(validate(Id, id))}`, queryParams(options), ResourceSummary);
+    },
+    imageHostingSettings() {
+      return request("/v2/knowledge/image-hosting", {}, ImageHostingSettings);
+    },
+    saveImageHosting(input: ImageHostingUpdate) {
+      return request("/v2/knowledge/image-hosting", {}, ImageHostingSettings, validate(ImageHostingUpdate, input), "PUT");
+    },
+    uploadNoteImage(id: string, file: File, signal?: AbortSignal) {
+      const body = new FormData();
+      body.set("image", file);
+      return request("/v2/knowledge/notes/" + encodeURIComponent(validate(Id, id)) + "/images", {}, ImageUploadResult, body, "POST", signal);
     },
     knowledgeDocument(id: string) { return request(`/v2/knowledge/notes/${encodeURIComponent(validate(Id, id))}/document`, {}, KnowledgeDocument); },
     // 删除与回收站（ADR 0038）：只有人可用。任务与项目的删除走 workCommand。
