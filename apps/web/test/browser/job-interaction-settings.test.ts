@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { JobEngineActivityCapability } from "@lumio/schema";
-import { jobInteractionStatus } from "../../src/client/job-interaction-settings.ts";
+import { jobInteractionChoice, jobInteractionStatus } from "../../src/client/job-interaction-settings.ts";
 
 const codex = JobEngineActivityCapability.parse({
   engine: "codex", version: "0.166.0", progress: true, sandbox: "os", approvals: true, questions: true, steer: true,
@@ -33,4 +33,14 @@ test("Pi uses reported runtime capabilities for the existing interaction option"
   expect(jobInteractionStatus(true, pi)).toBe("Live questions and approvals enabled");
   expect(jobInteractionStatus(true, { ...pi, approvals: false, questions: false, sandbox: "none" }))
     .toBe("Live questions and approvals are not enabled on this runtime");
+});
+
+test("delegate defaults to interaction for a capable project and honors a manual opt-out", () => {
+  const eligible = { available: true, required: false, fullAccess: false, workdir: "/projects/fixture", preferInteractive: true };
+  expect(jobInteractionChoice(eligible)).toMatchObject({ checked: true, disabled: false });
+  expect(jobInteractionChoice({ ...eligible, preferInteractive: false })).toMatchObject({ checked: false, disabled: false });
+  expect(jobInteractionChoice({ ...eligible, available: false })).toMatchObject({ checked: false, disabled: true });
+  expect(jobInteractionChoice({ ...eligible, fullAccess: true })).toMatchObject({ checked: false, disabled: true });
+  expect(jobInteractionChoice({ ...eligible, workdir: "~" })).toMatchObject({ checked: false, disabled: true, needsProjectDirectory: true });
+  expect(jobInteractionChoice({ ...eligible, required: true, preferInteractive: false })).toMatchObject({ checked: true, disabled: true });
 });
