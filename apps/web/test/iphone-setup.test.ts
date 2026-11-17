@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { encode } from "uqr";
-import { PAIR_SHORTCUT_NAME, pairingUrl, shortcutInstallUrl, unreachableFromPhone } from "../src/client/iphone-setup.ts";
+import { isIOSDevice, PAIR_SHORTCUT_NAME, pairingUrl, phoneHubDefault, shortcutInstallUrl, unreachableFromPhone } from "../src/client/iphone-setup.ts";
 
 describe("iPhone 快捷指令设置", () => {
   test("配对二维码启动“Lumio 收藏”，并把地址和配对码作为文字输入传过去", () => {
@@ -27,5 +27,18 @@ describe("iPhone 快捷指令设置", () => {
       expect(unreachableFromPhone(hub)).toBe(true);
     for (const hub of ["http://192.168.1.20:7420", "https://mac.tail1234.ts.net", "http://macsp.local:7420"])
       expect(unreachableFromPhone(hub)).toBe(false);
+  });
+
+  test("识别在 iPhone/iPad 上打开", () => {
+    expect(isIOSDevice("Mozilla/5.0 (iPhone; CPU iPhone OS 26_1 like Mac OS X)", "iPhone", 5)).toBe(true);
+    expect(isIOSDevice("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", "MacIntel", 5)).toBe(true);
+    expect(isIOSDevice("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", "MacIntel", 0)).toBe(false);
+    expect(isIOSDevice("Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "Win32", 0)).toBe(false);
+  });
+
+  test("在手机上打开时，Hub 地址默认用当前页面的地址", () => {
+    expect(phoneHubDefault("http://127.0.0.1:7420", "http://192.168.1.20:7420")).toBe("http://192.168.1.20:7420");
+    expect(phoneHubDefault("https://mac.tail1234.ts.net", "http://192.168.1.20:7420")).toBe("https://mac.tail1234.ts.net");
+    expect(phoneHubDefault("http://127.0.0.1:7420", "http://127.0.0.1:7420")).toBe("http://127.0.0.1:7420");
   });
 });

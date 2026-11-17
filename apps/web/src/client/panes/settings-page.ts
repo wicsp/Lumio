@@ -15,7 +15,7 @@ import { LANGS, THEMES } from "../settings.ts";
 import { AISettings } from "../ai-settings.ts";
 import { AgentsSettings } from "../agents-settings.ts";
 import { captureProxySettings } from "../capture-proxy-settings.ts";
-import { IPHONE_SHORTCUTS, pairingUrl, shortcutInstallUrl, unreachableFromPhone } from "../iphone-setup.ts";
+import { IPHONE_SHORTCUTS, isIOSDevice, pairingUrl, phoneHubDefault, shortcutInstallUrl, unreachableFromPhone } from "../iphone-setup.ts";
 import { qrSvg } from "../qr-code.ts";
 import type { GamepadInput } from "../gamepad-input.ts";
 import { GamepadSettings } from "../gamepad-settings.ts";
@@ -190,43 +190,53 @@ export class SettingsPane {
       t("In the menu bar, choose Lumio → 配对… and enter both. The code works once, until {0}."));
   }
 
-  /** iPhone 快捷指令（apps/mobile）：扫码安装，再扫码配对；手机只需相机，电脑是什么系统都行。 */
+  /**
+   * iPhone 快捷指令（apps/mobile）：电脑上扫码安装、扫码配对，电脑是什么系统都行；
+   * 在 iPhone 上打开这个页面时扫不了自己的屏幕，改成直接点按钮安装和配对。
+   */
   private iphoneSetup(): HTMLElement {
-    const installs = h("div", { class: "qr-row" }, ...IPHONE_SHORTCUTS.map(item => {
-      const url = shortcutInstallUrl(item.name);
-      return h("figure", { class: "qr-card" }, qrSvg(url, item.name),
-        h("figcaption", {}, h("a", { href: url, target: "_blank", rel: "noopener" }, item.name),
-          h("span", { class: "set-sub" }, item.use === "save" ? t("Bind to Back Tap") : t("Bind to the Action Button"))));
-    }));
+    const onPhone = isIOSDevice(navigator.userAgent, navigator.platform, navigator.maxTouchPoints);
+    const installs = onPhone
+      ? h("div", { class: "set-actions" }, ...IPHONE_SHORTCUTS.map(item =>
+        h("a", { class: "btn btn-small", href: shortcutInstallUrl(item.name) }, t("Add {0}").replace("{0}", item.name))))
+      : h("div", { class: "qr-row" }, ...IPHONE_SHORTCUTS.map(item => {
+        const url = shortcutInstallUrl(item.name);
+        return h("figure", { class: "qr-card" }, qrSvg(url, item.name),
+          h("figcaption", {}, h("a", { href: url, target: "_blank", rel: "noopener" }, item.name),
+            h("span", { class: "set-sub" }, item.use === "save" ? t("Bind to Back Tap") : t("Bind to the Action Button"))));
+      }));
     const result = h("div", { class: "set-pairing", role: "status" });
-    const button = h("button", { type: "button", class: "btn btn-small" }, t("Create pairing QR code"));
+    const button = h("button", { type: "button", class: "btn btn-small" }, onPhone ? t("Create pairing link") : t("Create pairing QR code"));
     button.addEventListener("click", () => void (async () => {
       button.disabled = true; clear(result);
       try {
         const invite = await this.session.client.clientInvite(`iphone@${new Date().toISOString().slice(0, 10)}`);
-        const address = h("input", { class: "mono set-input-wide", type: "url", value: invite.hub_url, "aria-label": t("Hub address the iPhone can reach") });
-        const code = h("div", { class: "qr-row" });
+        const address = h("input", { class: "mono set-input-wide", type: "url", value: phoneHubDefault(invite.hub_url, location.origin), "aria-label": t("Hub address the iPhone can reach") });
+        const code = h("div", { class: onPhone ? "set-actions" : "qr-row" });
         const warning = h("p", { class: "field-hint inbox-error" });
         const draw = () => {
           const hub = address.value.trim(), unreachable = unreachableFromPhone(hub);
           warning.textContent = unreachable ? t("The iPhone can't reach this address. Use this computer's LAN or Tailscale address.") : "";
-          if (unreachable) clear(code); else clear(code, h("figure", { class: "qr-card" }, qrSvg(pairingUrl(hub, invite.code), t("Pairing QR code"))));
+          if (unreachable) clear(code);
+          else if (onPhone) clear(code, h("a", { class: "btn btn-small btn-primary", href: pairingUrl(hub, invite.code) }, t("Pair this iPhone")));
+          else clear(code, h("figure", { class: "qr-card" }, qrSvg(pairingUrl(hub, invite.code), t("Pairing QR code"))));
         };
         address.addEventListener("input", draw);
         draw();
+        const hint = onPhone ? t("Tap after adding Lumio 收藏. The link works once, until {0}.") : t("Scan with the iPhone camera after adding Lumio 收藏. The code works once, until {0}.");
         clear(result,
           h("div", { class: "set-row set-row-stack" }, h("span", { class: "set-label" }, t("Hub address the iPhone can reach")), address),
           warning, code,
-          h("p", { class: "field-hint" }, t("Scan with the iPhone camera after adding Lumio 收藏. The code works once, until {0}.").replace("{0}", formatTime(invite.expires))));
+          h("p", { class: "field-hint" }, hint.replace("{0}", formatTime(invite.expires))));
       } catch (error) {
         clear(result, h("p", { class: "field-hint inbox-error" }, errorText(error)));
       } finally { button.disabled = false; }
     })());
     return h("div", { class: "set-rows" },
       h("div", { class: "set-row set-row-stack" }, h("span", { class: "set-label" }, t("1. Add the shortcuts"),
-        h("span", { class: "set-sub" }, t("Scan each code with the iPhone camera and tap Add Shortcut."))), installs),
+        h("span", { class: "set-sub" }, onPhone ? t("Tap each one, open the download and tap Add Shortcut.") : t("Scan each code with the iPhone camera and tap Add Shortcut."))), installs),
       h("div", { class: "set-row" }, h("span", { class: "set-label" }, t("2. Pair"),
-        h("span", { class: "set-sub" }, t("Create a code here, then scan it. No typing on the phone."))), button),
+        h("span", { class: "set-sub" }, onPhone ? t("Create a link here and tap it. No typing.") : t("Create a code here, then scan it. No typing on the phone."))), button),
       result);
   }
 
