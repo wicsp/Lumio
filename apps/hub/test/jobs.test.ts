@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
 import { AIConnection, JOB_ACCOUNT_FEATURE, JobActivityCapabilities, NativeConnectionView, WorkCommandRequest, WorkCommandResult, JobActionReceipt, JobActivityAck, JobActivityPage, JobActivitySync, JobAttention, JobLiveView } from "@lumio/schema";
-import { cp, mkdir, writeFile, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { cp, mkdir, writeFile, mkdtemp, readFile, realpath, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ApiError, Job, JobResult, RuntimeAck, RuntimeInfo, RuntimeRegistered, RuntimeSync, StoredArtifact, RunLogEvent, BackupManifest } from "@lumio/schema";
@@ -556,4 +556,27 @@ test("job account selection and the Runtime-only binding reject foreign owners a
   expect(sync.jobs.map(job => job.id)).toEqual([job.spec.id]);
   expect(sync.accounts).toEqual([{ job: job.spec.id, connection: first.id, owner: first.owner, account: "a".repeat(64), generation: 1, revision: first.revision }]);
   expect(JSON.stringify(sync.jobs)).not.toContain(first.id);
+});
+
+test("both local interactive Job entry points exclude the Hub's private directories", async () => {
+  await hub!.stop();
+  hub = await startHub({ ...readConfig({ LUMIO_VAULT: vault, LUMIO_STATE_DIR: state }), port: 0, localRuntime: "server" }, { log: () => {} });
+  port = hub.server.port!;
+  const engine = { name: "codex", version: "0.166.0", sandbox: "os" };
+  await request("/v1/runtime/register", runtime, { ...registration, engines: [engine] });
+  await request("/v1/runtime/job-activity/sync", runtime, { type: "register", platform: "darwin", engines: [
+    { engine: engine.name, version: engine.version, sandbox: engine.sandbox, progress: true, questions: true, approvals: true, steer: true },
+  ] });
+  const project = join(temp, "project"), alias = join(temp, "alias");
+  await mkdir(project);
+  await symlink(vault, alias);
+  const direct = (workdir: string) => request("/v2/execution/jobs", human, { runtime: "server", workdir,
+    run: { kind: "agent", engine: "codex", interaction: "interactive", prompt: "Synthetic directory check" } });
+  for (const path of [vault, state, alias, temp]) expect((await direct(path)).status).toBe(400);
+  expect(Job.parse(await (await direct(project)).json()).spec.workdir).toBe(project);
+  const work = (op: string, args: object) => request("/v2/work/commands", human,
+    WorkCommandRequest.parse({ request_id: randomUUID(), operation: { op, args } }));
+  const task = WorkCommandResult.parse(await (await work("work.task.create", { title: "Synthetic directory check", workdir: alias })).json());
+  if (task.kind !== "task") throw new Error("Expected a fixture task");
+  expect((await work("work.task.dispatch", { task: task.task.id, to: "codex@server", interaction: "interactive" })).status).toBe(400);
 });
