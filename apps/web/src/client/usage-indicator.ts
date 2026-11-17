@@ -56,7 +56,7 @@ export function usageGlance(connection: AIConnection, usage: AIQuotaView, now = 
     const balance = snapshot.balances.find(b => b.currency === "CNY") ?? snapshot.balances[0];
     const level: UsageLevel = !snapshot.available ? "empty" : usage.attention ? "low" : "ok";
     if (!balance) return { ...base, level, bars: [], resets: [], value: "—" };
-    return { ...base, level, bars: [balanceBar(balance.total, usage.settings.full_balance?.[balance.currency])], resets: [undefined],
+    return { ...base, level, bars: [balanceBar(balance.total, usage.settings.full_balance)], resets: [undefined],
       value: amount(balance.currency, balance.total) };
   }
   if (!("windows" in snapshot)) return undefined;

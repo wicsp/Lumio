@@ -33,7 +33,7 @@ describe("sidebar usage indicator", () => {
     const balances = [{ currency: "USD", total: "3.00", topped_up: "3.00", granted: "0" }, { currency: "CNY", total: "48.20", topped_up: "40.00", granted: "8.20" }] as const;
     expect(usageGlance(deepseek, view(deepseek.id, { snapshot: { source: "deepseek", sampled_at: at, available: true, balances: [...balances] } })))
       .toMatchObject({ level: "ok", value: "¥48.20", bars: [100], resets: [undefined] });
-    const scaled = (CNY: string) => usageGlance(deepseek, view(deepseek.id, { settings: { monitor: true, thresholds: {}, full_balance: { CNY } },
+    const scaled = (full: string) => usageGlance(deepseek, view(deepseek.id, { settings: { monitor: true, thresholds: {}, full_balance: full },
       snapshot: { source: "deepseek", sampled_at: at, available: true, balances: [...balances] } }))?.bars;
     expect(scaled("20")).toEqual([100]);
     expect(scaled("48.20")).toEqual([100]);
