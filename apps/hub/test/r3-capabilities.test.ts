@@ -253,7 +253,10 @@ test("answer and continue commits once; failure rolls back the comment, job, exe
   expect((await api("/v2/work/commands", payload)).status).toBe(200);
   const detail = await client().workTask(created.id); expect(detail.comments).toHaveLength(1); expect(detail.executions).toHaveLength(1);
   expect(detail.executions[0]?.input_snapshot).toContain("Synthetic answer");
-  const job = await client().job(detail.executions[0]!.job); expect(job.spec.run.kind === "agent" && job.spec.run.prompt).toContain("Result / Changes / Verification");
+  const job = await client().job(detail.executions[0]!.job);
+  if (job.spec.run.kind !== "agent") throw new Error("agent job expected");
+  expect(job.spec.run.prompt).toContain("start the report with one short plain-text sentence before any headings");
+  expect(job.spec.run.prompt).toContain("Result / Changes / Verification");
   const bad = { ...payload, request_id: requestId() }; expect((await api("/v2/work/commands", bad)).status).toBe(409); expect((await client().workTask(created.id)).comments).toHaveLength(1);
 });
 
