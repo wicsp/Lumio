@@ -1781,6 +1781,9 @@ button.inbox-title:hover { text-decoration: underline; }
 
 .note-image { max-width: 100%; max-height: min(70vh, 720px); object-fit: contain; vertical-align: middle; border-radius: 4px; }
 .note-image-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-block: 4px 8px; }
+.note-image-preview { max-width: 100%; padding-block: 6px; }
+.note-image-preview-canvas { max-width: 100%; max-height: min(70vh, 720px); object-fit: contain; vertical-align: middle; border-radius: 4px; }
+.note-image-preview-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
 
 .image-hosting-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 12px; }
 .image-hosting-fields > * { min-width: 0; }

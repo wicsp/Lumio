@@ -1,5 +1,6 @@
 import { KnowledgeGraphView } from "../graph/knowledge.ts";
 import { NoteEditor } from "../note-editor.ts";
+import { NoteImageQueue } from "../note-image-queue.ts";
 import { drafts } from "../drafts.ts";
 import { confirmDelete, deletableRow } from "../trash-actions.ts";
 import { NoteSave } from "../note-save.ts";
@@ -60,6 +61,12 @@ function linkSections(links: LinksResult): HTMLElement[] {
   ];
 }
 
+interface NoteWritingSession {
+  saver: NoteSave;
+  images: NoteImageQueue;
+  imageSave?: Promise<boolean>;
+}
+
 export class KnowledgePane {
   private readonly imageOrigins = noteImageOrigins();
   private graphMode = false;
@@ -89,6 +96,8 @@ export class KnowledgePane {
   private editor?: NoteEditor;
   private titleResize?: ResizeObserver;
   private saver?: NoteSave;
+  private writing?: NoteWritingSession;
+  private readonly writingSessions = new Map<string, NoteWritingSession>();
   private store = drafts();
   private recoveries = new WeakMap<NoteSave, ReturnType<ReturnType<typeof drafts>["claim"]>>();
   private saveTimer?: ReturnType<typeof setTimeout>;
@@ -104,6 +113,11 @@ export class KnowledgePane {
   private saveError=h("div",{class:"note-save-error"});
   private conflict=h("section",{class:"note-conflict",hidden:true});
   private unbindKeys: () => void;
+  private readonly warnUnsavedImages = (event: BeforeUnloadEvent) => {
+    if (![...this.writingSessions.values()].some(session => session.images.hasPending)) return;
+    event.preventDefault();
+    event.returnValue = "";
+  };
 
   constructor(root: HTMLElement, private client: Client, initialReference?: string, private focusChanged?: () => void) {
     this.listButton.addEventListener("click", () => this.setGraphMode(false));
@@ -143,7 +157,14 @@ export class KnowledgePane {
     return { ...ref, ...(this.saver ? { revision: this.saver.base.revision } : {}) };
   }
   canLeave():boolean{this.persist();if(!this.saver?.error)void this.saver?.save();return this.creator?.canLeave()??true;}
-  async beforeLeave():Promise<boolean>{this.persist();if(this.saver?.dirty&&!this.saver.error)await this.saver.save();return this.creator?.canLeave()??true;}
+  async beforeLeave(): Promise<boolean> {
+    this.persist();
+    if (this.saver?.dirty && !this.saver.error) {
+      const saving = this.saver.save();
+      if (!this.writing?.images.hasPending && !this.writing?.imageSave) await saving;
+    }
+    return this.creator?.canLeave() ?? true;
+  }
   private persist(saver=this.saver):void{
     if(!saver)return;
     const recovery=this.recoveries.get(saver);
@@ -161,8 +182,19 @@ export class KnowledgePane {
     this.displayed = undefined;
     if (hadFocus) this.focusChanged?.();
   }
-  private clearWriter():void{this.clearFocus();this.persist();this.titleResize?.disconnect();this.titleResize=undefined;this.outlineEntries=()=>[];this.outline.refresh();clearTimeout(this.saveTimer);clearTimeout(this.relatedTimer);this.relatedGeneration++;this.contextKey="";this.relatedTerms=[];this.linksRevision="";this.split.classList.remove("show-related");this.relatedHits=[];this.related.hidden=true;clear(this.related);this.editor?.destroy();this.editor=undefined;this.saver=undefined;this.creator?.dispose();this.creator=undefined;}
-  dispose():void{this.graphView?.dispose();this.clearWriter();this.outline.dispose();this.active=false;this.generation++;this.searchGeneration++;this.unbindKeys();}
+  private clearWriter():void{this.clearFocus();this.persist();this.titleResize?.disconnect();this.titleResize=undefined;this.outlineEntries=()=>[];this.outline.refresh();clearTimeout(this.saveTimer);clearTimeout(this.relatedTimer);this.relatedGeneration++;this.contextKey="";this.relatedTerms=[];this.linksRevision="";this.split.classList.remove("show-related");this.relatedHits=[];this.related.hidden=true;clear(this.related);this.editor?.destroy();this.editor=undefined;const session=this.writing;this.writing=undefined;this.saver=undefined;if(session)this.releaseWritingSession(session);this.creator?.dispose();this.creator=undefined;}
+  dispose(): void {
+    this.active = false;
+    this.graphView?.dispose();
+    this.clearWriter();
+    for (const session of this.writingSessions.values()) session.images.dispose();
+    this.writingSessions.clear();
+    window.removeEventListener("beforeunload", this.warnUnsavedImages);
+    this.outline.dispose();
+    this.generation++;
+    this.searchGeneration++;
+    this.unbindKeys();
+  }
   async open(reference: string, reload = false): Promise<void> {
     if (!reload && reference === this.selected && this.detail.querySelector(".reader")) return;
     if (!(await this.beforeLeave()) || !this.active) return;
@@ -399,6 +431,66 @@ export class KnowledgePane {
     one.addEventListener("click", () => choose(1)); two.addEventListener("click", () => choose(2));
     void draw();
   }
+  private releaseWritingSession(session: NoteWritingSession): void {
+    const { saver, images, imageSave } = session;
+    if (this.writing === session || images.hasPending || imageSave || saver.saving || (saver.dirty && !saver.error)) return;
+    const id = saver.base.document.note.id!;
+    if (this.writingSessions.get(id) !== session) return;
+    images.dispose();
+    this.writingSessions.delete(id);
+  }
+
+  private updateImageUnloadGuard(): void {
+    if ([...this.writingSessions.values()].some(session => session.images.hasPending)) {
+      window.addEventListener("beforeunload", this.warnUnsavedImages);
+    } else {
+      window.removeEventListener("beforeunload", this.warnUnsavedImages);
+    }
+  }
+
+  private writingSession(id: string, doc: KnowledgeDocument): NoteWritingSession {
+    const existing = this.writingSessions.get(id);
+    if (existing) return existing;
+
+    const saver = new NoteSave(doc, this.client, () => {
+      this.persist(saver);
+      if (this.active && this.writing === session) this.renderSave();
+      else this.releaseWritingSession(session);
+    });
+    const recovery = this.store.claim(`note:${id}`);
+    this.recoveries.set(saver, recovery);
+    const draft = recovery.read<{ base: KnowledgeDocument; title: string; body: string; pending?: NoteSave["pending"] }>();
+    if (draft?.base?.document?.note?.id === id && typeof draft.title === "string" && typeof draft.body === "string") {
+      saver.base = draft.base;
+      saver.title = draft.title;
+      saver.body = draft.body;
+      saver.pending = draft.pending;
+    }
+    const images = new NoteImageQueue(
+      (file, signal) => this.client.uploadNoteImage(id, file, signal),
+      () => saver.body,
+      body => saver.change(saver.title, body),
+      () => {
+        const mounted = this.writing === session;
+        if (saver.error || (mounted && this.editor?.view.composing)) return;
+        if (mounted) clearTimeout(this.saveTimer);
+        const saving = saver.save();
+        session.imageSave = saving;
+        void saving.finally(() => {
+          if (session.imageSave === saving) session.imageSave = undefined;
+          this.releaseWritingSession(session);
+        });
+      },
+      () => {
+        this.releaseWritingSession(session);
+        this.updateImageUnloadGuard();
+      },
+    );
+    const session: NoteWritingSession = { saver, images };
+    this.writingSessions.set(id, session);
+    return session;
+  }
+
   private async enableEditing(note:NoteDetail):Promise<void>{
     const generation=this.generation;
     try{
@@ -419,16 +511,15 @@ export class KnowledgePane {
       });
       this.titleResize.observe(title);
       this.conflict=h("section",{class:"note-conflict",hidden:true});this.saveError=h("div",{class:"note-save-error"});this.saveStatus=h("div",{class:"note-save-status",role:"status"});
-      const saver=new NoteSave(doc,this.client,()=>{this.persist(saver);if(this.active&&generation===this.generation&&this.saver===saver)this.renderSave();});this.saver=saver;
-      const recovery=this.store.claim(`note:${note.note.id}`);this.recoveries.set(saver,recovery);
-      const draft=recovery.read<{base:KnowledgeDocument;title:string;body:string;pending?:NoteSave["pending"]}>();
-      if(draft&&draft.base?.document?.note?.id===note.note.id&&typeof draft.title==="string"&&typeof draft.body==="string"){
-        saver.base=draft.base;saver.title=draft.title;saver.body=draft.body;saver.pending=draft.pending;title.value=saver.title;
-      }
+      const session = this.writingSession(note.note.id!, doc);
+      this.writing = session;
+      const { saver } = session;
+      this.saver = saver;
+      title.value = saver.title;
       this.linksRevision=doc.revision;
       const context=()=>writingContext(title.value,this.editor?.value??doc.document.body,this.editor?.position??0);
       this.editor=new NoteEditor({value:saver.body, imageOrigins:this.imageOrigins, imageUpload:{
-        settings:()=>this.client.imageHostingSettings(), send:(file,signal)=>this.client.uploadNoteImage(note.note.id!,file,signal),
+        settings:()=>this.client.imageHostingSettings(), queue: session.images,
       },change:(text,position,composing)=>{this.saver!.change(title.value,text);clearTimeout(this.saveTimer);if(!composing&&!this.saver!.error)this.saveTimer=setTimeout(()=>void this.saver?.save(),800);this.recommend(writingContext(title.value,text,position));},context:()=>this.recommend(context()),
         referenceContext:position=>writingContext(title.value,this.editor!.value,position),references:(query,position)=>this.client.noteReferences({source_id:note.note.id!,query,context:writingContext(title.value,this.editor!.value,position)}),open:ref=>void this.open(this.resolveReference(ref)),embed:(id,label,edit)=>aiNoteCard(this.client,id,label,{open:target=>void this.open(target),edit}),save:()=>{clearTimeout(this.saveTimer);if(!this.saver?.error)void this.saver?.save();},outlineChanged:()=>this.outline.refresh()});
       const titleChanged = (composing: boolean) => {
@@ -480,6 +571,9 @@ export class KnowledgePane {
         consequences: [t("The file moves to the vault's .trash folder."), ...(incoming ? [t("{0} notes link to it; those links will show as missing until it is restored.", incoming)] : [])],
         run: async requestId => (await this.client.deleteNote(id, { request_id: requestId, expected_revision: doc.revision })).item,
         deleted: () => {
+          this.writingSessions.get(id)?.images.dispose();
+          this.writingSessions.delete(id);
+          this.updateImageUnloadGuard();
           if (this.active && (this.selected === id || this.selected === doc.document.note.path)) {
             this.generation++;
             this.clearWriter(); this.selected = undefined; markSelected(this.results, undefined); this.showPlaceholder();
