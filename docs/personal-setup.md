@@ -2,6 +2,10 @@
 
 这里记作者（Wenbin）自己的用法，供参考。软件本身不依赖其中任何一项（ADR 0022）。
 
+日常 Hub 已迁到 Mio。正式 vault 与它的 `.git` 在服务器的同一个目录，Mac 运行执行器和 Lumio Capture。更新方式见 [Mio 的 NixOS 部署](local-deployment.md#mio-的-nixos-部署)。
+
+## 迁移前的 Mac 单机配置
+
 - **单机模式**，Hub 在 MacBook 上，launchd 管理。
 - **vault 在 iCloud 里**：`~/Library/Mobile Documents/iCloud~md~obsidian/Documents/Lumio`，安装时用 `lumio hub setup --vault <这个路径>`。
   vault 的 git 目录在 iCloud 之外（`~/Projects/lumio-vault.git`）。

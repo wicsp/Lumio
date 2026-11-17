@@ -15,6 +15,14 @@ export function mioSsh(hostname?: string): string[] {
     ...(hostname ? ["-o", `HostName=${hostname}`] : []), "mio"];
 }
 
+export function exportCommit(directory: string, commit: string, destination: string) {
+  // git archive from a subdirectory otherwise exports only that subtree.
+  const root = run(["git", "rev-parse", "--show-toplevel"], { cwd: directory });
+  const archive = Bun.spawnSync(["git", "archive", commit], { cwd: root });
+  if (!archive.success) throw new Error("Could not export origin/main.");
+  run(["tar", "-xf", "-", "-C", destination], { stdin: archive.stdout });
+}
+
 export async function deployMio(desktop: boolean) {
   if (desktop && process.platform !== "darwin") throw new Error("Lumio Capture builds require macOS.");
   const ssh = mioSsh(process.env.LUMIO_MIO_SSH_HOSTNAME);
@@ -30,9 +38,7 @@ export async function deployMio(desktop: boolean) {
   const build = join(work, "source");
   try {
     run(["mkdir", build]);
-    const archive = Bun.spawnSync(["git", "archive", commit], { cwd: import.meta.dir });
-    if (!archive.success) throw new Error("Could not export origin/main.");
-    run(["tar", "-xf", "-", "-C", build], { stdin: archive.stdout });
+    exportCommit(import.meta.dir, commit, build);
     const { packageManager } = JSON.parse(readFileSync(join(build, "package.json"), "utf8"));
     if (packageManager !== `bun@${Bun.version}`) throw new Error(`Use ${packageManager} to deploy this commit.`);
     console.log(`Building ${version} from origin/main.`);

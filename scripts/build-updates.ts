@@ -40,7 +40,9 @@ export async function publishBuildUpdates(options: {
       const build = join(options.build, `update-${platform}`); await mkdir(build, { recursive: true, mode: 0o700 });
       await options.compile(platform, join(build, "lumio"));
       const file = `lumio-${platform}.tar.gz`;
-      await options.run(["tar", "-czf", join(stage, file), "-C", build, "lumio"]);
+      // macOS tar otherwise includes an AppleDouble ._lumio entry for extended
+      // attributes, which the Runtime rejects during its single-file check.
+      await options.run(["env", "COPYFILE_DISABLE=1", "tar", "--format=ustar", "-czf", join(stage, file), "-C", build, "lumio"]);
       const bytes = await readFile(join(stage, file));
       artifacts.push({ platform, file, size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") });
     }
