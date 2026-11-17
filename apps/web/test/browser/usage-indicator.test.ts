@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { AIConnection, AIQuotaView } from "@lumio/schema";
-import { timeLeftOf, usageGlance } from "../../src/client/usage-indicator.ts";
+import { balanceBar, timeLeftOf, usageGlance } from "../../src/client/usage-indicator.ts";
 
 const at = "2026-11-10T12:00:00+08:00";
 const connection = (kind: "codex-account" | "claude-code-subscription" | "deepseek", name: string, id: string) => AIConnection.parse({
@@ -32,7 +32,13 @@ describe("sidebar usage indicator", () => {
   test("API balances show the CNY total and become empty when calls are blocked", () => {
     const balances = [{ currency: "USD", total: "3.00", topped_up: "3.00", granted: "0" }, { currency: "CNY", total: "48.20", topped_up: "40.00", granted: "8.20" }] as const;
     expect(usageGlance(deepseek, view(deepseek.id, { snapshot: { source: "deepseek", sampled_at: at, available: true, balances: [...balances] } })))
-      .toMatchObject({ level: "ok", value: "¥48.20", bars: [], resets: [] });
+      .toMatchObject({ level: "ok", value: "¥48.20", bars: [100], resets: [undefined] });
+    const scaled = (CNY: string) => usageGlance(deepseek, view(deepseek.id, { settings: { monitor: true, thresholds: {}, full_balance: { CNY } },
+      snapshot: { source: "deepseek", sampled_at: at, available: true, balances: [...balances] } }))?.bars;
+    expect(scaled("20")).toEqual([100]);
+    expect(scaled("48.20")).toEqual([100]);
+    expect(scaled("100")).toEqual([48.2]);
+    expect(balanceBar("5", "0")).toBe(100);
     expect(usageGlance(deepseek, view(deepseek.id, { snapshot: { source: "deepseek", sampled_at: at, available: false, balances: [...balances] } }))?.level).toBe("empty");
   });
   test("unmonitored connections are hidden and broken sources show an issue", () => {

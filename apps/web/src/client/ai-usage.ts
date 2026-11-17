@@ -207,12 +207,16 @@ function settingsDialog(connection: AIConnection, usage: AIQuotaView, client: Cl
   const cny = field("CNY balance below", thresholds.CNY ?? "");
   const usd = field("USD balance below", thresholds.USD ?? "");
   const percent = field("Remaining quota below (%)", thresholds.remaining_percent?.toString() ?? "");
+  const fullCny = field("CNY monitoring threshold", usage.settings.full_balance?.CNY ?? "");
+  const fullUsd = field("USD monitoring threshold", usage.settings.full_balance?.USD ?? "");
   const message = h("div", { role: "status" });
   const form = h("form", { class: "form-stack" },
     isClaude && h("label", { class: "field" }, h("span", { class: "field-label" }, t("Claude Code usage source")), mode),
     h("label", { class: "field" }, h("span", { class: "field-label" }, monitor, " ", t("Enable monitoring"))),
     h("p", { class: "field-hint" }, t("Leave a threshold blank to skip that alert. Enable AI usage alerts in your device’s notification settings.")),
-    ...(connection.kind === "deepseek" ? [cny.element, usd.element] : [percent.element]), message);
+    ...(connection.kind === "deepseek" ? [cny.element, usd.element, fullCny.element, fullUsd.element,
+      h("p", { class: "field-hint" }, t("The sidebar bar is full while the balance is at or above the monitoring threshold, and shrinks in proportion below it. Leave it blank to keep the bar full."))]
+      : [percent.element]), message);
   const save = h("button", { type: "button", class: "btn btn-primary", onclick: () => form.requestSubmit() }, t("Save"));
   const dialog = openDialog(t("Monitoring settings"), form, [save]);
   form.onsubmit = async event => {
@@ -220,7 +224,9 @@ function settingsDialog(connection: AIConnection, usage: AIQuotaView, client: Cl
     const remaining = percent.input.value.trim();
     const settings = AIQuotaSettings.safeParse({ monitor: monitor.checked, claude_mode: isClaude ? mode.value : undefined, thresholds: connection.kind === "deepseek"
       ? { CNY: cny.input.value.trim() || undefined, USD: usd.input.value.trim() || undefined }
-      : { remaining_percent: remaining ? (/^\d+(\.\d+)?$/.test(remaining) ? Number(remaining) : NaN) : undefined } });
+      : { remaining_percent: remaining ? (/^\d+(\.\d+)?$/.test(remaining) ? Number(remaining) : NaN) : undefined },
+      full_balance: connection.kind === "deepseek" && (fullCny.input.value.trim() || fullUsd.input.value.trim())
+        ? { CNY: fullCny.input.value.trim() || undefined, USD: fullUsd.input.value.trim() || undefined } : undefined });
     if (!settings.success) { clear(message, failure(t("Enter a valid balance or a percentage between 0 and 100."))); return; }
     save.disabled = true;
     try {

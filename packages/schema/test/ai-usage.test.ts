@@ -21,6 +21,9 @@ test("quota contracts preserve decimal amounts, validate ranges, and allow old n
   expect(AIQuotaSnapshot.safeParse({ ...balance, balances: [amount, amount] }).success).toBe(false);
   expect(AIQuotaSettings.safeParse({ monitor: true, thresholds: { CNY: "-1" } }).success).toBe(false);
   expect(AIQuotaSettings.safeParse({ monitor: true, thresholds: { remaining_percent: 100.1 } }).success).toBe(false);
+  expect(AIQuotaSettings.safeParse({ monitor: true, thresholds: {}, full_balance: { CNY: "10", USD: "2.5" } }).success).toBe(true);
+  expect(AIQuotaSettings.safeParse({ monitor: true, thresholds: {}, full_balance: { CNY: "-1" } }).success).toBe(false);
+  expect(AIQuotaSettings.safeParse({ monitor: true, thresholds: {}, full_balance: { CNY: "ten" } }).success).toBe(false);
   expect(NativeRuntimeMessage.safeParse({ type: "hello", protocol: 1, instance: "old", version: "1", isolation: "macos-seatbelt" }).success).toBe(true);
 });
 

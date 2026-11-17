@@ -1,6 +1,6 @@
 /**
  * 侧栏 AI 用量指示器：在侧栏底部、账号上方，每个开启监控的连接一行。
- * 订阅额度显示各窗口中最少的剩余百分比，细条依次是从短到长的窗口；API 余额显示余额。
+ * 订阅额度显示各窗口中最少的剩余百分比，细条依次是从短到长的窗口；API 余额显示余额，细条按监控阈值折算（ADR 0071）。
  * 每条细条上有一根竖线，表示离该窗口重置还剩的时间占比：亮条越过竖线说明额度撑得到重置，没到说明会提前用完。
  * 平时是灰色，低于监控阈值变黄，用完变红。收起侧栏时每个连接仍各占一行，只是去掉名称和数值、细条缩到栏宽，
  * 竖线照常画；鼠标移上去立即浮出与展开状态相同的完整列表。
@@ -40,6 +40,13 @@ export function timeLeftOf(window: AIQuotaWindow, now = Date.now()): number | un
   return Number.isFinite(left) ? Math.min(100, Math.max(0, left * 100)) : undefined;
 }
 
+/** API 余额细条长度（ADR 0071）：余额不低于监控阈值时满格，低于时按比例；没设监控阈值时满格。 */
+export function balanceBar(total: string, scale?: string): number {
+  const value = Number(total), full = Number(scale);
+  if (!scale || !(full > 0)) return 100;
+  return Math.min(100, Math.max(0, (value / full) * 100));
+}
+
 export function usageGlance(connection: AIConnection, usage: AIQuotaView, now = Date.now()): UsageGlance | undefined {
   if (!usage.settings.monitor || usage.aliyun_billing_configured !== undefined) return undefined;
   const base = { connection: connection.id, name: connection.name };
@@ -48,7 +55,9 @@ export function usageGlance(connection: AIConnection, usage: AIQuotaView, now = 
   if (snapshot.source === "deepseek") {
     const balance = snapshot.balances.find(b => b.currency === "CNY") ?? snapshot.balances[0];
     const level: UsageLevel = !snapshot.available ? "empty" : usage.attention ? "low" : "ok";
-    return { ...base, level, bars: [], resets: [], value: balance ? amount(balance.currency, balance.total) : "—" };
+    if (!balance) return { ...base, level, bars: [], resets: [], value: "—" };
+    return { ...base, level, bars: [balanceBar(balance.total, usage.settings.full_balance?.[balance.currency])], resets: [undefined],
+      value: amount(balance.currency, balance.total) };
   }
   if (!("windows" in snapshot)) return undefined;
   const windows = snapshot.windows.filter(window => window.used_percent !== undefined)

@@ -211,6 +211,13 @@ test("enabled DeepSeek monitoring persists alert deduplication and alerts again 
     f.advance(60_000);
     expect((await refresh()).attention).toBe(true);
     expect(f.notices()).toHaveLength(1);
+    // 只改监控阈值（ADR 0071）不重置提醒去重，原样保存并返回
+    const scaled = await parseView(await f.request(path(connection.id, "settings"), "PUT",
+      { monitor: true, thresholds: { CNY: "10" }, full_balance: { CNY: "20" } }));
+    expect(scaled.settings.full_balance).toEqual({ CNY: "20" });
+    f.advance(60_000);
+    await refresh();
+    expect(f.notices()).toHaveLength(1);
     total = "10.00";
     f.advance(1000);
     expect((await refresh()).attention).toBe(false);
@@ -237,6 +244,8 @@ test("Claude samples are owner- and Runtime-bound, reject old generations, and n
     expect(ClaudeQuotaBindings.parse(await (await f.request(report, "GET", undefined, other.token)).json())).toEqual([]);
     expect(ClaudeQuotaBindings.parse(await (await f.request(report, "GET", undefined, runtime.token)).json())).toEqual([binding]);
     const settings = { monitor: true, thresholds: { remaining_percent: 10 } };
+    // 监控阈值只用于 API 余额
+    expect((await f.request(path(connection.id, "settings"), "PUT", { ...settings, full_balance: { CNY: "10" } })).status).toBe(400);
     await parseView(await f.request(path(connection.id, "settings"), "PUT", settings));
     const sample = ClaudeQuotaSample.parse({ ...binding, sampled_at: f.now().toISOString(),
       windows: [{ id: "five_hour", minutes: 300, used_percent: 95, resets_at: "2026-11-10T01:01:00Z" }] });

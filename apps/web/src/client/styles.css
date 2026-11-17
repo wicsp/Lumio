@@ -244,7 +244,7 @@ kbd { padding: 0 5px; border: 1px solid var(--line); border-bottom-width: 2px; b
 .usage-row[data-level="low"] .usage-track > i { background: var(--ochre); }
 .usage-row[data-level="empty"] { color: var(--red); }
 .usage-row[data-level="empty"] .usage-track > i { background: var(--red); }
-/* 没有百分比可画（API 余额、读不到）时画一条虚线细条，保持每行都是条。 */
+/* 读不到读数（没配置好）时画一条虚线细条，保持每行都是条。 */
 .usage-bar-dashed .usage-track { --dash: var(--ink-4); background: repeating-linear-gradient(90deg, var(--dash) 0 4px, transparent 4px 7px); opacity: .7; }
 .usage-row[data-level="low"] .usage-bar-dashed .usage-track { --dash: var(--ochre); opacity: 1; }
 .usage-row[data-level="empty"] .usage-bar-dashed .usage-track { --dash: var(--red); opacity: 1; }
@@ -258,7 +258,7 @@ kbd { padding: 0 5px; border: 1px solid var(--line); border-bottom-width: 2px; b
 .usage-pop .ai-quota-window { margin: 0; }
 .usage-pop .button-row { margin-top: 2px; }
 @media (min-width: 861px) {
-  /* 收起：每个连接仍占一行，去掉名称和数值，细条缩到栏宽、竖线照常；无百分比的连接画虚线细条。 */
+  /* 收起：每个连接仍占一行，去掉名称和数值，细条缩到栏宽、竖线照常；读不到读数的连接画虚线细条。 */
   .sidebar-collapsed .sidebar .usage-glance { border-top-color: transparent; }
   .sidebar-collapsed .sidebar .usage-row { height: 16px; padding: 0 5px; gap: 0; }
   .sidebar-collapsed .sidebar .usage-row :is(.usage-name, .usage-value) { display: none; }
