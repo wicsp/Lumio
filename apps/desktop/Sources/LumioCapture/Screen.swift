@@ -80,25 +80,16 @@ struct ScreenCapture {
 
     private static func browserURL(_ bundle: String?, windowTitle: String?, focusedWindow: AXUIElement?) async throws -> URL? {
         let script: String
-        switch bundle {
-        case "com.apple.Safari":
+        if bundle == "com.apple.Safari" {
             let description: String? = focusedWindow.flatMap { attribute($0, kAXDescriptionAttribute) }
             let identifiers = [windowTitle, description].compactMap { $0 }.joined(separator: " ").lowercased()
             if ["private browsing", "无痕浏览", "隐私浏览"].contains(where: identifiers.contains) {
                 throw CaptureFailure("这个隐私窗口不截取")
             }
             script = #"tell application id "com.apple.Safari" to return URL of current tab of front window"#
-        case "com.google.Chrome", "com.microsoft.edgemac", "company.thebrowser.Browser":
-            guard let bundle else { return nil }
-            script = """
-                tell application id "\(bundle)"
-                    try
-                        if mode of front window is "incognito" then return "__private__"
-                    end try
-                    return URL of active tab of front window
-                end tell
-                """
-        default: return nil
+        } else {
+            guard let chromiumScript = chromiumTabScript(bundle) else { return nil }
+            script = chromiumScript
         }
         let raw = await Task.detached(priority: .userInitiated) { () -> String? in
             var error: NSDictionary?

@@ -22,7 +22,8 @@ set `LUMIO_UPDATE_DESKTOP_FIXTURES=1` when running `swift test` and run
    pairing code. Loopback HTTP is supported for the local instance. Remote origins
    use HTTPS. The token is stored in Keychain and **断开** removes it.
 3. Open **权限检查** and grant Screen Recording, Accessibility and Input Monitoring.
-   Allow browser Automation when macOS prompts to read a tab URL. Restart the
+   Allow browser Automation when macOS prompts to read the active tab URL in
+   Safari, Chrome, Edge, Arc or ego lite. Restart the
    helper if System Settings requests it.
 4. Point to a paragraph and tap **F18**. **触发键…** can learn another ordinary key
    or mouse button 3, 4 or 5. **关闭声音** mutes feedback.
