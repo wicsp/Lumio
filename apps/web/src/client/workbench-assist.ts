@@ -53,6 +53,7 @@ const isWorkbenchSection = (section: Section): section is WorkbenchSection =>
  * 什么都没有时返回 undefined（不发 focus）。设置、回收站不在分区里，只发选中的文字。
  */
 export function buildFocus(input: FocusInput): FocusSnapshot | undefined {
+  if (input.section === "personal") return undefined;
   const ref = refOf(input.id, input.label);
   const primary = ref && { ...ref, ...(input.revision ? { revision: input.revision } : {}) };
   const section = isWorkbenchSection(input.section) ? input.section : undefined;

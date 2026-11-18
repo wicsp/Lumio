@@ -2,8 +2,8 @@
  * 浏览器会话（ADR 0026）：请求会话持有令牌；保存与恢复由 App 负责。登出或 401 时中止所有未完成请求。
  */
 import { ApiClientError, createClient } from "@lumio/api-client";
-import { ApiError } from "@lumio/schema";
-import type { AssistantConfigUpdate, AssistantConfigView, AssistantToolCall, SpeechBinding, SpeechBindingUpdate, SpeechVocabulary, SpeechVocabularyUpdate, WorkAttention } from "@lumio/schema";
+import { ApiError, PersonalChatResult, PersonalCommandResult, PersonalJournalCommand, PersonalJournalEntry, PersonalProposal, PersonalView } from "@lumio/schema";
+import type { AssistantConfigUpdate, AssistantConfigView, AssistantToolCall, SpeechBinding, SpeechBindingUpdate, SpeechVocabulary, SpeechVocabularyUpdate, WorkAttention, PersonalChatRequest, PersonalProposalDecision, PersonalTodoStatusCommand } from "@lumio/schema";
 import { acceptLanguage, t } from "./i18n.ts";
 
 /**
@@ -38,6 +38,11 @@ export interface HubExtras {
   assistantTools(conversation: string): Promise<AssistantToolCall[]>;
   saveAssistantConfig(update: AssistantConfigUpdate): Promise<AssistantConfigView>;
   clearAssistantConfig(): Promise<AssistantConfigView>;
+  personalView?(): Promise<ReturnType<typeof PersonalView.parse> | undefined>;
+  personalChat?(request: PersonalChatRequest): Promise<PersonalChatResult>;
+  personalDecide?(request: ReturnType<typeof PersonalProposalDecision.parse>): Promise<PersonalProposal>;
+  personalJournal?(request: ReturnType<typeof PersonalJournalCommand.parse>): Promise<PersonalJournalEntry>;
+  personalTodoStatus?(request: ReturnType<typeof PersonalTodoStatusCommand.parse>): Promise<ReturnType<typeof PersonalCommandResult.parse>>;
   /** 语音（ADR 0055）：旧 Hub 没有这些接口时 speechBindings 返回 []，界面不显示麦克风。 */
   speechBindings(): Promise<SpeechBinding[]>;
   saveSpeechBinding(update: SpeechBindingUpdate): Promise<SpeechBinding | null>;
@@ -69,10 +74,10 @@ export function createSession(token: string | undefined, onUnauthorized: () => v
     return { ok: body.ok === true, ...(typeof body.version === "string" ? { version: body.version } : {}) };
   };
   // 语音配置接口不在 api-client 的路由表里（ADR 0055）：直接用同一个 fetcher，错误按 ApiError 转成 ApiClientError。
-  const speechRequest = async <T>(path: "bindings" | "vocabulary", body?: unknown): Promise<T> => {
+  const jsonRequest = async <T>(path: string, method = "GET", body?: unknown): Promise<T> => {
     const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
     if (body !== undefined) headers["Content-Type"] = "application/json";
-    const response = await fetcher(`${apiBase()}/v2/speech/${path}`, { method: body === undefined ? "GET" : "PUT", headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    const response = await fetcher(`${apiBase()}${path}`, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     const data: unknown = await response.json().catch(() => undefined);
     if (!response.ok) {
       const parsed = ApiError.safeParse(data);
@@ -84,15 +89,23 @@ export function createSession(token: string | undefined, onUnauthorized: () => v
   const missing = (cause: unknown) => cause instanceof ApiClientError && cause.code === "NOT_FOUND";
   const hub: HubExtras = {
     ai:client,
+    personalView: () => jsonRequest("/v2/personal").then(PersonalView.parse).catch(cause => {
+      if (missing(cause)) return undefined;
+      throw cause;
+    }),
+    personalChat: request => jsonRequest("/v2/personal/chat", "POST", request).then(PersonalChatResult.parse),
+    personalDecide: request => jsonRequest("/v2/personal/decisions", "POST", request).then(PersonalProposal.parse),
+    personalJournal: request => jsonRequest("/v2/personal/journal", "POST", request).then(PersonalJournalEntry.parse),
+    personalTodoStatus: request => jsonRequest("/v2/personal/todo-status", "POST", request).then(PersonalCommandResult.parse),
     attention: () => client.workAttention().catch((cause: unknown) => { if (missing(cause)) return undefined; throw cause; }),
     assistantConfig: () => client.assistantConfig(),
     saveAssistantConfig: (update) => client.updateAssistantConfig(update),
     clearAssistantConfig: () => client.clearAssistantConfig(),
     assistantTools: (conversation) => client.assistantTools(conversation).catch((cause: unknown) => { if (missing(cause)) return []; throw cause; }),
-    speechBindings: () => speechRequest<SpeechBinding[]>("bindings").catch((cause: unknown) => { if (missing(cause)) return []; throw cause; }),
-    saveSpeechBinding: (update) => speechRequest<SpeechBinding | null>("bindings", update),
-    speechVocabulary: () => speechRequest<SpeechVocabulary>("vocabulary"),
-    saveSpeechVocabulary: (update) => speechRequest<SpeechVocabulary>("vocabulary", update),
+    speechBindings: () => jsonRequest<SpeechBinding[]>("/v2/speech/bindings").catch((cause: unknown) => { if (missing(cause)) return []; throw cause; }),
+    saveSpeechBinding: (update) => jsonRequest<SpeechBinding | null>("/v2/speech/bindings", "PUT", update),
+    speechVocabulary: () => jsonRequest<SpeechVocabulary>("/v2/speech/vocabulary"),
+    saveSpeechVocabulary: (update) => jsonRequest<SpeechVocabulary>("/v2/speech/vocabulary", "PUT", update),
   };
   return { client, health, hub, ...(token ? { token } : {}), signal: controller.signal, close: () => {closed=true;controller.abort();} };
 }

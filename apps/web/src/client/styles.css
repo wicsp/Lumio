@@ -1884,3 +1884,19 @@ body:has(.dock-launcher:not([hidden])) .pane:not([hidden]) .thread-dock:not([hid
   .attn-bar { padding: 6px 8px; gap: 6px 8px; }
   .attn-bar-meta { display: none; }
 }
+
+.personal-layout { max-width: 72rem; margin: 0 auto; padding: 1.25rem; }
+.personal-title, .personal-actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.personal-title { justify-content: space-between; }
+.personal-chat { margin-block: 1rem; }
+.personal-chat textarea { display: block; width: 100%; resize: vertical; margin-block: .375rem; }
+.personal-chat details { margin-block: .5rem; }
+.personal-chat label { font-weight: 600; }
+.personal-history { white-space: pre-wrap; overflow-wrap: anywhere; }
+.personal-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: 1rem; }
+.personal-card { min-width: 0; overflow-wrap: anywhere; }
+.personal-card ul { margin: 0; padding: 0; list-style: none; }
+.personal-card li { border-bottom: 1px solid var(--line); padding-block: .65rem; }
+.personal-card .personal-actions, .personal-card li > button { margin-block-start: .375rem; }
+.personal-journal-form { min-width: min(24rem, 75vw); }
+.personal-journal-form label, .personal-journal-form textarea { display: block; width: 100%; margin-block: .5rem; }

@@ -21,6 +21,11 @@ import { updateRuntime } from "./runtime-updates.ts";
 
 export const V2_ROUTES = [
   ...INBOX_ROUTES,
+  { operation: "personal.read", method: "GET", pattern: /^\/v2\/personal$/, path: "/v2/personal" },
+  { operation: "personal.command", method: "POST", pattern: /^\/v2\/personal\/chat$/, path: "/v2/personal/chat" },
+  { operation: "personal.command", method: "POST", pattern: /^\/v2\/personal\/decisions$/, path: "/v2/personal/decisions" },
+  { operation: "personal.command", method: "POST", pattern: /^\/v2\/personal\/todo-status$/, path: "/v2/personal/todo-status" },
+  { operation: "personal.command", method: "POST", pattern: /^\/v2\/personal\/journal$/, path: "/v2/personal/journal" },
   ...GLANCE_ROUTES,
   ...IMAGE_HOSTING_ROUTES,
   { operation: "security.review", method: "POST", pattern: /^\/v2\/security\/review$/, path: "/v2/security/review" },
@@ -93,6 +98,22 @@ export async function handleV2(request: Request, server: Pick<Bun.Server<undefin
   let audited = false;
   try {
     if (decision.result !== "allow") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] }, { reason: decision.result === "deny" ? decision.reason : msg("v2.approval_required") });
+    if (route.operation === "personal.read" || route.operation === "personal.command") {
+      const personal = modules.personal;
+      if (identity.actor.role !== "human" || !personal || personal.owner !== identity.actor.id) {
+        throw new HubError("NOT_FOUND", { key: "personal.unavailable", args: [] });
+      }
+      const response = (value: unknown) => Response.json(value, { headers: { "Cache-Control": "no-store" } });
+      if (route.path === "/v2/personal") return response(personal.view());
+      const body = await json(request);
+      if (route.path === "/v2/personal/chat") {
+        server.timeout(request, 130);
+        return response(await personal.chat(body, AbortSignal.any([request.signal, AbortSignal.timeout(120_000)])));
+      }
+      if (route.path === "/v2/personal/decisions") return response(personal.decide(body));
+      if (route.path === "/v2/personal/journal") return response(personal.journalCommand(body));
+      return response(personal.todoCommand(body));
+    }
     if (route.operation === "security.review") {
       if (identity.actor.role !== "human") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] });
       return await modules.securityReview(request);

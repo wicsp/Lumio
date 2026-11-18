@@ -329,8 +329,8 @@ async function startHubInstance(config: HubConfig, options: {
     modules.native.setPort(server.port!);
     modules.inbox.start();
     modules.glances.start(() => modules!.voiceIdeas.recoverPending());
-  } catch (cause) { modules?.stop(); await modules?.imageHosting?.stop(); await modules?.glances?.stop(); await modules?.inbox?.stop(); await modules?.trash?.stop(); await modules?.notices.stop(); await modules?.explorations.stop(); await modules?.notifications.stop(); await vaultWatch?.stop(); store.close(); throw cause; }
-  return { server, store, modules: modules!, async stop() { modules?.stop(); await modules?.native.stop(); await server.stop(true); await modules?.imageHosting?.stop(); await modules?.glances?.stop(); await modules?.inbox.stop(); await modules?.speech.drain(); await modules?.trash?.stop(); await modules?.notices.stop(); await modules?.explorations.stop(); await modules?.notifications.stop(); await modules?.artifacts.drain(); await vaultWatch?.stop(); store.close(); } };
+  } catch (cause) { modules?.stop(); await modules?.personal?.drain(); await modules?.imageHosting?.stop(); await modules?.glances?.stop(); await modules?.inbox?.stop(); await modules?.trash?.stop(); await modules?.notices.stop(); await modules?.explorations.stop(); await modules?.notifications.stop(); await vaultWatch?.stop(); store.close(); throw cause; }
+  return { server, store, modules: modules!, async stop() { modules?.stop(); await modules?.native.stop(); await server.stop(true); await modules?.personal?.drain(); await modules?.imageHosting?.stop(); await modules?.glances?.stop(); await modules?.inbox.stop(); await modules?.speech.drain(); await modules?.trash?.stop(); await modules?.notices.stop(); await modules?.explorations.stop(); await modules?.notifications.stop(); await modules?.artifacts.drain(); await vaultWatch?.stop(); store.close(); } };
 }
 
 /** One Hub or offline migration owns a state directory. OS locks disappear on crashes, without deleting lock files. */

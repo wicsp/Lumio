@@ -51,11 +51,13 @@
         "@lumio/execution": "workspace:*",
         "@lumio/foundation": "workspace:*",
         "@lumio/knowledge": "workspace:*",
+        "@lumio/personal": "workspace:*",
         "@lumio/platform": "workspace:*",
         "@lumio/schema": "workspace:*",
         "@lumio/storage": "workspace:*",
         "@lumio/work": "workspace:*",
         "@mozilla/readability": "^0.6.0",
+        "fast-xml-parser": "5.11.2",
         "jpeg-js": "0.4.4",
         "linkedom": "^0.18.15",
         "pngjs": "7.0.0",
@@ -140,6 +142,13 @@
         "yaml": "^2.9.1",
       },
     },
+    "packages/personal": {
+      "name": "@lumio/personal",
+      "version": "0.0.0",
+      "dependencies": {
+        "@lumio/schema": "workspace:*",
+      },
+    },
     "packages/platform": {
       "name": "@lumio/platform",
       "version": "0.0.0",
@@ -165,6 +174,7 @@
         "@lumio/execution": "workspace:*",
         "@lumio/foundation": "workspace:*",
         "@lumio/knowledge": "workspace:*",
+        "@lumio/personal": "workspace:*",
         "@lumio/schema": "workspace:*",
         "@lumio/work": "workspace:*",
       },
@@ -257,6 +267,8 @@
     "@lumio/knowledge": ["@lumio/knowledge@workspace:packages/knowledge"],
 
     "@lumio/mobile": ["@lumio/mobile@workspace:apps/mobile"],
+
+    "@lumio/personal": ["@lumio/personal@workspace:packages/personal"],
 
     "@lumio/platform": ["@lumio/platform@workspace:packages/platform"],
 

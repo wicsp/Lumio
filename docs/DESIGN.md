@@ -35,7 +35,7 @@ flowchart TD
   Editors[外部编辑器] --> MD
 ```
 
-四个业务模块互不导入实现。每个模块内部由业务用例组织规则，通过注入的存储/模型/工具端口使用外部能力；
+业务模块互不导入实现。每个模块内部由业务用例组织规则，通过注入的存储、模型或工具端口使用外部能力。
 Storage 实现持久化，Hub 完成组装和跨模块协调。共用一个 SQLite 文件是为本地事务服务，不表示各模块可以互读内部表。
 跨模块通过稳定 ID、ResourceRef 与公开接口协作，Work 与 Execution 的关联由 Hub 在同一事务内协调。
 
@@ -69,6 +69,7 @@ Foundation 提供 ID 和错误；Platform 提供终端、诊断、下载与升�
 | `packages/work` | 数据库项目/任务、依赖、讨论、输入快照、显式委派用例；不做 I/O | schema |
 | `packages/execution` | Job 生命周期、设备名称/能力/在线事实、取消与执行有效性、数据库 Routine 计划与历史输入、cron；不做 I/O | schema, foundation |
 | `packages/assistant` | 对话、上下文、Agent 循环、工具记录与恢复；通过接口调用模型 | schema |
+| `packages/personal` | 个人日历对账、待办状态日志和命令回执；不做 I/O（ADR 0080） | schema |
 | `packages/storage` | 各领域的 SQLite、知识文件与索引适配器 | schema 与业务包公开接口 |
 | `packages/foundation` | 稳定 ID 与带 code 的基础错误 | schema |
 | `packages/platform` | 终端、下载、升级回退、诊断与配对/Hub 检查；显示和版本由应用传入 | schema |
@@ -81,7 +82,7 @@ Foundation 提供 ID 和错误；Platform 提供终端、诊断、下载与升�
 | `apps/mobile` | 生成 iPhone 捕获快捷指令（收藏 / 问一问，扫码配对），human 客户端 | schema（只在测试中校验请求体） |
 | `apps/feishu-bot` 等 | 后续客户端 | api-client |
 
-依赖方向由 `bun run lint:deps` 强制：`packages` 不依赖 `apps`，`apps` 之间不互相依赖——唯一例外是 `apps/cli` 可以引用其他 app 的入口模块 `src/entry.ts`，hub、runtime、web 之间仍不互相引用（ADR 0027）；四个业务包不导入其他业务包实现或具体适配器，禁止文件/网络/SQLite/进程 I/O（ADR 0025）。
+依赖方向由 `bun run lint:deps` 强制。`packages` 不依赖 `apps`。`apps` 之间的唯一例外是 `apps/cli` 可引用其他 app 的 `src/entry.ts`（ADR 0027）。业务包不导入其他业务包实现或具体适配器，不进行文件、网络、SQLite 或进程 I/O（ADR 0025、0080）。
 
 ## 3. 存储权威与备份
 

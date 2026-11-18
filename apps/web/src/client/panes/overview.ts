@@ -20,6 +20,7 @@ import { locale, t } from "../i18n.ts";
 import { turnGroup, turnIcon, turnText } from "../turn.ts";
 import { isWorkProposal, proposalCard } from "../proposal-card.ts";
 import { jobActivityBadge } from "../job-activity.ts";
+import { personalSchedule } from "./personal.ts";
 import { LiveData, settled, type LiveSnapshot } from "../live-data.ts";
 
 const LIVE = ["queued", "assigned", "running"];
@@ -67,9 +68,13 @@ export class OverviewPane {
   /** maxAge：可以复用多新的共用快照（毫秒）；操作之后传 0 强制重读。 */
   private async load(maxAge = 0): Promise<void> {
     const generation = ++this.generation;
-    const [snapshot, projects] = await Promise.all([this.live.get(maxAge), Promise.allSettled([this.client.workProjects()]).then(([value]) => value)]);
+    const [snapshot, projects, personal] = await Promise.all([
+      this.live.get(maxAge),
+      Promise.allSettled([this.client.workProjects()]).then(([value]) => value),
+      this.hub.personalView?.().catch(() => undefined),
+    ]);
     if (!this.active || generation !== this.generation) return;
-    const signature = JSON.stringify([snapshotKey(snapshot), projects, new Date().toDateString()]);
+    const signature = JSON.stringify([snapshotKey(snapshot), projects, personal?.events, personal?.todos, personal?.sync_ok, new Date().toDateString()]);
     if (signature === this.signature) return;
     this.signature = signature;
     const { tasks, jobs, proposals: approvals, attention, notices, jobAttention: liveAttention } = snapshot;
@@ -98,6 +103,14 @@ export class OverviewPane {
       agentsWorking.length ? t(agentsWorking.length === 1 ? "{0} task with agents" : "{0} tasks with agents", agentsWorking.length) : "",
     ].filter(Boolean) : [];
 
+    const personalToday = personal ? new Intl.DateTimeFormat("sv-SE", { timeZone: personal.timezone, dateStyle: "short" }).format(now) : "";
+    const dateOf = (value: string, zone: string) =>
+      new Intl.DateTimeFormat("sv-SE", { timeZone: zone, dateStyle: "short" }).format(new Date(value));
+    const personalEvents = personal?.events.filter(({ schedule }) => schedule.kind === "all_day"
+      ? schedule.start <= personalToday && personalToday < schedule.end
+      : dateOf(schedule.start, personal.timezone) <= personalToday && personalToday <= dateOf(new Date(Date.parse(schedule.end) - 1).toISOString(), personal.timezone)) ?? [];
+    const personalTodos = personal?.todos.filter(todo => todo.status === "open" && (!todo.due ||
+      (todo.due.kind === "date" ? todo.due.date : dateOf(todo.due.at, personal.timezone)) <= personalToday)) ?? [];
     clear(this.body,
       this.header(parts.join(t(" · "))),
       this.ask(),
@@ -111,6 +124,13 @@ export class OverviewPane {
           agentsWorking.length ? this.section("active", t("Agents working"), agentsWorking.length, () => this.navigate("work", "tasks"), this.taskList(agentsWorking, projectData, "")) : null,
           waiting.length ? this.section("waiting", t("Waiting on others"), waiting.length, () => this.navigate("work", "tasks"), this.taskList(waiting, projectData, "")) : null),
         h("div", { class: "today-col today-side" },
+          personal ? this.section("personal", t("Personal"), personalEvents.length + personalTodos.length, () => this.navigate("personal"),
+            h("div", { "data-private-personal": "true" },
+              !personal.sync_ok ? h("p", { class: "muted" }, t("Calendar sync is pending or unavailable.")) : null,
+              ...personalEvents.slice(0, 5).map(item => h("div", { class: "today-row" }, icon("calendar"),
+                h("span", { class: "row-main" }, item.title, h("span", { class: "row-sub" }, personalSchedule(item.schedule))))),
+              ...personalTodos.slice(0, 5).map(item => h("div", { class: "today-row" }, icon("check"), h("span", { class: "row-main" }, item.title))),
+              !personalEvents.length && !personalTodos.length ? h("p", { class: "muted" }, t("Nothing to show.")) : null)) : null,
           this.section("runs", t("Agent activity"), running.length, () => this.navigate("execution"),
             jobs.status === "rejected" ? failure(errorText(jobs.reason)) : this.runs(jobData ?? [], taskData ?? [])),
           this.section("projects", t("Projects"), projectData.filter(p => p.status !== "done").length, () => this.navigate("work", "projects"),

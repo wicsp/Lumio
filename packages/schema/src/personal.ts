@@ -193,6 +193,48 @@ export const PersonalCommandResult = z.discriminatedUnion("status", [
   z.strictObject({ status: z.literal("unverified"), request_id: RequestId }),
 ]);
 
+export const PersonalProposal = z.strictObject({
+  id: idOf("prop"),
+  operation: PersonalCommandProposal,
+  created: Timestamp,
+  expires_at: Timestamp,
+  status: z.enum(["pending", "approved", "rejected", "expired"]),
+  result: PersonalCommandResult.optional(),
+});
+export const PersonalProposalDecision = z.strictObject({
+  proposal: idOf("prop"),
+  decision: z.enum(["approve", "reject"]),
+});
+export const PersonalChatRequest = z.strictObject({
+  request_id: RequestId,
+  message: z.string().trim().min(1).max(12000),
+  journal_range: DateRange.optional(),
+  profile: idOf("aip").optional(),
+  previous_request_id: RequestId.optional(),
+});
+export const PersonalChatResult = z.strictObject({
+  reply: z.string(),
+  proposals: z.array(PersonalProposal),
+});
+export const PersonalJournalCommand = z.strictObject({
+  request_id: RequestId,
+  operation: z.discriminatedUnion("kind", [
+    PersonalJournalCreateArgs.extend({ kind: z.literal("entry") }),
+    z.strictObject({ kind: z.literal("correction"), corrects: idOf("jrn"), occurred: PersonalDateTime, content: JournalFields.content }),
+    z.strictObject({ kind: z.literal("retraction"), retracts: idOf("jrn"), content: JournalFields.content }),
+  ]),
+});
+
+export const PersonalView = z.strictObject({
+  timezone: TimeZone,
+  model_ready: z.boolean(),
+  events: z.array(PersonalEvent),
+  todos: z.array(PersonalTodo),
+  journal: z.array(PersonalJournalEntry),
+  proposals: z.array(PersonalProposal),
+  sync_ok: z.boolean(),
+});
+
 export type PersonalDateTime = z.infer<typeof PersonalDateTime>;
 export type PersonalEvent = z.infer<typeof PersonalEvent>;
 export type PersonalTodo = z.infer<typeof PersonalTodo>;
@@ -201,3 +243,6 @@ export type PersonalCommand = z.infer<typeof PersonalCommand>;
 export type PersonalTodoStatusCommand = z.infer<typeof PersonalTodoStatusCommand>;
 export type PersonalCommandProposal = z.infer<typeof PersonalCommandProposal>;
 export type PersonalCommandResult = z.infer<typeof PersonalCommandResult>;
+export type PersonalProposal = z.infer<typeof PersonalProposal>;
+export type PersonalChatRequest = z.infer<typeof PersonalChatRequest>;
+export type PersonalChatResult = z.infer<typeof PersonalChatResult>;

@@ -16,6 +16,7 @@
     "@lumio/assistant": "workspace:*",
     "@lumio/foundation": "workspace:*",
     "@lumio/knowledge": "workspace:*",
+    "@lumio/personal": "workspace:*",
     "@lumio/execution": "workspace:*"
   }
 }
