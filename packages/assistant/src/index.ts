@@ -61,6 +61,8 @@ export interface AssistantTool {
   spec: AssistantToolSpec;
   capability?: string;
   effect: "read" | "write";
+  /** Private source excerpts can be used by the current model turn without persisting them. */
+  transient?: true;
   execute(args: Record<string, unknown>, context: { actor: string; owner: string; request: string; record?: (metadata: Pick<AssistantToolCall, "capability" | "change" | "private_read">) => void; signal?: AbortSignal }): Promise<unknown>;
 }
 export interface AssistantContext {
@@ -79,6 +81,7 @@ export interface AssistantContext {
       focus?: FocusSnapshot;
       data?: Record<string, unknown>;
       tool?: AssistantTool;
+      readTool?: AssistantTool;
       image?: { file: string; sha256: string; load(signal: AbortSignal): Promise<readonly string[] | undefined> };
     };
   };
@@ -432,8 +435,8 @@ export class AssistantService {
         }
       }
       const messages = resolution ? this.history([turn.user]) : this.history(records);
-      const tools = rewrite ? [] : state.idea && !this.context.allowVoiceActions ? this.tools.filter(tool => tool.effect === "read")
-        : glance?.tool ? [...this.tools, glance.tool] : this.tools;
+      const turnTools = [...this.tools, ...(glance?.tool ? [glance.tool] : []), ...(glance?.readTool ? [glance.readTool] : [])];
+      const tools = rewrite ? [] : state.idea && !this.context.allowVoiceActions ? turnTools.filter(tool => tool.effect === "read") : turnTools;
       const maximum = this.context.maxSteps ?? 12;
       for (let step = 0; step < maximum; step++) {
         signal.throwIfAborted();
@@ -556,19 +559,21 @@ export class AssistantService {
         if (response.tool_calls.length > 16) throw new AssistantError("INVALID", { key: "index.too_many_tool_calls_requested_in_this_turn", args: [] });
         const calls = response.tool_calls.map((call) => AssistantToolCall.parse({ id: this.context.id("tool"), turn: state.id,
           name: call.name, args: call.args, capability: tools.find(tool => tool.spec.name === call.name)?.capability, status: "prepared", created: this.time() }));
-        this.store.transaction(() => { for (const call of calls) this.store.putCall(call); });
+        const recorded = (call: AssistantToolCall): AssistantToolCall => tools.some(tool => tool.spec.name === call.name && tool.transient)
+          ? { ...call, args: {}, result: undefined } : call;
+        this.store.transaction(() => { for (const call of calls) this.store.putCall(recorded(call)); });
         messages.push({ role: "assistant", content: response.content,continuation:response.continuation, tool_calls: calls.map((call) => ({ id: call.id, name: call.name, args: call.args })) });
         for (let call of calls) {
           signal.throwIfAborted();
           const tool = tools.find((value) => value.spec.name === call.name);
-          call = { ...call, status: "running" }; this.store.putCall(call); emit({ type: "tool", turn: state.id, tool: call });
+          call = { ...call, status: "running" }; this.store.putCall(recorded(call)); emit({ type: "tool", turn: state.id, tool: recorded(call) });
           let result: unknown;
           try {
             if (!tool) throw new AssistantError("INVALID", { key: "index.this_tool_is_not_provided", args: [] });
             if (!this.toolActor) throw new AssistantError("INVALID", { key: "index.assistant_tool_identity_is_not_configured", args: [] });
-            result = await tool.execute(call.args, { actor: this.toolActor.id, owner, request: call.id, record: metadata => { if (!cancellation.signal.aborted) { call = { ...call, ...metadata }; this.store.putCall(call); } }, signal });
+            result = await tool.execute(call.args, { actor: this.toolActor.id, owner, request: call.id, record: metadata => { if (!cancellation.signal.aborted) { call = { ...call, ...metadata }; this.store.putCall(recorded(call)); } }, signal });
             cancellation.signal.throwIfAborted();
-            if (workbench?.expandReadResult && tool.effect === "read") {
+            if (workbench?.expandReadResult && tool.effect === "read" && !tool.transient) {
               result = await workbench.expandReadResult(tool.spec.name, call.args, result, this.toolActor.id, signal, scope);
               cancellation.signal.throwIfAborted();
             }
@@ -602,13 +607,13 @@ export class AssistantService {
           }
           const content = JSON.stringify(result);
           this.store.transaction(() => {
-            this.store.putCall(call);
+            this.store.putCall(recorded(call));
             const toolMessage = AssistantMessage.parse({ id: this.context.id("amsg"), conversation: state.conversation,
-              turn: state.id, role: "tool", tool_call: call.id, content, created: this.time() });
+              turn: state.id, role: "tool", tool_call: call.id, content: tool?.transient ? '{"transient":true}' : content, created: this.time() });
             this.store.putMessage(toolMessage);
             if (anchors.length) this.store.putMessageAnchors(toolMessage.id, anchors);
           });
-          messages.push({ role: "tool", tool_call_id: call.id, content }); emit({ type: "tool", turn: state.id, tool: call });
+          messages.push({ role: "tool", tool_call_id: call.id, content }); emit({ type: "tool", turn: state.id, tool: recorded(call) });
         }
       }
       throw new AssistantError("CONFLICT", { key: "index.tool_call_limit_reached_for_this_turn_split_the_request_and_continue", args: [] });

@@ -58,10 +58,16 @@ final class CaptureTests: XCTestCase {
                                    ocr: [OCRBlock(text: "合成段落", box: PixelBox(x: 10, y: 20, w: 100, h: 60), confidence: 0.95)])
         let save = CaptureRequest(glance: "gln_\(id)", requestID: request)
         let chat = ChatRequest(conversation: "conv_\(id)", message: "Explain the highlighted text.", glance: "gln_\(id)", requestID: request)
+        let pageContent = Data(#"{"url":"https://example.com/paper","format":"html","title":"Fixture page","body":"<main>Fixture browser text</main>"}"#.utf8)
+        let page = try JSONDecoder().decode(BrowserPage.self, from: pageContent)
+        XCTAssertTrue(page.isValid)
+        var withPage = glance
+        withPage.page = page.metadata
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         for (file, data) in [
             ("glance-create.tap.json", try encoder.encode(glance)),
+            ("glance-create.browser.json", try encoder.encode(withPage)),
             ("capture-create.tap.json", try encoder.encode(save)),
             ("assistant-chat-request.hold.json", try encoder.encode(chat)),
         ] {
@@ -78,5 +84,9 @@ final class CaptureTests: XCTestCase {
         XCTAssertTrue(text.contains("name=\"meta\""))
         XCTAssertTrue(text.contains("name=\"image\"; filename=\"window.jpeg\""))
         XCTAssertTrue(text.hasSuffix("\r\nJPEG\r\n--synthetic--\r\n"))
+        let combined = String(decoding: try withPage.multipart(boundary: "synthetic", screenshot: Data("JPEG".utf8), pageContent: page.body), as: UTF8.self)
+        XCTAssertTrue(combined.contains("name=\"image\""))
+        XCTAssertTrue(combined.contains("name=\"page\"; filename=\"page\""))
+        XCTAssertTrue(combined.contains("<main>Fixture browser text</main>"))
     }
 }

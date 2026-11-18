@@ -15,27 +15,31 @@ enum CredentialStore {
         kSecAttrAccount as String: "hub",
     ]
 
-    static func read() -> String? {
+    static func read(account name: String = "hub") -> String? {
         var result: CFTypeRef?
         var query = account
+        query[kSecAttrAccount as String] = name
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess, let data = result as? Data else { return nil }
         return String(data: data, encoding: .utf8)
     }
 
-    static func write(_ token: String) throws {
+    static func write(_ token: String, account name: String = "hub") throws {
         let data = Data(token.utf8)
         var query = account
+        query[kSecAttrAccount as String] = name
         query[kSecValueData as String] = data
         query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         let added = SecItemAdd(query as CFDictionary, nil)
-        let status = added == errSecDuplicateItem ? SecItemUpdate(account as CFDictionary, [kSecValueData as String: data] as CFDictionary) : added
+        let match = account.merging([kSecAttrAccount as String: name]) { _, value in value }
+        let status = added == errSecDuplicateItem ? SecItemUpdate(match as CFDictionary, [kSecValueData as String: data] as CFDictionary) : added
         guard status == errSecSuccess else { throw CaptureFailure("无法写入钥匙串（\(status)）") }
     }
 
-    static func remove() throws {
-        let status = SecItemDelete(account as CFDictionary)
+    static func remove(account name: String = "hub") throws {
+        let match = account.merging([kSecAttrAccount as String: name]) { _, value in value }
+        let status = SecItemDelete(match as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else { throw CaptureFailure("无法清除钥匙串凭据（\(status)）") }
     }
 }
@@ -57,7 +61,10 @@ struct Hub {
     }
     private struct CaptureResult: Decodable {
         struct Capture: Decodable {
+            let id: String
             let title: String?
+            let state: String
+            let error: ErrorResponse.Detail?
         }
         let capture: Capture
     }
@@ -114,17 +121,29 @@ struct Hub {
         return try JSONDecoder().decode(Join.self, from: data).token
     }
 
-    func upload(_ meta: GlanceRequest, image: Data?) async throws -> Glance {
+    func upload(_ meta: GlanceRequest, image: Data?, page: BrowserPage? = nil) async throws -> Glance {
         let boundary = "Lumio-\(UUID())"
-        let body = try meta.multipart(boundary: boundary, screenshot: image)
+        var meta = meta
+        meta.page = page?.metadata
+        let body = try meta.multipart(boundary: boundary, screenshot: image, pageContent: page?.body)
         let data = try await send(request("v2/glances", method: "POST", body: body, contentType: "multipart/form-data; boundary=\(boundary)"))
         return try JSONDecoder().decode(Glance.self, from: data)
     }
 
-    func save(_ glance: Glance) async throws -> String {
+    func save(_ glance: Glance, waitForPage: Bool = false) async throws -> (title: String, ready: Bool) {
         let body = try JSONEncoder().encode(CaptureRequest(glance: glance.id))
         let data = try await send(request("v2/inbox/captures", method: "POST", body: body))
-        return try JSONDecoder().decode(CaptureResult.self, from: data).capture.title ?? "所见"
+        var capture = try JSONDecoder().decode(CaptureResult.self, from: data).capture
+        guard waitForPage else { return (capture.title ?? "所见", true) }
+        for _ in 0..<12 {
+            if capture.state == "ready" { return (capture.title ?? "所见", true) }
+            if capture.state == "failed" { throw CaptureFailure(capture.error?.message ?? "正文入库失败") }
+            try await Task.sleep(for: .milliseconds(250))
+            let status = try await send(request("v2/inbox/captures/\(capture.id)", method: "GET"))
+            capture = try JSONDecoder().decode(CaptureResult.Capture.self, from: status)
+        }
+        if capture.state == "failed" { throw CaptureFailure(capture.error?.message ?? "正文入库失败") }
+        return (capture.title ?? "所见", capture.state == "ready")
     }
 
     func mainConversation() async throws -> String {

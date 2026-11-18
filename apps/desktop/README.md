@@ -28,6 +28,10 @@ set `LUMIO_UPDATE_DESKTOP_FIXTURES=1` when running `swift test` and run
 4. Point to a paragraph and tap **F18**. **触发键…** can learn another ordinary key
    or mouse button 3, 4 or 5. **关闭声音** mutes feedback.
 
+For a loaded webpage, pair the current [Save to Lumio extension](../chrome-ext/README.md#f18-桌面捕获012-起)
+under **配对浏览器扩展…** and allow the site in the extension settings. Capture starts reading the page as it takes the window
+screenshot. The pop sound indicates the page text is ready to leave the tab. The usual save sound confirms Inbox processing.
+
 The built-in excluded bundle IDs are `com.1password.1password`,
 `com.agilebits.onepassword7`, `com.apple.keychainaccess`, `com.apple.Passwords`,
 `com.apple.systempreferences`, `com.bitwarden.desktop`,

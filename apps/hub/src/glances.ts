@@ -7,6 +7,7 @@ import { localHubUrl, type HubConfig } from "./config.ts";
 import { HubError } from "./errors.ts";
 import { checkGlanceImage, withPointer } from "./glance-image.ts";
 import { pointGlance, readingOrder } from "./glance-pointing.ts";
+import { extractPageContent } from "./inbox-extract.ts";
 import type { HubStore, Identity } from "./store.ts";
 import { assertNoteVisible } from "./trash.ts";
 
@@ -23,7 +24,8 @@ const conflict = () => new HubError("CONFLICT", { key: "glance.conflict", args: 
 const forbidden = () => new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] });
 const digest = (bytes: Buffer | string) => createHash("sha256").update(bytes).digest("hex");
 const noStore = { "Cache-Control": "no-store" };
-const maxMultipartBytes = GLANCE_LIMITS.max_image_bytes + 1024 * 1024;
+const maxMetaBytes = 1024 * 1024;
+const maxMultipartBytes = GLANCE_LIMITS.max_image_bytes + GLANCE_LIMITS.max_page_bytes + maxMetaBytes;
 const cleanupInterval = 60_000;
 
 interface GlanceRow { record: string; fingerprint: string }
@@ -117,7 +119,8 @@ export class Glances {
       const parsed = GlanceContextRetention.safeParse(requested);
       const wanted = parsed.success ? parsed.data : { text: [], image: false, source: false };
       // A recovered, already filtered pending record contains only verified excerpts.
-      const originals = [original.selection_text, original.pointing.text, windowText(original), ...(original.context_retention?.text ?? [])].filter((value): value is string => !!value);
+      const page = await this.pageText(original);
+      const originals = [original.selection_text, original.pointing.text, windowText(original), page, ...(original.context_retention?.text ?? [])].filter((value): value is string => !!value);
       const retained = [...new Set(wanted.text.filter(value => originals.some(source => source.includes(value))))];
       const keepImage = wanted.image && !!original.image && !original.image.purged;
       const source = wanted.source;
@@ -133,6 +136,7 @@ export class Glances {
           context_retention: { status: "pending", text: retained, image: keepImage, source },
         });
         if (!keepImage) { this.removeImage(next); next = this.get(id, owner); }
+        next = this.removePage(next);
         return this.save({ ...next, context_retention: { status: retained.length || keepImage || source ? "retained" : "discarded",
           text: retained, image: keepImage, source, enrichment_pending: true, finalized: this.now().toISOString() } });
       })();
@@ -169,17 +173,28 @@ export class Glances {
     const owner = identity.actor.id;
     if (request.method === "POST") {
       const form = await multipart(request);
-      const meta = form.get("meta"), part = form.get("image");
-      if (form.getAll("meta").length !== 1 || form.getAll("image").length > 1 || [...form.keys()].some(key => key !== "meta" && key !== "image")) throw invalid();
+      const meta = form.get("meta"), part = form.get("image"), page = form.get("page");
+      if (form.getAll("meta").length !== 1 || form.getAll("image").length > 1 || form.getAll("page").length > 1 ||
+        [...form.keys()].some(key => !["meta", "image", "page"].includes(key))) throw invalid();
       if (typeof meta !== "string" && !(meta instanceof File)) throw invalid();
+      if ((typeof meta === "string" ? Buffer.byteLength(meta) : meta.size) > maxMetaBytes) throw invalid();
       const raw = typeof meta === "string" ? meta : await meta.text();
       let value: unknown;
       try { value = JSON.parse(raw); } catch { throw invalid(); }
       const parsed = GlanceCreate.safeParse(value);
-      if (!parsed.success || (!!parsed.data.image !== !!part) || (part !== null && !(part instanceof File))) throw invalid();
+      if (!parsed.success || (!!parsed.data.image !== !!part) || (part !== null && !(part instanceof File)) ||
+        (!!parsed.data.page !== !!page) || (page !== null && (!(page instanceof File) || page.size > GLANCE_LIMITS.max_page_bytes))) throw invalid();
       const bytes = part ? Buffer.from(await part.arrayBuffer()) : undefined;
       if (bytes && !checkGlanceImage(bytes, parsed.data.image!)) throw invalid("glance.invalid_image");
-      const glance = await this.exclusive(() => this.create(owner, parsed.data, bytes));
+      let pageBody: { text: string; hash: string } | undefined;
+      if (page) {
+        const rawPage = Buffer.from(await page.arrayBuffer());
+        let text: string;
+        try { text = new TextDecoder("utf-8", { fatal: true }).decode(rawPage); } catch { throw invalid(); }
+        if (!text.trim() || text.length > GLANCE_LIMITS.max_page_chars) throw invalid();
+        pageBody = { text, hash: digest(rawPage) };
+      }
+      const glance = await this.exclusive(() => this.create(owner, parsed.data, bytes, pageBody));
       this.store.audit(identity, "glance.create", "allow", undefined, "applied");
       return Response.json(glance, { headers: noStore });
     }
@@ -189,6 +204,7 @@ export class Glances {
         if (glance.used_by.capture || glance.used_by.message) throw conflict();
         this.store.db.transaction(() => {
           if (glance.image && !glance.image.purged) this.files.removeCaptureFile(glance.image.file);
+          this.removePage(glance);
           this.store.db.query("DELETE FROM hub_glances WHERE id=?").run(glance.id);
         })();
         await this.files.sweepCaptureFiles().catch(() => {});
@@ -208,13 +224,14 @@ export class Glances {
     }
   }
 
-  private async create(owner: string, input: GlanceCreate, bytes?: Buffer): Promise<Glance> {
-    const { request_id, image, ...fields } = input;
+  private async create(owner: string, input: GlanceCreate, bytes?: Buffer, pageBody?: { text: string; hash: string }): Promise<Glance> {
+    const { request_id, image, page, ...fields } = input;
     const sha = bytes && digest(bytes);
-    const fingerprint = digest(JSON.stringify([input, sha]));
+    const fingerprint = digest(JSON.stringify(pageBody ? [input, sha, pageBody.hash] : [input, sha]));
     const prior = this.store.db.query<GlanceRow, [string, string]>("SELECT record,fingerprint FROM hub_glances WHERE owner=? AND request=?").get(owner, request_id);
     if (prior && prior.fingerprint !== fingerprint) throw conflict();
     const inner = this.isHubURL(fields.url);
+    const document = page && pageBody && !inner ? this.preparePage(page, pageBody.text, fields.url!) : undefined;
     const now = this.now();
     const glance = prior ? Glance.parse(JSON.parse(prior.record)) : this.store.db.transaction(() => {
       const id = newId("gln", now, randomBytes), created = now.toISOString();
@@ -227,6 +244,13 @@ export class Glances {
       }
       const result = Glance.parse({
         ...fields, id, owner, created, image: stored, used_by: {},
+        page: document && (() => {
+          const file = newId("art", now, randomBytes);
+          this.files.stage({ id: file, key: `${file}.bin`, owner: { module: "hub", id }, sha256: document.sha256,
+            size: document.bytes, media_type: "text/markdown; charset=utf-8", status: "staged", private: true, created });
+          const { body: _, ...metadata } = document;
+          return { ...metadata, file };
+        })(),
         ...(inner ? { pointing: { method: "none" }, lumio: this.reference(fields.url!), pointer: undefined, trail: [],
           selection_text: undefined, ocr: [], ocr_engine: undefined } : { pointing: pointGlance(input) }),
       });
@@ -236,7 +260,34 @@ export class Glances {
     if (glance.image && !glance.image.purged && bytes && this.files.get(glance.image.file).status === "staged") {
       await this.files.publish(glance.image.file, (async function* () { yield bytes; })());
     }
+    if (glance.page && !glance.page.purged && this.files.get(glance.page.file).status === "staged") {
+      if (!document || document.sha256 !== glance.page.sha256) throw conflict();
+      await this.files.publish(glance.page.file, (async function* () { yield Buffer.from(document.body); })());
+    }
     return glance;
+  }
+
+  private preparePage(page: NonNullable<GlanceCreate["page"]>, text: string, url: string) {
+    try {
+      const result = extractPageContent({ format: page.format, body: text }, url);
+      const bytes = Buffer.byteLength(result.body);
+      if (!bytes || bytes > GLANCE_LIMITS.max_page_bytes || result.body.length > GLANCE_LIMITS.max_page_chars) return;
+      const title = (page.title ?? result.title)?.trim().slice(0, 500).replace(/[\uD800-\uDBFF]$/, "");
+      return { ...result, title: title || undefined, format: page.format, bytes, sha256: digest(result.body) };
+    } catch { /* The existing screen capture remains usable when HTML extraction fails. */ }
+  }
+
+  async pageText(glance: Glance): Promise<string | undefined> {
+    const page = glance.page;
+    if (!page || page.purged) return;
+    try {
+      const artifact = this.files.get(page.file);
+      if (artifact.owner.module !== "hub" || artifact.owner.id !== glance.id) return;
+      const bytes = await readFile(await this.files.path(page.file));
+      if (bytes.length === page.bytes && digest(bytes) === page.sha256) return bytes.toString("utf8");
+    } catch (cause) {
+      if (!(cause instanceof StorageError) || !["NOT_FOUND", "CONFLICT"].includes(cause.code)) throw cause;
+    }
   }
 
   private image(glance: Glance): Promise<string> {
@@ -256,6 +307,8 @@ export class Glances {
   /** A successfully persisted capture is the ownership proof for the newly published entity. */
   transfer(glanceId: string, capture: string, entity: string, owner: Actor, ownsEntity: () => boolean): void {
     const glance = this.get(glanceId, owner.id);
+    if (glance.used_by.capture !== capture || !ownsEntity()) throw conflict();
+    this.removePage(glance);
     if (!glance.image || glance.image.purged) return;
     this.files.transferToKnowledge(glance.image.file, { module: "hub", id: glanceId }, { module: "knowledge", id: entity },
       ref => (ref.module === "hub" ? glance.used_by.capture === capture : ownsEntity()) ? owner : undefined);
@@ -276,6 +329,13 @@ export class Glances {
     this.save({ ...glance, image: { ...glance.image, purged: this.now().toISOString() } });
   }
 
+  private removePage(glance: Glance): Glance {
+    if (!glance.page || glance.page.purged) return glance;
+    try { this.files.removeCaptureFile(glance.page.file); }
+    catch (cause) { if (!(cause instanceof StorageError) || cause.code !== "NOT_FOUND") throw cause; }
+    return this.save({ ...glance, page: { ...glance.page, title: undefined, purged: this.now().toISOString() } });
+  }
+
   async sweep(): Promise<void> {
     const cutoff = new Date(this.now().getTime() - this.config.glanceRetentionDays * 86_400_000).toISOString();
     this.store.db.transaction(() => {
@@ -283,6 +343,10 @@ export class Glances {
         WHERE json_extract(record,'$.image.file') IS NOT NULL AND json_extract(record,'$.image.purged') IS NULL
           AND json_extract(record,'$.used_by.capture') IS NULL AND json_extract(record,'$.created') <= ?`).all(cutoff);
       for (const row of rows) this.removeImage(Glance.parse(JSON.parse(row.record)));
+      const pages = this.store.db.query<GlanceRow, [string]>(`SELECT record,fingerprint FROM hub_glances
+        WHERE json_extract(record,'$.page.file') IS NOT NULL AND json_extract(record,'$.page.purged') IS NULL
+          AND json_extract(record,'$.created') <= ?`).all(cutoff);
+      for (const row of pages) this.removePage(Glance.parse(JSON.parse(row.record)));
     })();
     await this.files.sweepCaptureFiles();
   }

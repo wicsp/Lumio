@@ -40,16 +40,16 @@ struct ScreenCapture {
             .flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
         let focusedWindow: AXUIElement? = attribute(element, kAXFocusedWindowAttribute)
         let title: String? = focusedWindow.flatMap { attribute($0, kAXTitleAttribute) }
-        let browser = try await browserURL(bundle, windowTitle: title, focusedWindow: focusedWindow)
-        if let browser, hub.isLocal(browser) {
-            return ScreenCapture(app: app, title: nil, url: browser, selected: nil, image: nil, window: nil, captured: captured, pointer: pointer)
-        }
-        guard CGPreflightScreenCaptureAccess() else { throw CaptureFailure("请在系统设置中允许屏幕录制") }
         let ids = (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? [])
             .filter {
                 ($0[kCGWindowOwnerPID as String] as? pid_t) == target.processIdentifier
                 && ($0[kCGWindowLayer as String] as? Int) == 0
             }.compactMap { $0[kCGWindowNumber as String] as? CGWindowID }
+        let browser = try await browserURL(bundle, windowTitle: title, focusedWindow: focusedWindow)
+        if let browser, hub.isLocal(browser) {
+            return ScreenCapture(app: app, title: nil, url: browser, selected: nil, image: nil, window: nil, captured: captured, pointer: pointer)
+        }
+        guard CGPreflightScreenCaptureAccess() else { throw CaptureFailure("请在系统设置中允许屏幕录制") }
         let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
         guard let window = ids.lazy.compactMap({ id in content.windows.first { $0.windowID == id } }).first,
               window.frame.width >= 1, window.frame.height >= 1 else {

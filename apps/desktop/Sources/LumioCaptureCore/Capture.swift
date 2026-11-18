@@ -67,10 +67,32 @@ public struct Image: Codable {
     }
 }
 
+public struct BrowserPage: Decodable {
+    public enum Format: String, Codable { case html, text }
+    public struct Metadata: Codable {
+        public let format: Format
+        public let title: String?
+    }
+    public let url: URL
+    public let format: Format
+    public let title: String?
+    public let body: String
+    public var metadata: Metadata { Metadata(format: format, title: title) }
+    public var isValid: Bool {
+        guard let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              ["http", "https"].contains(parts.scheme ?? ""), parts.host != nil,
+              parts.user == nil, parts.password == nil, url.absoluteString.utf16.count <= 2048 else { return false }
+        if let title, title.isEmpty || title.utf16.count > 500 { return false }
+        return body.utf16.count <= 2_000_000 && body.utf8.count <= 6 * 1024 * 1024
+            && !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
 public struct GlanceRequest: Codable {
     public let request_id: String, captured: String, app: App
     public var window_title: String?, url: URL?, image: Image?, pointer: PixelPoint?
     public var trail: [TrailPoint], selection_text: String?, ocr: [OCRBlock], ocr_engine: String?
+    public var page: BrowserPage.Metadata?
 
     public init(requestID: String = UUID().uuidString, captured: Date, app: App, window: String? = nil, url: URL? = nil,
                 image: Image? = nil, pointer: PixelPoint? = nil, trail: [TrailPoint] = [], selection: String? = nil, ocr: [OCRBlock] = []) {
@@ -82,7 +104,7 @@ public struct GlanceRequest: Codable {
         ocr_engine = ocr.isEmpty ? nil : "apple-vision@1"
     }
 
-    public func multipart(boundary: String, screenshot: Data?) throws -> Data {
+    public func multipart(boundary: String, screenshot: Data?, pageContent: String? = nil) throws -> Data {
         var body = Data()
         func append(_ text: String) { body.append(contentsOf: text.utf8) }
         append("--\(boundary)\r\nContent-Disposition: form-data; name=\"meta\"\r\nContent-Type: application/json\r\n\r\n")
@@ -90,6 +112,10 @@ public struct GlanceRequest: Codable {
         if let screenshot, let image {
             append("\r\n--\(boundary)\r\nContent-Disposition: form-data; name=\"image\"; filename=\"window.\(image.format)\"\r\nContent-Type: image/\(image.format)\r\n\r\n")
             body.append(screenshot)
+        }
+        if let pageContent, page != nil {
+            append("\r\n--\(boundary)\r\nContent-Disposition: form-data; name=\"page\"; filename=\"page\"\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n")
+            append(pageContent)
         }
         append("\r\n--\(boundary)--\r\n")
         return body

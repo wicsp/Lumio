@@ -115,18 +115,28 @@ export interface Extracted {
 const titleOf = (value: string) => value.replace(/\s+/g, " ").trim().slice(0, 500).replace(/[\uD800-\uDBFF]$/, "");
 const titleFallback = (value: string) => titleOf(value).slice(0, 100) || "Captured text";
 
+export function extractPageContent(content: CaptureContent, url?: string) {
+  if (content.format === "html") {
+    return {
+      ...htmlText(/<html[\s>]/i.test(content.body) ? content.body : `<html><body>${content.body}</body></html>`, url, false, true),
+      extractor: "page-html@1" as const,
+    };
+  }
+  return { body: content.body.trim(), title: undefined, lang: undefined, extractor: "pasted@1" as const };
+}
+
 export async function extractCapture(
   url: string | undefined, kind: CaptureKind, title: string | undefined, content: CaptureContent | undefined,
   signal: AbortSignal, network?: CaptureNetwork,
 ): Promise<Extracted> {
-  if (url) validateCaptureUrl(new URL(url));
-  let body = content?.body.trim() ?? "", extractor = "pasted@1", lang: string | undefined;
-  if (content?.format === "html") {
-    const page = htmlText(/<html[\s>]/i.test(body) ? body : `<html><body>${body}</body></html>`, url, false, true);
-    ({ body, lang } = page);
-    title ??= page.title;
-    extractor = "page-html@1";
+  if (url) {
+    const source = new URL(url);
+    if (source.username || source.password) throw new CaptureFailure("blocked");
+    if (!content || kind === "paper") validateCaptureUrl(source);
   }
+  const supplied = content && extractPageContent(content, url);
+  let body = supplied?.body ?? "", extractor: string = supplied?.extractor ?? "pasted@1", lang = supplied?.lang;
+  title ??= supplied?.title;
   if (kind === "paper") {
     const paperUrl = new URL(url!);
     const arxiv = paperUrl.hostname === "arxiv.org";

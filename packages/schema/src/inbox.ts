@@ -25,7 +25,7 @@ export const CAPTURE_LIMITS = {
   /** 网址最大长度。 */
   max_url_chars: 2048,
   /** 随捕获送来的正文（浏览器插件或手动粘贴）最大字符数。 */
-  max_content_chars: 2_000_000,
+  max_content_chars: GLANCE_LIMITS.max_page_chars,
   /** Hub 抓取网页的最大字节数。 */
   max_fetch_bytes: 10 * 1024 * 1024,
   /** Hub 抓取网页的超时（毫秒）。 */
