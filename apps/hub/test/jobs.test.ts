@@ -306,6 +306,23 @@ test("compiled runtime preserves the durable-start worker path", async () => {
   expect((await get(job.spec.id)).result!.exit_code).toBe(0);
 }, 20_000);
 
+test("Job activity uses device connectivity while waiting and job heartbeats once running", async () => {
+  RuntimeRegistered.parse(await (await request("/v1/runtime/register", runtime, registration)).json());
+  const job = await submit(), id = job.spec.id, url = `/v2/execution/jobs/${id}/live`;
+  const live = async () => JobLiveView.parse(await (await request(url)).json());
+  expect(await live()).toMatchObject({ status: "queued", connected: true });
+  await request("/v1/runtime/ack", runtime, { accepted: [id] });
+  const assigned = await get(id);
+  const old = new Date(Date.now() - 5 * 60_000).toISOString();
+  hub!.store.executionStore.save({ ...assigned, assigned: old });
+  expect(await live()).toMatchObject({ status: "assigned", connected: true, last_heartbeat: null });
+
+  await request("/v1/runtime/sync", runtime, { ...heartbeat, running: [id] });
+  expect(await live()).toMatchObject({ status: "running", connected: true });
+  hub!.store.executionStore.save({ ...await get(id), last_seen: old });
+  expect(await live()).toMatchObject({ status: "running", connected: false });
+});
+
 test("Job activity is authorized, contiguous, idempotent and cannot replace a final result", async () => {
   const path = "/v1/runtime/job-activity/sync";
   const registrationResponse = await fetch(base() + "/v1/runtime/register", {
