@@ -74,14 +74,11 @@ const ZH: Record<string, string> = {
   "Desktop pairing code": "桌面配对码",
   "Pair desktop capture": "配对桌面捕获",
   "Enter the desktop pairing code exactly as shown.": "请按小助手显示的内容输入桌面配对码。",
-  "Allow the extension to connect to Lumio Capture on this Mac.": "请允许扩展连接这台 Mac 上的 Lumio Capture。",
   "Could not save desktop capture settings.": "无法保存桌面捕获设置。",
-  "Website to allow for F18": "允许 F18 读取的网站",
-  "Allow website": "允许网站",
-  "Enter an HTTP or HTTPS website.": "请输入 HTTP 或 HTTPS 网站。",
-  "Website permission was declined.": "网站权限未授权。",
-  "Remove": "移除",
-  "F18 reads the current page only on websites you allow here.": "F18 仅在这里已允许的网站读取当前页面。",
+  "Allow website access once to capture the current page when you press F18.": "允许扩展访问所有网站后，按 F18 即可捕获当前网页。只需授权一次。",
+  "Allow website access to enable F18 page capture.": "允许网站访问权限后，即可使用 F18 捕获网页。",
+  "Enable F18 page capture": "启用 F18 网页捕获",
+  "F18 captures the current web page when you press it.": "按 F18 即可捕获当前网页。",
   "Forget desktop pairing": "解除桌面配对",
 };
 
