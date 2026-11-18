@@ -91,14 +91,23 @@ const dispatch = async (title: string, to: string) => {
   return (await command({ op: "work.task.dispatch", args: { task: task.id, to, expected_revision: task.revision } })).job;
 };
 const jobs = [await dispatch(msg("web-demo.run_experiments_with_three_more_model_families"), "codex@demo"), await dispatch(msg("web-demo.compute_bootstrap_95_confidence_intervals"), "pi@demo"), await dispatch(msg("web-demo.validate_migration_dry_run"), "codex@demo")];
-const sync = await runtime("/v1/runtime/sync", { running: [], queued: [], outbox: 0 });
-await runtime("/v1/runtime/ack", { accepted: sync.jobs.map((job: any) => job.id) });
-await runtime("/v1/runtime/sync", { running: sync.jobs.map((job: any) => job.id), queued: [], outbox: 0 });
-const lease = (id: string) => sync.jobs.find((job: any) => job.id === id).lease;
+// 按 Agent 并发限制（PR #289）一次同步不一定领到全部几轮：每轮上报前再同步一次，直到领到这一轮。
+const leased = new Map<string, string>();
+const leaseOf = async (id: string) => {
+  for (let i = 0; i < 5 && !leased.has(id); i++) {
+    const sync = await runtime("/v1/runtime/sync", { running: [...leased.keys()], queued: [], outbox: 0 });
+    await runtime("/v1/runtime/ack", { accepted: sync.jobs.map((job: any) => job.id) });
+    for (const job of sync.jobs) leased.set(job.id, job.lease);
+  }
+  const lease = leased.get(id);
+  if (!lease) throw new Error(`demo runtime could not lease ${id}`);
+  return lease;
+};
 const now = new Date().toISOString();
-await runtime("/v1/runtime/results", { job: jobs[0].spec.id, lease: lease(jobs[0].spec.id), status: "done", exit_code: 0, started: now, finished: now,
+await runtime("/v1/runtime/results", { job: jobs[0].spec.id, lease: await leaseOf(jobs[0].spec.id), status: "done", exit_code: 0, started: now, finished: now,
   report: msg("web-demo.results_setting_success_rate_a_41_2_b_37_9_c_52_6_two_more_models_ar") });
-await runtime("/v1/runtime/results", { job: jobs[1].spec.id, lease: lease(jobs[1].spec.id), status: "waiting_for_human", started: now, finished: now, question: msg("web-demo.use_1_000_or_10_000_bootstrap_samples_the_latter_takes_about_40_minu") });
+leased.delete(jobs[0].spec.id);
+await runtime("/v1/runtime/results", { job: jobs[1].spec.id, lease: await leaseOf(jobs[1].spec.id), status: "waiting_for_human", started: now, finished: now, question: msg("web-demo.use_1_000_or_10_000_bootstrap_samples_the_latter_takes_about_40_minu") });
 await dispatch(msg("web-demo.run_experiments_with_three_more_model_families"), "codex@demo"); // 第 2 轮，保持排队
 
 // 交接计划（ADR 0032）：实现 → 检查点「是否合并？」。第一轮交付后停在检查点，等你决定。

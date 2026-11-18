@@ -35,6 +35,7 @@ const asrReady = (profile: AIProfile, connection?: AIConnection) =>
 
 export class SpeechSettings {
   readonly element = h("div", { class: "speech-settings" });
+  private vocabularyOpen = false;
   private config: AIConfiguration = { connections: [], profiles: [] };
   private bindings: SpeechBinding[] = [];
   private vocabulary?: SpeechVocabulary;
@@ -158,12 +159,20 @@ export class SpeechSettings {
       const label = t(state.state === "synced" ? "Synced" : state.state === "pending" ? "Syncing" : "Sync failed");
       return `${connection?.name ?? state.connection} · ${label}`;
     });
-    return h("div", { class: "set-form-wrap form-stack" },
-      h("label", { class: "field" }, h("span", { class: "field-label" }, t("Vocabulary")), area, count,
+    // 热词表不常改：默认收起，摘要里给出词数和同步状态；保存后重新渲染时保持当前展开状态。
+    const failed = vocabulary.sync.some(state => state.state === "error");
+    const details = h("details", { class: "set-form-wrap vocabulary-fold" },
+      h("summary", {}, t("Vocabulary"), h("span", { class: "set-sub" },
+        [t("{0} of {1} terms", vocabulary.terms.length, MAX_TERMS), failed ? t("Sync failed") : ""].filter(Boolean).join(" · "))),
+      h("div", { class: "form-stack" },
+      h("label", { class: "field" }, h("span", { class: "field-label sr-only" }, t("Vocabulary")), area, count,
         h("span", { class: "field-hint" }, t("Helps recognize names and terms. The list is sent to and stored by the speech service, so don't include anything private."))),
       h("label", { class: "check" }, projects, t("Also include project names (private projects are skipped)")),
       sync.length ? h("p", { class: "field-hint" }, t("Sync status: {0}", sync.join("; "))) : null,
-      h("div", { class: "speech-actions" }, save, message));
+      h("div", { class: "speech-actions" }, save, message)));
+    if (this.vocabularyOpen || failed) details.setAttribute("open", "");
+    details.addEventListener("toggle", () => { this.vocabularyOpen = details.open; });
+    return details;
   }
 
   /** 改语音 Profile 的名称（模型与连接固定）。 */

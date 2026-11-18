@@ -6,8 +6,6 @@
 import type { AIConfiguration, AIConnection, AIProfile, AIQuotaView, AIRuntime, NativeSession, NativeConnectionView, NativeConnectionAction } from "@lumio/schema";
 import { DASHSCOPE_BASE_URLS, TYPESAFE_JEV_BASE_URL } from "@lumio/schema";
 import { SpeechSettings } from "./speech-settings.ts";
-import { KnowledgeAISettings } from "./knowledge-ai-settings.ts";
-import { JobInteractionSettings } from "./job-interaction-settings.ts";
 import { errorText, type Client } from "./api.ts";
 import { clear, failure, h, icon, openDialog, toast } from "./dom.ts";
 import { t } from "./i18n.ts";
@@ -65,7 +63,6 @@ export class AISettings {
   private auth = new Map<string, NativeConnectionView>();
   private profileRows = h("div", { class: "set-rows" });
   private connectionRows = h("div", { class: "set-rows" });
-  private concurrencyRows = h("div", { class: "set-rows" });
   private usage = new Map<string, AIQuotaView>();
   private usageVersion = 0;
   private usageTimer?: ReturnType<typeof setInterval>;
@@ -73,69 +70,22 @@ export class AISettings {
   private newConnection = h("button", { type: "button", class: "btn btn-quiet btn-small", onclick: () => this.editConnection() }, icon("plus"), t("Add connection"));
 
   private speech: SpeechSettings;
-  private knowledge: KnowledgeAISettings;
-  private jobInteraction: JobInteractionSettings;
 
   constructor(private client: Client, group: Group) {
     this.speech = new SpeechSettings(client, kind => this.editConnection(undefined, kind), () => void this.load());
-    this.knowledge = new KnowledgeAISettings(client);
-    this.jobInteraction = new JobInteractionSettings(client);
     this.element.append(
       group(t("Default assistant model"), t("New chats start with this profile. This preference is saved in this browser."), this.defaultRows),
       group(t("AI profiles"), t("Choose an API or an official Codex session. Profiles share model settings; each conversation keeps its own permissions and history."), this.profileRows, this.newProfile),
       group(t("Connections"), t("Manage API connections, runtime sign-ins, and usage monitoring."), this.connectionRows, this.newConnection),
-      group(t("Agent concurrency"), t("Connections that share an upstream quota can use the same group name. The limit applies across runtimes."), this.concurrencyRows),
-      group(t("Task execution"), t("Live interaction can use an existing Codex connection. Claude Agent SDK uses a provider API key. Interactive rounds require allowed project folders on the runtime."), this.jobInteraction.element),
-      group(t("Voice input"), t("Dictate into text boxes with the mic button. Audio goes through the Hub to the speech service and isn't stored."), this.speech.element),
-      group(t("Inbox cards"), t("When you save a link, AI writes a short card from the original text."), this.knowledge.element));
-    for (const rows of [this.defaultRows, this.connectionRows, this.profileRows, this.concurrencyRows]) {
+      group(t("Voice input"), t("Dictate into text boxes with the mic button. Audio goes through the Hub to the speech service and isn't stored."), this.speech.element));
+    for (const rows of [this.defaultRows, this.connectionRows, this.profileRows]) {
       clear(rows, h("p", { class: "set-empty" }, t("Loading…")));
     }
     void this.load();
     this.usageTimer = setInterval(() => void this.loadUsage(), 30_000);
   }
 
-  dispose(): void { this.active = false; clearInterval(this.usageTimer); this.speech.dispose(); this.knowledge.dispose(); this.jobInteraction.dispose(); }
-
-  private async loadConcurrency(): Promise<void> {
-    try {
-      const rows = await this.client.agentConcurrency();
-      if (this.active) this.renderConcurrency(rows);
-    } catch (error) {
-      if (this.active) clear(this.concurrencyRows, failure(errorText(error), () => this.loadConcurrency()));
-    }
-  }
-
-  private renderConcurrency(rows: Awaited<ReturnType<Client["agentConcurrency"]>>): void {
-    clear(this.concurrencyRows, ...rows.map(row => {
-      const group = h("input", { "aria-label": t("Shared quota group"), placeholder: t("Shared quota group"),
-        value: row.group ?? "", maxLength: 80, disabled: row.target.kind === "default" });
-      const backend = row.target.kind === "runtime" && row.target.engine === "pi"
-        ? h("input", { "aria-label": t("Pi provider"), placeholder: t("Pi provider"),
-          value: row.target.backend ?? "", readOnly: !!row.target.backend, maxLength: 64 })
-        : undefined;
-      const limit = h("input", { "aria-label": t("Job concurrency"), type: "number", min: "1", step: "1", value: String(row.max_concurrent), required: true });
-      const syncLimit = () => { limit.disabled = row.target.kind !== "default" && row.uses_default && !group.value.trim(); };
-      group.addEventListener("input", syncLimit);
-      syncLimit();
-      const error = h("span", { role: "status", class: "set-sub" });
-      const save = h("button", { type: "submit", class: "btn btn-small" }, t("Save"));
-      const form = h("form", { class: "set-row", onsubmit: async (event: Event) => {
-        event.preventDefault();
-        if (save.disabled) return;
-        save.disabled = true;
-        try {
-          const target = row.target.kind === "runtime" && backend?.value.trim()
-            ? { ...row.target, backend: backend.value.trim() } : row.target;
-          const updated = await this.client.setAgentConcurrency({ target, group: group.value.trim() || null,
-            max_concurrent: limit.disabled ? null : Number(limit.value) });
-          if (this.active) { this.renderConcurrency(updated); toast(t("Agent concurrency saved")); }
-        } catch (cause) { error.textContent = errorText(cause); }
-        finally { save.disabled = false; }
-      } }, h("span", { class: "set-label" }, row.name), row.target.kind === "default" ? null : group, backend, limit, save, error);
-      return form;
-    }));
-  }
+  dispose(): void { this.active = false; clearInterval(this.usageTimer); this.speech.dispose(); }
 
   private async loadUsage(): Promise<void> {
     const version = ++this.usageVersion;
@@ -165,10 +115,8 @@ export class AISettings {
         if (connection.revision !== prior.get(connection.id)) this.usage.delete(connection.id);
       }
       this.config = config; this.runtimes = runtimes; this.sessions = sessions;
-      void this.loadConcurrency();
       this.render();
       this.speech.update(config);
-      this.knowledge.update(config);
       void this.loadUsage();
       await Promise.all(config.connections.filter(c => c.kind === "codex-account").map(async c => {
         try { this.auth.set(c.id, await this.client.nativeConnection(c.id)); } catch { /* Older Hub. */ }
@@ -190,7 +138,7 @@ export class AISettings {
     this.newProfile.title = hasChatConnection ? "" : t("Add a chat connection first.");
     clear(this.profileRows, ...(this.config.profiles.length ? this.config.profiles.map(profile => this.item(
       profile.engine === "codex" ? "terminal" : profile.engine === "speech" ? "mic" : "assistant", profile.name, profileSummary(profile, byId.get(profile.connection)),
-      () => profile.engine === "speech" ? this.speech.rename(profile) : profile.engine === "embedding" ? this.knowledge.element.scrollIntoView() : this.editProfile(profile)))
+      () => profile.engine === "speech" ? this.speech.rename(profile) : profile.engine === "embedding" ? void (location.hash = "#settings/capture") : this.editProfile(profile)))
       : [h("p", { class: "set-empty" }, hasChatConnection ? t("No profiles yet. Create one to choose a model for the assistant.") : t("Add a chat connection first, then create a profile."))]));
     this.renderConnections();
   }

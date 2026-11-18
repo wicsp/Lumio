@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { AIConnection, AIProfile, AIQuotaView, NativeConnectionView, TYPESAFE_JEV_BASE_URL } from "@lumio/schema";
-import { DEFAULT_SETTINGS_SECTION, SETTINGS_SECTIONS, settingsSection } from "../../src/client/settings-sections.ts";
+import { DEFAULT_SETTINGS_SECTION, SETTINGS_SECTIONS, settingsNavGroups, settingsSection } from "../../src/client/settings-sections.ts";
 import { CONNECTION_KINDS, connectionSummary, profileConnections, profileSummary } from "../../src/client/ai-settings.ts";
 import { ZH } from "../../src/client/i18n.ts";
 
@@ -10,6 +10,15 @@ describe("settings sections", () => {
     expect(new Set(keys).size).toBe(keys.length);
     expect(keys).toContain(DEFAULT_SETTINGS_SECTION);
     for (const section of SETTINGS_SECTIONS) { expect(ZH[section.label]).toBeDefined(); expect(ZH[section.hint]).toBeDefined(); }
+    for (const group of settingsNavGroups()) if (group.title) expect(ZH[group.title]).toBeDefined();
+  });
+  test("navigation groups keep each group's sections together and in order", () => {
+    const groups = settingsNavGroups();
+    expect(groups.map(group => group.title)).toEqual(["Personal", "AI & agents", "Library", ""]);
+    expect(new Set(groups.map(group => group.title)).size).toBe(groups.length);
+    expect(groups.flatMap(group => group.sections.map(section => section.key))).toEqual(SETTINGS_SECTIONS.map(section => section.key));
+    expect(settingsSection("capture")).toBe("capture");
+    expect(settingsSection("execution")).toBe("execution");
   });
   test("route ids resolve to a section; empty or unknown ids mean the section list", () => {
     expect(settingsSection("ai")).toBe("ai");

@@ -22,7 +22,7 @@ async function render(): Promise<void> {
   const form = h("form", {},
     h("label", { for: "hub" }, t("Hub address")), hub,
     h("label", { for: "code" }, t("Pairing code")), code,
-    h("p", { class: "hint" }, t("In Lumio, open Settings → Hub & runtimes → Browser extension and create a pairing code.")),
+    h("p", { class: "hint" }, t("In Lumio, open Settings → Capture → Browser extension and create a pairing code.")),
     submit, message);
   form.addEventListener("submit", event => {
     event.preventDefault();

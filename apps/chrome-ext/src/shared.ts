@@ -57,7 +57,7 @@ const ZH: Record<string, string> = {
   "Connect this browser to Lumio": "把这个浏览器连接到 Lumio",
   "Hub address": "Hub 地址",
   "Pairing code": "配对码",
-  "In Lumio, open Settings → Hub & runtimes → Browser extension and create a pairing code.": "在 Lumio 中打开「设置 → Hub 与执行器 → 浏览器插件」，生成一个配对码。",
+  "In Lumio, open Settings → Capture → Browser extension and create a pairing code.": "在 Lumio 中打开「设置 → 收藏与捕获 → 浏览器插件」，生成一个配对码。",
   "Connected to {0}": "已连接 {0}",
   "Disconnect": "断开",
   "Chrome needs permission to reach your Hub.": "需要允许插件访问你的 Hub 地址。",

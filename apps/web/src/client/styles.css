@@ -885,6 +885,8 @@ div.note-rich-preview { padding:4px 0; }
 .set-shell { display: grid; grid-template-columns: 248px minmax(0, 1fr); gap: 32px; max-width: 1040px; margin: 0 auto; padding: 28px 28px 72px; align-items: start; }
 .set-nav { position: sticky; top: 20px; display: flex; flex-direction: column; gap: 14px; }
 .set-nav-list { display: flex; flex-direction: column; gap: 2px; }
+.set-nav-group { display: flex; flex-direction: column; gap: 4px; }
+.set-nav-heading { padding: 0 10px; color: var(--ink-4); font-size: var(--fs-xs); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
 .set-nav-item {
   display: flex; align-items: center; gap: 10px; width: 100%; min-height: 38px; padding: 6px 10px;
   border: 0; border-radius: var(--r-md); background: none; color: var(--ink-2); font-size: var(--fs-md); text-align: left; text-decoration: none;
@@ -938,6 +940,36 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 .set-row-icon { color: var(--ink-3); }
 .set-row-chevron { width: 14px; height: 14px; color: var(--ink-4); flex: none; }
 .ai-connection-row + .ai-connection-row { border-top: 1px solid var(--line); }
+/* 可折叠卡片：标题行常显，展开后显示内容（配对、代理等不常改的配置）。 */
+.set-fold + .set-fold { border-top: 1px solid var(--line); }
+.set-fold > summary { list-style: none; cursor: pointer; }
+.set-fold > summary::-webkit-details-marker { display: none; }
+.set-fold > summary:hover { background: var(--hover); }
+.set-fold > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.set-fold-chevron { width: 14px; height: 14px; flex: none; color: var(--ink-4); transform: rotate(90deg); transition: transform .15s var(--ease); }
+.set-fold[open] > summary .set-fold-chevron { transform: rotate(-90deg); }
+.set-fold-body { border-top: 1px solid var(--line); background: var(--paper); }
+.set-fold-body > .set-rows > .set-row:first-child, .set-fold-body > .set-form-wrap:first-child { border-top: 0; }
+.set-fold-note { padding: 0 14px 12px; }
+.set-fold-body > :first-child:not(.set-rows) { margin-top: 0; }
+@media (prefers-reduced-motion: reduce) { .set-fold-chevron { transition: none; } }
+/* Agent 并发：名称一行，输入框带标签排在下面，窄栏也不挤掉名称。 */
+.set-row.concurrency-row { flex-wrap: wrap; align-items: flex-end; row-gap: 8px; }
+.concurrency-row > .set-label { flex-basis: 100%; }
+.concurrency-fields { display: flex; flex: 1; flex-wrap: wrap; align-items: flex-end; gap: 8px; min-width: 0; }
+.concurrency-field { display: flex; flex: 1 1 120px; flex-direction: column; gap: 3px; min-width: 0; }
+.concurrency-field input { width: 100%; }
+.concurrency-row.compact { align-items: center; }
+.concurrency-row.compact > .set-label { flex-basis: auto; }
+.concurrency-row.compact .concurrency-fields { flex: none; }
+.concurrency-row.compact .concurrency-field { flex: none; width: 80px; }
+.concurrency-field:has(input[type=number]) { flex: 0 1 96px; }
+.concurrency-row > [role=status]:empty { display: none; }
+.concurrency-row > [role=status] { flex-basis: 100%; color: var(--red); }
+/* 语音热词表默认收起。 */
+.vocabulary-fold > summary { display: flex; align-items: baseline; gap: 8px; cursor: pointer; font-size: var(--fs-md); }
+.vocabulary-fold > summary .set-sub { display: inline; }
+.vocabulary-fold[open] > summary { margin-bottom: 10px; }
 .ai-quota-details { padding: 0 14px 12px; margin-left: 40px; min-width: 0; }
 .ai-quota-details > summary { padding: 4px 0; color: var(--ink-2); font-size: var(--fs-sm); cursor: pointer; }
 .ai-quota-details > summary .set-sub { display: inline; margin-left: 8px; }
@@ -970,6 +1002,9 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 .set-danger { color: var(--red); }
 .set-danger .icon { color: var(--red); }
 .set-empty { padding: 14px; color: var(--ink-3); font-size: var(--fs-sm); }
+.set-rows > .field-hint { padding: 0 14px 12px; }
+.set-form-wrap > .set-empty { padding: 0 0 10px; }
+.set-form-wrap.form-stack > :is([role=status], div):empty { display: none; }
 .set-bar { background: var(--paper); }
 .set-howto { align-items: flex-start; }
 .set-howto > .icon { margin-top: 3px; color: var(--ink-3); }
@@ -1603,7 +1638,10 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 .helper-notice { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: var(--r-md); background: var(--surface); }
 .helper-notice-title { display: flex; gap: 6px; align-items: flex-start; font-size: var(--fs-sm); font-weight: 600; }
 .helper-notice-title .icon { width: 14px; height: 14px; flex: none; margin-top: 2px; color: var(--ochre); }
-.set-row.helper-row { flex-direction: column; align-items: flex-start; gap: 6px; }
+.set-row.helper-row { display: block; min-height: 0; padding: 0 14px 10px 32px; border-top: 0; }
+.helper-row > summary { padding: 2px 0; cursor: pointer; width: fit-content; }
+.helper-row[open] > summary { margin-bottom: 6px; }
+.helper-row > .field-hint { margin-bottom: 8px; }
 
 /* G1 controller focus is independent of native mouse and keyboard focus. */
 [data-gamepad-mode] [data-pad-focus] {

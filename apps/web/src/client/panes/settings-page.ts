@@ -1,9 +1,10 @@
-import { imageHostingSettings } from "../image-hosting-settings.ts";
 /**
  * 设置页（ADR 0028）：二级菜单。桌面左侧是分类，右侧是当前分类的内容；
  * 窄屏先显示分类列表，点进分类后用返回键回到列表。地址是 `#settings/<分类>`。
  * 各分类在第一次打开时才创建，离开设置页时一起释放。
+ * 不常改的配置（配对、代理、改键说明等）放进可折叠的卡片，展开状态记在当前浏览器。
  */
+import { imageHostingSettings } from "../image-hosting-settings.ts";
 import type { RuntimeInfo } from "@lumio/schema";
 import { errorText, type Session } from "../api.ts";
 import { clear, confirmDialog, h, icon, toast } from "../dom.ts";
@@ -16,13 +17,16 @@ import { browserChoiceRow, LANGS, THEMES } from "../settings.ts";
 import { sidebarUsageStyle } from "../browser-preferences.ts";
 import { AISettings } from "../ai-settings.ts";
 import { AgentsSettings } from "../agents-settings.ts";
+import { AgentConcurrencySettings } from "../agent-concurrency-settings.ts";
+import { JobInteractionSettings } from "../job-interaction-settings.ts";
+import { KnowledgeAISettings } from "../knowledge-ai-settings.ts";
 import { captureProxySettings } from "../capture-proxy-settings.ts";
 import { IPHONE_SHORTCUTS, isIOSDevice, pairingUrl, phoneHubDefault, shortcutInstallUrl, unreachableFromPhone } from "../iphone-setup.ts";
 import { qrSvg } from "../qr-code.ts";
 import type { GamepadInput } from "../gamepad-input.ts";
 import { GamepadSettings } from "../gamepad-settings.ts";
 import { NotificationSettings } from "../notification-settings.ts";
-import { DEFAULT_SETTINGS_SECTION, SETTINGS_SECTIONS, settingsSection, type SettingsSection } from "../settings-sections.ts";
+import { DEFAULT_SETTINGS_SECTION, SETTINGS_SECTIONS, foldOpen, rememberFold, settingsNavGroups, settingsSection, type SettingsSection } from "../settings-sections.ts";
 
 const SOURCE = "https://github.com/wicsp/Lumio";
 
@@ -88,7 +92,7 @@ export class SettingsPane {
   // ───────────── 分类导航 ─────────────
 
   private nav(): HTMLElement {
-    const items = SETTINGS_SECTIONS.map(section => {
+    const item = (section: (typeof SETTINGS_SECTIONS)[number]) => {
       const item = h("a", { class: "set-nav-item", "data-pad-row": `settings:${section.key}`, href: `#settings/${section.key}`, "aria-current": "false",
         onclick: (event: Event) => { const click = event as MouseEvent; if (click.metaKey || click.ctrlKey || click.shiftKey) return; event.preventDefault(); this.navigate(section.key); } },
         h("span", { class: "set-nav-icon" }, icon(section.icon)),
@@ -96,10 +100,13 @@ export class SettingsPane {
         icon("chevron", "icon set-nav-chevron"));
       this.navItems.set(section.key, item);
       return item;
-    });
+    };
+    const groups = settingsNavGroups().map(group => h("div", { class: "set-nav-group" },
+      group.title ? h("p", { class: "set-nav-heading" }, t(group.title)) : null,
+      h("div", { class: "set-nav-list" }, ...group.sections.map(item))));
     return h("nav", { class: "set-nav", "aria-label": t("Settings") },
       this.profile(),
-      h("div", { class: "set-nav-list" }, ...items),
+      ...groups,
       h("button", { type: "button", class: "set-nav-item set-nav-signout", onclick: () => this.logout() },
         h("span", { class: "set-nav-icon" }, icon("logout")), h("span", { class: "set-nav-label" }, t("Sign out"))));
   }
@@ -141,6 +148,14 @@ export class SettingsPane {
         const profiles = new AISettings(this.session.client, (title, hint, body, action) => this.group(title, hint, body, action));
         return { element: page(profiles.element), dispose: () => profiles.dispose() };
       }
+      case "execution": {
+        const interaction = new JobInteractionSettings(this.session.client);
+        const concurrency = new AgentConcurrencySettings(this.session.client);
+        return { element: page(
+          this.group(t("Task execution"), t("Live interaction can use an existing Codex connection. Claude Agent SDK uses a provider API key. Interactive rounds require allowed project folders on the runtime."), interaction.element),
+          this.group(t("Agent concurrency"), t("Connections that share an upstream quota can use the same group name. The limit applies across runtimes."), concurrency.element)),
+          dispose: () => { interaction.dispose(); concurrency.dispose(); } };
+      }
       case "devices": {
         const hubRows = h("div", { class: "set-rows" }), runtimeRows = h("div", { class: "set-rows" });
         clear(hubRows, this.row(t("Address"), h("span", { class: "set-value mono" }, location.host)), this.row(t("Status"), h("span", { class: "set-value muted" }, t("Checking…"))));
@@ -148,14 +163,23 @@ export class SettingsPane {
         void this.loadHub(hubRows);
         this.runtimeRows = runtimeRows;
         void this.loadRuntimes(runtimeRows);
-        const proxy = captureProxySettings(this.session.client);
         return { element: page(this.group(t("Hub"), undefined, hubRows),
-          this.group(t("Capture proxy"), t("Use an HTTP or HTTPS proxy reachable from the Hub to fetch Inbox links."), proxy.element),
-          this.group(t("Runtimes"), t("Machines that run agents for this Hub."), runtimeRows),
-          this.group(t("Browser extension"), t("Save the page you're reading to the Inbox with one click."), this.extensionPairing()),
-          this.group(t("Desktop helper"), t("Tap the capture key in any Mac app to save what you're pointing at; hold it to ask the assistant. The screenshot of the front window goes to this Hub only when you press the key."), this.desktopPairing()),
-          this.group(t("iPhone"), t("Double-tap the back of the iPhone to save what's on screen; press the Action Button to ask the assistant about it. Works with any computer that shows this page."), this.iphoneSetup())),
-          dispose: proxy.dispose };
+          this.group(t("Runtimes"), t("Machines that run agents for this Hub."), runtimeRows)) };
+      }
+      case "capture": {
+        const cards = new KnowledgeAISettings(this.session.client);
+        void this.session.client.aiConfiguration().then(config => cards.update(config), () => cards.update({ connections: [], profiles: [] }));
+        const proxy = captureProxySettings(this.session.client);
+        return { element: page(
+          this.group(t("Inbox cards"), t("When you save a link, AI writes a short card from the original text."), cards.element),
+          this.group(t("Devices"), t("Pair once per device. Pairing codes work once and expire."), h("div", { class: "set-folds" },
+            this.fold("capture.browser", "globe", t("Browser extension"), t("Save the page you're reading to the Inbox with one click."), this.extensionPairing()),
+            this.fold("capture.mac", "monitor", t("Lumio Capture for Mac"), t("Tap the capture key in any Mac app to save what you're pointing at; hold it to ask the assistant."), this.desktopPairing(),
+              t("The screenshot of the front window goes to this Hub only when you press the key.")),
+            this.fold("capture.iphone", "device", t("iPhone"), t("Double-tap the back to save what's on screen; press the Action Button to ask the assistant."), this.iphoneSetup(),
+              t("Works with any computer that shows this page.")))),
+          this.group(t("Advanced"), undefined, this.fold("capture.proxy", "route", t("Capture proxy"), t("Use an HTTP or HTTPS proxy reachable from the Hub to fetch Inbox links."), proxy.element))),
+          dispose: () => { cards.dispose(); proxy.dispose(); } };
       }
       case "agents": {
         const agents = new AgentsSettings(this.session.client);
@@ -189,6 +213,22 @@ export class SettingsPane {
       (title || action) && h("div", { class: "set-group-head" }, title && h("h3", { class: "set-group-title" }, title), action),
       h("div", { class: "set-card" }, body),
       hint && h("p", { class: "set-hint" }, hint));
+  }
+
+  /**
+   * 可折叠的卡片：标题行常显（图标、名称、一句说明），展开后才显示内容。
+   * 默认收起；展开状态按 key 记在当前浏览器。
+   */
+  private fold(key: string, glyph: string, title: string, sub: string, body: HTMLElement, note?: string, open = false): HTMLElement {
+    const details = h("details", { class: "set-fold", "data-fold": key },
+      h("summary", { class: "set-row set-fold-head" },
+        h("span", { class: "set-row-badge" }, icon(glyph)),
+        h("span", { class: "set-label" }, title, h("span", { class: "set-sub" }, sub)),
+        icon("chevron", "icon set-fold-chevron")),
+      h("div", { class: "set-fold-body" }, body, note ? h("p", { class: "field-hint set-fold-note" }, note) : null));
+    if (foldOpen(key, open)) details.setAttribute("open", "");
+    details.addEventListener("toggle", () => rememberFold(key, details.open));
+    return details;
   }
 
   /** 给浏览器插件生成一次性配对码：插件设置页填 Hub 地址和配对码，换取自己的 human 令牌（ADR 0057）。 */
@@ -366,7 +406,8 @@ export class SettingsPane {
         remove);
       if (helper !== "missing") return [row];
       // 没装助手时说明它的用途，并给出可复制的安装命令（ADR 0020）。
-      return [row, h("div", { class: "set-row helper-row" },
+      return [row, h("details", { class: "set-row helper-row" },
+        h("summary", { class: "set-sub" }, t("Install the administrator helper")),
         h("p", { class: "field-hint" }, t("Only needed when an agent must install software or change system settings on {0}. Without it, everything else still works. To install, run this once in a terminal on {0}; it asks for that machine's password, and each request still needs your approval.", runtime.registration.name)),
         installCommandBlock())];
     }));
