@@ -50,7 +50,9 @@ test("runtime doctor reports each injected filesystem, HTTP, command, agent and 
     expect(JSON.stringify(checks)).not.toContain("synthetic-secret");
   }
   const f = fixture(); f.versions.pi = "9.0.0";
-  let checks = await doctor(f.options); expect(checks.find((c) => c.name === "pi 9.0.0")!.ok).toBe(false);
+  let checks = await doctor(f.options); expect(checks.find((c) => c.name === "pi 9.0.0")!.ok).toBe(true);
+  f.versions.pi = "1.3.9";
+  checks = await doctor(f.options); expect(checks.find((c) => c.name === "pi 1.3.9")!.ok).toBe(false);
   f.files["/synthetic/.config/lumio-runtime/runtime.env"] = "bad line";
   checks = await doctor(f.options); expect(checks.find((c) => c.name === "执行器配置")!.ok).toBe(false);
   const lines: string[] = []; expect(printChecks(checks, true, (l) => lines.push(l))).toBe(1); expect(JSON.parse(lines[0]!)).toEqual(checks);

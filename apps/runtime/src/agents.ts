@@ -7,8 +7,7 @@ import type { AgentRun, RuntimeRegistration } from "@lumio/schema";
  * 每个适配器只做翻译：把一轮 AgentRun 变成 argv，执行后从输出里取出最后的汇报与会话编号。
  * 它们不经过 shell，stdin 一律是 /dev/null（由 worker 保证）。
  *
- * 参数来自各 agent 的文档与本机验证，版本范围之外一律拒绝执行（ADR 0005 第 5 条）：不同版本的输出格式可能不同，
- * 不猜测。升级 agent 后需要先验证，再放宽这里的范围。
+ * 普通任务以支持所需 CLI 参数的最低版本为基线。结构化输出仍按各适配器的格式解析。
  */
 export type EngineName = AgentRun["engine"];
 export type Sandbox = RuntimeRegistration["engines"][number]["sandbox"];
@@ -26,21 +25,22 @@ export interface Adapter {
   engine: EngineName;
   command: string;
   sandbox: Sandbox;
-  /** 验证过的版本范围：[min, below)。 */
-  versions: { min: string; below: string };
+  minimumVersion: string;
   argv(run: AgentRun, ctx: AgentContext): string[];
   /** 从 stdout 与（可选的）最后回复文件中取出汇报与会话编号。取不到汇报时返回 undefined。 */
   parse(stdout: string, lastMessage: string | undefined, run: AgentRun): { report?: string; sessionId?: string };
 }
 
+export const CODEX_GIT_MINIMUM_VERSION = "0.166.0";
+
 const codex: Adapter = {
   engine: "codex", command: "codex", sandbox: "os",
-  versions: { min: "0.160.0", below: "0.200.0" },
+  minimumVersion: "0.160.0",
   argv(run, ctx) {
     // exec resume accepts configuration overrides even when its flag set differs from exec.
     const access = run.permissions?.access ?? "write";
     const mode = access === "read" ? "read-only" : access === "full" ? "danger-full-access" : "workspace-write";
-    const sandbox = access !== "full" && ctx.gitPaths?.length ? codexGitOptions(ctx.gitPaths, access === "read", true)
+    const sandbox = access !== "full" && ctx.gitPaths?.length ? ["--strict-config", ...codexGitOptions(ctx.gitPaths, access === "read", true)]
       : run.session?.resume ? ["-c", `sandbox_mode="${mode}"`] : ["--sandbox", mode];
     const common = [...(ctx.skillText ? ["-c", `developer_instructions=${JSON.stringify(ctx.skillText)}`,
       "-c", 'shell_environment_policy.inherit="all"', "-c", "shell_environment_policy.ignore_default_excludes=true",
@@ -67,7 +67,7 @@ const codex: Adapter = {
 
 const claude: Adapter = {
   engine: "claude-code", command: "claude", sandbox: "none",
-  versions: { min: "2.0.0", below: "3.0.0" },
+  minimumVersion: "2.0.0",
   argv(run, ctx) {
     const session = run.session ? (run.session.resume ? ["--resume", run.session.id] : ["--session-id", run.session.id]) : [];
     // 无人值守：不允许交互式确认，否则一遇到权限询问就卡住。隔离级别如实声明为 none。
@@ -93,7 +93,7 @@ export const PI_ACTIVITY_VERSION = "1.5.0";
 
 const pi: Adapter = {
   engine: "pi", command: "pi", sandbox: "none",
-  versions: { min: "1.4.0", below: "2.0.0" },
+  minimumVersion: "1.4.0",
   argv(run, ctx) {
     // pi 的 --session-id：不存在则新建，存在则打开，所以新建与继续用同一个参数。
     return ["-p", run.prompt, ...(ctx.structuredProgress ? ["--mode", "json"] : []), ...(ctx.skillFile ? ["--skill", ctx.skillFile] : []), ...(run.model ? ["--model", run.model] : []), ...(run.session ? ["--session-id", run.session.id] : [])];
@@ -114,7 +114,7 @@ export function compareVersions(a: string, b: string): number {
 }
 
 export function versionSupported(adapter: Adapter, version: string): boolean {
-  return compareVersions(version, adapter.versions.min) >= 0 && compareVersions(version, adapter.versions.below) < 0;
+  return compareVersions(version, adapter.minimumVersion) >= 0;
 }
 
 /** 提问约定（P2-3）：agent 在最后的回复里用这个标记写出问题。 */

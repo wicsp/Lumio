@@ -17,7 +17,7 @@ import { delimiter, dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { JobActionReceipt, JobControlTarget, JobHumanRequest, type GitState, type RuntimeRegistration } from "@lumio/schema";
 import { RunLogWriter, finalizeInterruptedLog } from "@lumio/storage/logs";
-import { ADAPTERS, PI_ACTIVITY_VERSION, splitQuestion, versionSupported, type Adapter } from "./agents.ts";
+import { ADAPTERS, CODEX_GIT_MINIMUM_VERSION, PI_ACTIVITY_VERSION, compareVersions, splitQuestion, versionSupported, type Adapter } from "./agents.ts";
 import type { RuntimeConfig } from "./config.ts";
 import { Queue, type LocalJob } from "./queue.ts";
 import type { RuntimeJobActivity } from "./job-activity.ts";
@@ -177,7 +177,7 @@ export class Executor {
       const executable = Bun.which(adapter.command, { PATH: this.env.PATH ?? "" });
       if (!detected || !executable) { await fail(msg("executor.is_not_installed_on_runtime", run.engine)); return; }
       if (!versionSupported(adapter, detected.version)) {
-        await fail(msg("executor.is_outside_verified_version_range_verify_the_new_version_before_exte", run.engine, detected.version, adapter.versions.min, adapter.versions.below)); return;
+        await fail(msg("executor.engine_version_too_old", run.engine, detected.version, adapter.minimumVersion)); return;
       }
       if (run.interaction && activity?.supported()) interactive = await interactiveEngine(run.engine, detected.version, this.env, Boolean(account));
       if (run.interaction && (!interactive || run.permissions?.access === "full")) { await fail(msg("executor.interactive_unavailable")); return; }
@@ -193,7 +193,9 @@ export class Executor {
         if (interactive?.roots.length) interactive = { ...interactive, roots: [workdir] };
       }
       if (run.engine === "codex" && run.permissions?.git && run.permissions.access !== "full") {
-        if (detected.version !== "0.166.0") { await fail(msg("executor.git_profile_version")); return; }
+        if (!interactive && compareVersions(detected.version, CODEX_GIT_MINIMUM_VERSION) < 0) {
+          await fail(msg("executor.git_profile_version", CODEX_GIT_MINIMUM_VERSION)); return;
+        }
         gitPaths = gitWritePaths(workdir, this.env);
         if (!gitPaths.length) { await fail(msg("executor.git_profile_workdir")); return; }
       }
