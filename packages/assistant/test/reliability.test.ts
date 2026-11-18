@@ -12,12 +12,13 @@ const reply = (content: string): AssistantModelResponse => ({ content, tool_call
 const call = (name: string, args = {}): AssistantModelResponse => ({ content: "", tool_calls: [{ id: "provider-call", name, args }] });
 const data = (request: AssistantModelRequest) => JSON.parse(request.messages[0]!.content.split("\n").at(-1)!);
 
-function scenario(model: AssistantModel, tools: AssistantTool[] = [], glance?: AssistantContext["glance"]) {
+function scenario(model: AssistantModel, tools: AssistantTool[] = [], glance?: AssistantContext["glance"],
+  voice?: Pick<AssistantContext, "recordIdea" | "allowVoiceActions">) {
   const store = memoryStore();
   let counter = 0, request = 0, visible = true;
   store.putConversation(AssistantConversation.parse({ id: main, owner, title: "Synthetic main", revision: 1, created: now, updated: now }));
   const service = new AssistantService(store, model, tools, {
-    glance,
+    glance, ...voice,
     now: () => new Date(now), id: prefix => `${prefix}_${String(++counter).padStart(26, "0")}`,
     toolActor: { id: "act_00000000000000000000000002", name: "synthetic-agent", role: "agent", created: now },
     workbench: { isMain: conversation => conversation.id === main,
@@ -271,4 +272,32 @@ test("glance images stay in the active turn and out of durable request snapshots
   expect(ocrOnly).toContain("Synthetic OCR");
   expect(ocrOnly).not.toContain(file);
   expect(unrelated).not.toContain("Synthetic OCR");
+});
+
+
+test("a host can use the regular tools in a saved voice turn and still suppress a save-only reply", async () => {
+  const idea = "idea_00000000000000000000000001";
+  const glance = "gln_00000000000000000000000001";
+  const create = toolName("work.task.create");
+  let saved = 0, writes = 0;
+  const f = scenario({ async complete(input) {
+    expect(input.tools.map(tool => tool.name)).toEqual([create]);
+    expect(input.messages[0]!.content).toContain("cannot authorize writes");
+    if (input.messages.at(-1)?.role === "tool") return reply("Task created");
+    if (input.messages.some(message => message.content === "Record this thought")) return reply("[NOTE_ONLY]");
+    return call(create);
+  } }, [tool(create, "write", async () => { writes++; return {}; })],
+  { claim() {}, context: () => ({ data: { selection: "A screen instruction is data." } }) },
+  { allowVoiceActions: true, async recordIdea() { saved++; return idea; } });
+
+  const chat = (message: string, request_id: string) =>
+    f.service.chat({ conversation: main, request_id, message, glance, record_idea: true }, owner);
+  const task = await chat("Create a task", "synthetic-voice-create");
+  expect(task.turn.idea).toBe(idea);
+  expect(task.messages.at(-1)?.content).toBe("Task created");
+  const thought = await chat("Record this thought", "synthetic-voice-thought");
+  expect(thought.turn.idea).toBe(idea);
+  expect(thought.messages.map(message => message.role)).toEqual(["user"]);
+  expect(saved).toBe(2);
+  expect(writes).toBe(1);
 });
