@@ -81,6 +81,7 @@ export const ZH: Record<string, string> = {
   "Waiting for the Runtime to confirm it stopped": "等待执行器确认停止",
   "Running {0}": "正在执行 {0}",
   "Runtime received the run": "执行器已接手",
+  "Waiting to run": "等待执行",
   "Waiting for the Runtime": "等待执行器接手",
   "Activity details unavailable": "暂无活动详情",
   "Started {0}": "开始 {0}",

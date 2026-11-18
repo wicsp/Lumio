@@ -112,6 +112,11 @@ export class JobActivity {
       if (event.type === "tool_started") activeTools.set(event.tool.id, event.tool);
       if (event.type === "tool_finished") activeTools.delete(event.tool.id);
     }
+    const waiting = !job.result && !phase && !started && !job.last_seen
+      && (job.status === "queued" || job.status === "assigned");
+    const runtimeOnline = waiting && this.store.runtimes(now).some(value => value.actor === job.spec.runtime && value.online);
+    const connected = waiting ? (runtimeOnline || (job.status === "queued" ? null : false))
+      : isLive(job) ? this.connected(job, now) : null;
     const binding = store.account(id);
     const controlsVisible = !viewer || !binding || binding.owner === viewer;
     const run = job.spec.run;
@@ -120,7 +125,7 @@ export class JobActivity {
     return JobLiveView.parse({
       job: id, status: job.status, created: job.spec.created, assigned: job.assigned ?? null, started,
       last_heartbeat: job.last_seen ?? null, last_activity: events.at(-1)?.event.at ?? null,
-      connected: isLive(job) ? this.connected(job, now) : null,
+      connected,
       capability: cap ? (cap.account_reuse && binding ? { ...cap, approvals: true, questions: true, steer: true } : cap) : null,
       phase,
       sequence: state.sequence, first_available: state.first,
