@@ -8,6 +8,7 @@ import { homedir, hostname } from "node:os";
 import { join, resolve } from "node:path";
 import { modelConfiguration } from "./assistant-model.ts";
 import { HubError } from "./errors.ts";
+import { personalConfig } from "./personal.ts";
 
 export function stateDirectory(env: NodeJS.ProcessEnv = process.env): string {
   return resolve(env.LUMIO_STATE_DIR ?? join(homedir(), ".local", "share", "lumio"));
@@ -60,6 +61,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env) {
     glanceRetentionDays, captureCardInputTokens, captureSummaryLanguage, decisionGateTimeoutMs, decisionGateMinConfidence,
     watchdogIntervalMinutes, explorationMaxTokens, explorationMaxMs: explorationMaxMinutes * 60_000,
     assistantModel: env.LUMIO_ASSISTANT_MANAGED === "1" ? undefined : modelConfiguration(env),
+    personal: personalConfig(env),
     assistantHome: env.HOME ?? (env === process.env ? homedir() : stateDirectory(env)),
     webOrigins: browserOrigins(env.LUMIO_WEB_ORIGINS),
     localRuntime: undefined as string | undefined,

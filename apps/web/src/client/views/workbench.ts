@@ -16,6 +16,7 @@ import type { Navigate, Pane, Section } from "../navigation.ts";
 import { t } from "../i18n.ts";
 import { SettingsPane } from "../panes/settings-page.ts";
 import { TrashPane } from "../panes/trash.ts";
+import { PersonalPane } from "../panes/personal.ts";
 import { InboxPane } from "../panes/inbox.ts";
 import { DEFAULT_BINDINGS, GamepadInput } from "../gamepad-input.ts";
 import { padButtonLabel } from "../gamepad-settings.ts";
@@ -40,6 +41,7 @@ export const SECTIONS: Array<{ key: Exclude<Section, "settings" | "trash">; labe
   { key: "inbox", label: "Inbox", short: "Inbox", icon: "inbox", key2: "4" },
   { key: "execution", label: "Execution", icon: "execution", key2: "5" },
   { key: "assistant", label: "Assistant", short: "Assistant", icon: "assistant", key2: "6" },
+  { key: "personal", label: "Personal", short: "Personal", icon: "calendar", key2: "8" },
   { key: "approvals", label: "Approvals", icon: "approvals", key2: "7" },
 ];
 
@@ -341,6 +343,7 @@ export class WorkbenchView {
     else if (section === "execution") pane = new ExecutionPane(target, client, this.session.hub, id, navigate, changed);
     else if (section === "assistant") pane = new AssistantPane(target, client, this.session.hub, navigate, id);
     else if (section === "trash") pane = new TrashPane(target, client, navigate, changed);
+    else if (section === "personal") pane = new PersonalPane(target, this.session.hub);
     else if (section === "inbox") pane = new InboxPane(target, client, navigate, changed);
     else pane = new ApprovalsPane(target, client, changed, navigate);
     return { target, pane };
@@ -349,9 +352,13 @@ export class WorkbenchView {
   /** 知识与工作页使用实际加载的对象，模块内切换不会更新工作台的路由缓存。 */
   private focusInput(): FocusInput {
     const { section, id } = this.parseHash(this.currentHash || "#overview");
+    if (section === "personal") return { section };
     const selection = window.getSelection();
     const anchor = selection?.anchorNode;
-    const selected = selection && !selection.isCollapsed && anchor && this.main.contains(anchor) ? selection.toString() : undefined;
+    const privateSelection = selection?.rangeCount && [...this.main.querySelectorAll("[data-private-personal]")]
+      .some(node => selection.getRangeAt(0).intersectsNode(node));
+    const selected = !privateSelection && selection && !selection.isCollapsed && anchor && this.main.contains(anchor)
+      ? selection.toString() : undefined;
     const usesPaneFocus = section === "knowledge" || section === "work";
     const ref = usesPaneFocus ? this.current?.pane.focus : undefined;
     const object = usesPaneFocus ? ref && { id: ref.id, label: ref.label, revision: ref.revision } : id ? { id } : undefined;

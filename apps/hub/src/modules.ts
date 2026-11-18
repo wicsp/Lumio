@@ -41,6 +41,7 @@ import { Jobs } from "./jobs.ts";
 import { JobActivity, checkJobInteraction } from "./job-activity.ts";
 import { HubError } from "./errors.ts";
 import { configuredModel } from "./assistant-model.ts";
+import { Personal } from "./personal.ts";
 import type { AssistantConfiguration } from "./assistant-config.ts";
 import { Capabilities } from "./capabilities.ts";
 import { authorize } from "./authorize.ts";
@@ -66,6 +67,7 @@ function roundPermissions(sandbox: "os" | "none", permissions: AgentRun["permiss
 /** Composition only: domain rules belong to their modules; adapters share one transaction-capable database. */
 export class BusinessModules {
   readonly ai:AIConfigurationService;
+  readonly personal?: Personal;
   readonly decisionGate: DecisionGate;
   readonly native:NativeAssistant;
   readonly speech: SpeechConfiguration;
@@ -185,6 +187,16 @@ export class BusinessModules {
     }, this.signal);
     this.ai.migrateLegacy(store.actors().filter(actor => actor.role === "human").map(actor => actor.id));
     this.ai.store.installConversationPurge();
+    if (config.personal) {
+      const personal = config.personal;
+      this.personal = new Personal(store.db, personal, requested => {
+        if (requested) return this.ai.model(personal.owner, requested);
+        if (options.assistantModel) return { model: options.assistantModel };
+        const profile = this.ai.list(personal.owner).profiles.find(item => item.engine === "lumio");
+        if (profile) return this.ai.model(personal.owner, profile.id);
+        if (config.assistantModel) return { model: configuredModel(config.assistantModel) };
+      }, id => !!this.workStore.task(id), now, this.signal);
+    }
     this.decisionGate = new DecisionGate(this.ai.decisionGate, {
       signal: this.signal,
       timeoutMs: config.decisionGateTimeoutMs,
@@ -229,7 +241,9 @@ export class BusinessModules {
     this.assistant.recover();
     this.reconcile();
     let nextEmbedding = 0;
+    this.personal?.tick();
     this.timer = setInterval(() => {
+      this.personal?.tick();
       if (now().getTime() >= nextEmbedding) {
         nextEmbedding = now().getTime() + 10_000;
         void this.semantic.refresh(store.actors().filter(actor => actor.role === "human").map(actor => actor.id));

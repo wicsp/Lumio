@@ -64,7 +64,7 @@ import { CliConfig, ClientInvite, ClientInviteRequest, ClientJoin, ClientJoinReq
 import { Proposal } from "./proposal.ts";
 import {
   PersonalCommand, PersonalCommandProposal, PersonalCommandResult, PersonalEvent, PersonalJournalEntry,
-  PersonalTodo, PersonalTodoStatusCommand,
+  PersonalTodo, PersonalTodoStatusCommand, PersonalProposal, PersonalProposalDecision, PersonalChatRequest, PersonalChatResult, PersonalView, PersonalJournalCommand,
 } from "./personal.ts";
 import { CheckResult, LinksResult, NoteDetail, ResourceSummary, SearchResult } from "./query.ts";
 
@@ -174,6 +174,12 @@ export const CONTRACTS = {
   "personal-command-proposal": PersonalCommandProposal,
   "personal-command-result": PersonalCommandResult,
   "personal-todo-status-command": PersonalTodoStatusCommand,
+  "personal-proposal": PersonalProposal,
+  "personal-proposal-decision": PersonalProposalDecision,
+  "personal-chat-request": PersonalChatRequest,
+  "personal-chat-result": PersonalChatResult,
+  "personal-view": PersonalView,
+  "personal-journal-command": PersonalJournalCommand,
   "work-project": WorkProject,
   "work-task": WorkTask,
   "work-comment": WorkComment,

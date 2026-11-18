@@ -4,13 +4,13 @@ module.exports = {
     {
       name: "domains-are-independent",
       severity: "error",
-      from: { path: "^packages/(knowledge|work|execution|assistant)/src/" },
-      to: { path: "^packages/(knowledge|work|execution|assistant|storage|api-client|platform|core)/", pathNot: "^packages/$1/" },
+      from: { path: "^packages/(knowledge|work|execution|assistant|personal)/src/" },
+      to: { path: "^packages/(knowledge|work|execution|assistant|personal|storage|api-client|platform|core)/", pathNot: "^packages/$1/" },
     },
     {
       name: "domains-no-io",
       severity: "error",
-      from: { path: "^packages/(knowledge|work|execution|assistant)/src/" },
+      from: { path: "^packages/(knowledge|work|execution|assistant|personal)/src/" },
       to: { path: "^(node:)?(fs|fs/promises|http|https|http2|net|tls|dgram|child_process)$|^bun:sqlite$|node_modules/(undici|axios|node-fetch|ky|got)/" },
     },
     {
