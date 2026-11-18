@@ -1,7 +1,8 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildSigningKey, publishBuildUpdates } from "./build-updates.ts";
+import { buildSigningKey, managedPlatforms, publishBuildUpdates } from "./build-updates.ts";
+import type { RuntimePlatform } from "../packages/schema/src/index.ts";
 
 function run(argv: string[], options: { cwd?: string; stdin?: Uint8Array | Bun.BunFile } = {}): string {
   const result = Bun.spawnSync(argv, options);
@@ -23,12 +24,32 @@ export function exportCommit(directory: string, commit: string, destination: str
   run(["tar", "-xf", "-", "-C", destination], { stdin: archive.stdout });
 }
 
+// The Hub binary is already built for Linux x64. Retain Mac support and add
+// other platforms from managed registrations, including offline devices.
+export function mioUpdatePlatforms(registrations: unknown[]): RuntimePlatform[] {
+  return [...new Set<RuntimePlatform>(["darwin-arm64", "linux-x64", ...managedPlatforms(registrations)])];
+}
+
+const readManagedRegistrations = `bash -s <<'LUMIO_RUNTIME_REGISTRY'
+set -euo pipefail
+read -r loader flag libs _ < <(systemctl cat lumio-mio-trial.service | sed -n 's/^ExecStart=//p')
+test "$flag" = --library-path
+binary=$(readlink -f /etc/lumio-mio-trial/current-lumio)
+BUN_BE_BUN=1 "$loader" --library-path "$libs" "$binary" -e '
+  import { Database } from "bun:sqlite";
+  using db = new Database("/var/lib/lumio-mio-trial/db/hub.sqlite", { readonly: true });
+  db.exec("PRAGMA busy_timeout=5000");
+  console.log(JSON.stringify(db.query("SELECT registration FROM runtimes").all().map(row => JSON.parse(row.registration))));
+'
+LUMIO_RUNTIME_REGISTRY`;
+
 export async function deployMio(desktop: boolean) {
   if (desktop && process.platform !== "darwin") throw new Error("Lumio Capture builds require macOS.");
   const ssh = mioSsh(process.env.LUMIO_MIO_SSH_HOSTNAME);
   const onlineVersion = run([...ssh, "curl -fsS --max-time 5 http://127.0.0.1:17420/health"]).trim();
   const base = /^\d+\.\d+\.\d+/.exec(JSON.parse(onlineVersion).version)?.[0];
   if (!base) throw new Error("Mio did not report a valid installed version.");
+  const platforms = mioUpdatePlatforms(JSON.parse(run([...ssh, readManagedRegistrations])));
 
   const git = (args: string[]) => run(["git", ...args], { cwd: import.meta.dir });
   git(["fetch", "--no-write-fetch-head", "origin", "+refs/heads/main:refs/remotes/origin/main"]);
@@ -50,8 +71,11 @@ export async function deployMio(desktop: boolean) {
     const signing = await buildSigningKey(join(homedir(), ".config/lumio/build-signing"));
     console.log(`Runtime build signing fingerprint: ${signing.fingerprint}`);
     await publishBuildUpdates({
-      root: join(work, "updates"), build, version, commit, key: signing.privateKey, platforms: ["darwin-arm64"],
-      compile: async (platform, outfile) => { compile(platform, outfile); },
+      root: join(work, "updates"), build, version, commit, key: signing.privateKey, platforms,
+      compile: async (platform, outfile) => {
+        if (platform === "linux-x64") copyFileSync(candidate, outfile);
+        else compile(platform, outfile);
+      },
       run: async (argv) => { run(argv); },
     });
 

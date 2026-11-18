@@ -46,11 +46,11 @@ bun run scripts/deploy-local.ts
 bun run scripts/deploy-local.ts --mio
 ```
 
-脚本使用已有的管理员 SSH 别名 `mio`，验证主机密钥。需要改用已配置过主机密钥的公网地址时，通过 `LUMIO_MIO_SSH_HOSTNAME` 指定。脚本从最新 `origin/main` 构建带 Web 的 Linux x64 程序和供 Apple Silicon Mac Runtime 使用的签名更新包。
+脚本使用已有的管理员 SSH 别名 `mio`，验证主机密钥。需要改用已配置过主机密钥的公网地址时，通过 `LUMIO_MIO_SSH_HOSTNAME` 指定。脚本从最新 `origin/main` 构建带 Web 的 Linux x64 程序，并发布 Linux x64 和 Apple Silicon 的签名更新包。Mio 已登记的受管执行器若还有其他受支持架构，脚本也为这些架构构建签名包，包括当前离线的设备。
 
 Mio 用现有的 Nix 动态加载器和 systemd 单元运行 Hub、Mio Runtime 与 HTTPS 代理。应用部署持部署锁，校验传输哈希并验证业务快照，等 Hub 助手和 Mio Runtime 空闲，切换到新程序。脚本核对回环和公网 HTTPS 的版本与资源，并等待 Mio Runtime 上报新版本。失败时恢复旧程序和期望版本并重新验收。Mio 的部署备份在 `/var/lib/lumio-mio-trial-staging/` 下，各次部署使用独立目录。
 
-Mac 执行器独立连接 Mio，可以信任开发机的构建公钥后按现有机制更新。用 `--mio --desktop` 可同时在开发机签名安装 Lumio Capture，需 Xcode 和已有的签名身份。程序更新使用上述部署命令，系统配置变更按 NixOS 的系统流程处理。
+受管执行器独立连接 Mio，由设备管理员用 `lumio runtime trust-build-key` 核对并信任开发机的构建公钥后，设备按现有机制更新。用 `--mio --desktop` 可同时在开发机签名安装 Lumio Capture，需 Xcode 和已有的签名身份。程序更新使用上述部署命令，系统配置变更按 NixOS 的系统流程处理。
 
 ## 在 Web 设置资料抓取代理（I1-3b）
 
