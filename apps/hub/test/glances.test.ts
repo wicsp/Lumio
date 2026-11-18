@@ -236,6 +236,26 @@ test("same URL captures distinct paragraphs, the local workbench uploads no scre
   expect((await f.request(`/v2/glances/${glance.id}`, "DELETE")).status).toBe(200);
 }));
 
+test("personal references are unavailable through generic resource lookup and glance context", async () => {
+  const id = "pev_00000000000000000000000001";
+  const modelCalls: AssistantModelRequest[] = [];
+  await fixture(async f => {
+    for (const auth of [f.owner, f.agent]) {
+      const response = await f.request(`/v2/resources/${id}`, "GET", undefined, auth);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ id, status: "unavailable" });
+    }
+    const url = new URL(`/#personal/${id}`, f.hub.server.url).href;
+    const glance = Glance.parse(await (await f.upload(meta({ url }), png)).json());
+    expect(glance.lumio).toEqual({ module: "personal", id });
+    const main = AssistantMain.parse(await (await f.request("/v2/assistant/main", "POST", { request_id: randomUUID() })).json());
+    const chat = { conversation: main.conversation, request_id: randomUUID(), message: "Explain the current page.", glance: glance.id };
+    expect((await f.request("/v2/assistant/chat", "POST", chat)).status).toBe(200);
+    expect(modelCalls).toHaveLength(1);
+    expect(JSON.stringify(modelCalls[0])).not.toContain(id);
+  }, (input) => { modelCalls.push(input); return { content: "Synthetic answer.", tool_calls: [] }; });
+});
+
 test("the main chat attaches a glance, scopingly offers capture, and minimizes persisted screen snapshots", async () => {
   const modelCalls: AssistantModelRequest[] = [];
   await fixture(async f => {

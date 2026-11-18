@@ -1,6 +1,6 @@
 # 0080 个人日程、待办与生活日志
 
-- 状态：Proposed（2026-11-18，待人类批准）
+- 状态：Accepted（2026-11-18）
 - 领域：Personal、Hub、Assistant、Storage、Web、CalDAV
 - 任务：`task_01M7MYJRY2J4ZW91Z0Z8F14WJH`
 - 核对基线：`origin/main` `a6d3628edaf885b3d2b5f6045033df6a2c5f72d5`
@@ -67,3 +67,7 @@
 - [RFC 4791 CalDAV](https://www.rfc-editor.org/rfc/rfc4791.html)
 - [RFC 5545 iCalendar](https://www.rfc-editor.org/rfc/rfc5545.html)
 - [RFC 6578 WebDAV 增量同步](https://www.rfc-editor.org/rfc/rfc6578.html)
+
+## 修订记录
+
+- 2026-11-18，任务所有者在讨论消息 `wmsg_01M7Q0ZBXNQE3J4ZX5D7Z83K6C` 回复「好的」，批准 PR #295 中的首版契约。

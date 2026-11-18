@@ -39,6 +39,9 @@ export const ID_PREFIXES = {
   exploration: "xpl",
   // ADR 0066（C1-1）：全局捕获键的所见
   glance: "gln",
+  personal_event: "pev",
+  personal_todo: "ptd",
+  personal_journal: "jrn",
 } as const;
 
 const ULID = "[0-9A-HJKMNP-TV-Z]{26}";
