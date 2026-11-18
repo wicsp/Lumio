@@ -1,7 +1,7 @@
 import { boundedText } from "./bounded-body.ts";
 import type { SemanticSearch } from "./semantic-search.ts";
 import { EDITING_ROUTES, KnowledgeEditing } from "./knowledge-editing.ts";
-import { KnowledgeCreateRequest, KnowledgeTemplateRequest, PaperResolveRequest, PaperResolveResult, type KnowledgeCreateResult } from "@lumio/schema";
+import { KnowledgeCreateRequest, type KnowledgeUpdateRequest, KnowledgeTemplateRequest, PaperResolveRequest, PaperResolveResult, type KnowledgeCreateResult } from "@lumio/schema";
 import { randomBytes } from "node:crypto";
 import { CoreError, newId } from "@lumio/foundation";
 import { knowledgeTemplate, parsePaperInput, parseArxivMetadata, parseCrossrefMetadata, generateCitekey, rewriteBibtexKey } from "@lumio/knowledge";
@@ -103,6 +103,11 @@ export class KnowledgeAuthoring {
     const parsed = KnowledgeCreateRequest.safeParse(body);
     if (!parsed.success) throw new HubError("INVALID", { key: "knowledge.invalid", args: [] }, { reason: "invalid-note" });
     return Response.json(await this.create(identity, parsed.data, now), { status: 201 });
+  }
+
+  async update(identity: Identity, id: string, input: KnowledgeUpdateRequest, now: Date) {
+    if (!this.editing || identity.actor.role !== "human") throw new HubError("INVALID", { key: "knowledge.no_vault", args: [] });
+    return this.editing.update(identity, id, input, now);
   }
 
   async create(identity: Identity, input: KnowledgeCreateRequest, now: Date): Promise<KnowledgeCreateResult> {

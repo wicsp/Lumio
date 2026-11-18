@@ -16,6 +16,28 @@ export const EDITING_ROUTES = [
 export class KnowledgeEditing {
     private edits: KnowledgeEditingStore;
     constructor(private config: HubConfig, private store: HubStore, private exclusive: <T>(action: () => Promise<T>) => Promise<T>, private issue: (path: string, message: string) => void, private semantic?: SemanticSearch) { this.edits = new KnowledgeEditingStore(store.db, config.vault, { stateDir: config.stateDir }); }
+    async update(identity: Identity, id: string, input: KnowledgeUpdateRequest, now: Date) {
+        const options = { stateDir: this.config.stateDir };
+        return this.exclusive(() => {
+            assertNoteVisible(this.store.db, id);
+            return this.edits.update(identity.actor.id, id, input, {
+                now,
+                finalize: async (note, bytes, writer) => { await updateIndex(this.config.vault, options); const git = await openVaultGit(this.config.vault); if (git)
+                    try {
+                        await git.add(note.note.path, bytes);
+                        await git.commit([note.note.path], "lumio: edit knowledge note", { "Lumio-Actor": writer });
+                    }
+                    catch (cause) {
+                        this.issue(note.note.path, msg("knowledge.commit_failed"));
+                        throw cause;
+                    } },
+                audit: (note, writer) => {
+                    const original = writer === identity.actor.id ? identity : this.store.recoveryIdentity(writer);
+                    this.store.audit(original, "knowledge.update", "allow", undefined, `${writer === identity.actor.id ? "updated" : "recovered"}:${note.note.id}`);
+                }
+            });
+        });
+    }
     async handle(request: Request, operation: string, body: unknown, identity: Identity, now: Date): Promise<Response> {
         const options = { stateDir: this.config.stateDir };
         try {
@@ -50,25 +72,7 @@ export class KnowledgeEditing {
                 return Response.json(result);
             }
             const input = KnowledgeUpdateRequest.parse(body);
-            const result = await this.exclusive(() => {
-                assertNoteVisible(this.store.db, id);
-                return this.edits.update(identity.actor.id, id, input, {
-                    now,
-                    finalize: async (note, bytes, writer) => { await updateIndex(this.config.vault, options); const git = await openVaultGit(this.config.vault); if (git)
-                        try {
-                            await git.add(note.note.path, bytes);
-                            await git.commit([note.note.path], "lumio: edit knowledge note", { "Lumio-Actor": writer });
-                        }
-                        catch (cause) {
-                            this.issue(note.note.path, msg("knowledge.commit_failed"));
-                            throw cause;
-                        } },
-                    audit: (note, writer) => {
-                        const original = writer === identity.actor.id ? identity : this.store.recoveryIdentity(writer);
-                        this.store.audit(original, operation, "allow", undefined, `${writer === identity.actor.id ? "updated" : "recovered"}:${note.note.id}`);
-                    }
-                });
-            });
+            const result = await this.update(identity, id, input, now);
             return Response.json(result);
         }
         catch (cause) {

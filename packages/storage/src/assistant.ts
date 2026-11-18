@@ -173,6 +173,12 @@ export class SqliteAssistantStore implements AssistantStore {
     }
     return result;
   }
+  replaceMessageAnchors(message: string, anchors: readonly ResourceRef[]): void {
+    this.db.transaction(() => {
+      this.db.query("DELETE FROM assistant_message_anchors WHERE message=?").run(message);
+      this.putMessageAnchors(message, anchors);
+    })();
+  }
   putMessageAnchors(message: string, anchors: readonly ResourceRef[]): void {
     if (!anchors.length) return;
     this.db.transaction(() => {

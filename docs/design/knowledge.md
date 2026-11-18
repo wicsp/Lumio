@@ -108,7 +108,7 @@ files/     attachments/  drawings/（Excalidraw）  templates/  originals/（资
 
 ## 在 Lumio 里新建与编辑笔记（ADR 0034 §1–5、0035 §1–8；本地验收中）
 
-- Idea 支持自由正文和可选的输入标题。省略标题时保存首行临时标题与稳定 ID。口述想法保留转录、段落和来源，并链接原讨论（ADR 0074）。
+- Idea 支持自由正文和可选的输入标题。省略标题时保存首行临时标题与稳定 ID。口述想法先保留原话与讨论链接，同轮模型筛选后仅附加相关原文摘录和来源；无关截图、OCR 和页面信息不入 Idea，人的编辑优先（ADR 0074、0076）。
 
 - **只对 human 开放**：新建与编辑接口不授予 agent / runtime。human 可新建论文、视频、网页、想法。
 - **可编辑范围**：合法、公开的 paper / source / idea / experiment / post 可在 Web 里直接编辑标题与正文；私密笔记和元数据不合法的笔记保持只读。

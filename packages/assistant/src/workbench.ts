@@ -50,6 +50,7 @@ export interface AssistantFragment extends AssistantFragmentSource {
 export interface AssistantWorkbenchStore {
   messageAnchors(conversation: string): ReadonlyMap<string, readonly ResourceRef[]>;
   putMessageAnchors(message: string, anchors: readonly ResourceRef[]): void;
+  replaceMessageAnchors?(message: string, anchors: readonly ResourceRef[]): void;
   enqueueFragment(source: AssistantFragmentSource, now: string): void;
   recentFragments(conversation: string, anchors: readonly ResourceRef[]): AssistantFragment[];
   nextFragment(now: string): AssistantFragment | undefined;

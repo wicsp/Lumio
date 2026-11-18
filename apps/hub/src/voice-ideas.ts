@@ -1,5 +1,5 @@
 import { type AssistantTool } from "@lumio/assistant";
-import { DerivedFrom, Idea, idOf, toolName, type AssistantMessage, type AssistantTurn, type Glance } from "@lumio/schema";
+import { DerivedFrom, Idea, idOf, toolName, type AssistantMessage, type AssistantTurn, type Glance, type GlanceContextRetention } from "@lumio/schema";
 import { FileKnowledgeRepository, noteById, readKnowledgeDocument, type SqliteAssistantStore } from "@lumio/storage";
 import { parsePaperInput } from "@lumio/knowledge";
 import type { HubConfig } from "./config.ts";
@@ -36,24 +36,72 @@ export class VoiceIdeas {
     return matches.length === 1 && typeof matches[0]!.frontmatter.id === "string" ? matches[0]!.frontmatter.id : undefined;
   }
 
+  private body(user: AssistantMessage): string {
+    return `${user.content}\n\n[Lumio](lumio:${user.id})\n`;
+  }
+
   async record(owner: string, turn: AssistantTurn, user: AssistantMessage, glanceId: string): Promise<string> {
     if (!this.config.vault) throw new HubError("INVALID", { key: "knowledge.no_vault", args: [] });
-    const glance = this.glances.get(glanceId, owner);
-    if (glance.used_by.message !== user.id) throw unavailable();
-    const source = await this.source(glance);
-    const origin = DerivedFrom.safeParse(glance.url);
-    const sources = [...new Set([user.id, ...(source ? [source] : []), ...(origin.success ? [origin.data] : [])])];
-    const sections = [user.content];
-    const excerpt = glance.selection_text ?? glance.pointing.text;
-    if (excerpt?.trim()) sections.push(`## ${text("voice_idea.selected_passage")}\n\n${excerpt.split(/\r?\n/u).map(line => `> ${line}`).join("\n")}`);
-    const links = [source ? `[${text("voice_idea.source")}](lumio:${source})` : undefined,
-      origin.success ? `<${encodeURI(origin.data)}>` : undefined, `[${text("voice_idea.discussion")}](lumio:${user.id})`];
-    const window = [glance.app.name, glance.window_title].filter(Boolean).join(" · ");
-    sections.push(`## ${text("voice_idea.source")}\n\n${window}\n\n${links.filter(Boolean).join("\n\n")}`);
+    if (this.glances.get(glanceId, owner).used_by.message !== user.id) throw unavailable();
     const note = await this.authoring.create(this.store.recoveryIdentity(owner), {
-      request_id: turn.id, note: { kind: "idea", tags: [], derived_from: sources }, body: sections.join("\n\n") + "\n",
+      request_id: turn.id, note: { kind: "idea", tags: [], derived_from: [user.id] }, body: this.body(user),
     }, new Date(user.created));
     return note.id;
+  }
+
+  async finish(owner: string, glanceId: string, messageId: string, decision?: GlanceContextRetention): Promise<void> {
+    const user = this.assistant.message(messageId);
+    if (!user || this.assistant.conversation(user.conversation)?.owner !== owner) throw unavailable();
+    const glance = await this.glances.retainContext(glanceId, owner, messageId, decision);
+    const turn = user.turn ? this.assistant.turn(user.turn) : undefined;
+    if (turn && !glance.context_retention?.source) {
+      this.store.db.transaction(() => {
+        for (const message of this.assistant.messages(user.conversation).filter(message => message.turn === turn.id)) {
+          this.assistant.replaceMessageAnchors(message.id, turn.idea ? [{ module: "knowledge", id: turn.idea }] : []);
+        }
+      })();
+    }
+    await this.enrich(owner, turn, user, glance);
+    this.glances.completeContext(glanceId, owner, messageId);
+  }
+
+  private async enrich(owner: string, turn: AssistantTurn | undefined, user: AssistantMessage, glance: Glance): Promise<void> {
+    if (!turn?.idea || glance.context_retention?.status !== "retained" || !this.config.vault) return;
+    const retained = glance.context_retention;
+    const current = await readKnowledgeDocument(this.config.vault, turn.idea, { stateDir: this.config.stateDir });
+    // Human edits win. The separate retained Glance remains linked by this message.
+    if (current.document.body !== this.body(user)) return;
+    const sections = [this.body(user).trimEnd()];
+    if (retained.text.length) sections.push(`## ${text("voice_idea.selected_passage")}\n\n${retained.text.join("\n\n").split(/\r?\n/u).map(line => `> ${line}`).join("\n")}`);
+    if (retained.source) {
+      const source = await this.source(glance);
+      const origin = DerivedFrom.safeParse(glance.url);
+      const window = [glance.app.name, glance.window_title].filter(Boolean).join(" · ");
+      const links = [source ? `[${text("voice_idea.source")}](lumio:${source})` : undefined, origin.success ? `<${encodeURI(origin.data)}>` : undefined].filter(Boolean);
+      sections.push(`## ${text("voice_idea.source")}\n\n${[window, ...links].filter(Boolean).join("\n\n")}`);
+    }
+    const body = sections.join("\n\n") + "\n";
+    if (body === current.document.body) return;
+    try {
+      await this.authoring.update(this.store.recoveryIdentity(owner), turn.idea, {
+        request_id: `${turn.id}-context`, expected_revision: current.revision, title: current.document.note.title!, body,
+      }, new Date());
+    } catch (cause) {
+      if (cause instanceof Error && "code" in cause && cause.code === "REVISION_CONFLICT") return;
+      throw cause;
+    }
+  }
+
+  async recoverPending(): Promise<void> {
+    for (const pending of this.glances.pendingContexts()) {
+      const message = this.assistant.message(pending.message);
+      if (!message) {
+        await this.glances.retainContext(pending.id, pending.owner, pending.message);
+        this.glances.completeContext(pending.id, pending.owner, pending.message);
+      } else if (!message.turn || this.assistant.turn(message.turn)?.status !== "running") {
+        await this.finish(pending.owner, pending.id, pending.message);
+      }
+    }
   }
 
   static tool(current: () => VoiceIdeas): AssistantTool {
