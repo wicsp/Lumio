@@ -1,0 +1,36 @@
+bun test v1.4.4 (38afee6c8)
+
+apps/chrome-ext/test/page.test.ts:
+(pass) which way to save a page > papers and PDFs go to the Hub as links; videos use transcripts; other pages send their HTML [0.18ms]
+(pass) transcripts > YouTube json3 becomes one line per caption, without empty or repeated lines [0.12ms]
+(pass) transcripts > Bilibili subtitles use body[].content [0.05ms]
+(pass) capture requests > a page sends its HTML, or its text when the HTML is too large [2.02ms]
+(pass) capture requests > videos send the transcript, or say there was none [0.29ms]
+(pass) capture requests > papers send only the link, with the extension channel and optional triage [0.06ms]
+(pass) Hub addresses keep only the origin [0.07ms]
+
+apps/hub/test/web.test.ts:
+(pass) Hub serves injected files without changing API authentication or contracts; responses prohibit caching [103.02ms]
+(pass) Origin and Host independently require local/public/extra sources; header-free CLI/runtime requests keep token behavior [79.10ms]
+(pass) Hub without Web options returns 404 at root; malformed origins fail configuration without echoing values [78.34ms]
+(pass) browser extension origins pass with an allowed Host and still require a valid token [64.33ms]
+
+packages/schema/test/setup.test.ts:
+(pass) CLI config is strict; vault optional [0.36ms]
+(pass) pairing codes are long lowercase base32; invites and joins are strict [0.57ms]
+(pass) signing key fingerprint is the first 8 bytes of SHA-256, grouped [0.32ms]
+(pass) client invites pair another machine's CLI [0.34ms]
+
+packages/api-client/test/client.test.ts:
+(pass) client encodes references/options and validates all success schemas [2.16ms]
+(pass) ApiError becomes a coded error preserving all decision information [0.45ms]
+(pass) malformed success/error/non-JSON/network responses never escape validation or expose sensitive content [0.93ms]
+(pass) check encodes visibility, validates CheckResult and propagates authorization errors [0.79ms]
+(pass) operation/proposal/actors methods use their endpoints, methods, request bodies and success schemas [2.93ms]
+(pass) job client validates request defaults, Job output and errors at all four endpoints [2.91ms]
+(pass) pairing client validates invites and join, omits anonymous authorization, and supports empty 204 removal [0.84ms]
+
+ 22 pass
+ 0 fail
+ 276 expect() calls
+Ran 22 tests across 4 files. [551.00ms]

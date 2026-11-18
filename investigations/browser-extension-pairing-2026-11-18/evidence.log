@@ -1,0 +1,29 @@
+{"label":"old-bundle","data":{"sha256":"df82cc27c0d52512dfdeb54c506c20b6f97951bf6ee045379b1bf07426f2034a","oldJoin":true,"newJoin":false}}
+{"label":"old-options","data":{"calls":[{"path":"/v1/client/join","status":401}],"saved":false,"text":"Lumio Connect this browser to Lumio Hub address  Pairing code  In Lumio, open Settings → Hub & runtimes → Browser extension and create a pairing code. Connect The connection expired. Connect again in the extension settings. How to use Click the Lumio button, or press Alt+Shift+S, on the page you're reading. Right-click a link to save just the link.","codeUsed":0}}
+{"label":"old-endpoint-body","data":{"status":401,"body":{"error":{"code":"UNAUTHENTICATED","message":"A valid Bearer token is required"}}}}
+{"label":"fresh-options-same-code","data":{"calls":[{"path":"/v2/setup/client/join","status":200}],"saved":true,"codeUsed":1,"elapsedMs":0}}
+{"label":"get-not-preview","data":{"status":401,"codeUsed":0}}
+{"label":"same-label-invalidation","data":{"olderCodeUsed":1,"newerJoin":"success"}}
+{"label":"clip-after-pairing","data":{"state":"queued","duplicate":"none"}}
+{"label":"same-label-token-revocation","data":{"previousTokenValid":false}}
+{"label":"restart-persistence","data":{"join":"success"}}
+{"label":"ttl-boundary","data":{"before600000ms":"accepted","at600000ms":"UNAUTHENTICATED"}}
+{"label":"global-lockout","data":{"validCodeRejectedUntil60000ms":true,"after60000ms":"accepted"}}
+{"label":"ip-origin-static-function","data":{"standardAnd8443":"allowed when configured as publicUrl","realTLSChecked":false}}
+{"label":"hub-log","data":{"method":"POST","path":"/v2/setup/client-invites","status":200}}
+{"label":"hub-log","data":{"method":"POST","path":"<unmatched>","status":401}}
+{"label":"hub-log","data":{"method":"POST","path":"<unmatched>","status":401}}
+{"label":"hub-log","data":{"method":"POST","path":"/v2/setup/client/join","status":200}}
+{"label":"hub-log","data":{"method":"POST","path":"/v2/setup/client-invites","status":200}}
+{"label":"hub-log","data":{"method":"GET","path":"<unmatched>","status":401}}
+{"label":"hub-log","data":{"method":"POST","path":"/v2/setup/client/join","status":200}}
+{"label":"hub-log","data":{"method":"POST","path":"/v2/setup/client-invites","status":200}}
+{"label":"hub-log","data":{"method":"POST","path":"/v2/setup/client-invites","status":200}}
+{"label":"hub-log","data":{"method":"POST","path":"/v2/setup/client/join","status":401}}
+{"label":"hub-log","data":{"method":"POST","path":"/v2/setup/client/join","status":200}}
+{"label":"hub-log","data":{"method":"POST","path":"/v2/inbox/captures","status":202}}
+{"label":"hub-log","data":{"method":"POST","path":"/v2/setup/client-invites","status":200}}
+{"label":"hub-log","data":{"method":"POST","path":"/v2/setup/client/join","status":200}}
+{"label":"hub-log","data":{"method":"POST","path":"/v2/setup/client-invites","status":200}}
+{"label":"hub-log","data":{"method":"POST","path":"/v2/setup/client/join","status":200}}
+{"label":"result","data":"all investigation assertions passed; no production Hub contacted"}

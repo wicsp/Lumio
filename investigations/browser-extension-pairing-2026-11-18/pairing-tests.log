@@ -1,0 +1,13 @@
+bun test v1.4.4 (38afee6c8)
+
+apps/hub/test/pairing.test.ts:
+(pass) new invite invalidates old codes, persists only hashes, expires exactly at ten minutes and returns identical 401 [162.88ms]
+(pass) global failure budget is shared across both joins, blocks even valid codes for one minute, and invites survive Hub restart [157.13ms]
+(pass) logging in again from the same machine revokes the previous CLI token; a label held by another identity is refused (P2-11) [88.51ms]
+(pass) without a public URL clients can pair using the bound local address [101.45ms]
+
+ 4 pass
+ 5 filtered out
+ 0 fail
+ 63 expect() calls
+Ran 4 tests across 1 file. [748.00ms]
