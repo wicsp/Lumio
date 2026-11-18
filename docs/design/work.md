@@ -28,7 +28,7 @@
   详情推导直接后续 `dependents` 与直接子任务 `children`，排除回收站。列表可组合 readiness（ready = open 且不阻塞；blocked = open 且阻塞）、精确标签、直接父任务、项目与文字筛选，依赖批量读取。
   `blocked_by` 不接受 create / patch 提交，写入任务与幂等回执前剔除，不进入备份或存储导出；幂等重试保留原命令结果版本并重新推导当前前置事实。
 - Task/Project 描述在数据库中；依赖、讨论、执行关联各有明确归属。保存描述或计划不隐式委派。
-- **项目执行策略（ADR 0077）**：项目 Job 跨 Runtime 共用并发上限（默认 1）。Hub 在交付前持久占用名额，收到终止结果才释放。启用自动 worktree 的项目以目标机器上的 Git 根目录及已提交基线派发。任务续跑与返工沿用同一 Runtime 上的工作区及分支；配置冲突时交回人处理。
+- **项目执行策略（ADR 0077）**：项目 Job 跨 Runtime 共用并发上限（默认 1）。Hub 在交付前持久占用项目与 Agent 配额名额，收到终止结果才释放（ADR 0079）。启用自动 worktree 的项目以目标机器上的 Git 根目录及已提交基线派发。任务续跑与返工沿用同一 Runtime 上的工作区及分支；配置冲突时交回人处理。
 - 更新带 `expected_revision`；请求用 `request_id` 去重。委派在同一事务内保存 Job、Work 关联和请求回执；同一任务默认只有一轮待完成，交接图允许已就绪的分支并行。
 - 运行结果作为 Work 进展追加一次，按交接计划推进或交回给人。
 - 一轮里的提问与验收（ADR 0030、0032）：agent 用 `<lumio-question>` 提问并结束本轮；`/v2/work/attention` 只按 turn 选择轮到人且原因为 answer / review / failed 的任务。

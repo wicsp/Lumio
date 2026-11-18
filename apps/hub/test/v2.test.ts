@@ -108,12 +108,22 @@ test("v2 Routine plans and historical results work without Knowledge or Task, pr
   expect((await request("/v2/execution/commands", body, agent)).status).toBe(403);
   const created = ExecutionRoutine.parse(await (await request("/v2/execution/commands", body)).json());
   expect(ExecutionRoutine.parse(await (await request("/v2/execution/commands", body)).json())).toEqual(created);
-  const first = RuntimeSync.parse(await (await request("/v1/runtime/sync", { running: [], queued: [], outbox: 0 }, runtime)).json());
+  const legacy = RuntimeSync.parse(await (await request("/v1/runtime/sync", { running: [], queued: [], outbox: 0 }, runtime)).json());
+  expect(legacy.routines).toEqual([]);
+  const syncManaged = async () => RuntimeSync.parse(await (await fetch(`http://127.0.0.1:${hub.server.port}/v1/runtime/sync`, {
+    method: "POST", headers: { Authorization: `Bearer ${runtime}`, "Content-Type": "application/json", "X-Lumio-Features": "agent_admission" },
+    body: JSON.stringify({ running: [], queued: [], outbox: 0 }),
+  })).json());
+  const device = hub.store.runtimes(new Date()).find(device => device.registration.name === "server")!;
+  const { version, platform, install, ...registration } = device.registration;
+  hub.store.registerRuntime(device.actor, { ...registration, features: ["agent_admission"],
+    version: version ?? undefined, platform: platform ?? undefined, install: install ?? undefined }, new Date());
+  const first = await syncManaged();
   expect(first.jobs).toEqual([]); expect(first.routines).toHaveLength(1);
   const old = first.routines[0]!;
   const changed = { request_id: "synthetic-routine-0002", operation: { op: "execution.routine.update", args: { routine: created.id, expected_revision: 1, patch: { description: "第二版" } } } };
   expect((await request("/v2/execution/commands", changed)).status).toBe(200);
-  const sync = RuntimeSync.parse(await (await request("/v1/runtime/sync", { running: [], queued: [], outbox: 0 }, runtime)).json());
+  const sync = await syncManaged();
   expect(sync.routines[0]!.lease).not.toBe(old.lease);
   const fired = new Date(Math.floor(Date.now() / 60_000) * 60_000), id = routineJobId(created.id, fired);
   const result = { job: id, lease: old.lease, status: "done", finished: new Date().toISOString(), report: "离线结果" };

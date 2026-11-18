@@ -425,6 +425,8 @@ export class NativeAssistant {
         ).get(s.id, m.turn);
         if ((m.event.status === "done" || (m.event.status === "cancelled" && !unknownEffect)) && !s.quarantined && !terminal)
           s.view = { ...s.view, state: s.view.stopped ? "offline" : "ready", approval: undefined };
+        if (m.event.status === "failed" && !s.quarantined && !terminal)
+          s.view = { ...s.view, state: "failed", approval: undefined };
         if (m.turn) this.ai.deliveryState(m.turn, "completed");
         if ((m.event.status === "unknown" || unknownEffect) && !terminal) {
           s.quarantined = true;
@@ -576,6 +578,12 @@ export class NativeAssistant {
       });
       s = this.owned(input.conversation.native_session!, input.conversation.owner);
     }
+    while (!this.hub.agentConcurrency.nativeAvailable(s)) {
+      if (input.signal.aborted) return { text: "", status: "cancelled" as const };
+      await Bun.sleep(500);
+      s = this.owned(input.conversation.native_session!, input.conversation.owner);
+    }
+    if (input.signal.aborted) return { text: "", status: "cancelled" as const };
     this.validate(input.conversation, input.request);
     const context_revision = createHash("sha256")
       .update(JSON.stringify(input.memories.map((m) => [m.id, m.revision])))
@@ -686,6 +694,9 @@ export class NativeAssistant {
         undefined,
         "applied",
       );
+      for (const delivery of this.ai.deliveries(s.id)) {
+        if (delivery.state === "sent") this.ai.deliveryState(delivery.turn, "completed");
+      }
       s.quarantined = false;
       s.view = { ...s.view, state: "closed", error: undefined };
       this.put(s);
@@ -724,6 +735,11 @@ export class NativeAssistant {
       const binding = request.method === "GET" ? gate.binding(owner) :
         gate.update(owner, await request.json().catch(() => undefined));
       return Response.json(binding, { headers: { "Cache-Control": "no-store" } });
+    }
+    if (path === "/v2/ai/concurrency" && (request.method === "GET" || request.method === "PUT")) {
+      const policy = this.hub.agentConcurrency;
+      const value = request.method === "GET" ? policy.view(owner) : policy.update(owner, await request.json().catch(() => undefined));
+      return Response.json(value, { headers: { "Cache-Control": "no-store" } });
     }
     if (path === "/v2/ai/config" && request.method === "GET")
       return Response.json(AIConfiguration.parse(this.modules.ai.list(owner)));

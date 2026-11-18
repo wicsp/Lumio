@@ -6,7 +6,7 @@ import { SudoGate } from "./sudo.ts";
 import { privateFile } from "./service.ts";
 import { join } from "node:path";
 import { mkdir, readFile } from "node:fs/promises";
-import { JOB_ACCOUNT_FEATURE, JOB_ACTIVITY_FEATURE, PROJECT_WORKTREE_FEATURE, RUNTIME_CONCURRENCY_FEATURE, RuntimeConcurrency, RuntimeAck, RuntimeRegistered, RuntimeRegistration, RuntimeSync } from "@lumio/schema";
+import { AGENT_ADMISSION_FEATURE, JOB_ACCOUNT_FEATURE, JOB_ACTIVITY_FEATURE, PROJECT_WORKTREE_FEATURE, RUNTIME_CONCURRENCY_FEATURE, RuntimeConcurrency, RuntimeAck, RuntimeRegistered, RuntimeRegistration, RuntimeSync } from "@lumio/schema";
 import type { RuntimeConfig } from "./config.ts";
 import { detectEngines } from "./engines.ts";
 import { Queue } from "./queue.ts";
@@ -84,7 +84,8 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
   const savedConcurrency = RuntimeConcurrency.nullable().safeParse(
     await readFile(concurrencyFile, "utf8").then(value => JSON.parse(value)).catch(() => undefined));
   if (savedConcurrency.success) concurrency = { override: savedConcurrency.data, effective: executor.setConcurrency(savedConcurrency.data) };
-  const projectFeatures = `, ${RUNTIME_CONCURRENCY_FEATURE}`
+  let managedAdmission = true;
+  const projectFeatures = `, ${AGENT_ADMISSION_FEATURE}, ${RUNTIME_CONCURRENCY_FEATURE}`
     + (Bun.which("git", { PATH: env.PATH ?? "" }) ? `, ${PROJECT_WORKTREE_FEATURE}` : "");
   let backoff = Math.min(config.pollSeconds, 60);
   async function send(path: string, body: unknown) {
@@ -156,7 +157,11 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
           if (!response.ok) throw new Error(msg("selftest.hub_request_failed"));
           const info = RuntimeRegistered.parse(await response.json());
           actor = info.actor;
-          if (!info.registration.features?.includes(RUNTIME_CONCURRENCY_FEATURE)) {
+          managedAdmission = info.registration.features?.includes(AGENT_ADMISSION_FEATURE) === true;
+          if (managedAdmission) {
+            concurrency = undefined;
+            executor.useHubAdmission();
+          } else if (!info.registration.features?.includes(RUNTIME_CONCURRENCY_FEATURE)) {
             concurrency = undefined;
             executor.setConcurrency(null);
           }
@@ -173,13 +178,14 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
           archives.retryNow(); archiveWake.notify();
         } else {
           const report = updater?.heartbeat();
-          const sync = await post("/v1/runtime/sync", { ...queue.heartbeat(), ...(report ? { update: report } : {}), ...(concurrency ? { concurrency } : {}) }, RuntimeSync);
-          if (sync.max_concurrent !== undefined) {
+          const sync = await post("/v1/runtime/sync", { ...queue.heartbeat(), ...(managedAdmission ? { routine_offers: plans.offers(now()) } : {}), ...(report ? { update: report } : {}), ...(concurrency ? { concurrency } : {}) }, RuntimeSync);
+          if (!managedAdmission && sync.max_concurrent !== undefined) {
             if (concurrency?.override !== sync.max_concurrent) await privateFile(concurrencyFile, JSON.stringify(sync.max_concurrent));
             concurrency = { override: sync.max_concurrent, effective: executor.setConcurrency(sync.max_concurrent) };
           }
           await updater?.install.confirm(version);
           queue.receive(sync.jobs, sync.access, sync.accounts);
+          if (managedAdmission) plans.observeDeliveries(sync.jobs);
           const accepted = queue.jobs().filter((j) => !j.acked).map((j) => j.spec.id);
           if (accepted.length) {
             await post("/v1/runtime/ack", RuntimeAck.parse({ accepted }), RuntimeAck);
@@ -207,7 +213,7 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
       }
       // 例行任务到点就生成 Job，不论 Hub 是否在线（ADR 0019 第 6 节）。
       if (!updater?.draining && !signal.aborted) {
-        if (plans.fire(now()).length) deliveries.notify();
+        if (!managedAdmission && plans.fire(now()).length) deliveries.notify();
         if (!justAcked) executor.pump();
       }
       try { await wait(delay * 1000, signal); } catch (cause) { if (!signal.aborted) throw cause; }

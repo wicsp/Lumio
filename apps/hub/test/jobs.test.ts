@@ -1,3 +1,4 @@
+import { Jobs } from "../src/jobs.ts";
 import { beforeEach as beforeLocale, afterEach as afterLocale } from "bun:test";
 let previousLocale: string | undefined;
 beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
@@ -9,7 +10,7 @@ import { AIConnection, JOB_ACCOUNT_FEATURE, JobActivityCapabilities, NativeConne
 import { cp, mkdir, writeFile, mkdtemp, readFile, realpath, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PROJECT_WORKTREE_FEATURE, RUNTIME_CONCURRENCY_FEATURE, RuntimeConcurrencyRequest, RuntimeConcurrencySettings, type WorkTask, ApiError, Job, JobResult, RuntimeAck, RuntimeInfo, RuntimeRegistered, RuntimeSync, StoredArtifact, RunLogEvent, BackupManifest } from "@lumio/schema";
+import { PROJECT_WORKTREE_FEATURE, AgentConcurrencyUpdate, AgentConcurrencyView, type WorkTask, ApiError, Job, JobResult, RuntimeAck, RuntimeInfo, RuntimeRegistered, RuntimeSync, StoredArtifact, RunLogEvent, BackupManifest } from "@lumio/schema";
 import { startHub } from "../src/server.ts";
 import { readConfig } from "../src/config.ts";
 import { HubStore } from "../src/store.ts";
@@ -223,12 +224,11 @@ test("lost result response retries identical result; 409 keeps the outbox and lo
   await stop(daemon); expect((await Promise.all(output)).join("\n")).toContain("409");
 });
 
-test("MAX_CONCURRENT=1 executes in receipt order without overlap", async () => {
-  await startRuntime(); const calls = join(temp, "sequence");
-  const first = await submit("quiet", calls, 250), second = await submit("quiet", calls, 0);
-  await eventually(async () => (await get(second.spec.id)).status === "done");
-  expect((await get(first.spec.id)).status).toBe("done");
-  expect((await readFile(calls, "utf8")).trim().split("\n")).toEqual([expect.stringMatching(/^start /), "end", expect.stringMatching(/^start /), "end"]);
+test("a managed runtime can overlap commands despite a legacy device value of one", async () => {
+  await startRuntime();
+  const first = await submit("quiet", join(temp, "first"), 1000);
+  const second = await submit("quiet", join(temp, "second"), 1000);
+  await eventually(async () => (await get(first.spec.id)).status === "running" && (await get(second.spec.id)).status === "running");
 });
 
 for (const mode of ["restart", "timeout", "cancel"] as const) test(`${mode} kills process group including grandchild`, async () => {
@@ -378,33 +378,75 @@ test("project admission survives retries and limits jobs across runtimes", async
   expect((await sync(runtime, PROJECT_WORKTREE_FEATURE)).jobs.map(job => job.id)).toEqual([managed.job.spec.id]);
 });
 
-test("runtime concurrency applies live, drains on decrease and restores the local limit", async () => {
-  const child = await startRuntime(), list = async () =>
-    RuntimeInfo.array().parse(await (await request("/v2/execution/runtimes")).json());
-  const device = (await list())[0]!;
-  expect(device.concurrency).toEqual({ desired: null, effective: 1, pending: false });
-  const set = async (value: number | null, token = human) => request("/v2/execution/commands", token,
-    RuntimeConcurrencyRequest.parse({ request_id: randomUUID(),
-      operation: { op: "execution.runtime.concurrency", args: { runtime: device.actor, max_concurrent: value } } }));
-  expect((await set(2, agent)).status).toBe(403);
-  expect(RuntimeConcurrencySettings.parse(await (await set(2)).json())).toMatchObject({ desired: 2 });
-  await eventually(async () => (await list())[0]?.concurrency?.effective === 2);
-  const first = await submit("quiet", join(temp, "first"), 1000);
-  const second = await submit("quiet", join(temp, "second"), 1000);
-  await eventually(async () => (await get(first.spec.id)).status === "running" && (await get(second.spec.id)).status === "running");
-  expect(RuntimeConcurrencySettings.parse(await (await set(null)).json())).toMatchObject({ desired: null });
-  await eventually(async () => (await list())[0]?.concurrency?.effective === 1);
-  expect((await get(first.spec.id)).status).toBe("running");
-  expect((await get(second.spec.id)).status).toBe("running");
-  const third = await submit("quiet", join(temp, "third"));
-  await eventually(async () => (await get(third.spec.id)).status === "done");
-  expect((await get(first.spec.id)).status).toBe("done");
-  expect((await get(second.spec.id)).status).toBe("done");
-  const done = await get(third.spec.id);
-  const earlier = await Promise.all([get(first.spec.id), get(second.spec.id)]);
-  expect(Date.parse(done.result!.started!)).toBeGreaterThanOrEqual(
-    Math.max(...earlier.map(job => Date.parse(job.result!.finished))));
-  expect(child.exitCode).toBeNull();
+test("account admission is shared across Runtime registrations and settings apply immediately", async () => {
+  const actor = hub!.store.actors().find(value => value.name === "owner")!.id;
+  const engines = ["codex", "claude-code", "pi"].map(name => ({ name, version: "synthetic", sandbox: "none" }));
+  const left = RuntimeRegistered.parse(await (await request("/v1/runtime/register", runtime, { ...registration, engines })).json());
+  const right = RuntimeRegistered.parse(await (await request("/v1/runtime/register", other, { ...registration, name: "other", engines })).json());
+  const jobs = new Jobs(hub!.store);
+  const create = (device: string, engine: "codex" | "claude-code" | "pi", account?: string, model?: string) => {
+    const job = jobs.create({ runtime: device, workdir: "~", timeout_seconds: 120,
+      run: { kind: "agent", engine, prompt: "Synthetic", model, ...(account ? { interaction: "interactive" as const } : {}) } }, new Date());
+    if (account) hub!.store.jobActivity.bindAccount({ job: job.spec.id, account, owner: actor,
+      connection: device === left.actor ? "aic_00000000000000000000000001" : "aic_00000000000000000000000002",
+      revision: 1, generation: 1 });
+    return job;
+  };
+  const sync = async (token: string) => RuntimeSync.parse(await (await request("/v1/runtime/sync", token, heartbeat, JOB_ACCOUNT_FEATURE)).json());
+  const shared = "a".repeat(64), separate = "b".repeat(64);
+  const first = Array.from({ length: 3 }, () => create(left.actor, "codex", shared));
+  const fourth = create(right.actor, "codex", shared), fifth = create(right.actor, "codex", shared);
+  const independent = create(right.actor, "codex", separate);
+  expect((await sync(runtime)).jobs.map(spec => spec.id)).toEqual(first.map(job => job.spec.id));
+  expect((await sync(other)).jobs.map(spec => spec.id)).toEqual([fourth.spec.id, independent.spec.id]);
+  await request("/v1/runtime/register", runtime, { ...registration, engines });
+  expect((await sync(other)).jobs.map(spec => spec.id)).toEqual([fourth.spec.id, independent.spec.id]);
+
+  const set = async (input: AgentConcurrencyUpdate, token = human) => {
+    const response = await fetch(base() + "/v2/ai/concurrency", {
+      method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(AgentConcurrencyUpdate.parse(input)),
+    });
+    return response;
+  };
+  const leftPi = { kind: "runtime", runtime: left.actor, engine: "pi" } as const;
+  expect((await set({ target: leftPi, group: "pi-shared", max_concurrent: 100 }, agent)).status).toBe(403);
+  for (const id of [left.actor, right.actor]) {
+    const response = await set({ target: { ...leftPi, runtime: id }, group: "pi-shared", max_concurrent: 100 });
+    const sharedRows = AgentConcurrencyView.parse(await response.json()).filter(row => row.group === "pi-shared");
+    expect(sharedRows.length).toBeGreaterThan(0);
+    expect(sharedRows.every(row => row.max_concurrent === 100)).toBe(true);
+  }
+  const claude = [create(left.actor, "claude-code"), create(left.actor, "claude-code"), create(right.actor, "claude-code")];
+  const pi = Array.from({ length: 101 }, (_, n) => create(n < 51 ? left.actor : right.actor, "pi"));
+  const leftJobs = (await sync(runtime)).jobs.map(spec => spec.id);
+  expect(leftJobs).toContain(claude[0]!.spec.id);
+  expect(leftJobs).toContain(claude[1]!.spec.id);
+  const rightJobs = (await sync(other)).jobs.map(spec => spec.id);
+  expect(rightJobs).not.toContain(claude[2]!.spec.id);
+  expect(rightJobs).not.toContain(fifth.spec.id);
+  expect(rightJobs).not.toContain(pi.at(-1)!.spec.id);
+  expect([...leftJobs, ...rightJobs].filter(id => pi.some(job => job.spec.id === id))).toHaveLength(100);
+  const local = create(left.actor, "pi", undefined, "local/synthetic");
+  const provider = await set({ target: { ...leftPi, backend: "local" }, group: "local-backend", max_concurrent: 1 });
+  expect(AgentConcurrencyView.parse(await provider.json())).toContainEqual(
+    expect.objectContaining({ group: "local-backend", max_concurrent: 1 }));
+  expect((await sync(runtime)).jobs.map(spec => spec.id)).toContain(local.spec.id);
+  await set({ target: leftPi, group: "pi-shared", max_concurrent: 101 });
+  expect((await sync(other)).jobs.map(spec => spec.id)).toContain(pi.at(-1)!.spec.id);
+  await set({ target: leftPi, group: "pi-shared", max_concurrent: 2 });
+  const afterDecrease = create(right.actor, "pi");
+  const held = (await sync(other)).jobs.map(spec => spec.id);
+  expect(held).toContain(pi.at(-1)!.spec.id);
+  expect(held).not.toContain(afterDecrease.spec.id);
+
+
+  const released = first[0]!.spec;
+  await request("/v1/runtime/ack", runtime, { accepted: [released.id] });
+  expect((await request("/v1/runtime/results", runtime, JobResult.parse({
+    job: released.id, lease: released.lease, status: "done", finished: new Date().toISOString(),
+  }))).status).toBe(200);
+  expect((await sync(other)).jobs.map(spec => spec.id)).toContain(fifth.spec.id);
 });
 
 test("Job activity uses device connectivity while waiting and job heartbeats once running", async () => {

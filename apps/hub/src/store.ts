@@ -1,9 +1,10 @@
+import { AgentConcurrency } from "./agent-concurrency.ts";
 import { Database } from "bun:sqlite";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { chmod, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { newId } from "@lumio/foundation";
-import { AgentInfo, AgentTokenIssued, JobAccess, type JobSpec, Actor, Proposal, type ProposalOperation, type ProposalStatus, type ActorRole, RuntimeRegistration, RuntimeRegistered, RuntimeInfo, RUNTIME_CONCURRENCY_FEATURE, type Job } from "@lumio/schema";
+import { AgentInfo, AgentTokenIssued, JobAccess, type JobSpec, Actor, Proposal, type ProposalOperation, type ProposalStatus, type ActorRole, RuntimeRegistration, RuntimeRegistered, RuntimeInfo, type Job } from "@lumio/schema";
 import { HubError } from "./errors.ts";
 import { ExecutionRuntimes, RuntimeUpdates } from "@lumio/execution";
 import { workSystemActor, SqliteRuntimeRegistry, SqliteExecutionStore, SqliteRuntimeUpdates, SqliteJobActivity, SqliteAIStore } from "@lumio/storage";
@@ -16,17 +17,12 @@ export class HubStore {
   readonly aiStore: SqliteAIStore;
   readonly jobActivity: SqliteJobActivity;
   readonly runtimeUpdates: RuntimeUpdates;
+  readonly agentConcurrency: AgentConcurrency;
   projectForJob: (job: Job) => string | undefined = job => job.project ?? undefined;
   projectConcurrency: (project: string) => number = () => 1;
   runtimeVersion = version;
   private readonly runtimeRegistry: ExecutionRuntimes;
   private constructor(public readonly db: Database) {
-    db.exec(`CREATE TABLE IF NOT EXISTS runtime_concurrency (
-      actor TEXT PRIMARY KEY REFERENCES actors(id) ON DELETE CASCADE,
-      desired INTEGER, applied INTEGER, effective INTEGER);
-      CREATE TABLE IF NOT EXISTS runtime_concurrency_requests (
-        owner TEXT NOT NULL REFERENCES actors(id) ON DELETE CASCADE, request TEXT NOT NULL,
-        fingerprint TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(owner,request));`);
     this.runtimeRegistry = new ExecutionRuntimes(new SqliteRuntimeRegistry(db));
     this.runtimeUpdates = new RuntimeUpdates(new SqliteRuntimeUpdates(db), () => this.runtimeVersion);
     this.executionStore = new SqliteExecutionStore(db, {
@@ -34,6 +30,7 @@ export class HubStore {
     });
     this.jobActivity = new SqliteJobActivity(db);
     this.aiStore = new SqliteAIStore(db);
+    this.agentConcurrency = new AgentConcurrency(this);
   }
 
   static async open(stateDir: string): Promise<HubStore> {
@@ -270,21 +267,8 @@ export class HubStore {
       .run(new Date().toISOString(), identity.actor.id, identity.label, operation, authorization, proposal ?? null, execution ?? null);
   }
 
-  setRuntimeConcurrency(actor: string, desired: number | null): void {
-    this.db.query(`INSERT INTO runtime_concurrency(actor,desired) VALUES(?,?)
-      ON CONFLICT(actor) DO UPDATE SET desired=excluded.desired`).run(actor, desired);
-  }
-  reportRuntimeConcurrency(actor: string, report: { override: number | null; effective: number }): void {
-    this.db.query(`INSERT INTO runtime_concurrency(actor,applied,effective) VALUES(?,?,?)
-      ON CONFLICT(actor) DO UPDATE SET applied=excluded.applied,effective=excluded.effective`)
-      .run(actor, report.override, report.effective);
-  }
   registerRuntime(actor: string, registration: RuntimeRegistration, now: Date): RuntimeRegistered {
-    return this.db.transaction(() => {
-      const info = this.runtimeRegistry.register(actor, registration, now);
-      this.db.query("UPDATE runtime_concurrency SET applied=NULL,effective=NULL WHERE actor=?").run(actor);
-      return info;
-    })();
+    return this.runtimeRegistry.register(actor, registration, now);
   }
   syncRuntime(actor: string, now: Date): void { this.runtimeRegistry.sync(actor, now); }
   registeredRuntimes(now: Date): RuntimeInfo[] { return this.runtimeRegistry.list(now); }
@@ -294,18 +278,7 @@ export class HubStore {
       "SELECT DISTINCT actor_id FROM tokens WHERE revoked IS NULL",
     ).all().map(token => token.actor_id));
     return this.registeredRuntimes(now).filter(runtime => authorized.has(runtime.actor))
-      .map(runtime => {
-        const features = runtime.registration.features;
-        if (features?.includes("self_update")) runtime.update = this.runtimeUpdates.view(runtime);
-        if (features?.includes(RUNTIME_CONCURRENCY_FEATURE)) {
-          const settings = this.db.query<{ desired: number | null; applied: number | null; effective: number | null }, [string]>(
-            "SELECT desired,applied,effective FROM runtime_concurrency WHERE actor=?").get(runtime.actor);
-          const desired = settings?.desired ?? null;
-          runtime.concurrency = { desired, effective: settings?.effective ?? runtime.registration.max_concurrent,
-            pending: desired !== (settings?.applied ?? null) };
-        }
-        return runtime;
-      });
+      .map(runtime => runtime.registration.features?.includes("self_update") ? { ...runtime, update: this.runtimeUpdates.view(runtime) } : runtime);
   }
 
   close(): void { this.db.close(); }

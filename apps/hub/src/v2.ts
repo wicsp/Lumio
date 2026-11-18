@@ -1,4 +1,3 @@
-import { RuntimeConcurrencyRequest, RuntimeConcurrencySettings } from "@lumio/schema";
 import { JobSpec } from "@lumio/schema";
 import { text as msg } from "./messages.ts";
 import { Id, KnowledgeAiNoteCommand, KnowledgeAiNoteResult, ResourceSummary, KnowledgeGraph, KnowledgeGraphArgs, AgentInfo, AgentTokenRequest, AgentRevokeRequest, AssistantChatRequest, WorkCommandRequest, ExecutionRoutineCommandRequest, RequestId, AssistantToolCall, capability, ExecutionRoutine, PlanTemplate, WorkCommandResult, AssistantEvent, KnowledgeDeleteRequest, AssistantConversationDeleteRequest, TrashListArgs, TrashPurgeRequest, TrashRestoreRequest } from "@lumio/schema";
@@ -235,30 +234,6 @@ export async function handleV2(request: Request, server: Pick<Bun.Server<undefin
     }
     if (route.operation === "work.command" || route.operation === "execution.command") {
       const body = await json(request);
-      if (route.operation === "execution.command" && typeof body === "object" && body !== null && "operation" in body &&
-        typeof body.operation === "object" && body.operation !== null && "op" in body.operation &&
-        body.operation.op === "execution.runtime.concurrency") {
-        const input = RuntimeConcurrencyRequest.safeParse(body);
-        if (identity.actor.role !== "human") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] });
-        if (!input.success) throw new HubError("INVALID", { key: "capability.invalid", args: [] });
-        const args = input.data.operation.args, requestId = input.data.request_id;
-        return store.db.transaction(() => {
-          const fingerprint = JSON.stringify(args);
-          const previous = store.db.query<{ fingerprint: string; result: string }, [string, string]>(
-            "SELECT fingerprint,result FROM runtime_concurrency_requests WHERE owner=? AND request=?").get(identity.actor.id, requestId);
-          if (previous) {
-            if (previous.fingerprint !== fingerprint) throw new HubError("CONFLICT", { key: "index.request_id_was_used_for_a_different_operation", args: [] });
-            return Response.json(RuntimeConcurrencySettings.parse(JSON.parse(previous.result)));
-          }
-          const runtime = store.runtimes(now).find(device => device.actor === args.runtime);
-          if (!runtime?.concurrency) throw new HubError("INVALID", { key: "jobs.runtime_concurrency_unsupported", args: [] });
-          store.setRuntimeConcurrency(runtime.actor, args.max_concurrent);
-          const result = store.runtimes(now).find(device => device.actor === runtime.actor)!.concurrency;
-          store.db.query("INSERT INTO runtime_concurrency_requests VALUES(?,?,?,?)")
-            .run(identity.actor.id, requestId, fingerprint, JSON.stringify(result));
-          return Response.json(result);
-        })();
-      }
       if (route.operation === "execution.command" && typeof body === "object" && body !== null && "operation" in body &&
         typeof body.operation === "object" && body.operation !== null && "op" in body.operation &&
         typeof body.operation.op === "string" && body.operation.op.startsWith("execution.runtime.update.")) {

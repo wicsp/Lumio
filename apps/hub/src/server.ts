@@ -115,7 +115,7 @@ async function startHubInstance(config: HubConfig, options: {
   let modules: BusinessModules | undefined;
   const hooks: RoutineHooks = {
     plans: (actor) => modules?.routines.plans(actor) ?? [],
-    adopt: (actor, id, now, lease) => modules?.routines.adopt(actor, id, now, lease),
+    adopt: (actor, id, now, lease, offer) => modules?.routines.adopt(actor, id, now, lease, offer),
   };
   try {
     const assistantConfig = new AssistantConfiguration({ home: options.assistantHome ?? config.assistantHome, external: config.assistantModel, fetch: options.assistantFetch,
