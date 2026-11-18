@@ -1,3 +1,6 @@
+import { IPhoneShortcutPairing } from "@lumio/schema";
+import type { Lang } from "./i18n.ts";
+
 /**
  * iPhone 捕获快捷指令（apps/mobile）的安装与扫码配对。
  *
@@ -20,8 +23,8 @@ export function shortcutInstallUrl(name: string): string {
   return `${SIGNED_BASE}${encodeURIComponent(`${name}.shortcut`)}`;
 }
 
-export function pairingUrl(hub: string, code: string): string {
-  const payload = JSON.stringify({ hub: hub.trim().replace(/\/+$/, ""), code });
+export function pairingUrl(hub: string, code: string, language: Lang): string {
+  const payload = JSON.stringify(IPhoneShortcutPairing.parse({ hub: hub.trim().replace(/\/+$/, ""), code, language: language === "zh" ? "zh-CN" : "en-US" }));
   return `shortcuts://run-shortcut?name=${encodeURIComponent(PAIR_SHORTCUT_NAME)}&input=text&text=${encodeURIComponent(payload)}`;
 }
 

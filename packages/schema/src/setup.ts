@@ -58,6 +58,13 @@ export const ClientJoin = z.strictObject({
   token: z.string().min(1).describe("只在这一次响应里出现"),
 });
 
+/** iPhone shortcuts:// 配对链接的 JSON 输入。缺少语言的既有链接沿用中文（ADR 0075）。 */
+export const IPhoneShortcutPairing = z.strictObject({
+  hub: z.url(),
+  code: PairingCode,
+  language: z.enum(["zh-CN", "en-US"]).optional(),
+});
+
 /** `GET /v2/setup/runtime/signing-key`（runtime）：Hub 的 Ed25519 公钥，安装提权助手时用（ADR 0020、0021）。 */
 export const HubSigningKey = z.strictObject({
   public_key: z.string().regex(/^[A-Za-z0-9_-]{43}$/).describe("32 字节原始公钥，base64url"),
@@ -80,3 +87,5 @@ export type ClientInviteRequest = z.infer<typeof ClientInviteRequest>;
 export type ClientInvite = z.infer<typeof ClientInvite>;
 export type ClientJoinRequest = z.infer<typeof ClientJoinRequest>;
 export type ClientJoin = z.infer<typeof ClientJoin>;
+
+export type IPhoneShortcutPairing = z.infer<typeof IPhoneShortcutPairing>;

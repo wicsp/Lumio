@@ -19,16 +19,38 @@ import { attach, asType, dictionary, f, HAS_NO_VALUE, HAS_VALUE, key, shortcutIn
 export const CONFIG_PATH = "Lumio/config.json";
 export const OCR_ENGINE = "ios-vision@1";
 export const APP_NAME = "iPhone";
-export const SHORTCUT_REVISION = 3;
+export const SHORTCUT_REVISION = 4;
 /** 识字块单块上限是 5000 个 UTF-16 码元；正则按字符截，留出余量给表情等代理对。 */
 export const OCR_MAX_CHARS = 2400;
 /** 截图长边上限，与 GLANCE_LIMITS.max_image_edge 一致。 */
 export const IMAGE_EDGE = 2048;
 
-interface Config { hub: Ref; token: Ref }
+interface Config { hub: Ref; token: Ref; language: Ref; labels: Ref }
 
-function notify(w: Workflow, title: string, ...body: (string | Ref)[]) {
-  w.add("notification", { WFNotificationActionTitle: title, WFNotificationActionBody: text(...body), WFNotificationActionSound: true });
+function notify(w: Workflow, title: string | Ref, ...body: (string | Ref)[]) {
+  w.add("notification", { WFNotificationActionTitle: text(title), WFNotificationActionBody: text(...body), WFNotificationActionSound: true });
+}
+
+/** 配对时同步 Web 界面语言；旧链接和旧配置沿用中文。 */
+function localeConfig(w: Workflow, source: Ref): Pick<Config, "language" | "labels"> {
+  const languageName = "Lumio Language", labelsName = "Lumio Labels";
+  const setLanguage = (value: string | Ref) => {
+    const output = w.add("gettext", { WFTextActionText: text(value) }, "Text");
+    w.add("setvariable", { WFVariableName: languageName, WFInput: attach(output) });
+  };
+  setLanguage("zh-CN");
+  const valid = w.add("text.match", { WFMatchTextPattern: "^(zh-CN|en-US)$", WFMatchTextCaseSensitive: true, text: text(source) }, "Matches");
+  w.when(valid, HAS_VALUE, () => { setLanguage(source); });
+  const setLabels = (values: Record<string, string>) => {
+    const labels = w.add("dictionary", { WFItems: dictionary(Object.entries(values).map(([name, value]) => [name, f.text(value)])) }, "Dictionary");
+    w.add("setvariable", { WFVariableName: labelsName, WFInput: attach(labels) });
+  };
+  setLabels({ paired: "Lumio 已配对", failed: "Lumio 失败", saved: "已收藏", saved_body: "已存入 Lumio" });
+  const english = w.add("text.match", { WFMatchTextPattern: "^en-US$", WFMatchTextCaseSensitive: true, text: text(variable(languageName)) }, "Matches");
+  w.when(english, HAS_VALUE, () => {
+    setLabels({ paired: "Lumio paired", failed: "Lumio failed", saved: "Saved", saved_body: "Saved to Lumio" });
+  });
+  return { language: variable(languageName), labels: variable(labelsName) };
 }
 
 /** 扫码收到的快捷指令名，二维码按名字启动它；apps/web 的设置页用同一个名字。 */
@@ -39,20 +61,21 @@ function pairFromInput(w: Workflow) {
   w.when(shortcutInput, HAS_VALUE, () => {
     const payload = w.add("detect.dictionary", { WFInput: attach(shortcutInput) }, "Dictionary");
     const hub = w.add("text.replace", { WFInput: text(key(payload, "hub")), WFReplaceTextFind: "/+$", WFReplaceTextReplace: "", WFReplaceTextRegularExpression: true }, "Updated Text");
+    const locale = localeConfig(w, key(payload, "language"));
     const response = w.add("downloadurl", {
       WFURL: text(hub, "/v2/setup/client/join"),
       WFHTTPMethod: "POST",
       WFHTTPBodyType: "JSON",
       ShowHeaders: true,
-      WFHTTPHeaders: dictionary([["Accept-Language", f.text("zh")]]),
+      WFHTTPHeaders: dictionary([["Accept-Language", f.text(locale.language)]]),
       WFJSONValues: dictionary([["code", f.text(key(payload, "code"))]]),
     }, "Contents of URL");
-    failUnless(w, response, "token");
-    const config = w.add("dictionary", { WFItems: dictionary([["hub", f.text(hub)], ["token", f.text(key(response, "token"))]]) }, "Dictionary");
+    failUnless(w, response, "token", locale.labels);
+    const config = w.add("dictionary", { WFItems: dictionary([["hub", f.text(hub)], ["token", f.text(key(response, "token"))], ["language", f.text(locale.language)]]) }, "Dictionary");
     const json = w.add("gettext", { WFTextActionText: text(config) }, "Text");
     const file = w.add("setitemname", { WFInput: attach(json), WFName: "config.json", WFDontIncludeFileExtension: false }, "Renamed Item");
     w.add("documentpicker.save", { WFInput: attach(file), WFAskWhereToSave: false, WFFileDestinationPath: CONFIG_PATH, WFSaveFileOverwrite: true }, "Saved File");
-    notify(w, "Lumio 已配对", hub);
+    notify(w, key(locale.labels, "paired"), hub);
     w.add("exit", {});
   });
 }
@@ -65,7 +88,7 @@ function loadConfig(w: Workflow): Config {
     w.add("exit", {});
   });
   const config = w.add("detect.dictionary", { WFInput: attach(file) }, "Dictionary");
-  return { hub: key(config, "hub"), token: key(config, "token") };
+  return { hub: key(config, "hub"), token: key(config, "token"), ...localeConfig(w, key(config, "language")) };
 }
 
 /** 本次运行的请求 ID 前缀：`ios-<毫秒时间>-<随机数>`，各请求再加后缀，满足 RequestId 的格式。 */
@@ -123,17 +146,17 @@ function uploadGlance(w: Workflow, config: Config, base: { id: Ref; captured: Re
     WFHTTPMethod: "POST",
     WFHTTPBodyType: "Form",
     ShowHeaders: true,
-    WFHTTPHeaders: dictionary([["Authorization", f.text("Bearer ", config.token)], ["Accept-Language", f.text("zh")]]),
+    WFHTTPHeaders: dictionary([["Authorization", f.text("Bearer ", config.token)], ["Accept-Language", f.text(config.language)]]),
     WFFormValues: dictionary([["meta", f.text(meta)], ["image", f.file(shot.jpeg)]]),
   }, "Contents of URL");
-  failUnless(w, response, "id");
+  failUnless(w, response, "id", config.labels);
   return key(response, "id");
 }
 
 /** 响应里没有 `field` 时，提示 Hub 返回的错误并结束。 */
-function failUnless(w: Workflow, response: Ref, field: string) {
+function failUnless(w: Workflow, response: Ref, field: string, labels: Ref) {
   w.when(key(response, field), HAS_NO_VALUE, () => {
-    notify(w, "Lumio 失败", key(response, "error.message"));
+    notify(w, key(labels, "failed"), key(response, "error.message"));
     w.add("exit", {});
   });
 }
@@ -144,7 +167,7 @@ function postJson(w: Workflow, config: Config, path: string, body: [string, Retu
     WFHTTPMethod: "POST",
     WFHTTPBodyType: "JSON",
     ShowHeaders: true,
-    WFHTTPHeaders: dictionary([["Authorization", f.text("Bearer ", config.token)], ["Accept-Language", f.text("zh")]]),
+    WFHTTPHeaders: dictionary([["Authorization", f.text("Bearer ", config.token)], ["Accept-Language", f.text(config.language)]]),
     WFJSONValues: dictionary(body),
   }, "Contents of URL");
 }
@@ -162,9 +185,9 @@ export function saveShortcut(): Workflow {
     ["channel", f.text("share")],
     ["glance", f.text(id)],
   ]);
-  failUnless(w, result, "capture.id");
+  failUnless(w, result, "capture.id", config.labels);
   w.add("vibrate", {});
-  notify(w, "已收藏", "已存入 Lumio");
+  notify(w, key(config.labels, "saved"), key(config.labels, "saved_body"));
   return w;
 }
 
@@ -174,18 +197,25 @@ export function askShortcut(): Workflow {
   pairFromInput(w);
   const shot = glance(w);
   const config = loadConfig(w);
-  const said = w.add("dictatetext", { WFDictateTextStopListening: "After Pause" }, "Dictated Text");
+  const transcriptName = "Lumio Dictation";
+  const dictate = (language: string) => {
+    const said = w.add("dictatetext", { WFSpeechLanguage: language, WFDictateTextStopListening: "After Pause" }, "Dictated Text");
+    w.add("setvariable", { WFVariableName: transcriptName, WFInput: attach(said) });
+  };
+  const english = w.add("text.match", { WFMatchTextPattern: "^en-US$", WFMatchTextCaseSensitive: true, text: text(config.language) }, "Matches");
+  w.when(english, HAS_VALUE, () => dictate("en-US"), () => dictate("zh-CN"));
+  const said = variable(transcriptName);
   const base = requestBase(w);
   const id = uploadGlance(w, config, base, shot);
   const main = postJson(w, config, "/v2/assistant/main", [["request_id", f.text(base.id, "-m")]]);
-  failUnless(w, main, "conversation");
+  failUnless(w, main, "conversation", config.labels);
   const reply = postJson(w, config, "/v2/assistant/chat", [
     ["request_id", f.text(base.id, "-t")],
     ["conversation", f.text(key(main, "conversation"))],
     ["message", f.text(said)],
     ["glance", f.text(id)],
   ]);
-  failUnless(w, reply, "turn.id");
+  failUnless(w, reply, "turn.id", config.labels);
   const messages = w.add("getvalueforkey", { WFInput: attach(reply), WFDictionaryKey: "messages", WFGetDictionaryValueType: "Value" }, "Dictionary Value");
   const last = w.add("getitemfromlist", { WFInput: attach(messages), WFItemSpecifier: "Last Item" }, "Item from List");
   w.add("showresult", { Text: text(key(asType(last, "WFDictionaryContentItem"), "content")) });

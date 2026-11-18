@@ -7,6 +7,7 @@ export type Lang = "en" | "zh";
 const KEY = "lumio.web.lang";
 
 export const ZH: Record<string, string> = {
+  "Pairing syncs the current Lumio language for dictation and shortcut messages. Pair again after changing it.": "配对会同步当前 Lumio 语言，用于听写和快捷指令提示。切换语言后请重新配对。",
   "Insert image": "插入图片",
   "Uploads to {0}": "上传到 {0}",
   "Configure an upload destination in Image hosting settings.": "请在图床设置中配置上传目的地。",
