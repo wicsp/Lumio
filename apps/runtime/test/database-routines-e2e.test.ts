@@ -59,7 +59,11 @@ test("database Routine uses protocol 2 on a real runtime with no Knowledge, wait
     await Bun.sleep(250);
     expect(local("SELECT * FROM queue")).toHaveLength(1);
     expect(local("SELECT * FROM outbox")).toHaveLength(0);
-    await boot(); await eventually(async () => Job.array().parse(await api(`/v2/execution/jobs?routine=${routine.id}`)).length === 2);
+    await boot();
+    await eventually(async () => {
+      const jobs = Job.array().parse(await api(`/v2/execution/jobs?routine=${routine.id}`));
+      return jobs.length === 2 && jobs.every(job => job.status === "done");
+    });
     await eventually(() => local("SELECT * FROM outbox").length === 0);
     await stop(); now = Date.parse("2026-10-26T11:05:30Z"); start();
     await eventually(async () => Job.array().parse(await api(`/v2/execution/jobs?routine=${routine.id}`)).filter((job) => job.status === "done").length === 3);
