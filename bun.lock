@@ -12,7 +12,7 @@
     },
     "apps/chrome-ext": {
       "name": "@lumio/chrome-ext",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
         "@lumio/api-client": "workspace:*",
         "@lumio/schema": "workspace:*",

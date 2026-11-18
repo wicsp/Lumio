@@ -37,7 +37,7 @@ async function render(): Promise<void> {
         await saveConnection({ hub: origin, token: joined.token, actor: joined.actor });
         void render();
       } catch (error) {
-        message.replaceChildren(h("span", { class: "error" }, failureText(error)));
+        message.replaceChildren(h("span", { class: "error" }, failureText(error, "pairing")));
       } finally { submit.disabled = false; }
     });
   });

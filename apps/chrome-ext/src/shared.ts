@@ -1,5 +1,5 @@
 /** 插件各页面共用：连接配置、Hub 客户端、文案。 */
-import { createClient } from "@lumio/api-client";
+import { ApiClientError, createClient } from "@lumio/api-client";
 
 export interface Connection { hub: string; token: string; actor: string }
 
@@ -62,6 +62,9 @@ const ZH: Record<string, string> = {
   "Disconnect": "断开",
   "Chrome needs permission to reach your Hub.": "需要允许插件访问你的 Hub 地址。",
   "Enter a valid address, e.g. http://127.0.0.1:7420": "请输入有效的地址，例如 http://127.0.0.1:7420",
+  "Pairing was rejected. Check the Hub address and extension version, then try a new pairing code.": "配对请求被拒绝。请核对 Hub 地址和插件版本，再用新的配对码重试。",
+  "The Hub did not recognize the pairing request. Check the Hub address and extension version.": "Hub 无法识别配对请求。请核对 Hub 地址和插件版本。",
+  "Enter the pairing code exactly as shown in Lumio.": "请按 Lumio 显示的内容输入配对码。",
   "How to use": "怎么用",
   "Click the Lumio button, or press Alt+Shift+S, on the page you're reading. Right-click a link to save just the link.": "在正在看的页面上点工具栏的 Lumio 按钮，或按 Alt+Shift+S。右键点链接，可以只存这个链接。",
   "Connecting…": "正在连接…",
@@ -84,8 +87,15 @@ export function h<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<s
 }
 
 /** 把 Hub 错误翻成人话。 */
-export function failureText(error: unknown): string {
+export function failureText(error: unknown, phase: "session" | "pairing" = "session"): string {
   const status = (error as { status?: number })?.status;
+  if (phase === "pairing") {
+    if (status === 401) return t("Pairing was rejected. Check the Hub address and extension version, then try a new pairing code.");
+    if (status === 404) return t("The Hub did not recognize the pairing request. Check the Hub address and extension version.");
+    if (status === undefined && error instanceof ApiClientError && error.code === "INVALID") {
+      return t("Enter the pairing code exactly as shown in Lumio.");
+    }
+  }
   if (status === 401) return t("The connection expired. Connect again in the extension settings.");
   if (status === undefined) return t("Can't reach Lumio. Check that the Hub is running.");
   return error instanceof Error ? error.message : String(error);
