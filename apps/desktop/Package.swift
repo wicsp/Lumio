@@ -9,5 +9,6 @@ let package = Package(
         .target(name: "LumioCaptureCore"),
         .executableTarget(name: "LumioCapture", dependencies: ["LumioCaptureCore"]),
         .testTarget(name: "LumioCaptureCoreTests", dependencies: ["LumioCaptureCore"]),
+        .testTarget(name: "LumioCaptureTests", dependencies: ["LumioCapture"]),
     ]
 )

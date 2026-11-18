@@ -310,37 +310,23 @@ enum Connection: Equatable {
     }
 
     @objc private func pairBrowser() {
-        let dialog = NSAlert()
-        dialog.messageText = "配对浏览器扩展"
-        dialog.informativeText = "在 Save to Lumio 的设置里复制扩展 ID。选择浏览器后，Capture 会生成一个本机配对码。"
-        let idField = NSTextField(string: settings.string(forKey: "browserExtensionID") ?? "")
-        idField.placeholderString = "扩展 ID"
-        let browser = NSPopUpButton(frame: .zero)
-        browser.addItems(withTitles: Self.browsers.map(\.0))
-        browser.selectItem(at: Self.browsers.firstIndex(where: { $0.1 == settings.string(forKey: "browserBundle") }) ?? 0)
-        let fields = NSStackView(views: [idField, browser])
-        fields.orientation = .vertical
-        fields.alignment = .leading
-        fields.spacing = 8
-        idField.widthAnchor.constraint(equalToConstant: 310).isActive = true
-        dialog.accessoryView = fields
-        dialog.addButton(withTitle: "生成配对码")
-        dialog.addButton(withTitle: "取消")
-        NSApp.activate(ignoringOtherApps: true)
-        guard dialog.runModal() == .alertFirstButtonReturn else { return }
-        let id = idField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard BrowserBridge.extensionID(id) else { panel.show("请输入有效的扩展 ID"); return }
+        let selected = Self.browsers.firstIndex(where: { $0.1 == settings.string(forKey: "browserBundle") }) ?? 0
+        let dialog = BrowserPairingDialog(savedID: settings.string(forKey: "browserExtensionID"),
+                                          browsers: Self.browsers.map(\.0), selectedBrowser: selected)
+        guard let pairing = dialog.run() else { return }
         do {
             let key = try BrowserBridge.key()
             try CredentialStore.write(key, account: "browser-bridge")
-            settings.set(id, forKey: "browserExtensionID")
-            settings.set(Self.browsers[browser.indexOfSelectedItem].1, forKey: "browserBundle")
+            settings.set(pairing.id, forKey: "browserExtensionID")
+            settings.set(Self.browsers[pairing.browserIndex].1, forKey: "browserBundle")
             startBrowserBridge()
             let code = NSAlert()
             code.messageText = "本机浏览器配对码"
             code.informativeText = "把配对码粘贴到 Save to Lumio 的「配对桌面捕获」。"
             let text = NSTextField(labelWithString: key)
+            text.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
             text.isSelectable = true
+            text.sizeToFit()
             code.accessoryView = text
             code.addButton(withTitle: "复制配对码")
             code.addButton(withTitle: "关闭")
