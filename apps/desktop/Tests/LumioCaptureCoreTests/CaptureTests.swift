@@ -4,6 +4,22 @@ import LumioCaptureCore
 import XCTest
 
 final class CaptureTests: XCTestCase {
+    func testChromiumTabScriptSupportsEgoLite() throws {
+        let bundleIDs = ["com.citrolabs.ego.lite", "com.google.Chrome", "com.microsoft.edgemac", "company.thebrowser.Browser"]
+        for bundleID in bundleIDs {
+            let script = try XCTUnwrap(chromiumTabScript(bundleID))
+            XCTAssertEqual(script, """
+                tell application id "\(bundleID)"
+                    try
+                        if mode of front window is "incognito" then return "__private__"
+                    end try
+                    return URL of active tab of front window
+                end tell
+                """)
+        }
+        XCTAssertNil(chromiumTabScript("example.reader"))
+    }
+
     func testPressAndCoordinateConversions() {
         let frame = CGRect(x: -500, y: 200, width: 400, height: 300)
         let transform = PixelTransform(window: frame, width: 800, height: 600)
