@@ -26,6 +26,28 @@ import { LiveData, settled, type LiveSnapshot } from "../live-data.ts";
 const LIVE = ["queued", "assigned", "running"];
 const DAY = 86_400_000;
 
+/** Show one current round per task, even when a plan is running in parallel. */
+export function todayAgentRuns(jobs: readonly Job[], tasks: readonly WorkTask[]): Job[] {
+  const turns = new Map(tasks.map(task => [task.id, task.turn]));
+  const candidates = jobs.filter(job => {
+    const task = job.spec.source?.task;
+    if (!task) return true;
+    const turn = turns.get(task);
+    if (!turn) return LIVE.includes(job.status);
+    return turn.job === job.spec.id || turn.parallel?.some(branch => branch.job === job.spec.id);
+  });
+
+  candidates.sort((a, b) => Number(LIVE.includes(b.status)) - Number(LIVE.includes(a.status))
+    || Date.parse(b.spec.created) - Date.parse(a.spec.created));
+  const seen = new Set<string>();
+  return candidates.filter(job => {
+    const key = job.spec.source?.task ?? job.spec.id;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export class OverviewPane {
   private body = h("div", { class: "today-inner" });
   private generation = 0;
@@ -92,7 +114,8 @@ export class OverviewPane {
     const next = mine.filter(task => !focus.includes(task)).sort(byDue);
     const agentsWorking = taskData?.filter(task => turnGroup(task) === "agents") ?? [];
     const waiting = taskData?.filter(task => turnGroup(task) === "external") ?? [];
-    const running = jobData?.filter(job => LIVE.includes(job.status)) ?? [];
+    const activity = todayAgentRuns(jobData ?? [], taskData ?? []);
+    const running = activity.filter(job => LIVE.includes(job.status));
     // ADR 0032：任务提醒按当前交接；旧 Hub 与独立运行使用同一套回退规则。
     const attentionData = settled(attention);
     const liveRequests = settled(liveAttention) ?? [];
@@ -132,7 +155,7 @@ export class OverviewPane {
               ...personalTodos.slice(0, 5).map(item => h("div", { class: "today-row" }, icon("check"), h("span", { class: "row-main" }, item.title))),
               !personalEvents.length && !personalTodos.length ? h("p", { class: "muted" }, t("Nothing to show.")) : null)) : null,
           this.section("runs", t("Agent activity"), running.length, () => this.navigate("execution"),
-            jobs.status === "rejected" ? failure(errorText(jobs.reason)) : this.runs(jobData ?? [], taskData ?? [])),
+            jobs.status === "rejected" ? failure(errorText(jobs.reason)) : this.runs(activity, taskData ?? [])),
           this.section("projects", t("Projects"), projectData.filter(p => p.status !== "done").length, () => this.navigate("work", "projects"),
             projects.status === "rejected" ? failure(errorText(projects.reason)) : this.projects(projectData, taskData ?? [])))));
   }
@@ -223,10 +246,8 @@ export class OverviewPane {
   }
 
   private runs(jobs: Job[], tasks: WorkTask[]): HTMLElement {
-    const live = jobs.filter(job => LIVE.includes(job.status));
-    const recent = jobs.filter(job => !LIVE.includes(job.status)).sort((a, b) => b.spec.created.localeCompare(a.spec.created));
-    const shown = [...live, ...recent].slice(0, 5);
-    if (!shown.length) return h("p", { class: "today-empty" }, t("No agent runs yet. Delegate a task and each round shows up here."));
+    const shown = jobs.slice(0, 5);
+    if (!shown.length) return h("p", { class: "today-empty" }, t("No current agent activity."));
     return h("div", { class: "today-rows" }, ...shown.map(job => h("button", { type: "button", class: "today-row", "data-pad-row": job.spec.id, onclick: () => this.navigate("execution", job.spec.id) },
       statusIcon(job.status),
       h("span", { class: "row-main" }, h("span", { class: "row-title" }, jobTitle(job, tasks)),

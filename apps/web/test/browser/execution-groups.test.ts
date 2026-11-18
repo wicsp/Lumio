@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Job, WorkAttention, WorkTask } from "@lumio/schema";
 import { executionGroups } from "../../src/client/execution-groups.ts";
+import { todayAgentRuns } from "../../src/client/panes/overview.ts";
 
 const at = "2026-11-05T00:00:00Z";
 const id = (prefix: string, n: number) => `${prefix}_${String(n).padStart(26, "0")}`;
@@ -106,5 +107,39 @@ describe("execution attention follows the current turn", () => {
     const routine = Job.parse({ ...run(2, "unknown"), spec: { ...run(2, "unknown").spec,
       source: { routine: id("rtn", 1), round: 1 } } });
     expect(executionGroups([standalone, routine], [], []).needs).toEqual([standalone, routine]);
+  });
+});
+
+describe("Today shows current agent activity", () => {
+  test("only the current round appears for a task, including a result awaiting review", () => {
+    const oldQuestion = run(1, "waiting_for_human", 1);
+    const oldFailure = run(2, "failed", 1, 2);
+    const currentResult = run(3, "done", 1, 3);
+    const closedResult = run(4, "done", 2);
+    const standalone = run(5, "running");
+    const tasks = [
+      task(1, human("review", currentResult)),
+      task(2, { holder: "nobody", reason: "on_hold", since: at }, "done"),
+    ];
+    const jobs = [oldQuestion, closedResult, currentResult, oldFailure, standalone];
+    expect(todayAgentRuns(jobs, tasks)).toEqual([standalone, currentResult]);
+    expect(executionGroups(jobs, tasks, []).history).toEqual(jobs.slice(0, 4));
+  });
+
+  test("parallel branches share one row and a live branch represents the task", () => {
+    const stale = run(1, "running", 1);
+    const active = run(2, "running", 1, 2);
+    const delivered = run(3, "done", 1, 3);
+    const current = task(1, { holder: "agents", reason: "working", since: at, parallel: [
+      { stage: "build", agent: "codex@mac", job: active.spec.id, round: 2 },
+      { stage: "review", agent: "claude-code@mac", job: delivered.spec.id, round: 3 },
+    ] });
+    expect(todayAgentRuns([stale, delivered, active], [current])).toEqual([active]);
+  });
+
+  test("without a task snapshot, show live runs but avoid reviving old results", () => {
+    const active = run(1, "queued", 1, 2);
+    const old = run(2, "failed", 1);
+    expect(todayAgentRuns([old, active], [])).toEqual([active]);
   });
 });

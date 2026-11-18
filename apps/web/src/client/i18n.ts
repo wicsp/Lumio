@@ -1064,7 +1064,7 @@ export const ZH: Record<string, string> = {
   "Approval": "审批",
   "Review": "查看",
   "Answer": "回答",
-  "No agent runs yet. Delegate a task and each round shows up here.": "还没有 agent 运行。委派任务后，每一轮都会显示在这里。",
+  "No current agent activity.": "暂无 Agent 动态。",
   "Ask the assistant anything…": "问助手任何问题…",
   "Back": "返回",
   "Appearance": "外观",
