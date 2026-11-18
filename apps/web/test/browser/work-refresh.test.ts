@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { WorkTask, WorkTaskDetail } from "@lumio/schema";
 import { WorkPane } from "../../src/client/panes/work.ts";
 import { WorkEditor } from "../../src/client/panes/work-editor.ts";
+import { groupTasksByTurn } from "../../src/client/turn.ts";
 
 const seed = WorkTask.parse(JSON.parse(readFileSync(new URL("../../../../fixtures/work/readiness.json", import.meta.url), "utf8")));
 const detail = WorkTaskDetail.parse({ task: { ...seed, id: "task_00000000000000000000000002", title: "Synthetic dependent", dependencies: [seed.id], blocked_by: [] },
@@ -26,6 +27,33 @@ function fixture() {
   }) as WorkPane;
   return { pane, editor, focus(value: boolean) { focused = value; }, reloads: () => reloads, listLoads: () => listLoads };
 }
+
+test("only completed tasks are ordered by completion time, newest first", () => {
+  const at = seed.created;
+  const task = (suffix: number, extra: Partial<WorkTask> = {}) =>
+    WorkTask.parse({ ...seed, id: `task_0000000000000000000000000${suffix}`, ...extra });
+  const oldCompletion = task(2, {
+    outcome: "done", turn: { holder: "nobody", reason: "on_hold", since: "2026-11-08T10:00:00+08:00" },
+    updated: "2026-11-08T05:00:00Z",
+  });
+  const recentCompletion = task(1, {
+    outcome: "done", turn: { holder: "nobody", reason: "on_hold", since: "2026-11-08T04:00:00Z" },
+    created: "2026-11-08T01:00:00Z", updated: "2026-11-08T04:00:00Z",
+  });
+  const middleCompletion = task(6, {
+    outcome: "done", turn: { holder: "nobody", reason: "on_hold", since: "2026-11-08T03:00:00Z" },
+    created: "2026-11-08T02:00:00Z", updated: "2026-11-08T03:00:00Z",
+  });
+  const [firstTodo, secondTodo] = [task(3), task(4, { turn: { holder: "human", reason: "todo", since: "2026-11-08T03:00:00Z" } })];
+  const cancelled = task(5, { outcome: "cancelled", turn: { holder: "nobody", reason: "on_hold", since: at } });
+  const tasks = [oldCompletion, firstTodo, recentCompletion, secondTodo, middleCompletion, cancelled];
+
+  expect(groupTasksByTurn(tasks)).toEqual([
+    ["todo", [firstTodo, secondTodo]],
+    ["done", [recentCompletion, middleCompletion, oldCompletion]],
+    ["cancelled", [cancelled]],
+  ]);
+});
 
 test("returning from trash refreshes a clean task despite its populated saved title", () => {
   const f = fixture();

@@ -12,7 +12,7 @@ import { drafts } from "../drafts.ts";
 import { confirmDelete, deletableRow } from "../trash-actions.ts";
 import { dueLabel } from "../format.ts";
 import { PROJECT_LABELS } from "../labels.ts";
-import { TURN_GROUPS, TURN_GROUP_LABELS, isBlocked, turnGroup, turnIcon, turnText, type TurnGroup } from "../turn.ts";
+import { TURN_GROUPS, TURN_GROUP_LABELS, groupTasksByTurn, isBlocked, turnGroup, turnIcon, turnText, type TurnGroup } from "../turn.ts";
 import { allTags, blockingTitles } from "../task-structure.ts";
 import { listKeys, markSelected } from "../list-keys.ts";
 import type { Navigate } from "../navigation.ts";
@@ -194,7 +194,9 @@ export class WorkPane {
         if (generation !== this.listGeneration || !this.active) return;
         this.tasks = tasks;
         const visible = projects.filter(p => (!this.statusFilter || p.status === this.statusFilter) && (!q || p.title.toLowerCase().includes(q.toLowerCase())));
-        this.renderGroups(PROJECT_ORDER, visible, p => p.status, p => this.projectRow(p), PROJECT_LABELS, statusIcon,
+        const groups = PROJECT_ORDER.map(status => [status, visible.filter(project => project.status === status)] as const)
+          .filter(([, list]) => list.length);
+        this.renderGroups(groups, p => this.projectRow(p), PROJECT_LABELS, statusIcon,
           q || this.statusFilter ? t("No matching projects") : t("No projects yet. A project groups the tasks behind one goal."));
         return;
       }
@@ -202,16 +204,18 @@ export class WorkPane {
       if (generation !== this.listGeneration || !this.active) return;
       this.tasks = all;
       const tasks = all.filter(task => (!this.statusFilter || turnGroup(task) === this.statusFilter) && (!this.tagFilter || task.tags.includes(this.tagFilter)));
-      this.renderGroups(TURN_GROUPS, tasks, turnGroup, t => this.taskRow(t), TURN_GROUP_LABELS, group => turnIcon(group as TurnGroup),
+      this.renderGroups(groupTasksByTurn(tasks), task => this.taskRow(task), TURN_GROUP_LABELS, turnIcon,
         q || this.statusFilter || this.projectFilter || this.tagFilter ? t("No matching tasks. Try another search or clear the filters.") : t("No tasks yet. Press C to create the first one."));
     } catch (error) {
       if (!quiet && generation === this.listGeneration && this.active) clear(this.list, failure(errorText(error), () => this.load()));
     }
   }
 
-  private renderGroups<T extends WorkTask | WorkProject>(order: readonly string[], items: T[], groupOf: (item: T) => string, row: (item: T) => HTMLElement, labels: Record<string, string>, glyph: (group: string) => SVGSVGElement, emptyText: string): void {
-    if (!items.length) { clear(this.list, empty(emptyText, this.mode === "tasks" ? { label: t("New task"), run: () => this.create() } : { label: t("New project"), run: () => this.create() })); return; }
-    const groups = order.map(status => [status, items.filter(i => groupOf(i) === status)] as const).filter(([, list]) => list.length);
+  private renderGroups<Group extends string, Item extends WorkTask | WorkProject>(
+    groups: readonly (readonly [Group, Item[]])[], row: (item: Item) => HTMLElement, labels: Record<Group, string>,
+    glyph: (group: Group) => SVGSVGElement, emptyText: string,
+  ): void {
+    if (!groups.length) { clear(this.list, empty(emptyText, this.mode === "tasks" ? { label: t("New task"), run: () => this.create() } : { label: t("New project"), run: () => this.create() })); return; }
     clear(this.list, ...groups.map(([status, list]) => {
       const group = h("section", { class: `group${this.folded.has(status) && !this.statusFilter ? " collapsed" : ""}` });
       const head = h("button", { type: "button", class: "group-head", "data-pad-row": `group:${status}`, "aria-expanded": String(!group.classList.contains("collapsed")), onclick: () => {

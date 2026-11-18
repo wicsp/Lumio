@@ -30,6 +30,15 @@ export function turnGroup(task: WorkTask): TurnGroup {
   return "agents";
 }
 
+export function groupTasksByTurn(tasks: readonly WorkTask[]): (readonly [TurnGroup, WorkTask[]])[] {
+  return TURN_GROUPS.map(group => {
+    const list = tasks.filter(task => turnGroup(task) === group);
+    // 完成时会更新 turn.since，之后编辑任务只会更新 updated。
+    if (group === "done") list.sort((a, b) => Date.parse(b.turn.since) - Date.parse(a.turn.since));
+    return [group, list] as const;
+  }).filter(([, list]) => list.length);
+}
+
 /** 组 → 图标样式（复用状态图标的形状）。 */
 export function turnIcon(group: TurnGroup): SVGSVGElement {
   return statusIcon({ needs: "needs", todo: "todo", blocked: "blocked", agents: "active", external: "waiting", hold: "paused", done: "done", cancelled: "cancelled" }[group]);

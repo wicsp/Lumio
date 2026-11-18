@@ -19,7 +19,7 @@ import { ago, dateInputValue, dueLabel, isoFromDateInput } from "../format.ts";
 import { PROJECT_LABELS } from "../labels.ts";
 import { checkpointCommand, openPlanEditor, planProgress, stageLabel } from "../plan.ts";
 import { MessageRail } from "../side-rail.ts";
-import { TURN_ACTION_DONE, TURN_ACTION_ICONS, TURN_ACTION_LABELS, TURN_GROUPS, TURN_GROUP_LABELS, isBlocked, reasonLabel, turnActionCommand, turnActions, turnGroup, turnIcon, turnText, workingAgent, type TurnAction } from "../turn.ts";
+import { TURN_ACTION_DONE, TURN_ACTION_ICONS, TURN_ACTION_LABELS, TURN_GROUP_LABELS, groupTasksByTurn, isBlocked, reasonLabel, turnActionCommand, turnActions, turnGroup, turnIcon, turnText, workingAgent, type TurnAction } from "../turn.ts";
 import { allTags, blockingTitles, childProgress, normalizeTag, parentCandidates, prerequisiteCandidates, prerequisiteState, type PrerequisiteState } from "../task-structure.ts";
 import { renderMarkdown } from "../utils/markdown.ts";
 import { referenceInput } from "../reference-input.ts";
@@ -586,7 +586,7 @@ export class WorkEditor {
       if (!tasks || !this.active) return;
       if (view === "graph") { void this.renderProjectGraph(body, tasks, project.id); return; }
       if (!tasks.length) { clear(body, h("p", { class: "muted" }, t("No tasks in this project yet."))); return; }
-      const groups = TURN_GROUPS.map(group => [group, tasks!.filter(task => turnGroup(task) === group)] as const).filter(([, list]) => list.length);
+      const groups = groupTasksByTurn(tasks);
       clear(body, ...groups.map(([group, list]) => h("div", { class: "project-task-group" },
         h("p", { class: "project-task-head" }, turnIcon(group), TURN_GROUP_LABELS[group], h("span", { class: "count" }, list.length)),
         h("div", { class: "runs" }, ...list.map(task => h("button", { type: "button", class: "run", onclick: () => this.hooks.navigate("work", task.id) },
