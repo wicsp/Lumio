@@ -4,6 +4,33 @@ import AVFoundation
 import LumioCaptureCore
 import ServiceManagement
 
+/// 菜单栏显示的 Hub 连接状态。
+enum Connection: Equatable {
+    case unpaired, checking, connected, unreachable
+
+    func title(host: String?) -> String {
+        let place = host.map { " · \($0)" } ?? ""
+        switch self {
+        case .unpaired: return "未配对"
+        case .checking: return "正在连接\(place)"
+        case .connected: return "已连接\(place)"
+        case .unreachable: return "Hub 不可达\(place)"
+        }
+    }
+
+    var badge: NSImage? {
+        let symbol: String, color: NSColor
+        switch self {
+        case .connected: symbol = "circle.fill"; color = .systemGreen
+        case .checking: symbol = "circle.dotted"; color = .secondaryLabelColor
+        case .unreachable: symbol = "circle.fill"; color = .systemRed
+        case .unpaired: symbol = "circle"; color = .secondaryLabelColor
+        }
+        let config = NSImage.SymbolConfiguration(pointSize: 8, weight: .regular).applying(.init(paletteColors: [color]))
+        return NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?.withSymbolConfiguration(config)
+    }
+}
+
 @MainActor final class CaptureApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     static let defaultExclusions: Set<String> = [
         "com.1password.1password", "com.agilebits.onepassword7", "com.apple.keychainaccess",
@@ -16,7 +43,8 @@ import ServiceManagement
     private let browserBridge = BrowserBridge()
     private let panel = FeedbackPanel()
     private let settings = UserDefaults.standard
-    private var connection = "未配对"
+    private var connection = Connection.unpaired
+    private weak var statusLine: NSMenuItem?
     private var capture: Task<ScreenCapture, Error>?
     private var browserPage: Task<BrowserPage?, Never>?
     private var submission: Task<Void, Never>?
@@ -58,43 +86,93 @@ import ServiceManagement
         }
     }
 
+    /// 菜单按用途分段：状态（连接、触发方式、缺少的权限）→ 打开 Lumio → 连接 → 设置 → 退出。
+    /// 开关类选项用勾选表示当前状态，不再用「打开…/关闭…」交替的文字。
     func menuWillOpen(_ menu: NSMenu) {
         menu.removeAllItems()
-        menu.addItem(withTitle: connection, action: nil, keyEquivalent: "")
-        menu.addItem(.separator())
-        func add(_ title: String, _ action: Selector) {
-            menu.addItem(withTitle: title, action: action, keyEquivalent: "").target = self
+        menu.autoenablesItems = false
+        @discardableResult
+        func add(_ title: String, _ action: Selector?, key: String = "", on: Bool = false) -> NSMenuItem {
+            let item = menu.addItem(withTitle: title, action: action, keyEquivalent: key)
+            item.target = self
+            item.isEnabled = action != nil
+            item.state = on ? .on : .off
+            return item
         }
-        add("配对…", #selector(pair))
-        if hub != nil { add("断开", #selector(disconnect)) }
-        add(browserBridge.connected ? "浏览器扩展已连接…" : "配对浏览器扩展…", #selector(pairBrowser))
+        let paired = hub != nil
+        let header = add(connection.title(host: hostLabel), nil)
+        header.image = connection.badge
+        statusLine = header
+        add(paired ? "轻点 \(hotKey.trigger.display) 收藏 · 按住说话" : "配对后即可使用 \(hotKey.trigger.display) 收藏", nil)
+        let missing = Self.missingPermissions()
+        if !missing.isEmpty {
+            let item = add("缺少权限：\(missing.joined(separator: "、"))…", #selector(permissions))
+            item.image = NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: nil)
+        }
+        if paired {
+            menu.addItem(.separator())
+            add("打开 Lumio", #selector(openLumio), key: "o")
+        }
+        menu.addItem(.separator())
+        menu.addItem(.sectionHeader(title: "连接"))
+        add(paired ? "重新配对…" : "配对…", #selector(pair))
+        if paired { add("断开", #selector(disconnect)) }
+        add(browserBridge.connected ? "浏览器扩展已连接…" : "配对浏览器扩展…", #selector(pairBrowser), on: browserBridge.connected)
         if settings.string(forKey: "browserExtensionID") != nil {
             add("断开浏览器扩展", #selector(disconnectBrowser))
         }
-        add("触发键…（\(hotKey.trigger.display)）", #selector(changeTrigger))
+        menu.addItem(.separator())
+        menu.addItem(.sectionHeader(title: "设置"))
+        add("触发键：\(hotKey.trigger.display)…", #selector(changeTrigger))
         add("排除的 App…", #selector(editExclusions))
-        add("权限检查", #selector(permissions))
-        add(sound ? "关闭声音" : "打开声音", #selector(toggleSound))
+        add("提示音", #selector(toggleSound), on: sound)
         if Bundle.main.bundleIdentifier == "io.lumio.capture" {
             switch SMAppService.mainApp.status {
-            case .enabled: add("关闭登录时启动", #selector(toggleLogin))
-            case .requiresApproval: add("在系统设置允许登录时启动", #selector(openLoginSettings))
+            case .enabled: add("登录时启动", #selector(toggleLogin), on: true)
+            case .requiresApproval: add("登录时启动（需在系统设置允许）…", #selector(openLoginSettings))
             default: add("登录时启动", #selector(toggleLogin))
             }
         }
+        add("权限检查…", #selector(permissions))
         menu.addItem(.separator())
-        add("退出", #selector(quit))
+        add("退出 Lumio Capture", #selector(quit), key: "q")
         refresh()
+    }
+
+    private var hostLabel: String? {
+        guard let raw = settings.string(forKey: "origin"), let url = URL(string: raw), let host = url.host else { return nil }
+        return url.port.map { "\(host):\($0)" } ?? host
+    }
+
+    /// 截图、读取选中文字、监听触发键必需；麦克风只在按住说话时需要，也一并提示。
+    static func missingPermissions() -> [String] {
+        [("屏幕录制", CGPreflightScreenCaptureAccess()), ("辅助功能", AXIsProcessTrusted()),
+         ("输入监控", CGPreflightListenEventAccess()), ("麦克风", AVCaptureDevice.authorizationStatus(for: .audio) == .authorized)]
+            .filter { !$0.1 }.map { $0.0 }
     }
 
     private func refresh() {
         _ = hotKey.start()
-        guard let hub else { connection = "未配对"; return }
+        guard let hub else { show(.unpaired); return }
+        if connection == .unpaired { show(.checking) }
         Task {
-            do { try await hub.ping(); connection = "已连接" }
-            catch { connection = "Hub 不可达" }
-            status.button?.toolTip = "Lumio · \(connection)"
+            do { try await hub.ping(); show(.connected) }
+            catch { show(.unreachable) }
         }
+    }
+
+    /// 更新菜单栏图标、提示和已打开菜单里的状态行。未连接时图标变灰。
+    private func show(_ state: Connection) {
+        connection = state
+        status.button?.appearsDisabled = state != .connected
+        status.button?.toolTip = "Lumio Capture · \(state.title(host: hostLabel))"
+        statusLine?.title = state.title(host: hostLabel)
+        statusLine?.image = state.badge
+    }
+
+    @objc private func openLumio() {
+        guard let raw = settings.string(forKey: "origin"), let url = URL(string: raw) else { return }
+        NSWorkspace.shared.open(url)
     }
 
     private func begin(at pointer: CGPoint) {
@@ -314,7 +392,8 @@ import ServiceManagement
                 let token = try await Hub(origin: origin, token: nil).pair(code: code.stringValue.trimmingCharacters(in: .whitespacesAndNewlines))
                 try CredentialStore.write(token)
                 settings.set(origin.absoluteString, forKey: "origin")
-                panel.show("已配对")
+                connection = .unpaired
+                panel.show("已配对 · 轻点 \(hotKey.trigger.display) 收藏", sound: sound ? "Glass" : nil)
                 refresh()
             } catch { panel.show(error.localizedDescription, sound: sound ? "Basso" : nil) }
         }
@@ -325,6 +404,7 @@ import ServiceManagement
             try CredentialStore.remove()
             settings.removeObject(forKey: "origin")
             refresh()
+            panel.show("已断开")
         } catch { panel.show(error.localizedDescription) }
     }
 

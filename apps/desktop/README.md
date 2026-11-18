@@ -16,17 +16,21 @@ set `LUMIO_UPDATE_DESKTOP_FIXTURES=1` when running `swift test` and run
 
 ## Pair and capture
 
-1. In Lumio, use the client pairing code flow in Settings, or use
+1. In Lumio, open Settings → Capture → Lumio Capture for Mac and create a pairing code, or use
    `lumio login-code --name desktop`.
-2. Open the Lumio menu-bar item and choose **配对…**. Enter the Hub origin and
+2. Open the Lumio menu-bar item and choose **配对…** (shown as **重新配对…** once paired). Enter the Hub origin and
    pairing code. Loopback HTTP is supported for the local instance. Remote origins
    use HTTPS. The token is stored in Keychain and **断开** removes it.
-3. Open **权限检查** and grant Screen Recording, Accessibility and Input Monitoring.
+3. Open **权限检查…** and grant Screen Recording, Accessibility and Input Monitoring.
    Allow browser Automation when macOS prompts to read the active tab URL in
    Safari, Chrome, Edge, Arc or ego lite. Restart the
    helper if System Settings requests it.
-4. Point to a paragraph and tap **F18**. **触发键…** can learn another ordinary key
-   or mouse button 3, 4 or 5. **关闭声音** mutes feedback.
+4. Point to a paragraph and tap **F18**. **触发键：F18…** can learn another ordinary key
+   or mouse button 3, 4 or 5. Uncheck **提示音** to mute feedback.
+
+The top of the menu shows the connection state and Hub address, the current
+trigger, and any missing permission (click it to fix). The menu-bar icon dims
+while the Hub is unpaired or unreachable. **打开 Lumio** (⌘O) opens the paired Hub.
 
 For a loaded webpage, pair the current [Save to Lumio extension](../chrome-ext/README.md#f18-桌面捕获012-起)
 under **配对浏览器扩展…** and allow the site in the extension settings. Capture starts reading the page as it takes the window

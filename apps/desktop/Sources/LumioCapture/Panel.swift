@@ -53,6 +53,7 @@ import AppKit
         more.isHidden = !expandable
         open.isHidden = url == nil
         label.stringValue = text
+        fitHeight()
         let mouse = NSEvent.mouseLocation
         if let screen = NSScreen.screens.first(where: { $0.frame.contains(mouse) }) ?? NSScreen.main {
             let frame = screen.visibleFrame
@@ -67,6 +68,16 @@ import AppKit
             }
         }
     }
+    /// 面板高度随文字和按钮变化：一行提示不再撑出一大块空白，三行回复也不会被按钮挡住。
+    private func fitHeight() {
+        let width = panel.frame.width - 40
+        label.preferredMaxLayoutWidth = width
+        let text = ceil(label.sizeThatFits(NSSize(width: width, height: .greatestFiniteMagnitude)).height)
+        let hasActions = !(more.isHidden && open.isHidden)
+        let actions = hasActions ? ceil(open.fittingSize.height) + 10 + 14 : 17
+        panel.setContentSize(NSSize(width: panel.frame.width, height: max(56, 17 + text + actions)))
+    }
+
     @objc private func openLumio() {
         if let targetURL { NSWorkspace.shared.open(targetURL) }
     }
