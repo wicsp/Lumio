@@ -16,7 +16,7 @@
 
 1. 构建：`bun run --cwd apps/chrome-ext build`，产物在 `apps/chrome-ext/dist/`。
 2. Chrome 打开 `chrome://extensions`，开启「开发者模式」，「加载已解压的扩展程序」选 `dist/`。
-3. Lumio 中打开「设置 → Hub 与执行器 → 浏览器插件」，点「生成配对码」。
+3. Lumio 中打开「设置 → 收藏与捕获 → 浏览器插件」，点「生成配对码」。
 4. 插件设置页填 Hub 地址和配对码，点「连接」。Chrome 会请求访问这个 Hub 地址的权限。
 5. 在页面上点工具栏的 Lumio 按钮，或按 `Alt+Shift+S`。弹窗打开即保存，处理完可以直接存档、标为已读或丢弃。
 
