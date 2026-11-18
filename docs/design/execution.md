@@ -26,9 +26,9 @@
 - **高权限申请**（ADR 0020）：每轮单独的本地 socket 凭据经 `lumio runtime sudo -- <绝对路径程序>` 发起，Runtime 向 `/v2/approval/privileged` 提交并经 `/v1/runtime/privileged` 查询与回报；人用 `lumio proposals` 查看并批准或拒绝。批准后 Hub 签发 10 分钟有效的一次性凭据，root 助手独立验证并在执行前记为已用；输出只返回调用者，执行状态离线时保留交回。Linux 与 macOS 安装见 [高权限助手](../../infra/sudo-helper.md)。
   执行器登记 `privileged_helper` 能力表示已配置助手；没配置时拒绝请求，并在这一轮结果的 `privileged_unavailable` 里记下第一次请求的程序（不含参数），供 Web 提示人安装。
 - **项目工作区与并发（ADR 0077、0079）**：Runtime 在 Agent 启动前准备任务专属 worktree，续跑时验证原目录及分支。Hub 同时占用项目名额和 Agent 连接名额。新版 Runtime 不设设备并发上限。调低额度让已有轮次自然结束。
-- **适配器**：`codex exec`、`claude -p`、`pi -p` 的非交互模式；锁定验证过的版本；如实声明隔离级别（`os`/`none`）。
+- **适配器**：`codex exec`、`claude -p`、`pi -p` 的非交互模式；普通 Job 只检查 CLI 最低版本（ADR 0083）；如实声明隔离级别（`os`/`none`）。
   不经过 shell；command 类型只执行登记过的程序；密钥在执行节点上才解析。
-- **阶段权限与钩子**（ADR 0049，H1-4）：Codex 默认使用工作区写入沙箱，可按阶段改为只读或显式全权限；Git 写入授权只覆盖已验证版本上当前 checkout 的元数据。无 OS 沙箱的引擎由执行器账号权限约束。
+- **阶段权限与钩子**（ADR 0049，H1-4）：Codex 默认使用工作区写入沙箱，可按阶段改为只读或显式全权限；Git 写入授权只覆盖当前 checkout 的元数据。非交互 Codex 要求支持命名权限配置（最低 0.166.0），以严格配置模式启动（ADR 0083）。无 OS 沙箱的引擎由执行器账号权限约束。
   在执行器环境中通过 `LUMIO_SECRET_<名称>` 配置阶段密钥（名称中的 `-` 写成大写 `H`，例如 `LUMIO_SECRET_githubHmerge`），同名变量只注入声明它的 agent 轮次，汇报和日志脱敏。前后钩子以执行器账号在工作目录按 argv 运行，输出进入轮次日志，失败或超时结束该轮。
 - **普通权限申请**（ADR 0049，H1-9）：执行器从 agent 汇报末尾的独立 `<lumio-permission>` 行提取权限，按等待人决定交回并保留理由。
 - **不做**：跨设备调用工具、上下文管理、模型路由；留给以后自研的 agent（作为执行器里的一种引擎接入）。

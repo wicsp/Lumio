@@ -950,6 +950,7 @@ export const ZH: Record<string, string> = {
 
   "Choose an agent to dispatch to": "请使用委派操作选择 agent",
   "Connected agents": "已连接的 agent",
+  "{0} on {1} reports {2}. Live interaction was tested with {3} and may be unavailable with this version.": "{1} 上的 {0} 报告版本为 {2}。同轮交互已在 {3} 验证，当前版本可能暂不支持。",
   "Agents outside Lumio that can read your tasks and notes and make small changes. They can't mark tasks done, delegate, approve, or read private notes.": "Lumio 以外、能读你的任务和笔记并做小改动的 agent。它们不能把任务标为完成、不能委派、不能审批，也读不到私密笔记。",
   "This Hub doesn't support connected agents yet. Run lumio upgrade.": "这个 Hub 还不支持连接外部 agent。请运行 lumio upgrade。",
   "Connect Codex, Claude Code or pi": "连接 Codex、Claude Code 或 pi",
