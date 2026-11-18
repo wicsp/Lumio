@@ -17,13 +17,14 @@ const IDS = {
   capture: "cap_01ARZ3NDEKTSV4RRFFQ69G5FAV",
   conversation: "conv_01ARZ3NDEKTSV4RRFFQ69G5FAV",
   turn: "turn_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  idea: "idea_01ARZ3NDEKTSV4RRFFQ69G5FAV",
 };
 
 const screenshot = new File(["synthetic screenshot"], "Screenshot.jpg", { type: "image/jpeg" });
 
 class Exit extends Error {}
 
-function run(workflow: Workflow, options: { ocr?: string; config?: boolean; fail?: string; input?: string; configLanguage?: string } = {}) {
+function run(workflow: Workflow, options: { ocr?: string; config?: boolean; fail?: string; input?: string; configLanguage?: string; chatMode?: "note-only" | "empty" | "reply-error" | "save-error" } = {}) {
   const outputs = new Map<string, Value>();
   const variables = new Map<string, Value>();
   const requests: Request[] = [];
@@ -71,6 +72,7 @@ function run(workflow: Workflow, options: { ocr?: string; config?: boolean; fail
       case 1: return evalDict(unwrap(item.WFValue, "WFDictionaryFieldValue"));
       case 2: return ((item.WFValue as { Value: { WFItemType: number; WFValue: Value }[] }).Value).map(evalItem);
       case 3: { const text = evalText(item.WFValue); return Number(text); }
+      case 4: { const value = unwrap(item.WFValue, "WFBooleanSubstitutableState"); expect(typeof value).toBe("boolean"); return value; }
       case 5: return attachValue(unwrap(item.WFValue, "WFTokenAttachmentParameterState"));
       default: throw new Error(`未知类型 ${item.WFItemType}`);
     }
@@ -85,7 +87,13 @@ function run(workflow: Workflow, options: { ocr?: string; config?: boolean; fail
     if (path === "/v2/glances") return { id: IDS.glance };
     if (path === "/v2/inbox/captures") return { capture: { id: IDS.capture } };
     if (path === "/v2/assistant/main") return { conversation: IDS.conversation };
-    if (path === "/v2/assistant/chat") return { turn: { id: IDS.turn }, messages: [{ role: "user", content: "问" }, { role: "assistant", content: "合成回答" }] };
+    if (path === "/v2/assistant/chat") {
+      const turn = options.chatMode === "save-error" ? { id: IDS.turn, error: "合成保存错误" }
+        : { id: IDS.turn, idea: IDS.idea, ...(options.chatMode === "reply-error" ? { error: "合成模型错误" } : {}) };
+      const messages = options.chatMode === "empty" ? [] : [{ role: "user", content: "问" },
+        ...(!options.chatMode ? [{ role: "assistant", content: "合成回答" }] : [])];
+      return { turn, messages };
+    }
     if (path === "/v2/setup/client/join") return { actor: "act_01ARZ3NDEKTSV4RRFFQ69G5FAV", token: env.token };
     throw new Error(`未模拟的路径 ${path}`);
   };
@@ -228,14 +236,40 @@ describe("iPhone 快捷指令", () => {
   });
 
   test("问一问：所见、主对话、聊天依次发出，显示助手回复", () => {
-    const { requests, shown } = run(askShortcut());
+    const { requests, shown, notifications } = run(askShortcut());
     expect(requests.map(r => new URL(r.url).pathname)).toEqual(["/v2/glances", "/v2/assistant/main", "/v2/assistant/chat"]);
     checkGlance(requests[0]!);
     RequestId.parse(requests[1]!.body.request_id);
     const chat = AssistantChatRequest.parse(requests[2]!.body);
-    expect(chat).toMatchObject({ conversation: IDS.conversation, glance: IDS.glance, message: "这段是什么意思" });
+    expect(chat).toMatchObject({ conversation: IDS.conversation, glance: IDS.glance, message: "这段是什么意思", record_idea: true });
     expect(new Set(requests.map(r => (r.type === "Form" ? JSON.parse(r.body.meta as string) : r.body).request_id)).size).toBe(3);
     expect(shown).toEqual(["合成回答"]);
+    expect(notifications).toEqual(["已记下想法: 已存入 Lumio"]);
+  });
+
+  test.each(["zh-CN", "en-US"])("只记想法时用 %s 确认保存，原话不作为助手回复显示", configLanguage => {
+    const result = run(askShortcut(), { configLanguage, chatMode: "note-only" });
+    expect(AssistantChatRequest.parse(result.requests[2]!.body).record_idea).toBe(true);
+    expect(result.shown).toEqual([]);
+    expect(result.notifications).toEqual([configLanguage === "zh-CN" ? "已记下想法: 已存入 Lumio" : "Idea saved: Saved to Lumio"]);
+  });
+
+  test("保存成功但返回空消息时仍确认保存", () => {
+    const result = run(askShortcut(), { chatMode: "empty" });
+    expect(result.notifications).toEqual(["已记下想法: 已存入 Lumio"]);
+    expect(result.shown).toEqual([]);
+  });
+
+  test("助手回复失败仍保留已保存的确认", () => {
+    const result = run(askShortcut(), { chatMode: "reply-error" });
+    expect(result.notifications).toEqual(["已记下想法: 已存入 Lumio"]);
+    expect(result.shown).toEqual(["已记下想法\n\n合成模型错误"]);
+  });
+
+  test("保存失败时报告错误，不提示已保存", () => {
+    const result = run(askShortcut(), { chatMode: "save-error" });
+    expect(result.notifications).toEqual(["Lumio 失败: 合成保存错误"]);
+    expect(result.shown).toEqual([]);
   });
 
   test.each(["zh-CN", "en-US"])("问一问按配对配置用 %s 听写和请求 Hub", language => {
