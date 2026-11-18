@@ -577,6 +577,7 @@ select { appearance: none; padding-right: 28px; background-image: linear-gradien
 .run:first-child { border-top: 0; }
 .run:hover { background: var(--hover); }
 .run-round { font-weight: 550; }
+.task-action-row .run-round { min-width: 0; overflow-wrap: anywhere; }
 .run .row-meta { margin-left: auto; }
 
 /* Markdown（界面内） */
@@ -748,19 +749,19 @@ div.note-rich-preview { padding:4px 0; }
 .today-row:hover { background: var(--hover); }
 .today-row .row-sub { gap: 12px; font-size: var(--fs-xs); }
 /* 一键委派（ADR 0044）：行内按钮放在行按钮旁边，不嵌套按钮 */
-.today-row-wrap { display: flex; align-items: center; border-top: 1px solid var(--line); }
-.today-row-wrap:first-child { border-top: 0; }
-.today-row-wrap:hover { background: var(--hover); }
-.today-row-wrap .today-row { flex: 1; min-width: 0; border-top: 0; }
-.today-row-wrap .today-row:hover { background: none; }
-.today-delegate-group { display: inline-flex; flex: none; margin-right: 12px; }
-.today-delegate-group .btn { gap: 5px; }
-.today-delegate { border-top-right-radius: 0; border-bottom-right-radius: 0; }
-.today-delegate-pick { padding: 0 6px; margin-left: -1px; border-top-left-radius: 0; border-bottom-left-radius: 0; }
-.today-delegate-group.is-busy { opacity: .6; }
+.task-action-row { display: flex; align-items: center; border-top: 1px solid var(--line); }
+.task-action-row:first-child { border-top: 0; }
+.task-action-row:hover { background: var(--hover); }
+.task-action-row > :is(.today-row, .run) { flex: 1; min-width: 0; border-top: 0; }
+.task-action-row > :is(.today-row, .run):hover { background: none; }
+.quick-delegate-group { display: inline-flex; flex: none; margin-right: 12px; }
+.quick-delegate-group .btn { gap: 5px; }
+.quick-delegate { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.quick-delegate-pick { padding: 0 6px; margin-left: -1px; border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.quick-delegate-group.is-busy { opacity: .6; }
 .prop-text { display: inline-flex; align-items: center; min-height: 30px; color: var(--ink); font-size: var(--fs-md); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .prop-text.placeholder-value { color: var(--ink-4); }
-@media (max-width: 640px) { .today-delegate-label { display: none; } }
+@media (max-width: 640px) { .quick-delegate-label { display: none; } }
 .today-empty { padding: 16px 14px; color: var(--ink-3); font-size: var(--fs-sm); }
 .due-tag { flex: none; padding: 2px 8px; border-radius: 10px; background: var(--sunken); color: var(--ink-3); font-size: var(--fs-xs); white-space: nowrap; }
 .due-tag.soon { background: var(--ochre-wash); color: var(--ochre); }
