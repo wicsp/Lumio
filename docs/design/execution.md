@@ -25,7 +25,7 @@
 - 已编译的 Runtime 把该实例的程序目录放在 agent 的 PATH 前面；agent 使用同版本 `lumio`，凭据限当前 Job。
 - **高权限申请**（ADR 0020）：每轮单独的本地 socket 凭据经 `lumio runtime sudo -- <绝对路径程序>` 发起，Runtime 向 `/v2/approval/privileged` 提交并经 `/v1/runtime/privileged` 查询与回报；人用 `lumio proposals` 查看并批准或拒绝。批准后 Hub 签发 10 分钟有效的一次性凭据，root 助手独立验证并在执行前记为已用；输出只返回调用者，执行状态离线时保留交回。Linux 与 macOS 安装见 [高权限助手](../../infra/sudo-helper.md)。
   执行器登记 `privileged_helper` 能力表示已配置助手；没配置时拒绝请求，并在这一轮结果的 `privileged_unavailable` 里记下第一次请求的程序（不含参数），供 Web 提示人安装。
-- **项目工作区与并发（ADR 0077、0078）**：Runtime 在 Agent 启动前准备任务专属 worktree，续跑时验证原目录及分支。Hub 同时占用项目名额和 Agent 连接名额。新版 Runtime 不设设备并发上限。调低额度让已有轮次自然结束。
+- **项目工作区与并发（ADR 0077、0079）**：Runtime 在 Agent 启动前准备任务专属 worktree，续跑时验证原目录及分支。Hub 同时占用项目名额和 Agent 连接名额。新版 Runtime 不设设备并发上限。调低额度让已有轮次自然结束。
 - **适配器**：`codex exec`、`claude -p`、`pi -p` 的非交互模式；锁定验证过的版本；如实声明隔离级别（`os`/`none`）。
   不经过 shell；command 类型只执行登记过的程序；密钥在执行节点上才解析。
 - **阶段权限与钩子**（ADR 0049，H1-4）：Codex 默认使用工作区写入沙箱，可按阶段改为只读或显式全权限；Git 写入授权只覆盖已验证版本上当前 checkout 的元数据。无 OS 沙箱的引擎由执行器账号权限约束。
@@ -57,7 +57,7 @@
 ## 数据库 Routine 与设备（ADR 0025）
 
 - 数据库 Routine 使用 `/v2/execution/routines` 与 `/v2/execution/commands`；计划在 Execution，独立于 Task 与知识目录。
-  Runtime 继续使用 Job 协议 2。例行任务本地计算最近触发，通过同步提交带 lease 的候选，由 Hub 取得连接名额后交付。离线期间等同步，旧结果仍按原 lease 匹配历史计划（ADR 0078）。
+  Runtime 继续使用 Job 协议 2。例行任务本地计算最近触发，通过同步提交带 lease 的候选，由 Hub 取得连接名额后交付。离线期间等同步，旧结果仍按原 lease 匹配历史计划（ADR 0079）。
 - 设备登记规则和在线时限由 Execution 判断，Runtime 表与 Job 表由 Storage 适配；Hub 的身份和 HTTP 入口只组装并转发。
   审批通过 Execution 查询 Job 是否仍有效，取消请求已登记时即拒绝开启高权限工作，不直接读取执行表。
 - `lumio routine` 管理数据库计划。从指定执行开启追问时创建人工 Work 任务并保留执行来源。

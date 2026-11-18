@@ -1,4 +1,4 @@
-# 0078 按 Agent 账号与后端限制并发
+# 0079 按 Agent 账号与后端限制并发
 
 - 状态：Implemented（2026-11-18，人类批准后实施）
 - 领域：连接身份、Work、Execution、Runtime
