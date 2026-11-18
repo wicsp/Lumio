@@ -1,0 +1,40 @@
+{
+  "app" : {
+    "bundle_id" : "example.reader",
+    "name" : "Synthetic Reader"
+  },
+  "captured" : "1970-01-01T00:00:00Z",
+  "image" : {
+    "format" : "jpeg",
+    "height" : 600,
+    "width" : 800
+  },
+  "ocr" : [
+    {
+      "box" : {
+        "h" : 60,
+        "w" : 100,
+        "x" : 10,
+        "y" : 20
+      },
+      "confidence" : 0.95,
+      "text" : "合成段落"
+    }
+  ],
+  "ocr_engine" : "apple-vision@1",
+  "page" : {
+    "format" : "html",
+    "title" : "Fixture page"
+  },
+  "pointer" : {
+    "x" : 40,
+    "y" : 55
+  },
+  "request_id" : "20000000-0000-4000-8000-000000000001",
+  "selection_text" : "合成段落",
+  "trail" : [
+
+  ],
+  "url" : "https://example.com/paper",
+  "window_title" : "Fixture"
+}

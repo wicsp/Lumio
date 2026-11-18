@@ -68,6 +68,21 @@ const ZH: Record<string, string> = {
   "How to use": "怎么用",
   "Click the Lumio button, or press Alt+Shift+S, on the page you're reading. Right-click a link to save just the link.": "在正在看的页面上点工具栏的 Lumio 按钮，或按 Alt+Shift+S。右键点链接，可以只存这个链接。",
   "Connecting…": "正在连接…",
+  "Desktop capture": "桌面捕获",
+  "Extension ID": "扩展 ID",
+  "Copy this ID into Lumio Capture, then paste the local pairing code here.": "把扩展 ID 填到 Lumio Capture，再把生成的本机配对码粘贴到这里。",
+  "Desktop pairing code": "桌面配对码",
+  "Pair desktop capture": "配对桌面捕获",
+  "Enter the desktop pairing code exactly as shown.": "请按小助手显示的内容输入桌面配对码。",
+  "Allow the extension to connect to Lumio Capture on this Mac.": "请允许扩展连接这台 Mac 上的 Lumio Capture。",
+  "Could not save desktop capture settings.": "无法保存桌面捕获设置。",
+  "Website to allow for F18": "允许 F18 读取的网站",
+  "Allow website": "允许网站",
+  "Enter an HTTP or HTTPS website.": "请输入 HTTP 或 HTTPS 网站。",
+  "Website permission was declined.": "网站权限未授权。",
+  "Remove": "移除",
+  "F18 reads the current page only on websites you allow here.": "F18 仅在这里已允许的网站读取当前页面。",
+  "Forget desktop pairing": "解除桌面配对",
 };
 
 export function t(text: string, ...args: Array<string | number>): string {

@@ -1,6 +1,9 @@
 /** 后台：右键菜单"把链接存到 Lumio"（只存链接，由 Hub 下载），结果用工具栏角标提示。 */
 import { failureText, hubClient, loadConnection, newRequestId } from "./shared.ts";
 import { strategyFor } from "./page.ts";
+import { startDesktopBridge } from "./desktop-bridge.ts";
+
+startDesktopBridge();
 
 const MENU = "lumio-save-link";
 

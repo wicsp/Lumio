@@ -135,6 +135,15 @@ test("desktop client fixtures match the contract", () => {
   }
 });
 
+test("a browser page can accompany a screenshot and requires its own valid source URL", () => {
+  const page = { format: "html", title: "Fixture" };
+  expect(GlanceCreate.safeParse({ ...tap, page, url: "http://127.0.0.1:12345/test" }).success).toBe(true);
+  expect(GlanceCreate.safeParse({ ...tap, page, url: undefined }).success).toBe(false);
+  expect(GlanceCreate.safeParse({ ...tap, page, url: "https://user:password@example.com/" }).success).toBe(false);
+  expect(GlanceCreate.safeParse({ ...tap, page: { format: "image" } }).success).toBe(false);
+  expect(GlanceCreate.safeParse({ ...tap, page: { ...page, body: "multipart carries this" } }).success).toBe(false);
+});
+
 // ADR 0076: strict same-response retention envelope, compatible optional record field.
 test("capture retention accepts bounded literal candidates and rejects ambiguous decisions", () => {
   const context = { text: ["相关原文"], image: false, source: true };

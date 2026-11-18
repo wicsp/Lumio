@@ -13,10 +13,12 @@ import ServiceManagement
 
     private let status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private let hotKey = HotKey()
+    private let browserBridge = BrowserBridge()
     private let panel = FeedbackPanel()
     private let settings = UserDefaults.standard
     private var connection = "未配对"
     private var capture: Task<ScreenCapture, Error>?
+    private var browserPage: Task<BrowserPage?, Never>?
     private var submission: Task<Void, Never>?
     private var press: Press?
     private var sampler: Timer?
@@ -42,6 +44,7 @@ import ServiceManagement
         hotKey.onPress = { [weak self] in self?.begin(at: $0) }
         hotKey.onRelease = { [weak self] in self?.finish() }
         hotKey.onCancel = { [weak self] in self?.cancel() }
+        startBrowserBridge()
         refresh()
         if Bundle.main.bundleIdentifier == "io.lumio.capture", !settings.bool(forKey: "loginConfigured") {
             changeLogin(start: true)
@@ -64,6 +67,10 @@ import ServiceManagement
         }
         add("配对…", #selector(pair))
         if hub != nil { add("断开", #selector(disconnect)) }
+        add(browserBridge.connected ? "浏览器扩展已连接…" : "配对浏览器扩展…", #selector(pairBrowser))
+        if settings.string(forKey: "browserExtensionID") != nil {
+            add("断开浏览器扩展", #selector(disconnectBrowser))
+        }
         add("触发键…（\(hotKey.trigger.display)）", #selector(changeTrigger))
         add("排除的 App…", #selector(editExclusions))
         add("权限检查", #selector(permissions))
@@ -109,6 +116,7 @@ import ServiceManagement
             }
         }
         capture = Task { try await ScreenCapture.collect(app: front, at: pointer, hub: hub) }
+        browserPage = Task { [browserBridge] in await browserBridge.capture(bundle: front.bundleIdentifier) }
         if sound { NSSound(named: "Tink")?.play() }
         speechProblem = nil
         holdTimer = Task { [weak self] in
@@ -130,6 +138,8 @@ import ServiceManagement
         holdTimer?.cancel()
         holdTimer = nil
         let speech = self.speech
+        let browserPage = self.browserPage
+        self.browserPage = nil
         self.speech = nil
         speech?.release()
         self.capture = nil
@@ -138,12 +148,15 @@ import ServiceManagement
         let held = !press.isTap(at: ProcessInfo.processInfo.systemUptime)
         let problem = speechProblem
         submission = Task {
-            defer { submission = nil }
+            defer { browserPage?.cancel(); submission = nil }
             var uploaded: Hub.Glance?
             var savedIdea: String?
             do {
                 let screen = try await capture.value
                 try Task.checkCancellation()
+                let snapshot = await browserPage?.value
+                let page = snapshot.flatMap { $0.url == screen.url && !hub.isLocal($0.url) ? $0 : nil }
+                if page != nil, sound { NSSound(named: "Pop")?.play() }
                 let (meta, image) = try await screen.request(press: press, includeTrail: held)
                 var transcript = "", speechFailure = problem
                 if let speech {
@@ -152,13 +165,14 @@ import ServiceManagement
                     catch { speechFailure = error.localizedDescription }
                 }
                 try Task.checkCancellation()
-                let glance = try await hub.upload(meta, image: image)
+                let glance = try await hub.upload(meta, image: image, page: page)
                 uploaded = glance
                 try Task.checkCancellation()
                 if transcript.isEmpty {
-                    let title = try await hub.save(glance)
+                    let saved = try await hub.save(glance, waitForPage: page != nil)
                     let note = speechFailure.map { "\n语音不可用 · \($0)" } ?? ""
-                    panel.show("已收藏 · \(title)\(note)", sound: sound ? "Glass" : nil)
+                    let status = saved.ready ? "已收藏" : "正在入库"
+                    panel.show("\(status) · \(saved.title)\(note)", sound: sound && saved.ready ? "Glass" : nil)
                 } else {
                     let conversation = try await hub.mainConversation()
                     let url = hub.conversationURL(conversation)
@@ -192,11 +206,80 @@ import ServiceManagement
         speech?.cancel()
         speech = nil
         capture?.cancel()
+        browserPage?.cancel()
+        browserPage = nil
         capture = nil
         press = nil
         activeHub = nil
         submission?.cancel()
         panel.show("已取消")
+    }
+
+    private static let browsers = [
+        ("ego lite", "com.citrolabs.ego.lite"),
+        ("Google Chrome", "com.google.Chrome"),
+        ("Microsoft Edge", "com.microsoft.edgemac"),
+        ("Arc", "company.thebrowser.Browser"),
+    ]
+
+    private func startBrowserBridge() {
+        guard let id = settings.string(forKey: "browserExtensionID"), BrowserBridge.extensionID(id),
+              let browser = settings.string(forKey: "browserBundle"),
+              Self.browsers.contains(where: { $0.1 == browser }),
+              let key = CredentialStore.read(account: "browser-bridge") else { return }
+        do { try browserBridge.start(extensionID: id, browser: browser, secret: key) }
+        catch { panel.show("无法启动浏览器连接") }
+    }
+
+    @objc private func pairBrowser() {
+        let dialog = NSAlert()
+        dialog.messageText = "配对浏览器扩展"
+        dialog.informativeText = "在 Save to Lumio 的设置里复制扩展 ID。选择浏览器后，Capture 会生成一个本机配对码。"
+        let idField = NSTextField(string: settings.string(forKey: "browserExtensionID") ?? "")
+        idField.placeholderString = "扩展 ID"
+        let browser = NSPopUpButton(frame: .zero)
+        browser.addItems(withTitles: Self.browsers.map(\.0))
+        browser.selectItem(at: Self.browsers.firstIndex(where: { $0.1 == settings.string(forKey: "browserBundle") }) ?? 0)
+        let fields = NSStackView(views: [idField, browser])
+        fields.orientation = .vertical
+        fields.alignment = .leading
+        fields.spacing = 8
+        idField.widthAnchor.constraint(equalToConstant: 310).isActive = true
+        dialog.accessoryView = fields
+        dialog.addButton(withTitle: "生成配对码")
+        dialog.addButton(withTitle: "取消")
+        NSApp.activate(ignoringOtherApps: true)
+        guard dialog.runModal() == .alertFirstButtonReturn else { return }
+        let id = idField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard BrowserBridge.extensionID(id) else { panel.show("请输入有效的扩展 ID"); return }
+        do {
+            let key = try BrowserBridge.key()
+            try CredentialStore.write(key, account: "browser-bridge")
+            settings.set(id, forKey: "browserExtensionID")
+            settings.set(Self.browsers[browser.indexOfSelectedItem].1, forKey: "browserBundle")
+            startBrowserBridge()
+            let code = NSAlert()
+            code.messageText = "本机浏览器配对码"
+            code.informativeText = "把配对码粘贴到 Save to Lumio 的「配对桌面捕获」。"
+            let text = NSTextField(labelWithString: key)
+            text.isSelectable = true
+            code.accessoryView = text
+            code.addButton(withTitle: "复制配对码")
+            code.addButton(withTitle: "关闭")
+            if code.runModal() == .alertFirstButtonReturn {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(key, forType: .string)
+            }
+        } catch { panel.show(error.localizedDescription) }
+    }
+
+    @objc private func disconnectBrowser() {
+        do {
+            try CredentialStore.remove(account: "browser-bridge")
+            settings.removeObject(forKey: "browserExtensionID")
+            settings.removeObject(forKey: "browserBundle")
+            browserBridge.stop()
+        } catch { panel.show(error.localizedDescription) }
     }
 
     @objc private func pair() {

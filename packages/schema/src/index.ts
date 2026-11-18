@@ -68,7 +68,7 @@ import { KnowledgeTemplateRequest, KnowledgeTemplateResult, PaperResolveRequest,
 
 import { KnowledgeGraphArgs, KnowledgeGraph, KnowledgeGraphEdge } from "./knowledge-graph.ts";
 import { Capture, CaptureCommand, CaptureCreate, CaptureCreateResult, CaptureList, CaptureProxySettings, CaptureProxyUpdate, KnowledgeAIBinding, KnowledgeAIBindingUpdate, OriginalFrontmatter } from "./inbox.ts";
-import { CaptureGlanceToolArgs, CaptureGlanceToolResult, Glance, GlanceCreate, GlanceDeleteResult, GlanceContextRetention, GlanceAssistantReply } from "./glance.ts";
+import { CaptureGlanceToolArgs, CaptureGlanceToolResult, Glance, GlanceCreate, GlanceDeleteResult, GlanceContextRetention, GlanceAssistantReply, GlanceBrowserPage, GlancePageReadArgs } from "./glance.ts";
 import { AssistantMain, AssistantMainEnsure, DecisionGateBinding, DecisionGateBindingUpdate, Exploration, ExplorationCommand, ExplorationList, FocusSnapshot, Notice, NoticeCommand, NoticeCommandResult, NoticeList, WorkbenchAction } from "./workbench.ts";
 import { SpeechClientMessage, SpeechServerMessage, SpeechVocabulary, SpeechVocabularyUpdate, SpeechBinding, SpeechBindingUpdate } from "./speech.ts";
 
@@ -259,6 +259,8 @@ export const CONTRACTS = {
   "decision-gate-binding-update": DecisionGateBindingUpdate,
   // 全局捕获键（ADR 0066，C1-1）
   "glance-create": GlanceCreate,
+  "glance-browser-page": GlanceBrowserPage,
+  "glance-page-read-args": GlancePageReadArgs,
   glance: Glance,
   "glance-context-retention": GlanceContextRetention,
   "glance-assistant-reply": GlanceAssistantReply,

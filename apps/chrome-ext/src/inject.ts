@@ -8,11 +8,15 @@ import type { PageSnapshot, TranscriptResult } from "./page.ts";
 /** 普通网页：整页 HTML 交给 Hub 抽正文；同时带上纯文本，HTML 太大时用。 */
 export function snapshotPage(): PageSnapshot {
   const meta = document.querySelector<HTMLMetaElement>('meta[name="description"], meta[property="og:description"]');
+  const copy = document.documentElement.cloneNode(true) as HTMLElement;
+  const controls = "form,input,textarea,select,[contenteditable]:not([contenteditable=false])";
+  const hasControls = copy.querySelector(controls) !== null;
+  for (const element of copy.querySelectorAll(controls + ",script,template")) element.remove();
   return {
     url: location.href,
     title: document.title,
-    html: document.documentElement.outerHTML,
-    text: document.body?.innerText ?? "",
+    html: copy.outerHTML,
+    text: hasControls ? copy.querySelector("article,main,[role=main],body")?.textContent ?? "" : document.body?.innerText ?? "",
     ...(meta?.content ? { description: meta.content } : {}),
   };
 }

@@ -140,9 +140,9 @@ export class Inbox {
       const now = this.now(), time = now.toISOString();
       const capture = previous ?? this.state.put({ input, glanceReason, capture: {
         id: newId("cap", now, randomBytes), owner, channel: input.channel, url,
-        original_url: url !== originalURL ? originalURL : undefined, title: input.title ?? (glance && this.glanceTitle(glance)),
+        original_url: url !== originalURL ? originalURL : undefined, title: input.title ?? glance?.page?.title ?? (glance && this.glanceTitle(glance)),
         glance: glance?.id,
-        kind: glance && captureKind(url) !== "paper" ? url ? "web" : "text" : captureKind(url), state: "queued", card: "none", attempt: 1, revision: 1, created: time, updated: time,
+        kind: glance && (glance.page || captureKind(url) !== "paper") ? url ? "web" : "text" : captureKind(url), state: "queued", card: "none", attempt: 1, revision: 1, created: time, updated: time,
         triage: input.triage, triaged: input.triage ? time : undefined,
       } });
       if (glance) this.glances.claim(glance.id, owner, "capture", capture.id);
@@ -185,6 +185,15 @@ export class Inbox {
   }
 
   private async glanceOriginal(glance: Glance, capture: Capture): Promise<Extracted> {
+    if (glance.page) {
+      const archived = glance.page.purged && capture.entity?.id
+        ? await showOriginal(this.config.vault, capture.entity.id, this.indexOptions) : undefined;
+      const body = archived?.body ?? await this.glances.pageText(glance);
+      if (body) return {
+        note: { kind: "web", title: capture.title ?? this.glanceTitle(glance), url: capture.url, tags: [] },
+        body, extractor: glance.page.extractor, lang: glance.page.lang,
+      };
+    }
     const binding = this.state.binding(capture.owner, "knowledge.vision");
     const recognizedText = windowText(glance);
     let content = recognizedText;
@@ -396,8 +405,9 @@ export class Inbox {
       const existing = await noteById(this.config.vault, id, this.indexOptions);
       const revision = existing ? (await readKnowledgeDocument(this.config.vault, id, this.indexOptions)).revision : undefined;
       if (!revision && capture.ai_note) throw inboxMissing();
+      const pointed = capture.glance ? this.glances.get(capture.glance, owner).pointing.text : undefined;
       const input = binding ? await summarizeOriginal(this.config, capture, original.body, value.summary ?? "card",
-        (this.options.model ?? this.ai.model.bind(this.ai))(owner, binding.profile), this.stopping.signal, value.glanceReason)
+        (this.options.model ?? this.ai.model.bind(this.ai))(owner, binding.profile), this.stopping.signal, value.glanceReason, pointed)
         : KnowledgeAiNoteCreateArgs.parse({ title: captureCardTitle(capture), body: original.body.trim(),
           derived_from: [capture.entity.id, capture.id, ...(capture.url ? [capture.url] : [])] });
       await this.exclusive(async () => {

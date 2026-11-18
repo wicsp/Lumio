@@ -31,6 +31,9 @@ export const GLANCE_LIMITS = {
   max_image_edge: 2048,
   /** 截图字节上限。 */
   max_image_bytes: 4 * 1024 * 1024,
+  /** 已加载的网页快照上限。 */
+  max_page_bytes: 6 * 1024 * 1024,
+  max_page_chars: 2_000_000,
   /** 按住期间光标轨迹的点数上限；超出时小助手均匀抽稀。 */
   max_trail_points: 200,
   /** 选中文字的字符上限（按 UTF-16 码元计）。 */
@@ -85,6 +88,29 @@ export const GlanceImageMeta = z.strictObject({
   height: z.number().int().positive().max(GLANCE_LIMITS.max_image_edge),
 });
 
+/** 网页正文在 multipart 的 page 部分，使用 UTF-8。 */
+export const GlancePageMeta = z.strictObject({
+  format: z.enum(["html", "text"]),
+  title: z.string().trim().min(1).max(500).optional(),
+});
+
+/** 本机扩展传给捕获小助手的页面快照。 */
+export const GlanceBrowserPage = GlancePageMeta.extend({
+  url: HttpUrl.refine(value => {
+    if (!URL.canParse(value)) return false;
+    const url = new URL(value);
+    return !url.username && !url.password;
+  }),
+  body: z.string().min(1).max(GLANCE_LIMITS.max_page_chars),
+});
+export type GlanceBrowserPage = z.infer<typeof GlanceBrowserPage>;
+
+/** 只在捕获所在的助手轮次开放。 */
+export const GlancePageReadArgs = z.strictObject({
+  offset: z.number().int().min(0).max(GLANCE_LIMITS.max_page_chars).default(0),
+  query: z.string().trim().min(1).max(200).optional(),
+});
+
 /**
  * 上传所见的元数据（multipart 的 `meta` 部分）。
  * - 至少有截图、网址、选中文字之一；
@@ -99,6 +125,7 @@ export const GlanceCreate = z
     window_title: z.string().max(GLANCE_LIMITS.max_window_title_chars).optional(),
     url: HttpUrl.optional().describe("前台是已知浏览器时读到的当前标签页网址"),
     image: GlanceImageMeta.optional(),
+    page: GlancePageMeta.optional(),
     pointer: GlancePoint.optional().describe("按下时的光标；光标不在该窗口内时缺省"),
     trail: z.array(GlanceTrailPoint).max(GLANCE_LIMITS.max_trail_points).default([]).describe("按住期间的光标轨迹；轻点时为空"),
     selection_text: z.string().min(1).max(GLANCE_LIMITS.max_selection_chars).optional(),
@@ -106,6 +133,8 @@ export const GlanceCreate = z
     ocr_engine: z.string().regex(/^[a-z0-9][a-z0-9-]{0,40}@[0-9]+$/).optional().describe("形如 apple-vision@1；有识字块时必填"),
   })
   .superRefine((glance, ctx) => {
+    if (glance.page && (!glance.url || !GlanceBrowserPage.shape.url.safeParse(glance.url).success))
+      ctx.addIssue({ code: "custom", path: ["url"], message: "网页正文需要不含凭据的来源网址" });
     if (glance.image === undefined && glance.url === undefined && glance.selection_text === undefined)
       ctx.addIssue({ code: "custom", message: "至少要有截图、网址或选中文字之一" });
     if (glance.ocr.length > 0 && glance.ocr_engine === undefined)
@@ -167,6 +196,16 @@ export const Glance = z.strictObject({
   app: GlanceApp,
   window_title: z.string().max(GLANCE_LIMITS.max_window_title_chars).optional(),
   url: HttpUrl.optional(),
+  page: z.strictObject({
+    file: idOf("art"),
+    format: GlancePageMeta.shape.format,
+    title: GlancePageMeta.shape.title,
+    extractor: z.enum(["page-html@1", "pasted@1"]),
+    lang: z.string().optional(),
+    bytes: z.number().int().positive().max(GLANCE_LIMITS.max_page_bytes),
+    sha256: Sha256,
+    purged: Timestamp.optional(),
+  }).optional(),
   image: z
     .strictObject({
       file: idOf("art"),

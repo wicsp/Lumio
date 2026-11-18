@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PNG } from "pngjs";
 import { encode } from "jpeg-js";
-import { AIConnection, AIProfile, AssistantEvent, AssistantMain, AssistantChatResult, AssistantChatRequest, Capture, CaptureCreateResult, Glance, GlanceCreate, KnowledgeOriginal, KnowledgeCreateResult, SearchResult, NoteDetail, AssistantModelRequest, AssistantToolCall, ExecutionTarget, Proposal, WorkCommandResult, WorkTask, WorkTaskDetail, toolName, type AssistantModelResponse } from "@lumio/schema";
+import { AIConnection, AIProfile, AssistantEvent, AssistantMain, AssistantChatResult, AssistantChatRequest, Capture, CaptureCreateResult, GLANCE_LIMITS, Glance, GlanceCreate, KnowledgeOriginal, KnowledgeCreateResult, SearchResult, NoteDetail, AssistantModelRequest, AssistantToolCall, ExecutionTarget, Proposal, WorkCommandResult, WorkTask, WorkTaskDetail, toolName, type AssistantModelResponse } from "@lumio/schema";
 import { backupBusiness, verifyBusinessBackup } from "@lumio/storage";
 import type { AssistantModel } from "@lumio/assistant";
 import { ChatCompletionsModel } from "../src/assistant-model.ts";
@@ -56,10 +56,11 @@ async function setup(root: string, model?: AssistantModel | ((input: AssistantMo
     method, headers: { Authorization: `Bearer ${auth}`, "Accept-Language": "zh", ...(body instanceof FormData ? {} : { "Content-Type": "application/json" }) },
     body: body instanceof FormData ? body : body !== undefined ? JSON.stringify(body) : undefined,
   });
-  const upload = (input: GlanceCreate, image?: Buffer, auth = owner) => {
+  const upload = (input: GlanceCreate, image?: Buffer, auth = owner, page?: string) => {
     const form = new FormData();
     form.set("meta", JSON.stringify(input));
     if (image) form.set("image", new Blob([Uint8Array.from(image)], { type: `image/${input.image!.format}` }), "sample");
+    if (page !== undefined) form.append("page", new Blob([page], { type: "text/plain" }), "page");
     return request("/v2/glances", "POST", form, auth);
   };
   const save = async (glance: Glance, channel: "desktop" | "share" = "desktop") => {
@@ -79,6 +80,85 @@ async function setup(root: string, model?: AssistantModel | ((input: AssistantMo
   return { hub, root, state, vault, owner, other, agent, runtime, request, upload, save, ready,
     advance: () => { now = new Date(now.getTime() + 2 * 86_400_000); } };
 }
+
+test("a local browser page and screenshot save as one capture using the same archive text as Save to Lumio", () => fixture(async f => {
+  const url = "http://127.0.0.1:12345/synthetic";
+  const html = await readFile(new URL("../../../fixtures/i1-inbox/article.html", import.meta.url), "utf8");
+  const input = meta({ url, page: { format: "html", title: "Synthetic article" }, selection_text: "Chosen text" });
+  expect((await f.upload(input, png)).status).toBe(400);
+  expect((await f.upload({ ...input, page: undefined }, png, f.owner, html)).status).toBe(400);
+  const duplicate = new FormData();
+  duplicate.append("meta", JSON.stringify(input));
+  duplicate.append("image", new Blob([Uint8Array.from(png)], { type: "image/png" }), "sample");
+  duplicate.append("page", new Blob([html]), "page");
+  duplicate.append("page", new Blob([html]), "page");
+  expect((await f.request("/v2/glances", "POST", duplicate)).status).toBe(400);
+  const glance = Glance.parse(await (await f.upload(input, png, f.owner, html)).json());
+  expect(glance.page).toMatchObject({ title: "Synthetic article", extractor: "page-html@1" });
+  expect(glance.pointing).toMatchObject({ method: "selection", text: "Chosen text" });
+  expect(Glance.parse(await (await f.upload(input, png, f.owner, html)).json())).toEqual(glance);
+  expect((await f.upload(input, png, f.owner, html + "x")).status).toBe(409);
+  expect((await f.request(`/v2/glances/${glance.id}`, "GET", undefined, f.other)).status).toBe(404);
+  const capture = await f.save(glance);
+  const original = async (id: string) => KnowledgeOriginal.parse(await (await f.request(`/v2/knowledge/originals?ref=${id}`)).json());
+  const archive = await original(capture.entity!.id!);
+  expect(archive.body).toContain("far-tail-sentinel");
+  expect(archive.frontmatter.glance).toMatchObject({ id: glance.id, screenshot: glance.image!.file, pointing: "selection" });
+  expect((await f.request(`/v2/glances/${glance.id}/image`)).status).toBe(200);
+  expect(Glance.parse(await (await f.request(`/v2/glances/${glance.id}`)).json()).page?.purged).toBeTruthy();
+  const result = await f.request("/v2/inbox/captures", "POST", {
+    request_id: randomUUID(), channel: "extension", url, content: { format: "html", body: html },
+  });
+  expect(result.status).toBe(202);
+  const extension = await f.ready(CaptureCreateResult.parse(await result.json()).capture.id);
+  expect((await original(extension.entity!.id!)).body).toBe(archive.body);
+}));
+
+test("the current voice turn can read its attached page without retaining the tool result", async () => {
+  const privateText = "Synthetic statement available only in the webpage";
+  const read = toolName("capture.glance.page");
+  let turns = 0;
+  await fixture(async f => {
+    const main = AssistantMain.parse(await (await f.request("/v2/assistant/main", "POST", { request_id: randomUUID() })).json());
+    const glance = Glance.parse(await (await f.upload(meta({
+      url: "http://127.0.0.1:12345/synthetic", page: { format: "text", title: "Ephemeral page title" }, selection_text: "Prompt selection",
+    }), png, f.owner, privateText)).json());
+    const pageFile = await f.hub.modules.artifacts.path(glance.page!.file);
+    const response = await f.request("/v2/assistant/chat", "POST", {
+      message: "What does this passage say?", request_id: randomUUID(), conversation: main.conversation, glance: glance.id, record_idea: true,
+    });
+    const result = AssistantChatResult.parse(await response.json());
+    expect(result.turn.status).toBe("done");
+    expect(turns).toBe(2);
+    expect(JSON.stringify(f.hub.modules.assistantStore.calls(result.turn.id))).not.toContain(privateText);
+    expect(JSON.stringify(f.hub.modules.assistantStore.messages(main.conversation))).not.toContain(privateText);
+    expect(await Bun.file(pageFile).exists()).toBe(false);
+    const minimized = Glance.parse(await (await f.request(`/v2/glances/${glance.id}`)).json());
+    expect(minimized.page?.purged).toBeTruthy();
+    expect(minimized.page?.title).toBeUndefined();
+  }, input => {
+    expect(input.tools.find(tool => tool.name === read)).toBeDefined();
+    if (++turns === 1) {
+      expect(input.messages[0]!.content).toContain("Prompt selection");
+      return { content: "", tool_calls: [{ id: "fixture-read", name: read, args: { query: privateText } }] };
+    }
+    expect(input.messages.some(message => message.role === "tool" && message.content.includes(privateText))).toBe(true);
+    return retainedReply("I read the passage.");
+  });
+});
+
+test("a page attachment must be valid UTF-8 and stay within both size limits", () => fixture(async f => {
+  const input = meta({ image: undefined, pointer: undefined, ocr: [], ocr_engine: undefined,
+    url: "http://127.0.0.1:12345/synthetic", page: { format: "text" } });
+  const bodies = [new Uint8Array([0xc3, 0x28]), "a".repeat(GLANCE_LIMITS.max_page_chars + 1),
+    new Uint8Array(GLANCE_LIMITS.max_page_bytes + 1).fill(65)];
+  for (const body of bodies) {
+    const form = new FormData();
+    form.append("meta", JSON.stringify(input));
+    form.append("page", new Blob([body]), "page");
+    expect((await f.request("/v2/glances", "POST", form)).status).toBe(400);
+  }
+}));
 
 test("checked upload is owner-only, idempotent, transferred on save, and follows the source through trash, restore and backup", () => fixture(async f => {
   const input = meta();
