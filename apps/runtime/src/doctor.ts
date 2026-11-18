@@ -39,14 +39,15 @@ export async function doctor(options: DiagnosticOptions & {
     const result = await io.run(["loginctl", "show-user", io.env.USER ?? String(io.uid), "-p", "Linger"]);
     if (result.code || result.stdout.trim() !== "Linger=yes") throw new Error();
   });
-  for (const adapter of Object.values(ADAPTERS)) await check(`agent ${adapter.engine}${msg("(${0})", "runtime.env PATH")}`, msg("doctor.install_and_add_its_path_to_path_in_runtime_env_supported", adapter.command, adapter.versions.min, adapter.versions.below), async () => {
+  for (const adapter of Object.values(ADAPTERS)) await check(`agent ${adapter.engine}${msg("(${0})", "runtime.env PATH")}`, msg("doctor.install_and_add_its_path_to_path_in_runtime_env_supported", adapter.command, adapter.minimumVersion), async () => {
     const executable = (options.which ?? ((command, path) => Bun.which(command, { PATH: path })))(adapter.command, saved.PATH ?? "");
     if (!executable) throw new Error();
     const result = await io.run([executable, "--version"], { ...io.env, ...saved });
     const version = parseVersion(result.stdout.trim() || result.stderr.trim());
     if (result.code || !version) throw new Error();
-    checks.push({ name: `${adapter.engine} ${version}`, ok: versionSupported(adapter, version),
-      ...(!versionSupported(adapter, version) ? { problem: msg("doctor.outside_adapter_verified_version_range"), fix: msg("doctor.install_a_supported_version_or_verify_the_adapter_first", adapter.versions.min, adapter.versions.below) } : {}) });
+    const supported = versionSupported(adapter, version);
+    checks.push({ name: `${adapter.engine} ${version}`, ok: supported,
+      ...(!supported ? { problem: msg("doctor.engine_version_too_old"), fix: msg("doctor.install_minimum_version", adapter.minimumVersion) } : {}) });
   });
   await check(msg("doctor.state_directory_permissions_0700"), msg("doctor.set_runtime_state_directory_ownership_to_this_account_and_permission"), async () => {
     if (!config) throw new Error(); const s = await io.stat(config.stateDir);

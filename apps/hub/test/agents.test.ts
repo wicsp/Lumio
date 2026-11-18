@@ -63,10 +63,10 @@ afterEach(async () => {
   await rm(temp, { recursive: true, force: true });
 });
 
-test("registers fake agents; three engines run non-interactively and return report, session and engine info", async () => {
-  await startRuntime();
+test("three upgraded agents run non-interactively and return report, session and engine info", async () => {
+  await startRuntime({ FAKE_CODEX_VERSION: "codex-cli 0.200.0", FAKE_CLAUDE_VERSION: "3.0.0 (Claude Code)", FAKE_PI_VERSION: "2.0.1" });
   const engines = RuntimeInfo.array().parse(await (await request("/v2/execution/runtimes")).json())[0]!.registration.engines;
-  expect(engines.map((e) => [e.name, e.version, e.sandbox])).toEqual([["codex", "0.163.0", "os"], ["claude-code", "2.1.310", "none"], ["pi", "1.4.0", "none"]]);
+  expect(engines.map((e) => [e.name, e.version, e.sandbox])).toEqual([["codex", "0.200.0", "os"], ["claude-code", "3.0.0", "none"], ["pi", "2.0.1", "none"]]);
   for (const engine of ["codex", "claude-code", "pi"] as const) {
     const { job } = await submit({ engine, prompt: `你好 ${engine}`, session: { id: "s-1", resume: false } });
     const r = (await done(job!.spec.id)).result!;
@@ -106,11 +106,11 @@ test("question marker ends the round as waiting_for_human; resume passes the ses
   expect(committed.git?.after?.dirty).toBe(false);
 });
 
-test("versions outside the verified range fail without running; Hub rejects engines the runtime lacks; timeout kills the agent", async () => {
-  await startRuntime({ FAKE_PI_VERSION: "2.0.1" });
+test("versions below the CLI minimum fail without running; Hub rejects missing engines; timeout kills the agent", async () => {
+  await startRuntime({ FAKE_PI_VERSION: "1.3.9" });
   const before = (await calls()).length;
   const old = (await done((await submit({ engine: "pi", prompt: "不该执行" })).job!.spec.id)).result!;
-  expect(old.status).toBe("failed"); expect(old.error).toContain("verified version range");
+  expect(old.status).toBe("failed"); expect(old.error).toContain("minimum version 1.4.0");
   expect((await calls()).length).toBe(before);
   const rejected = await submit({ engine: "codex", prompt: "x" }, { runtime: "nope" });
   expect(rejected.response.status).toBe(400);

@@ -289,7 +289,7 @@ test("planned dispatch stops on missing or offline registration with no new roun
   expect(WorkCommandResult.parse(await (await command("work.task.dispatch", input, human, "synthetic-offline-stage")).json())).toEqual(failed);
 });
 
-test("preflight sends permissions and hooks only to capable runtimes and uses the verified Git version", async () => {
+test("preflight sends permissions and hooks to capable runtimes with newer Codex versions", async () => {
   const t = await task();
   const hooks = { before: { argv: ["/bin/echo", "synthetic hook"], timeout_minutes: 2 } };
   const permissions = { access: "read", git: true, secrets: ["synthetic-credential"] };
@@ -297,10 +297,7 @@ test("preflight sends permissions and hooks only to capable runtimes and uses th
   const original = register();
   const unsupported = await applied("work.task.dispatch", { task: t.id });
   expect(unsupported).toMatchObject({ task: { turn: { reason: "failed", note: expect.stringContaining("does not support stage permissions") } } });
-  register({ features: ["stage_permissions", "hooks"] });
-  const unverified = await applied("work.task.dispatch", { task: t.id });
-  expect(unverified).toMatchObject({ task: { turn: { reason: "failed", note: expect.stringContaining("requires verified Codex 0.166.0") } } });
-  const engines = original.registration.engines.map(engine => ({ ...engine, version: "0.166.0" }));
+  const engines = original.registration.engines.map(engine => ({ ...engine, version: "0.169.0" }));
   register({ engines, features: ["stage_permissions"] });
   const noHooks = await applied("work.task.dispatch", { task: t.id });
   expect(noHooks).toMatchObject({ task: { turn: { reason: "failed", note: expect.stringContaining("does not support stage hooks") } } });

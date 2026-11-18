@@ -2,7 +2,7 @@
  * 设置页「已连接的 agent」（ADR 0029 第 6 节）：谁能以 agent 身份访问 Lumio、最近活动、吊销。
  * 接入在那台机器上用 `lumio skill install` 完成（它用已登录的 CLI 发令牌），网页不显示也不保存令牌。
  */
-import type { AgentInfo } from "@lumio/schema";
+import type { AgentInfo, RuntimeInfo } from "@lumio/schema";
 import { ApiClientError } from "@lumio/api-client";
 import { errorText, type Client } from "./api.ts";
 import { formatTime } from "./commands.ts";
@@ -14,14 +14,30 @@ type AgentKind = "codex" | "claude" | "pi";
 const AGENT_KINDS: Array<[AgentKind, string]> = [["codex", "Codex"], ["claude", "Claude Code"], ["pi", "pi"]];
 const INSTALL: Record<AgentKind, string> = { codex: "lumio skill install --for codex", claude: "lumio skill install --for claude", pi: "lumio skill install --for pi" };
 
+type RuntimeEngine = RuntimeInfo["registration"]["engines"][number];
+
+// Versions tested for live interaction, as documented in docs/design/execution.md.
+const testedInteractionVersions: Record<RuntimeEngine["name"], string> = {
+  codex: "0.166.0", "claude-code": "2.1.322", pi: "1.5.0",
+};
+
+export function agentVersionNotice(engine: RuntimeEngine, runtime: string): string | undefined {
+  const tested = testedInteractionVersions[engine.name];
+  if (engine.version === tested) return;
+  return t("{0} on {1} reports {2}. Live interaction was tested with {3} and may be unavailable with this version.",
+    engine.name, runtime, engine.version, tested);
+}
+
 export class AgentsSettings {
   readonly element = h("div", { class: "set-rows" });
+  private versionNotices = h("div", { role: "status" });
   private kind: AgentKind = "codex";
   private active = true;
 
   constructor(private client: Client) {
     clear(this.element, h("p", { class: "set-empty" }, t("Loading…")));
     void this.load();
+    void this.loadVersionNotices();
   }
   dispose(): void { this.active = false; }
 
@@ -34,6 +50,18 @@ export class AgentsSettings {
       const missing = cause instanceof ApiClientError && cause.code === "NOT_FOUND";
       clear(this.element, h("p", { class: "set-empty" }, missing ? t("This Hub doesn't support connected agents yet. Run lumio upgrade.") : errorText(cause)));
     }
+  }
+
+  private async loadVersionNotices(): Promise<void> {
+    try {
+      const runtimes = await this.client.runtimes();
+      if (!this.active) return;
+      const notices = runtimes.flatMap(({ registration }) => registration.engines
+        .map(engine => agentVersionNotice(engine, registration.name))
+        .filter(notice => notice !== undefined));
+      clear(this.versionNotices, ...notices.map(notice => h("div", { class: "set-row" },
+        icon("alert"), h("span", { class: "set-label" }, notice))));
+    } catch { /* Version notices are advisory and independent of agent management. */ }
   }
 
   private render(agents: AgentInfo[]): void {
@@ -55,7 +83,7 @@ export class AgentsSettings {
         h("span", { class: "set-sub" }, t("On that machine, in a terminal logged in to this Hub, run:")),
         tabs, code),
       h("button", { type: "button", class: "btn btn-small", onclick: () => void navigator.clipboard?.writeText(INSTALL[this.kind]).then(() => toast(t("Copied"))) }, icon("link"), t("Copy")));
-    clear(this.element, ...(rows.length ? rows : [h("p", { class: "set-empty" }, t("No agents connected yet."))]), howto);
+    clear(this.element, ...(rows.length ? rows : [h("p", { class: "set-empty" }, t("No agents connected yet."))]), howto, this.versionNotices);
   }
 
   private row(agent: AgentInfo): HTMLElement {

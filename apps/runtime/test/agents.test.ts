@@ -37,13 +37,16 @@ test("pi: one --session-id for both new and continued sessions; stdout is the re
   expect(ADAPTERS.pi.parse(" 结果\n", undefined, r)).toEqual({ report: "结果", sessionId: "task_1" });
 });
 
-test("versions outside the verified range are rejected", () => {
+test("ordinary agent jobs accept versions at or above each CLI minimum", () => {
   expect(compareVersions("0.163.0", "0.160.0")).toBe(1);
   expect(compareVersions("1.4.0-beta.1", "1.4.0")).toBe(0);
   expect(versionSupported(ADAPTERS.codex, "0.163.0")).toBe(true);
-  expect(versionSupported(ADAPTERS.codex, "0.200.0")).toBe(false);
+  expect(versionSupported(ADAPTERS.codex, "0.200.0")).toBe(true);
+  expect(versionSupported(ADAPTERS.codex, "0.159.0")).toBe(false);
   expect(versionSupported(ADAPTERS.pi, "1.3.9")).toBe(false);
-  expect(versionSupported(ADAPTERS["claude-code"], "2.1.310")).toBe(true);
+  expect(versionSupported(ADAPTERS.pi, "2.0.0")).toBe(true);
+  expect(versionSupported(ADAPTERS["claude-code"], "1.9.0")).toBe(false);
+  expect(versionSupported(ADAPTERS["claude-code"], "3.0.0")).toBe(true);
 });
 
 test("question marker becomes a separate question; empty marker is ignored", () => {
@@ -72,6 +75,7 @@ test("Codex receives per-round sandbox settings, including for resumed sessions"
   expect(ADAPTERS.codex.argv(run({ permissions: { access: "full" }, session }), ctx)).toContain('sandbox_mode="danger-full-access"');
   const gitPaths = ["/shared/.git", "/shared/.git/worktrees/task"];
   const args = ADAPTERS.codex.argv(run({ permissions: { access: "read", git: true }, session }), { ...ctx, gitPaths });
+  expect(args).toContain("--strict-config");
   expect(args).toContain('default_permissions="lumio-stage"');
   const profile = args.find(arg => arg.startsWith("permissions.lumio-stage="));
   expect(profile).toContain('extends=":read-only"');
