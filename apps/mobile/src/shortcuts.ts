@@ -19,7 +19,7 @@ import { attach, asType, dictionary, f, HAS_NO_VALUE, HAS_VALUE, key, shortcutIn
 export const CONFIG_PATH = "Lumio/config.json";
 export const OCR_ENGINE = "ios-vision@1";
 export const APP_NAME = "iPhone";
-export const SHORTCUT_REVISION = 4;
+export const SHORTCUT_REVISION = 5;
 /** 识字块单块上限是 5000 个 UTF-16 码元；正则按字符截，留出余量给表情等代理对。 */
 export const OCR_MAX_CHARS = 2400;
 /** 截图长边上限，与 GLANCE_LIMITS.max_image_edge 一致。 */
@@ -45,10 +45,10 @@ function localeConfig(w: Workflow, source: Ref): Pick<Config, "language" | "labe
     const labels = w.add("dictionary", { WFItems: dictionary(Object.entries(values).map(([name, value]) => [name, f.text(value)])) }, "Dictionary");
     w.add("setvariable", { WFVariableName: labelsName, WFInput: attach(labels) });
   };
-  setLabels({ paired: "Lumio 已配对", failed: "Lumio 失败", saved: "已收藏", saved_body: "已存入 Lumio" });
+  setLabels({ paired: "Lumio 已配对", failed: "Lumio 失败", saved: "已收藏", saved_body: "已存入 Lumio", idea_saved: "已记下想法" });
   const english = w.add("text.match", { WFMatchTextPattern: "^en-US$", WFMatchTextCaseSensitive: true, text: text(variable(languageName)) }, "Matches");
   w.when(english, HAS_VALUE, () => {
-    setLabels({ paired: "Lumio paired", failed: "Lumio failed", saved: "Saved", saved_body: "Saved to Lumio" });
+    setLabels({ paired: "Lumio paired", failed: "Lumio failed", saved: "Saved", saved_body: "Saved to Lumio", idea_saved: "Idea saved" });
   });
   return { language: variable(languageName), labels: variable(labelsName) };
 }
@@ -154,9 +154,9 @@ function uploadGlance(w: Workflow, config: Config, base: { id: Ref; captured: Re
 }
 
 /** 响应里没有 `field` 时，提示 Hub 返回的错误并结束。 */
-function failUnless(w: Workflow, response: Ref, field: string, labels: Ref) {
+function failUnless(w: Workflow, response: Ref, field: string, labels: Ref, errorField = "error.message") {
   w.when(key(response, field), HAS_NO_VALUE, () => {
-    notify(w, key(labels, "failed"), key(response, "error.message"));
+    notify(w, key(labels, "failed"), key(response, errorField));
     w.add("exit", {});
   });
 }
@@ -214,11 +214,24 @@ export function askShortcut(): Workflow {
     ["conversation", f.text(key(main, "conversation"))],
     ["message", f.text(said)],
     ["glance", f.text(id)],
+    ["record_idea", f.boolean(true)],
   ]);
   failUnless(w, reply, "turn.id", config.labels);
+  failUnless(w, reply, "turn.idea", config.labels, "turn.error");
+  notify(w, key(config.labels, "idea_saved"), key(config.labels, "saved_body"));
+  w.when(key(reply, "turn.error"), HAS_VALUE, () => {
+    w.add("showresult", { Text: text(key(config.labels, "idea_saved"), "\n\n", key(reply, "turn.error")) });
+    w.add("exit", {});
+  });
   const messages = w.add("getvalueforkey", { WFInput: attach(reply), WFDictionaryKey: "messages", WFGetDictionaryValueType: "Value" }, "Dictionary Value");
-  const last = w.add("getitemfromlist", { WFInput: attach(messages), WFItemSpecifier: "Last Item" }, "Item from List");
-  w.add("showresult", { Text: text(key(asType(last, "WFDictionaryContentItem"), "content")) });
+  w.when(messages, HAS_VALUE, () => {
+    const last = w.add("getitemfromlist", { WFInput: attach(messages), WFItemSpecifier: "Last Item" }, "Item from List");
+    const message = asType(last, "WFDictionaryContentItem");
+    const assistant = w.add("text.match", { WFMatchTextPattern: "^assistant$", WFMatchTextCaseSensitive: true, text: text(key(message, "role")) }, "Matches");
+    w.when(assistant, HAS_VALUE, () => {
+      w.when(key(message, "content"), HAS_VALUE, () => { w.add("showresult", { Text: text(key(message, "content")) }); });
+    });
+  });
   return w;
 }
 

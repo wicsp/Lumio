@@ -60,6 +60,7 @@ const textToken = (...parts: (string | Ref)[]): PlistValue => {
 export type Field =
   | { type: "text"; value: (string | Ref)[] }
   | { type: "number"; value: number | Ref }
+  | { type: "boolean"; value: boolean }
   | { type: "dict"; value: [string, Field][] }
   | { type: "array"; value: Field[] }
   | { type: "file"; value: Ref };
@@ -67,17 +68,19 @@ export type Field =
 export const f = {
   text: (...value: (string | Ref)[]): Field => ({ type: "text", value }),
   number: (value: number | Ref): Field => ({ type: "number", value }),
+  boolean: (value: boolean): Field => ({ type: "boolean", value }),
   dict: (...value: [string, Field][]): Field => ({ type: "dict", value }),
   array: (...value: Field[]): Field => ({ type: "array", value }),
   file: (value: Ref): Field => ({ type: "file", value }),
 };
 
-const ITEM_TYPE = { text: 0, dict: 1, array: 2, number: 3, file: 5 } as const;
+const ITEM_TYPE = { text: 0, dict: 1, array: 2, number: 3, boolean: 4, file: 5 } as const;
 
 function fieldValue(field: Field): PlistValue {
   switch (field.type) {
     case "text": return textToken(...field.value);
     case "number": return textToken(typeof field.value === "number" ? String(field.value) : field.value);
+    case "boolean": return { Value: field.value, WFSerializationType: "WFBooleanSubstitutableState" };
     // Nested Dictionary items wrap the serialized dictionary once more.
     case "dict": return { Value: dictionary(field.value), WFSerializationType: "WFDictionaryFieldValue" };
     case "array": return { Value: field.value.map(item => ({ WFItemType: ITEM_TYPE[item.type], WFValue: fieldValue(item) })), WFSerializationType: "WFArrayParameterState" };
