@@ -1,0 +1,50 @@
+{
+  "authorName": "assistant-b20208057a33",
+  "proposal": {
+    "id": "prop_01JABCDEFGHJKMNPQRSTVWXYZ0",
+    "author": "act_01JABCDEFGHJKMNPQRSTVWXYZ0",
+    "reason": "work.task.dispatch: 整理论文复现实验材料\n目标执行器目前离线。",
+    "status": "pending",
+    "created": "2026-11-11T00:00:00Z",
+    "operation": {
+      "op": "work.command",
+      "args": {
+        "request_id": "synthetic-dispatch-layout",
+        "operation": {
+          "op": "work.task.dispatch",
+          "args": {
+            "task": "task_01JABCDEFGHJKMNPQRSTVWXYZ0",
+            "to": "claude-code@very-long-runtime-hostname-12345",
+            "expected_revision": 1,
+            "comment": "核对附件后开始执行。"
+          }
+        }
+      }
+    }
+  },
+  "taskDetail": {
+    "task": {
+      "schema_version": 3,
+      "type": "task",
+      "id": "task_01JABCDEFGHJKMNPQRSTVWXYZ0",
+      "title": "整理论文复现实验材料，并补齐不同运行环境下的验证步骤和结果说明",
+      "description": "先对照基线检查实验配置，记录每个运行环境使用的数据和参数。最后汇总复现步骤、输出目录与性能对比，附上每种模型的完整验证结果。",
+      "revision": 1,
+      "outcome": "open",
+      "turn": { "holder": "human", "reason": "todo", "since": "2026-11-11T00:00:00Z" },
+      "created": "2026-11-11T00:00:00Z",
+      "updated": "2026-11-11T00:00:00Z",
+      "created_by": "act_01JABCDEFGHJKMNPQRSTVWXYZ0",
+      "updated_by": "act_01JABCDEFGHJKMNPQRSTVWXYZ0",
+      "tags": [],
+      "dependencies": [],
+      "next_target": { "target": "codex@fixture", "source": "project" },
+      "references": []
+    },
+    "dependents": [],
+    "children": [],
+    "comments": [],
+    "executions": [],
+    "turns": []
+  }
+}

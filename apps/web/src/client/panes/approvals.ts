@@ -11,7 +11,7 @@ import { JOB_LABELS } from "../labels.ts";
 import { listKeys, markSelected } from "../list-keys.ts";
 import type { Navigate } from "../navigation.ts";
 import { t, translated } from "../i18n.ts";
-import { isWorkProposal, proposalCard } from "../proposal-card.ts";
+import { dispatchSummary, isWorkProposal, pendingDispatchArgs, proposalCard } from "../proposal-card.ts";
 
 const STATUS: Record<Proposal["status"], string> = translated({ pending: "Pending", accepted: "Accepted", rejected: "Rejected", withdrawn: "Withdrawn" });
 const title = (p: Proposal) => p.operation.op === "exec.privileged" ? p.operation.args.argv.join(" ")
@@ -61,15 +61,23 @@ export class ApprovalsPane {
       if (!this.active || generation !== this.generation) return;
       this.proposals = proposals;
       if (!proposals.length) { clear(this.list, empty(this.status === "pending" ? t("No pending requests.") : t("Nothing here."))); return; }
-      clear(this.list, ...proposals.map(p => h("div", { class: "row", "data-id": p.id, role: "button", tabindex: "0", onclick: () => this.openProposal(p),
-        onkeydown: (event: Event) => { if ((event as KeyboardEvent).key === "Enter") this.openProposal(p); } },
-        icon(p.operation.op === "exec.privileged" ? "terminal" : isWorkProposal(p) ? (p.operation.args.operation.op === "work.task.dispatch" ? "play" : "route") : "approvals"),
-        h("span", { class: "row-main" }, h("span", { class: `row-title${isWorkProposal(p) ? "" : " mono"}` }, title(p)), h("span", { class: "row-sub" }, p.reason)),
-        h("span", { class: "row-meta", title: formatTime(p.created) }, ago(p.created)))));
+      clear(this.list, ...proposals.map(p => this.proposalRow(p)));
       markSelected(this.list, this.selected);
     } catch (error) {
       if (this.active && generation === this.generation) clear(this.list, failure(errorText(error), () => this.load()));
     }
+  }
+
+  private proposalRow(p: Proposal): HTMLElement {
+    const dispatch = pendingDispatchArgs(p);
+    const time = h("span", { class: "row-meta", title: formatTime(p.created) }, ago(p.created));
+    return h("div", { class: dispatch ? "row dispatch-proposal-row" : "row", "data-id": p.id, role: "button", tabindex: "0", onclick: () => this.openProposal(p),
+      onkeydown: (event: Event) => { if ((event as KeyboardEvent).key === "Enter") this.openProposal(p); } },
+      icon(p.operation.op === "exec.privileged" ? "terminal" : isWorkProposal(p) ? (p.operation.args.operation.op === "work.task.dispatch" ? "play" : "route") : "approvals"),
+      dispatch
+        ? h("div", { class: "row-main" }, dispatchSummary(p, dispatch, this.client), time)
+        : h("span", { class: "row-main" }, h("span", { class: `row-title${isWorkProposal(p) ? "" : " mono"}` }, title(p)), h("span", { class: "row-sub" }, p.reason)),
+      dispatch ? null : time);
   }
 
   private openById(id: string): void { const p = this.proposals.find(x => x.id === id); if (p) this.openProposal(p); }
@@ -85,7 +93,7 @@ export class ApprovalsPane {
           h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": t("Back to list"), "data-pad-back": true, onclick: () => { this.selected = undefined; markSelected(this.list, undefined); this.showPlaceholder(); } }, icon("back")),
           h("span", {}, title(proposal)),
           h("span", { class: `pill ${proposal.status === "pending" ? "pill-ochre" : proposal.status === "accepted" ? "pill-green" : ""}` }, STATUS[proposal.status])),
-        proposalCard(proposal, { client: this.client, navigate: this.navigate, changed: () => { this.changed(); void this.load(); } })));
+        proposalCard(proposal, { client: this.client, navigate: this.navigate, changed: () => { this.changed(); void this.load(); } }, "approvals")));
       return;
     }
     const note = h("div", { role: "alert" });
