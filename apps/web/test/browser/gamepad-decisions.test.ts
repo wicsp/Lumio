@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { Proposal, WorkAttention, type TrashItem } from "@lumio/schema";
+import { Proposal, WorkAttention, WorkTaskDetail, type TrashItem } from "@lumio/schema";
 import { isWorkProposal, proposalCard, riskyProposal } from "../../src/client/proposal-card.ts";
 import { attentionCard, type AttentionContext } from "../../src/client/attention-card.ts";
 import { ApprovalsPane } from "../../src/client/panes/approvals.ts";
 import { TrashPane } from "../../src/client/panes/trash.ts";
 import { setLang } from "../../src/client/i18n.ts";
+import delegation from "../fixtures/pending-delegation.json";
 
 class ElementStub extends EventTarget {
   children: (ElementStub | string)[] = [];
@@ -109,6 +110,56 @@ test("ordinary plan and dispatch approvals keep their normal single-key action",
     operation: { op: "work.task.dispatch", args: { task: taskId, to: "codex@fixture", expected_revision: 1 } } } } });
   if (!isWorkProposal(dispatch)) throw new Error("Expected a work proposal");
   expect(riskyProposal(dispatch)).toBe(false);
+});
+
+test("the approvals list shows four fields for pending delegations and keeps historical rows compact", async () => {
+  const proposal = Proposal.parse(delegation.proposal);
+  const detail = WorkTaskDetail.parse(delegation.taskDetail);
+  const list = new ElementStub("div");
+  const client = {
+    proposals: async (status: Proposal["status"]) => [Proposal.parse({ ...proposal, status })],
+    actors: async () => [{ id: proposal.author, name: delegation.authorName }],
+    workTask: async () => detail,
+  };
+  const pane = Object.assign(Object.create(ApprovalsPane.prototype), {
+    active: true, generation: 0, list, client, status: "pending",
+  }) as { status: Proposal["status"]; load(): Promise<void> };
+
+  await pane.load();
+  await Bun.sleep(0);
+  const summary = list.find(node => node.className === "dispatch-summary");
+  expect(summary?.children.map(child => typeof child === "string" ? child : child.textContent)).toEqual([
+    "Proposed by", delegation.authorName,
+    "Task title", detail.task.title,
+    "Task description", detail.task.description,
+    "Assigned to", delegation.proposal.operation.args.operation.args.to,
+  ]);
+
+  for (const status of ["accepted", "rejected", "withdrawn"] as const) {
+    pane.status = status;
+    await pane.load();
+    expect(list.find(node => node.className === "dispatch-summary")).toBeUndefined();
+    expect(list.find(node => node.className === "row-sub")?.textContent).toBe(proposal.reason);
+  }
+});
+
+test("the pending approval card retains the proposer, stored target and decisions when the task lookup fails", async () => {
+  const proposal = Proposal.parse(delegation.proposal);
+  if (!isWorkProposal(proposal)) throw new Error("Expected a work proposal");
+  const client = { actors: async () => [], workTask: async () => { throw new Error("Fixture task unavailable"); } };
+  const card = proposalCard(proposal, { client: client as never, navigate() {}, changed() {} }, "approvals") as unknown as ElementStub;
+  await Promise.resolve(); await Promise.resolve();
+  const summary = card.find(node => node.className === "dispatch-summary");
+  expect(summary?.children.map(child => typeof child === "string" ? child : child.textContent)).toEqual([
+    "Proposed by", proposal.author,
+    "Task title", "整理论文复现实验材料",
+    "Task description", "Task description unavailable.",
+    "Assigned to", delegation.proposal.operation.args.operation.args.to,
+  ]);
+  expect(card.textContent).toContain(delegation.proposal.operation.args.operation.args.comment);
+  expect(card.textContent).toContain("目标执行器目前离线。");
+  expect(card.find(node => node.attrs["data-pad-action"] === "primary")?.textContent).toBe("Approve");
+  expect(card.find(node => node.attrs["data-pad-action"] === "reject")?.textContent).toBe("Reject");
 });
 
 test("privileged approval remains disabled until its run is checked and renders the full argv and identities", async () => {

@@ -832,6 +832,24 @@ div.note-rich-preview { padding:4px 0; }
 .attn-title { display: block; max-width: 100%; margin-top: 1px; padding: 0; border: 0; background: none; color: var(--ink); font-weight: 600; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attn-title:hover { text-decoration: underline; }
 .attn-meta { color: var(--ink-3); font-size: var(--fs-xs); }
+.dispatch-proposal-row { align-items: start; padding-block: 10px; }
+.dispatch-proposal-row > .icon { flex: none; margin-top: 3px; }
+.dispatch-proposal-row .row-meta { margin-top: 3px; }
+.dispatch-summary {
+  display: grid; grid-template-columns: fit-content(42%) minmax(0, 1fr);
+  column-gap: 10px; row-gap: 3px; margin: 0; overflow-wrap: anywhere; font-size: var(--fs-sm);
+}
+.dispatch-summary dt { color: var(--ink-3); }
+.dispatch-summary dd { min-width: 0; margin: 0; }
+.dispatch-summary .dispatch-description {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; color: var(--ink-2);
+}
+.attn-heading .dispatch-summary { margin-block: 4px; }
+.dispatch-task-link {
+  display: block; max-width: 100%; padding: 0; border: 0; background: none; text-align: start; font-weight: 600;
+}
+.dispatch-task-link:hover { text-decoration: underline; }
+.dispatch-advisory { color: var(--ochre); font-size: var(--fs-sm); white-space: pre-wrap; overflow-wrap: anywhere; }
 .attn-report { font-size: var(--fs-xs); white-space: nowrap; }
 .attn-body { display: flex; flex-direction: column; gap: 10px; margin-left: 44px; }
 .attn-question { padding: 10px 12px; border-radius: var(--r-md); background: var(--ochre-wash); color: var(--ink); line-height: 1.55; white-space: pre-wrap; }

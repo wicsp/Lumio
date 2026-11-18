@@ -6,7 +6,7 @@
 import type { Proposal, WorkCommandProposal } from "@lumio/schema";
 import { errorText, isConflict, type Client } from "./api.ts";
 import { formatTime } from "./commands.ts";
-import { clear, failure, h, icon } from "./dom.ts";
+import { append, clear, failure, h, icon } from "./dom.ts";
 import { ago } from "./format.ts";
 import { t } from "./i18n.ts";
 import { hookText, permissionSummary, planRows } from "./plan.ts";
@@ -15,10 +15,45 @@ import type { Navigate } from "./navigation.ts";
 export type WorkProposal = Proposal & { operation: WorkCommandProposal };
 export const isWorkProposal = (proposal: Proposal): proposal is WorkProposal => proposal.operation.op === "work.command";
 
-let names: Promise<Map<string, string>> | undefined;
-function actorName(client: Client, id: string): Promise<string> {
-  names ??= client.actors().then(list => new Map(list.map(actor => [actor.id, actor.name.startsWith("work-system-") ? "Lumio" : actor.name])), () => { names = undefined; return new Map<string, string>(); });
-  return names.then(map => map.get(id) ?? t("An agent"));
+const namesByClient = new WeakMap<Client, Promise<Map<string, string>>>();
+function actorName(client: Client, id: string, fallback = t("An agent")): Promise<string> {
+  let names = namesByClient.get(client);
+  if (!names) {
+    names = client.actors().then(list => new Map(list.map(actor => [actor.id, actor.name.startsWith("work-system-") ? "Lumio" : actor.name])), () => {
+      namesByClient.delete(client);
+      return new Map<string, string>();
+    });
+    namesByClient.set(client, names);
+  }
+  return names.then(map => map.get(id) ?? fallback);
+}
+
+type DispatchArgs = Extract<WorkCommandProposal["args"]["operation"], { op: "work.task.dispatch" }>["args"];
+
+export function pendingDispatchArgs(proposal: Proposal): DispatchArgs | undefined {
+  if (proposal.status !== "pending" || !isWorkProposal(proposal)) return undefined;
+  const op = proposal.operation.args.operation;
+  return op.op === "work.task.dispatch" ? op.args : undefined;
+}
+
+export function dispatchSummary(proposal: Proposal, args: DispatchArgs, client: Client, openTask?: () => void): HTMLElement {
+  const proposer = h("dd", {}, proposal.author);
+  const fallbackTitle = proposal.reason.split("\n", 1)[0]?.replace(/^work\.task\.dispatch: /, "") || args.task;
+  const title = openTask
+    ? h("button", { type: "button", class: "dispatch-task-link", "data-pad-action": "detail", onclick: openTask }, fallbackTitle)
+    : h("strong", {}, fallbackTitle);
+  const description = h("dd", { class: "dispatch-description" }, t("Loading…"));
+  void actorName(client, proposal.author, proposal.author).then(name => { proposer.textContent = name; });
+  void client.workTask(args.task).then(({ task }) => {
+    title.textContent = task.title;
+    description.textContent = task.description.trim() || t("No description.");
+  }, () => { description.textContent = t("Task description unavailable."); });
+  // Hub freezes the destination in the proposal. The task's current next_target may differ.
+  return h("dl", { class: "dispatch-summary" },
+    h("dt", {}, t("Proposed by")), proposer,
+    h("dt", {}, t("Task title")), h("dd", {}, title),
+    h("dt", {}, t("Task description")), description,
+    h("dt", {}, t("Assigned to")), h("dd", {}, h("span", { class: "mono" }, args.to ?? t("Target not recorded"))));
 }
 
 /** 一句话标题（审批列表、今日卡片）。 */
@@ -62,15 +97,22 @@ export function riskyProposal(proposal: WorkProposal): boolean {
 export interface ProposalContext { client: Client; navigate: Navigate; changed(): void }
 
 /** 今日与审批页共用的卡片。 */
-export function proposalCard(proposal: WorkProposal, ctx: ProposalContext): HTMLElement {
+export function proposalCard(proposal: WorkProposal, ctx: ProposalContext, layout?: "approvals"): HTMLElement {
   const args = proposal.operation.args.operation.args;
   // 计划模板提议没有任务（ADR 0049 第 6 节）：标题不是跳转按钮。
   const task = "task" in args ? args.task : undefined;
-  const heading = task
-    ? h("button", { type: "button", class: "attn-title", "data-pad-action": "detail", onclick: () => ctx.navigate("work", task) }, proposal.reason)
-    : h("p", { class: "attn-title" }, proposal.reason);
-  void Promise.all([actorName(ctx.client, proposal.author), task ? ctx.client.workTask(task).then(detail => detail.task.title, () => proposal.reason) : Promise.resolve("")])
-    .then(([author, title]) => { heading.textContent = proposalTitle(proposal, author, title); });
+  const dispatch = layout === "approvals" ? pendingDispatchArgs(proposal) : undefined;
+  const advisory = dispatch ? proposal.reason.split("\n").slice(1).join("\n") : "";
+  let heading: HTMLElement;
+  if (dispatch) {
+    heading = dispatchSummary(proposal, dispatch, ctx.client, () => ctx.navigate("work", dispatch.task));
+  } else {
+    heading = task
+      ? h("button", { type: "button", class: "attn-title", "data-pad-action": "detail", onclick: () => ctx.navigate("work", task) }, proposal.reason)
+      : h("p", { class: "attn-title" }, proposal.reason);
+    void Promise.all([actorName(ctx.client, proposal.author), task ? ctx.client.workTask(task).then(detail => detail.task.title, () => proposal.reason) : Promise.resolve("")])
+      .then(([author, title]) => { heading.textContent = proposalTitle(proposal, author, title); });
+  }
   const card = h("article", { tabindex: "0", "data-pad-row": proposal.id, class: `attn ${proposal.status === "pending" ? "attn-ochre" : "attn-done-state"}` });
   const error = h("div", { role: "alert" });
   const approve = h("button", { type: "button", class: "btn btn-primary btn-small", "data-pad-action": "primary", "data-pad-hold": riskyProposal(proposal) }, icon("check"), t("Approve"));
@@ -91,14 +133,15 @@ export function proposalCard(proposal: WorkProposal, ctx: ProposalContext): HTML
   };
   approve.addEventListener("click", () => void decide(true));
   reject.addEventListener("click", () => void decide(false));
-  card.append(
+  append(card,
     h("header", { class: "attn-head" },
       h("span", { class: "attn-icon" }, icon("approvals")),
       h("div", { class: "attn-heading" },
-        h("p", { class: "attn-kind" }, proposal.status === "pending" ? t("Waiting for your approval") : proposal.status === "accepted" ? t("Approved") : proposal.status === "rejected" ? t("Rejected") : t("Withdrawn")),
+        dispatch ? null : h("p", { class: "attn-kind" }, proposal.status === "pending" ? t("Waiting for your approval") : proposal.status === "accepted" ? t("Approved") : proposal.status === "rejected" ? t("Rejected") : t("Withdrawn")),
         heading,
         h("p", { class: "attn-meta", title: formatTime(proposal.created) }, ago(proposal.created)))),
-    ...[proposalBody(proposal)].filter((node): node is HTMLElement => node !== null),
+    advisory ? h("p", { class: "dispatch-advisory" }, advisory) : null,
+    proposalBody(proposal),
     proposal.status === "pending" ? h("div", { class: "attn-actions" }, approve, reject)
       : h("p", { class: "muted" }, proposal.status === "accepted" ? t("Approved") : proposal.status === "rejected" ? t("Rejected")
         : proposal.superseded_by ? t("Withdrawn: replaced by a newer proposal from the same agent.") : t("Withdrawn by the agent.")),
