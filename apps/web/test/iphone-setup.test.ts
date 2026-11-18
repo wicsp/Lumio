@@ -1,18 +1,19 @@
 import { describe, expect, test } from "bun:test";
 import { encode } from "uqr";
+import { IPhoneShortcutPairing } from "@lumio/schema";
 import { isIOSDevice, PAIR_SHORTCUT_NAME, pairingUrl, phoneHubDefault, shortcutInstallUrl, unreachableFromPhone } from "../src/client/iphone-setup.ts";
 
 describe("iPhone 快捷指令设置", () => {
-  test("配对二维码启动“Lumio 收藏”，并把地址和配对码作为文字输入传过去", () => {
-    const url = new URL(pairingUrl("http://192.168.1.20:7420//", "abcdefghijklmnopqrstuvwxyz234567"));
+  test.each(["zh", "en"] as const)("配对二维码启动“Lumio 收藏”，携带地址、配对码和 %s 界面语言", language => {
+    const url = new URL(pairingUrl("http://192.168.1.20:7420//", "abcdefghijklmnopqrstuvwxyz234567", language));
     expect(url.protocol).toBe("shortcuts:");
     expect(url.searchParams.get("name")).toBe(PAIR_SHORTCUT_NAME);
     expect(url.searchParams.get("input")).toBe("text");
-    expect(JSON.parse(url.searchParams.get("text")!)).toEqual({ hub: "http://192.168.1.20:7420", code: "abcdefghijklmnopqrstuvwxyz234567" });
+    expect(IPhoneShortcutPairing.parse(JSON.parse(url.searchParams.get("text")!))).toEqual({ hub: "http://192.168.1.20:7420", code: "abcdefghijklmnopqrstuvwxyz234567", language: language === "zh" ? "zh-CN" : "en-US" });
   });
 
   test("配对链接装得进一个二维码", () => {
-    const { size } = encode(pairingUrl("https://lumio.example-tailnet.ts.net", "abcdefghijklmnopqrstuvwxyz234567"), { ecc: "M" });
+    const { size } = encode(pairingUrl("https://lumio.example-tailnet.ts.net", "abcdefghijklmnopqrstuvwxyz234567", "zh"), { ecc: "M" });
     expect(size).toBeLessThanOrEqual(73);
   });
 

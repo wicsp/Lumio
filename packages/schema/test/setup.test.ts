@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { CliConfig, ClientInvite, ClientJoinRequest, HubSigningKey, PairingCode, RuntimeInvite, RuntimeJoin, RuntimeJoinRequest, signingKeyFingerprint } from "../src/index.ts";
+import { CliConfig, ClientInvite, ClientJoinRequest, IPhoneShortcutPairing, HubSigningKey, PairingCode, RuntimeInvite, RuntimeJoin, RuntimeJoinRequest, signingKeyFingerprint } from "../src/index.ts";
 
 // ADR 0021：安装与配对的契约。
 const code = "abcdefghijklmnopqrstuvwxyz";
@@ -33,4 +33,12 @@ test("client invites pair another machine's CLI", () => {
   expect(ClientInvite.parse(invite)).toEqual(invite);
   expect(ClientInvite.safeParse({ ...invite, name: "Bad Name" }).success).toBe(false);
   expect(ClientJoinRequest.safeParse({ code: "short" }).success).toBe(false);
+});
+
+test("iPhone pairing carries the selected speech language and accepts existing links", () => {
+  const input = { hub: "https://hub.example", code };
+  expect(IPhoneShortcutPairing.parse(input)).toEqual(input);
+  for (const language of ["zh-CN", "en-US"] as const) expect(IPhoneShortcutPairing.parse({ ...input, language }).language).toBe(language);
+  for (const language of ["", "fr", "system"]) expect(IPhoneShortcutPairing.safeParse({ ...input, language }).success).toBe(false);
+  expect(IPhoneShortcutPairing.safeParse({ ...input, extra: true }).success).toBe(false);
 });

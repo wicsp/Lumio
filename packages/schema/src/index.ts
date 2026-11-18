@@ -59,7 +59,7 @@ import { ExecutionTarget, Job, JobResult, JobSpec, SubmitJob, RuntimeAck, Runtim
 import { ExecutionRuntimeUpdateCommandRequest, ReleaseManifest, RuntimeUpdateDirective, RuntimeUpdateReport } from "./runtime-update.ts";
 import { Operation } from "./operation.ts";
 import { PrivilegedApproval, PrivilegedReport, PrivilegedStatus } from "./privileged.ts";
-import { CliConfig, ClientInvite, ClientInviteRequest, ClientJoin, ClientJoinRequest, HubSigningKey, RuntimeInvite, RuntimeInviteRequest, RuntimeJoin, RuntimeJoinRequest } from "./setup.ts";
+import { CliConfig, ClientInvite, ClientInviteRequest, ClientJoin, ClientJoinRequest, IPhoneShortcutPairing, HubSigningKey, RuntimeInvite, RuntimeInviteRequest, RuntimeJoin, RuntimeJoinRequest } from "./setup.ts";
 import { Proposal } from "./proposal.ts";
 import { CheckResult, LinksResult, NoteDetail, ResourceSummary, SearchResult } from "./query.ts";
 
@@ -143,6 +143,7 @@ export const CONTRACTS = {
   "client-invite": ClientInvite,
   "client-join-request": ClientJoinRequest,
   "client-join": ClientJoin,
+  "iphone-shortcut-pairing": IPhoneShortcutPairing,
   "search-result": SearchResult,
   "links-result": LinksResult,
   "note-detail": NoteDetail,

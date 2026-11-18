@@ -231,8 +231,8 @@ export class SettingsPane {
           const hub = address.value.trim(), unreachable = unreachableFromPhone(hub);
           warning.textContent = unreachable ? t("The iPhone can't reach this address. Use this computer's LAN or Tailscale address.") : "";
           if (unreachable) clear(code);
-          else if (onPhone) clear(code, h("a", { class: "btn btn-small btn-primary", href: pairingUrl(hub, invite.code) }, t("Pair this iPhone")));
-          else clear(code, h("figure", { class: "qr-card" }, qrSvg(pairingUrl(hub, invite.code), t("Pairing QR code"))));
+          else if (onPhone) clear(code, h("a", { class: "btn btn-small btn-primary", href: pairingUrl(hub, invite.code, lang()) }, t("Pair this iPhone")));
+          else clear(code, h("figure", { class: "qr-card" }, qrSvg(pairingUrl(hub, invite.code, lang()), t("Pairing QR code"))));
         };
         address.addEventListener("input", draw);
         draw();
@@ -250,7 +250,7 @@ export class SettingsPane {
         h("span", { class: "set-sub" }, onPhone ? t("Tap each one, open the download and tap Add Shortcut.") : t("Scan each code with the iPhone camera and tap Add Shortcut."))), installs),
       h("div", { class: "set-row" }, h("span", { class: "set-label" }, t("2. Pair"),
         h("span", { class: "set-sub" }, onPhone ? t("Create a link here and tap it. No typing.") : t("Create a code here, then scan it. No typing on the phone."))), button),
-      result);
+      h("p", { class: "field-hint" }, t("Pairing syncs the current Lumio language for dictation and shortcut messages. Pair again after changing it.")), result);
   }
 
   private pairing(kind: "browser" | "desktop", label: string, sub: string, hint: string): HTMLElement {

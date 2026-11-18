@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { AssistantChatRequest, CaptureCreate, ClientJoinRequest, GLANCE_LIMITS, GlanceCreate, RequestId } from "@lumio/schema";
+import { AssistantChatRequest, CaptureCreate, ClientJoinRequest, IPhoneShortcutPairing, GLANCE_LIMITS, GlanceCreate, RequestId } from "@lumio/schema";
 import { toPlist } from "../src/plist.ts";
 import { askShortcut, saveShortcut, CONFIG_PATH, PAIR_SHORTCUT_NAME, SHORTCUT_REVISION } from "../src/shortcuts.ts";
 import type { Action, Workflow } from "../src/workflow.ts";
@@ -10,7 +10,7 @@ import type { Action, Workflow } from "../src/workflow.ts";
  */
 
 type Value = unknown;
-interface Request { url: string; type: string; body: Record<string, Value> }
+interface Request { url: string; type: string; body: Record<string, Value>; headers: Record<string, Value> }
 
 const IDS = {
   glance: "gln_01ARZ3NDEKTSV4RRFFQ69G5FAV",
@@ -23,14 +23,15 @@ const screenshot = new File(["synthetic screenshot"], "Screenshot.jpg", { type: 
 
 class Exit extends Error {}
 
-function run(workflow: Workflow, options: { ocr?: string; config?: boolean; fail?: string; input?: string } = {}) {
+function run(workflow: Workflow, options: { ocr?: string; config?: boolean; fail?: string; input?: string; configLanguage?: string } = {}) {
   const outputs = new Map<string, Value>();
   const variables = new Map<string, Value>();
   const requests: Request[] = [];
   const shown: string[] = [];
   const notifications: string[] = [];
   const saved: { path: string; content: Value }[] = [];
-  const env = { hub: "http://hub.test:7420", token: "tok_synthetic" };
+  const dictationLanguages: string[] = [];
+  const env = { ...(options.configLanguage ? { language: options.configLanguage } : {}), hub: "http://hub.test:7420", token: "tok_synthetic" };
 
   const resolve = (ref: Record<string, Value>): Value => {
     let value: Value;
@@ -139,7 +140,7 @@ function run(workflow: Workflow, options: { ocr?: string; config?: boolean; fail
       case "gettext": out = evalText(p.WFTextActionText); break;
       case "documentpicker.open": out = options.config === false ? undefined : JSON.stringify(env); break;
       case "detect.dictionary": out = JSON.parse(attachValue(p.WFInput) as string); break;
-      case "dictatetext": out = "这段是什么意思"; break;
+      case "dictatetext": dictationLanguages.push(evalText(p.WFSpeechLanguage)); out = "这段是什么意思"; break;
       case "dictionary": out = evalDict(p.WFItems); break;
       case "setvariable": variables.set(p.WFVariableName as string, attachValue(p.WFInput)); break;
       case "detect.text": out = str(attachValue(p.WFInput)); break;
@@ -148,7 +149,7 @@ function run(workflow: Workflow, options: { ocr?: string; config?: boolean; fail
       case "setitemname": out = attachValue(p.WFInput); break;
       case "documentpicker.save": saved.push({ path: p.WFFileDestinationPath as string, content: attachValue(p.WFInput) }); break;
       case "getvalueforkey": out = (attachValue(p.WFInput) as Record<string, Value>)[p.WFDictionaryKey as string]; break;
-      case "notification": notifications.push(`${p.WFNotificationActionTitle}: ${evalText(p.WFNotificationActionBody)}`); break;
+      case "notification": notifications.push(`${evalText(p.WFNotificationActionTitle)}: ${evalText(p.WFNotificationActionBody)}`); break;
       case "showresult": shown.push(evalText(p.Text)); break;
       case "vibrate": case "comment": break;
       case "exit": throw new Exit();
@@ -157,7 +158,7 @@ function run(workflow: Workflow, options: { ocr?: string; config?: boolean; fail
         const body = p.WFHTTPBodyType === "Form" ? evalDict(p.WFFormValues) : evalDict(p.WFJSONValues);
         const headers = evalDict(p.WFHTTPHeaders);
         if (!url.endsWith("/v2/setup/client/join")) expect(headers.Authorization).toBe(`Bearer ${env.token}`);
-        requests.push({ url, type: p.WFHTTPBodyType as string, body });
+        requests.push({ url, type: p.WFHTTPBodyType as string, body, headers });
         out = respond(new URL(url).pathname);
         break;
       }
@@ -171,7 +172,7 @@ function run(workflow: Workflow, options: { ocr?: string; config?: boolean; fail
   } catch (error) {
     if (!(error instanceof Exit)) throw error;
   }
-  return { requests, shown, notifications, saved, executed };
+  return { requests, shown, notifications, saved, executed, dictationLanguages };
 }
 
 function checkGlance(request: Request) {
@@ -237,6 +238,32 @@ describe("iPhone 快捷指令", () => {
     expect(shown).toEqual(["合成回答"]);
   });
 
+  test.each(["zh-CN", "en-US"])("问一问按配对配置用 %s 听写和请求 Hub", language => {
+    const result = run(askShortcut(), { configLanguage: language });
+    expect(result.dictationLanguages).toEqual([language]);
+    expect(result.requests.every(request => request.headers["Accept-Language"] === language)).toBe(true);
+    const chat = AssistantChatRequest.parse(result.requests[2]!.body);
+    expect(chat.message).toBe("这段是什么意思");
+  });
+
+  test.each([undefined, "invalid"])("旧配置或不支持的语言 %s 沿用中文听写", configLanguage => {
+    expect(run(askShortcut(), { configLanguage }).dictationLanguages).toEqual(["zh-CN"]);
+  });
+
+  test.each(["zh-CN", "en-US"])("扫码配对保存 %s，收藏和错误提示采用同一语言", language => {
+    const payload = IPhoneShortcutPairing.parse({ hub: "http://hub.test:7420", code: "abcdefghijklmnopqrstuvwxyz234567", language });
+    for (const shortcut of [saveShortcut(), askShortcut()]) {
+      const result = run(shortcut, { input: JSON.stringify(payload) });
+      expect(result.saved).toEqual([{ path: CONFIG_PATH, content: JSON.stringify({ hub: payload.hub, token: "tok_synthetic", language }) }]);
+      expect(result.requests[0]!.headers["Accept-Language"]).toBe(language);
+      expect(result.notifications).toEqual([`${language === "zh-CN" ? "Lumio 已配对" : "Lumio paired"}: ${payload.hub}`]);
+    }
+    const saved = run(saveShortcut(), { configLanguage: language });
+    expect(saved.notifications).toEqual([language === "zh-CN" ? "已收藏: 已存入 Lumio" : "Saved: Saved to Lumio"]);
+    const failure = run(askShortcut(), { configLanguage: language, fail: "/v2/glances" });
+    expect(failure.notifications).toEqual([`${language === "zh-CN" ? "Lumio 失败" : "Lumio failed"}: 合成错误`]);
+  });
+
   test("Hub 返回错误时提示并停下", () => {
     const { requests, notifications } = run(saveShortcut(), { fail: "/v2/glances" });
     expect(requests).toHaveLength(1);
@@ -256,7 +283,7 @@ describe("iPhone 快捷指令", () => {
       expect(requests).toHaveLength(1);
       expect(requests[0]!.url).toBe("http://hub.test:7420/v2/setup/client/join");
       ClientJoinRequest.parse(requests[0]!.body);
-      expect(saved).toEqual([{ path: CONFIG_PATH, content: JSON.stringify({ hub: "http://hub.test:7420", token: "tok_synthetic" }) }]);
+      expect(saved).toEqual([{ path: CONFIG_PATH, content: JSON.stringify({ hub: "http://hub.test:7420", token: "tok_synthetic", language: "zh-CN" }) }]);
       expect(notifications).toEqual(["Lumio 已配对: http://hub.test:7420"]);
       expect(executed).not.toContain("takescreenshot");
     }
