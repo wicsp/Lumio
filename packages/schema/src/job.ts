@@ -68,6 +68,27 @@ export const JobSource = z.strictObject({
 
 export const PROJECT_WORKTREE_FEATURE = "project_worktree";
 export const RUNTIME_CONCURRENCY_FEATURE = "runtime_concurrency";
+export const AGENT_ADMISSION_FEATURE = "agent_admission";
+export const PiConcurrencyBackend = z.string().trim().min(1).max(64).regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/);
+export const AgentConcurrencyTarget = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("default"), engine: z.enum(AGENTS) }),
+  z.strictObject({ kind: z.literal("runtime"), engine: z.enum(AGENTS), runtime: idOf("act"), backend: PiConcurrencyBackend.optional() }),
+  z.strictObject({ kind: z.literal("connection"), connection: idOf("aic") }),
+]);
+export type AgentConcurrencyTarget = z.infer<typeof AgentConcurrencyTarget>;
+const AgentConcurrencyGroup = z.string().trim().min(1).max(80).regex(/^[a-z0-9][a-z0-9._-]*$/);
+export const AgentConcurrencyUpdate = z.strictObject({
+  target: AgentConcurrencyTarget,
+  group: AgentConcurrencyGroup.nullable(),
+  max_concurrent: z.number().int().positive().nullable(),
+});
+export type AgentConcurrencyUpdate = z.infer<typeof AgentConcurrencyUpdate>;
+export const AgentConcurrencyView = z.array(z.strictObject({
+  target: AgentConcurrencyTarget, name: z.string(), group: AgentConcurrencyGroup.nullable(), uses_default: z.boolean(),
+  max_concurrent: z.number().int().positive(),
+}));
+export const RoutineOffer = z.strictObject({ job: idOf("job"), lease: z.string().min(16) });
+
 export const RuntimeConcurrency = z.number().int().positive();
 export const RuntimeConcurrencySettings = z.strictObject({
   desired: RuntimeConcurrency.nullable(),
@@ -165,7 +186,7 @@ export const Job = z.strictObject({
  * privileged_helper：已配置高权限助手（ADR 0020），人可在设置里看到哪台执行器还没装。
  * self_update：能按 Hub 的期望版本自更新（ADR 0063）；声明它时必须同时登记 version、platform、install。
  */
-export const RUNTIME_FEATURES = ["stage_permissions", "hooks", "permission_request", "privileged_helper", "self_update", PROJECT_WORKTREE_FEATURE, RUNTIME_CONCURRENCY_FEATURE] as const;
+export const RUNTIME_FEATURES = ["stage_permissions", "hooks", "permission_request", "privileged_helper", "self_update", PROJECT_WORKTREE_FEATURE, RUNTIME_CONCURRENCY_FEATURE, AGENT_ADMISSION_FEATURE] as const;
 
 /**
  * 执行器启动时登记自己的能力。
@@ -237,6 +258,7 @@ export const RoutineSpec = z.strictObject({
 
 /** 执行器每次轮询时报告的状态（同时也是心跳）。 */
 export const RuntimeHeartbeat = z.strictObject({
+  routine_offers: z.array(RoutineOffer).optional(),
   running: z.array(idOf("job")),
   queued: z.array(idOf("job")),
   outbox: z.number().int().nonnegative().describe("还没交回的结果数"),

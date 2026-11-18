@@ -1,4 +1,4 @@
-import { JOB_ACCOUNT_FEATURE, JOB_ACTIVITY_FEATURE, PROJECT_WORKTREE_FEATURE, RUNTIME_CONCURRENCY_FEATURE, JobResult, RuntimeAck, RuntimeHeartbeat, RuntimeInfo, RuntimeRegistration, RuntimeSync, type Job } from "@lumio/schema";
+import { AGENT_ADMISSION_FEATURE, JOB_ACCOUNT_FEATURE, JOB_ACTIVITY_FEATURE, PROJECT_WORKTREE_FEATURE, RUNTIME_CONCURRENCY_FEATURE, JobResult, RuntimeAck, RuntimeHeartbeat, RuntimeInfo, RuntimeRegistration, RuntimeSync, type Job } from "@lumio/schema";
 import { Jobs, type RoutineHooks } from "./jobs.ts";
 import type { authorize } from "./authorize.ts";
 import { HubError } from "./errors.ts";
@@ -21,7 +21,7 @@ export async function handleRuntime(request: Request, operation: "runtime.regist
       const registration = RuntimeRegistration.safeParse(body);
       if (!registration.success) throw new HubError("INVALID", { key: "runtime.invalid_runtime_registration", args: [] });
       const supported = features.filter(feature => feature === JOB_ACTIVITY_FEATURE || feature === JOB_ACCOUNT_FEATURE);
-      const extensions = ([PROJECT_WORKTREE_FEATURE, RUNTIME_CONCURRENCY_FEATURE] as const).filter(feature => features.includes(feature));
+      const extensions = ([PROJECT_WORKTREE_FEATURE, RUNTIME_CONCURRENCY_FEATURE, AGENT_ADMISSION_FEATURE] as const).filter(feature => features.includes(feature));
       const declared = [...new Set([...(registration.data.features ?? []), ...extensions])];
       const info = store.registerRuntime(identity.actor.id, {
         ...registration.data, ...(declared.length ? { features: declared } : {}),
@@ -47,6 +47,7 @@ export async function handleRuntime(request: Request, operation: "runtime.regist
       store.db.transaction(() => {
         jobs.result(identity.actor.id, result.data);
         store.jobActivity.seal(result.data.job);
+        store.agentConcurrency.finish(result.data.job);
         if (onResult) onResult(jobs.get(result.data.job));
       })();
       return Response.json(result.data);
@@ -55,15 +56,18 @@ export async function handleRuntime(request: Request, operation: "runtime.regist
     return store.db.transaction(() => {
       const heartbeat = RuntimeHeartbeat.parse(body), runtime = store.runtimes(now).find(value => value.actor === identity.actor.id);
       if (runtime) store.runtimeUpdates.report(runtime, heartbeat.update);
-      const concurrency = runtime?.concurrency;
-      if (concurrency && heartbeat.concurrency) store.reportRuntimeConcurrency(identity.actor.id, heartbeat.concurrency);
+      const managedRoutines = runtime?.registration.features?.includes(AGENT_ADMISSION_FEATURE) === true && features.includes(AGENT_ADMISSION_FEATURE);
       const sync = jobs.sync(identity.actor.id, heartbeat, now, {
         eligible: job => (!job.spec.worktree || runtime?.registration.features?.includes(PROJECT_WORKTREE_FEATURE) === true && features.includes(PROJECT_WORKTREE_FEATURE))
           && (features.includes(JOB_ACCOUNT_FEATURE) || !store.jobActivity.account(job.spec.id)),
         project: store.projectForJob,
         limit: store.projectConcurrency,
+        quota: job => store.agentConcurrency.admit(job),
+        managedRoutines,
       });
-      if (concurrency && features.includes(RUNTIME_CONCURRENCY_FEATURE)) sync.max_concurrent = concurrency.desired;
+      if (!managedRoutines) sync.routines = [];
+      if (!features.includes(AGENT_ADMISSION_FEATURE) && runtime?.registration.features?.includes(RUNTIME_CONCURRENCY_FEATURE)
+        && features.includes(RUNTIME_CONCURRENCY_FEATURE)) sync.max_concurrent = null;
       if (runtime) {
         const update = store.runtimeUpdates.directive(runtime);
         if (update) sync.update = update;

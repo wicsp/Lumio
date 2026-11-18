@@ -99,7 +99,7 @@ export class ExecutionRoutines {
     });
   }
   /** Lease identifies the exact historical input even when an offline runtime still holds an older plan. */
-  adopt(actor: string, id: string, now: Date, lease?: string): Job | undefined {
+  adopt(actor: string, id: string, now: Date, lease?: string, offer = false): Job | undefined {
     let fired: Date;
     try { fired = new Date(idTime(id)); } catch { return; }
     if (fired > now || fired.getUTCSeconds() !== 0 || fired.getUTCMilliseconds() !== 0) return;
@@ -107,12 +107,15 @@ export class ExecutionRoutines {
       && routineJobId(plan.routine, fired) === id && (lease === undefined || plan.spec.lease === lease));
     if (candidates.length !== 1) return;
     const plan = candidates[0]!, spec = plan.spec;
+    if (offer && (this.store.get(plan.routine)?.status !== "active"
+      || this.store.currentPlan(plan.routine)?.fingerprint !== plan.fingerprint
+      || this.jobs.list(undefined, undefined, plan.routine).some(job => job.status === "queued"))) return;
     const expected = nextFire(parseCron(spec.schedule), spec.timezone, new Date(fired.getTime() - 1));
     if (expected?.getTime() !== fired.getTime()) return;
     const job = Job.parse({ spec: { protocol_version: JOB_PROTOCOL_VERSION, id, runtime: actor, lease: spec.lease,
       source: { routine: plan.routine, round: 1, fired_at: fired.toISOString() }, run: spec.template.run,
       workdir: spec.template.workdir, timeout_seconds: spec.template.timeout_seconds, ...(spec.template.gpus ? { gpus: spec.template.gpus } : {}), created: fired.toISOString() },
-      status: "assigned", assigned: now.toISOString() });
+      ...(offer ? { status: "queued" } : { status: "assigned", assigned: now.toISOString() }) });
     this.jobs.record(job); return job;
   }
   list(): ExecutionRoutineInfo[] {

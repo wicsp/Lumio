@@ -55,7 +55,7 @@ import {
 } from "./work.ts";
 import { ApiError, OperationRequest, OperationResult } from "./api.ts";
 import { AiNote, Asset, Experiment, Idea, Paper, Post, Source } from "./entities.ts";
-import { ExecutionTarget, Job, JobResult, JobSpec, SubmitJob, RuntimeAck, RuntimeConcurrencyRequest, RuntimeConcurrencySettings, RuntimeHeartbeat, RuntimeInfo, RuntimeRegistered, RuntimeRegistration, RuntimeSync } from "./job.ts";
+import { AgentConcurrencyUpdate, AgentConcurrencyView, ExecutionTarget, Job, JobResult, JobSpec, SubmitJob, RuntimeAck, RuntimeConcurrencyRequest, RuntimeConcurrencySettings, RuntimeHeartbeat, RuntimeInfo, RuntimeRegistered, RuntimeRegistration, RuntimeSync } from "./job.ts";
 import { ExecutionRuntimeUpdateCommandRequest, ReleaseManifest, RuntimeUpdateDirective, RuntimeUpdateReport } from "./runtime-update.ts";
 import { Operation } from "./operation.ts";
 import { PrivilegedApproval, PrivilegedReport, PrivilegedStatus } from "./privileged.ts";
@@ -124,6 +124,8 @@ export const CONTRACTS = {
   "runtime-info": RuntimeInfo,
   "runtime-concurrency-request": RuntimeConcurrencyRequest,
   "runtime-concurrency-settings": RuntimeConcurrencySettings,
+  "agent-concurrency-update": AgentConcurrencyUpdate,
+  "agent-concurrency-view": AgentConcurrencyView,
   "execution-target": ExecutionTarget,
   "runtime-heartbeat": RuntimeHeartbeat,
   "runtime-sync": RuntimeSync,

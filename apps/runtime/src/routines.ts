@@ -33,6 +33,23 @@ export class RoutinePlans {
     })();
   }
 
+  offers(now: Date) {
+    return this.list().flatMap(({ spec, last_fired }) => {
+      try {
+        const latest = dueFires(parseCron(spec.schedule), spec.timezone, new Date(last_fired), now).latest;
+        return latest ? [{ job: routineJobId(spec.routine, latest), lease: spec.lease }] : [];
+      } catch { return []; }
+    });
+  }
+
+  observeDeliveries(jobs: JobSpec[]): void {
+    const mark = this.queue.db.query("UPDATE routines SET last_fired=? WHERE routine=? AND last_fired<?");
+    for (const job of jobs) {
+      const source = job.source;
+      if (source?.routine && source.fired_at) mark.run(source.fired_at, source.routine, source.fired_at);
+    }
+  }
+
   /** 到点的例行任务各生成一个 Job（只取最近的一次触发），返回生成的编号。 */
   fire(now: Date): string[] {
     const db = this.queue.db, fired: string[] = [];

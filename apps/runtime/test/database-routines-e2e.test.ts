@@ -12,7 +12,7 @@ import { readConfig } from "../src/config.ts";
 import { runRuntime } from "../src/runtime.ts";
 
 // Only HTTP crosses the app boundary; all processes, credentials, engines and files are synthetic.
-test("database Routine uses protocol 2 on a real runtime with no Knowledge, retains offline results and coalesces missed fires", async () => {
+test("database Routine uses protocol 2 on a real runtime with no Knowledge, waits for the Hub and coalesces missed fires", async () => {
   const temp = await mkdtemp(join(tmpdir(), "lumio-db-routine-")), state = join(temp, "hub"), runtimeState = join(temp, "runtime");
   const hubMain = new URL("../../hub/src/main.ts", import.meta.url).pathname;
   const probe = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() }), port = probe.port!; await probe.stop(true);
@@ -56,7 +56,9 @@ test("database Routine uses protocol 2 on a real runtime with no Knowledge, reta
     await eventually(async () => Job.array().parse(await api(`/v2/execution/jobs?routine=${routine.id}`))[0]?.status === "done");
     await eventually(() => local<{ spec: string }>("SELECT spec FROM routines")[0]!.spec.includes("Previous report"));
     await halt(); now = Date.parse("2026-10-26T10:20:30Z");
-    await eventually(() => local("SELECT * FROM outbox").length === 1);
+    await Bun.sleep(250);
+    expect(local("SELECT * FROM queue")).toHaveLength(1);
+    expect(local("SELECT * FROM outbox")).toHaveLength(0);
     await boot(); await eventually(async () => Job.array().parse(await api(`/v2/execution/jobs?routine=${routine.id}`)).length === 2);
     await eventually(() => local("SELECT * FROM outbox").length === 0);
     await stop(); now = Date.parse("2026-10-26T11:05:30Z"); start();

@@ -15,13 +15,15 @@ export interface ExecutionStore {
   syncRuntime(actor: string, now: Date): void;
   transaction<T>(action: () => T): T;
 }
-export interface RoutineHooks { plans(actor: string): RoutineSpec[]; adopt(actor: string, id: string, now: Date, lease?: string): Job | undefined }
+export interface RoutineHooks { plans(actor: string): RoutineSpec[]; adopt(actor: string, id: string, now: Date, lease?: string, offer?: boolean): Job | undefined }
 export interface ExecutionContext { id(now: Date): string; lease(): string; now(): Date }
 export { SubmitJob };
 export interface JobAdmission {
   eligible(job: Job): boolean;
   project(job: Job): string | undefined;
   limit(project: string): number;
+  quota?(job: Job): boolean;
+  managedRoutines?: boolean;
 }
 const active = (job: Job) => job.status === "assigned" || job.status === "running";
 
@@ -94,7 +96,13 @@ export class ExecutionJobs {
   sync(actor: string, heartbeat: RuntimeHeartbeat, now: Date, admission?: JobAdmission): RuntimeSync {
     return this.store.transaction(() => {
       this.store.syncRuntime(actor, now);
-      for (const id of [...heartbeat.running, ...heartbeat.queued]) if (!this.store.get(id)) this.routines?.adopt(actor, id, now);
+      if (admission?.managedRoutines) {
+        for (const offer of heartbeat.routine_offers ?? []) {
+          if (!this.store.get(offer.job)) this.routines?.adopt(actor, offer.job, now, offer.lease, true);
+        }
+      } else {
+        for (const id of [...heartbeat.running, ...heartbeat.queued]) if (!this.store.get(id)) this.routines?.adopt(actor, id, now);
+      }
       const running = new Set(heartbeat.running);
       for (const job of this.store.list({ runtime: actor, open: true })) if (running.has(job.spec.id) && active(job)) this.store.save({ ...job, status: "running", last_seen: now.toISOString() });
       const jobs = this.store.list({ runtime: actor, open: true }), cancellations = new Set(this.store.cancellations());
@@ -110,11 +118,12 @@ export class ExecutionJobs {
         if (job.admitted) return true;
         if (runtime && runtimeDraining(runtime)) return false;
         const project = admission?.project(job);
-        if (!admission || !project) return true;
-        const count = counts.get(project) ?? 0;
-        if (count >= admission.limit(project)) return false;
-        this.store.save({ ...job, project, admitted: now.toISOString() });
-        counts.set(project, count + 1);
+        const count = project ? counts.get(project) ?? 0 : 0;
+        if (admission && project && count >= admission.limit(project)) return false;
+        const limited = job.spec.run.kind === "agent" && admission?.quota;
+        if (limited && !limited(job)) return false;
+        if (project || limited) this.store.save({ ...job, ...(project ? { project } : {}), admitted: now.toISOString() });
+        if (project) counts.set(project, count + 1);
         return true;
       });
       return RuntimeSync.parse({ jobs: deliver.map(job => job.spec),

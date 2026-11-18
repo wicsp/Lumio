@@ -49,14 +49,13 @@ macOS 同样支持配对，使用 `io.lumio.runtime` launchd 服务，日志在�
    LUMIO_TOKEN=<runtime 身份的令牌>
    LUMIO_RUNTIME_NAME=server
    LUMIO_RUNTIME_TAGS=gpu:4,lab
-   LUMIO_RUNTIME_MAX_CONCURRENT=1
    LUMIO_RUNTIME_STATE_DIR=/home/<用户名>/.local/share/lumio-runtime
    LUMIO_RUNTIME_POLL_SECONDS=5
    PATH=/home/<用户名>/.local/bin:/usr/local/bin:/usr/bin:/bin
    ```
    `PATH` 必须包含实际安装 codex、claude、pi 的目录；systemd 不读取交互式 shell 配置。
    先确认执行器能访问该地址；HTTPS 通常由 Hub 前面的反向代理提供。
-   默认状态目录为 `~/.local/share/lumio-runtime/`；标签默认空、并发默认 1、轮询默认 5 秒。
+   默认状态目录为 `~/.local/share/lumio-runtime/`；标签默认空，轮询默认 5 秒。新版 Hub 在「设置 → AI 模型」中按 Agent 连接管理并发，同时执行项目上限（ADR 0078）。
    环境文件中的路径请写绝对路径，不使用 `~`、`$HOME` 等 shell 展开。
 4. 复制本目录的单元到 `~/.config/systemd/user/lumio-runtime.service`，然后运行：
    ```sh

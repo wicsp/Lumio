@@ -76,6 +76,7 @@ export class Executor {
     private engines: Engines = [], private sudo?: SudoGate, private activity?: RuntimeJobActivity, private accounts?: ConnectionAuth) {
     this.maxConcurrent = config.registration.max_concurrent;
   }
+  useHubAdmission(): void { this.maxConcurrent = Infinity; }
   setConcurrency(override: number | null): number {
     return this.maxConcurrent = override ?? this.config.registration.max_concurrent;
   }

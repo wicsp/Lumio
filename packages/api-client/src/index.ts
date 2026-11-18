@@ -1,3 +1,4 @@
+import { AgentConcurrencyView, AgentConcurrencyUpdate } from "@lumio/schema";
 import { ImageHostingSettings, ImageHostingUpdate, ImageUploadResult } from "@lumio/schema";
 import { SecurityReviewRequest, SecurityReviewResult, Glance } from "@lumio/schema";
 import { Capture, CaptureCommand, CaptureList, CaptureListArgs, CaptureProxySettings, CaptureProxyUpdate, KnowledgeAIBinding, KnowledgeAIBindingUpdate, CaptureCreate, CaptureCreateResult, KnowledgeAiNoteCommand, KnowledgeAiNoteResult, KnowledgeOriginal, KnowledgeOriginalShowArgs, ResourceSummary } from "@lumio/schema";
@@ -13,7 +14,7 @@ import { AgentInfo, AgentTokenIssued, AgentTokenRequest, AgentRevokeRequest, Cli
 import { AssistantConfigView, AssistantConfigUpdate, AssistantToolCall, ExecutionJobListArgs, RequestId, WorkTaskListArgs, WorkAttention, WorkCommandRequest, WorkCommandResult, PlanTemplate, type WorkCommand, WorkTask, WorkTaskDetail, WorkProject, ExecutionRoutine, ExecutionRoutineCommandRequest, ExecutionRoutineInfo,
   ProjectStatus, AssistantMemory, AssistantMemoryCommandRequest, AssistantMemoryCommandResult, AssistantChatRequest, AssistantChatResult, AssistantConversation, AssistantConversationDetail, AssistantEvent, StoredArtifact, idOf } from "@lumio/schema";
 import { JobLiveView, JobActivityPage, JobActivityQuery, JobAction, JobActionReceipt, JobAttention, JobActivityCapabilities } from "@lumio/schema";
-import { Job, JobSpec, JobStatus, RuntimeName, SubmitJob, RuntimeInfo, RuntimeConcurrencyRequest, RuntimeConcurrencySettings, Actor, OperationRequest, OperationResult, Proposal, ProposalStatus, ApiError, CheckResult, LinksResult, NoteDetail, SearchResult, type ApiErrorCode, type NoteRef } from "@lumio/schema";
+import { Job, JobSpec, JobStatus, RuntimeName, SubmitJob, RuntimeInfo, Actor, OperationRequest, OperationResult, Proposal, ProposalStatus, ApiError, CheckResult, LinksResult, NoteDetail, SearchResult, type ApiErrorCode, type NoteRef } from "@lumio/schema";
 
 export class ApiClientError extends Error {
   hubUrl?: string;
@@ -128,6 +129,10 @@ export function createClient(options: { url: string; token?: string; language?: 
       return request("/v2/knowledge/originals", validate(KnowledgeOriginalShowArgs, { ref }), KnowledgeOriginal);
     },
     aiConfiguration(){return request("/v2/ai/config",{},AIConfiguration);},
+    agentConcurrency() { return request("/v2/ai/concurrency", {}, AgentConcurrencyView); },
+    setAgentConcurrency(input: AgentConcurrencyUpdate) {
+      return request("/v2/ai/concurrency", {}, AgentConcurrencyView, validate(AgentConcurrencyUpdate, input), "PUT");
+    },
     aiUsage() { return request("/v2/ai/usage", {}, AIQuotaViews); },
     saveAliyunBilling(id: string, input: AliyunBillingUpdate) {
       return request(`/v2/ai/connections/${validate(idOf("aic"), id)}/usage/aliyun-billing`, {}, AIQuotaView, validate(AliyunBillingUpdate, input), "PUT");
@@ -320,11 +325,7 @@ export function createClient(options: { url: string; token?: string; language?: 
     jobAttention() { return request("/v2/execution/attention", {}, JobAttention); },
     cancelJob(id: string) { return request(`/v2/execution/jobs/${encodeURIComponent(validate(JobSpec.shape.id, id))}/cancel`, {}, Job, {}); },
     runtimes() { return request("/v2/execution/runtimes", {}, RuntimeInfo.array()); },
-    setRuntimeConcurrency(runtime: string, maxConcurrent: number | null, requestId: string) {
-      const input = RuntimeConcurrencyRequest.parse({ request_id: requestId,
-        operation: { op: "execution.runtime.concurrency", args: { runtime, max_concurrent: maxConcurrent } } });
-      return request("/v2/execution/commands", {}, RuntimeConcurrencySettings, input);
-    },
+
     actors() { return request("/v2/system/actors", {}, Actor.array()); },
     operation(input: OperationRequest) { return request("/v2/approval/privileged", {}, OperationResult, validate(OperationRequest, input)); },
     targets(args: { online?: boolean } = {}) { const value = validate(ExecutionTargetListArgs, args); return request("/v2/execution/targets", value.online === undefined ? {} : { online: String(value.online) }, ExecutionTarget.array()); },
