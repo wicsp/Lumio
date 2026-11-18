@@ -1,12 +1,12 @@
 /** 设置页：用 Lumio 里生成的配对码，把这个浏览器连接到 Hub（换取一个 human 令牌，只存在本机插件存储里）。 */
 import { normalizeHub } from "./page.ts";
 import { clearConnection, failureText, h, hubClient, hubPattern, loadConnection, saveConnection, t } from "./shared.ts";
-import { desktopSite, isBridgeSecret, loadDesktopConnection, saveDesktopConnection, sitePermission } from "./desktop-bridge.ts";
+import { hasDesktopPageAccess, isBridgeSecret, loadDesktopSecret, requestDesktopPageAccess, saveDesktopSecret } from "./desktop-bridge.ts";
 
 const root = document.getElementById("root")!;
 
 async function desktopSettings() {
-  const desktop = await loadDesktopConnection();
+  const desktop = await loadDesktopSecret();
   const message = h("p", { role: "status", class: "status" });
   const id = h("input", { readonly: true, value: chrome.runtime.id, id: "desktop-extension-id" });
   const section = h("section", {}, h("h2", {}, t("Desktop capture")),
@@ -15,44 +15,35 @@ async function desktopSettings() {
   if (!desktop) {
     const secret = h("input", { type: "password", autocomplete: "off", required: true, id: "desktop-secret" });
     const form = h("form", {}, h("label", { for: secret.id }, t("Desktop pairing code")), secret,
+      h("p", { class: "hint" }, t("Allow website access once to capture the current page when you press F18.")),
       h("button", { type: "submit", class: "btn" }, t("Pair desktop capture")));
     form.addEventListener("submit", event => {
       event.preventDefault();
       const value = secret.value.trim();
       if (!isBridgeSecret(value)) { message.textContent = t("Enter the desktop pairing code exactly as shown."); return; }
-      void chrome.permissions.request({ origins: ["http://127.0.0.1/*"] }).then(async granted => {
-        if (!granted) { message.textContent = t("Allow the extension to connect to Lumio Capture on this Mac."); return; }
-        await saveDesktopConnection({ secret: value, origins: [] });
+      void requestDesktopPageAccess().then(async granted => {
+        if (!granted) { message.textContent = t("Allow website access to enable F18 page capture."); return; }
+        await saveDesktopSecret(value);
         await render();
       }).catch(() => { message.textContent = t("Could not save desktop capture settings."); });
     });
     section.append(form, message);
     return section;
   }
-  const site = h("input", { type: "url", required: true, id: "desktop-site", placeholder: "https://example.com" });
-  const form = h("form", {}, h("label", { for: site.id }, t("Website to allow for F18")), site,
-    h("button", { type: "submit", class: "btn" }, t("Allow website")));
-  form.addEventListener("submit", event => {
-    event.preventDefault();
-    const origin = desktopSite(site.value);
-    if (!origin) { message.textContent = t("Enter an HTTP or HTTPS website."); return; }
-    void chrome.permissions.request({ origins: [sitePermission(origin)] }).then(async granted => {
-      if (!granted) { message.textContent = t("Website permission was declined."); return; }
-      const current = await loadDesktopConnection();
-      if (current?.secret !== desktop.secret) return;
-      await saveDesktopConnection({ ...current, origins: [...new Set([...current.origins, origin])] });
-      await render();
-    }).catch(() => { message.textContent = t("Could not save desktop capture settings."); });
-  });
-  const list = h("ul", {}, ...desktop.origins.map(origin => h("li", {}, origin, " ",
-    h("button", { type: "button", class: "btn", onclick: async () => {
-      const current = await loadDesktopConnection();
-      if (current?.secret !== desktop.secret) return;
-      await saveDesktopConnection({ ...current, origins: current.origins.filter(value => value !== origin) });
-      await render();
-    } }, t("Remove")))));
-  section.append(h("p", { class: "hint" }, t("F18 reads the current page only on websites you allow here.")), form, list,
-    h("button", { type: "button", class: "btn", onclick: async () => { await saveDesktopConnection(); await render(); } }, t("Forget desktop pairing")), message);
+  if (await hasDesktopPageAccess()) {
+    section.append(h("p", { class: "hint" }, t("F18 captures the current web page when you press it.")));
+  } else {
+    const allow = h("button", { type: "button", class: "btn", id: "desktop-enable" }, t("Enable F18 page capture"));
+    allow.addEventListener("click", () => {
+      void requestDesktopPageAccess().then(async granted => {
+        if (!granted) { message.textContent = t("Allow website access to enable F18 page capture."); return; }
+        await render();
+      }).catch(() => { message.textContent = t("Could not save desktop capture settings."); });
+    });
+    section.append(h("p", { class: "hint" }, t("Allow website access once to capture the current page when you press F18.")), allow);
+  }
+  section.append(
+    h("button", { type: "button", class: "btn", onclick: async () => { await saveDesktopSecret(); await render(); } }, t("Forget desktop pairing")), message);
   return section;
 }
 
