@@ -3,7 +3,7 @@ let previousLocale: string | undefined;
 beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_LANG = "zh"; });
 afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { expect, test } from "bun:test";
-import { doctor, supported, verifiedVersions, type DoctorOptions } from "../src/doctor.ts";
+import { doctor, supported, minimumAgentVersions, type DoctorOptions } from "../src/doctor.ts";
 import { printChecks, type DiagnosticOptions } from "../src/diagnostics.ts";
 import { readFile } from "node:fs/promises";
 const token = "synthetic-secret-never-print";
@@ -63,7 +63,7 @@ test("CLI doctor isolates config, permissions, health, auth, vault, services, ru
   expect(checks.filter((c) => c.name === "Hub 问题")).toHaveLength(2);
   expect(checks.find((c) => c.name.startsWith("Hub 版本"))!.fix).toBe("运行 lumio upgrade");
   expect(checks.find((c) => c.name === "执行器 server")!.fix).toContain("lumio runtime doctor");
-  expect(checks.find((c) => c.name.includes("0.999.0"))!.ok).toBe(false);
+  expect(checks.find((c) => c.name.includes("0.999.0"))!.ok).toBe(true);
   expect(checks.find((c) => c.name === "例行任务 fixture")!.ok).toBe(false);
   f.options.env = { LUMIO_PUBLIC_URL: "ftp://invalid" }; checks = await doctor(f.options);
   expect(checks.find((c) => c.name === "对外地址 /health")!.ok).toBe(false);
@@ -71,11 +71,14 @@ test("CLI doctor isolates config, permissions, health, auth, vault, services, ru
   f.bodies["/v2/execution/runtimes"] = [{ ...runtime, registration: { ...runtime.registration, engines: [] } }]; checks = await doctor(f.options); expect(checks.find((c) => c.name === "server agent")!.ok).toBe(false);
   const output: string[] = []; expect(printChecks(checks, true, (l) => output.push(l))).toBe(1); expect(JSON.parse(output[0]!)).toEqual(checks);
 });
-test("CLI version ranges stay aligned with runtime adapters without cross-app imports", async () => {
+test("CLI minimum versions stay aligned with runtime adapters without cross-app imports", async () => {
   const adapters = await readFile(new URL("../../runtime/src/agents.ts", import.meta.url), "utf8");
-  for (const [engine, [min, below]] of Object.entries(verifiedVersions)) {
-    expect(adapters).toContain(`versions: { min: "${min}", below: "${below}" }`);
-    expect(supported(engine as keyof typeof verifiedVersions, min)).toBe(true); expect(supported(engine as keyof typeof verifiedVersions, below)).toBe(false);
+  for (const engine of Object.keys(minimumAgentVersions) as (keyof typeof minimumAgentVersions)[]) {
+    const minimum = minimumAgentVersions[engine];
+    expect(adapters).toMatch(new RegExp(`engine: "${engine}",[^\n]+\n +minimumVersion: "${minimum.replaceAll(".", "\\.")}"`));
+    expect(supported(engine, minimum)).toBe(true);
+    expect(supported(engine, "9.0.0")).toBe(true);
+    expect(supported(engine, "0.0.1")).toBe(false);
   }
   expect(supported("pi", "garbage")).toBe(false);
 });

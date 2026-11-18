@@ -8,8 +8,8 @@ import { diagnosticIO, environment, httpURL, localAddress, serviceCommand, type 
 import { version } from "./version.ts";
 
 // Mirrors the runtime adapters without an app-to-app import. A parity test guards changes.
-export const verifiedVersions = { codex: ["0.160.0", "0.200.0"], "claude-code": ["2.0.0", "3.0.0"], pi: ["1.4.0", "2.0.0"] } as const;
-export function supported(engine: keyof typeof verifiedVersions, value: string): boolean {
+export const minimumAgentVersions = { codex: "0.160.0", "claude-code": "2.0.0", pi: "1.4.0" } as const;
+export function supported(engine: keyof typeof minimumAgentVersions, value: string): boolean {
   const parts = /^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(value);
   if (!parts) return false;
   const compare = (other: string) => {
@@ -17,7 +17,7 @@ export function supported(engine: keyof typeof verifiedVersions, value: string):
     for (let i = 0; i < 3; i++) { const d = Number(parts[i + 1]) - b[i]!; if (d) return Math.sign(d); }
     return 0;
   };
-  return compare(verifiedVersions[engine][0]) >= 0 && compare(verifiedVersions[engine][1]) < 0;
+  return compare(minimumAgentVersions[engine]) >= 0;
 }
 export type DoctorOptions = DiagnosticOptions;
 export async function doctor(options: DoctorOptions = {}): Promise<Check[]> {
@@ -103,8 +103,11 @@ export async function doctor(options: DoctorOptions = {}): Promise<Check[]> {
       checks.push({ name: msg("doctor.runtime_2", r.registration.name), ok: r.online, problem: msg("doctor.last_seen", r.last_seen, r.online ? "" : msg("doctor.offline")),
         ...(!r.online ? { fix: msg("doctor.run_lumio_runtime_doctor_on_the_server") } : {}) });
       if (!r.registration.engines.length) checks.push({ name: `${r.registration.name} agent`, ok: false, problem: msg("doctor.no_agent_detected"), fix: msg("doctor.install_an_agent_update_path_in_runtime_env_and_restart_runtime") });
-      for (const e of r.registration.engines) checks.push({ name: `${r.registration.name} ${e.name} ${e.version}`, ok: supported(e.name, e.version),
-        ...(!supported(e.name, e.version) ? { problem: msg("doctor.outside_adapter_verified_version_range"), fix: msg("doctor.install_version_or_verify_the_adapter_first", e.name, verifiedVersions[e.name].join(", ")) } : {}) });
+      for (const e of r.registration.engines) {
+        const ok = supported(e.name, e.version);
+        checks.push({ name: `${r.registration.name} ${e.name} ${e.version}`, ok,
+          ...(!ok ? { problem: msg("doctor.engine_version_too_old"), fix: msg("doctor.install_minimum_agent_version", e.name, minimumAgentVersions[e.name]) } : {}) });
+      }
     }
   });
   await check(msg("doctor.routines"), msg("doctor.run_lumio_routine_list_to_inspect_and_repair_schedules"), async () => {
