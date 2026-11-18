@@ -26,9 +26,6 @@ export function stageDispatchOptions(stage: StagePermissions & Pick<AgentRun, "h
   if ((access !== "write" || git || secrets?.length) && !features.includes("stage_permissions")) {
     throw new PlanDispatchUnavailable({ key: "target.stage_permissions_unsupported", args: [target] });
   }
-  if (engine.name === "codex" && git && access !== "full" && engine.version !== "0.166.0") {
-    throw new PlanDispatchUnavailable({ key: "target.stage_git_version", args: [target, engine.version] });
-  }
   if ((hooks?.before || hooks?.after) && !features.includes("hooks")) {
     throw new PlanDispatchUnavailable({ key: "target.stage_hooks_unsupported", args: [target] });
   }
