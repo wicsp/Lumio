@@ -39,7 +39,7 @@ async function fixture(action: (f: Awaited<ReturnType<typeof setup>>) => Promise
   } finally { await rm(root, { recursive: true, force: true }); }
 }
 
-async function setup(root: string, model?: AssistantModel | ((input: AssistantModelRequest) => AssistantModelResponse)) {
+async function setup(root: string, model?: AssistantModel | ((input: AssistantModelRequest) => AssistantModelResponse | Promise<AssistantModelResponse>)) {
   const vault = join(root, "vault"), state = join(root, "state");
   await mkdir(vault);
   let now = new Date(at);
@@ -156,7 +156,7 @@ test("same URL captures distinct paragraphs, the local workbench uploads no scre
   expect((await f.request(`/v2/glances/${glance.id}`, "DELETE")).status).toBe(200);
 }));
 
-test("the main chat attaches a glance, scopingly offers capture, and keeps text snapshots after the chat-only screenshot expires", async () => {
+test("the main chat attaches a glance, scopingly offers capture, and minimizes persisted screen snapshots", async () => {
   const modelCalls: AssistantModelRequest[] = [];
   await fixture(async f => {
     const glance = Glance.parse(await (await f.upload(meta(), png)).json());
@@ -176,7 +176,12 @@ test("the main chat attaches a glance, scopingly offers capture, and keeps text 
     expect(expired.image?.sha256).toBe(glance.image?.sha256);
     expect((await f.request(`/v2/glances/${glance.id}/image`)).status).toBe(404);
     const snapshots = f.hub.store.db.query<{ request: string }, []>("SELECT request FROM assistant_contexts ORDER BY step").all();
-    expect(snapshots.map(row => AssistantModelRequest.parse(JSON.parse(row.request)))).toEqual(modelCalls);
+    expect(snapshots).toHaveLength(modelCalls.length);
+    for (const row of snapshots) {
+      const snapshot = AssistantModelRequest.parse(JSON.parse(row.request));
+      expect(snapshot.messages[0]!.content).toContain(glance.id);
+      expect(row.request).not.toContain("window_text");
+    }
   }, input => { modelCalls.push(input); return { content: "Synthetic explanation.", tool_calls: [] }; });
 });
 
@@ -259,6 +264,9 @@ test("the active message can save its own glance with the scoped tool", async ()
     const used = Glance.parse(await (await f.request(`/v2/glances/${glance.id}`)).json());
     expect(used.used_by.message).toBeDefined();
     expect(used.used_by.capture).toBeDefined();
+    expect(used.ocr).toEqual(ocr);
+    expect(used.context_retention).toMatchObject({ status: "retained", image: true, source: true });
+    expect((await f.request(`/v2/glances/${glance.id}/image`)).status).toBe(200);
     expect((await f.ready(used.used_by.capture!)).title).toBe("Pointed paragraph");
   }, input => input.messages.at(-1)?.role === "user"
     ? { content: "", tool_calls: [{ id: "synthetic-save", name: "capture__glance", args: { title: "Pointed paragraph", reason: "Reader asked to keep it." } }] }
@@ -369,12 +377,15 @@ test("voice ideas persist before model work, link the selected paper and recover
     if (input.messages[0]!.content.includes("[NOTE_ONLY]")) {
       expect(input.tools.some(tool => tool.name === "work__task__create")).toBe(false);
       if (last.content.includes("Synthetic timeout")) throw new Error("Synthetic timeout");
-      return { content: last.content.includes("Recording-only thought") ? "[NOTE_ONLY]" : answer, tool_calls: [] };
+      const quiet = last.content.includes("Recording-only thought");
+      return { content: JSON.stringify({ reply: quiet ? "[NOTE_ONLY]" : answer,
+        context: { text: quiet ? [] : ["Only large samples were studied."], image: false, source: !quiet } }), tool_calls: [] };
     }
     if (last.role === "user") return { content: "", tool_calls: [{ id: "synthetic-discussion", name: discussion, args: { idea: voiceIdea! } }] };
     return { content: last.content.includes(answer) ? "I recovered the earlier discussion." : "Discussion unavailable.", tool_calls: [] };
   } };
   await fixture(async f => {
+
     const article = KnowledgeCreateResult.parse(await (await f.request("/v2/knowledge/notes", "POST", {
       request_id: randomUUID(), note: { kind: "paper", title: "Synthetic Generalization Paper", authors: ["Test Author"], year: 2026 }, body: "Fixture text.",
     })).json());
@@ -403,7 +414,7 @@ test("voice ideas persist before model work, link the selected paper and recover
     const published = NoteDetail.parse(await (await f.request(`/v2/knowledge/notes/${voiceIdea}`)).json());
     expect(published.body).toContain(transcript);
     expect(published.body).toContain("Only large samples were studied.");
-    expect(published.frontmatter.derived_from).toContain(article.id);
+    expect(published.body).toContain(`lumio:${article.id}`);
     expect(published.body).toMatch(/lumio:amsg_/);
     const replay = AssistantChatResult.parse(await (await f.request("/v2/assistant/chat", "POST", voice)).json());
     expect(replay.turn.idea).toBe(voiceIdea);
@@ -456,3 +467,213 @@ test("configured embeddings find paraphrased ideas and keep private input off th
     expect(other.hits).toEqual([]);
   } finally { await provider.stop(true); }
 }));
+
+const privateMarker = "UNRELATED_CONTEXT_SECRET_9";
+const retainedExcerpt = "The experiment uses 42 samples.";
+const retainedReply = (reply: string, context = { text: [] as string[], image: false, source: false }) => ({
+  content: JSON.stringify({ reply, context }), tool_calls: [],
+});
+
+async function voiceRequest(f: Awaited<ReturnType<typeof setup>>, message: string, extra: Partial<GlanceCreate> = {}) {
+  const main = AssistantMain.parse(await (await f.request("/v2/assistant/main", "POST", { request_id: randomUUID() })).json());
+  const glance = Glance.parse(await (await f.upload(meta({ selection_text: `${retainedExcerpt}\n${privateMarker}`, ...extra }), png)).json());
+  const body = AssistantChatRequest.parse({ request_id: randomUUID(), conversation: main.conversation, message, glance: glance.id, record_idea: true });
+  return { main, glance, body };
+}
+
+test("unrelated capture bytes, OCR, source metadata and private reasoning are removed while the original words remain", async () => {
+  let calls = 0;
+  const model: AssistantModel = {
+    supportsImages: () => true,
+    async complete(input, options) {
+      calls++;
+      expect(input.messages[0]!.content).toContain(privateMarker);
+      expect(options.screenImages).toHaveLength(1);
+      return { ...retainedReply("Your independent thought is recorded."), continuation: { reasoning_content: privateMarker } };
+    },
+  };
+  await fixture(async f => {
+    f.hub.modules.inbox.visionEnabled = () => true;
+    const { glance, body } = await voiceRequest(f, "I want to organize my reading notes this weekend.", {
+      app: { name: privateMarker }, window_title: privateMarker, url: `https://fixture.example/${privateMarker}`,
+      ocr: [{ text: privateMarker, box: { x: 0, y: 0, w: 256, h: 128 } }],
+    });
+    const file = await f.hub.modules.artifacts.path(glance.image!.file);
+    const result = AssistantChatResult.parse(await (await f.request("/v2/assistant/chat", "POST", body)).json());
+    expect(result.turn.status).toBe("done");
+    expect(calls).toBe(1);
+    const minimized = Glance.parse(await (await f.request(`/v2/glances/${glance.id}`)).json());
+    expect(minimized.context_retention).toMatchObject({ status: "discarded", text: [], image: false, source: false });
+    expect(minimized.ocr).toEqual([]);
+    expect(minimized.selection_text).toBeUndefined();
+    expect(minimized.window_title).toBeUndefined();
+    expect(minimized.url).toBeUndefined();
+    expect(JSON.stringify(minimized)).not.toContain(privateMarker);
+    expect((await f.request(`/v2/glances/${glance.id}/image`)).status).toBe(404);
+    expect(await Bun.file(file).exists()).toBe(false);
+    const note = NoteDetail.parse(await (await f.request(`/v2/knowledge/notes/${result.turn.idea}`)).json());
+    expect(note.body).toContain(body.message);
+    expect(note.body).not.toContain(privateMarker);
+    expect(note.body).not.toContain(retainedExcerpt);
+    const snapshots = f.hub.store.db.query<{ request: string }, []>("SELECT request FROM assistant_contexts").all();
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0]!.request).toContain(body.message);
+    expect(snapshots[0]!.request).not.toContain(privateMarker);
+    expect(snapshots[0]!.request).not.toContain(retainedExcerpt);
+    const states = f.hub.store.db.query<{ record: string }, []>("SELECT record FROM assistant_model_states").all();
+    expect(states).toHaveLength(1);
+    expect(JSON.stringify(states)).not.toContain(privateMarker);
+    const anchors = f.hub.modules.assistantStore.messageAnchors(result.conversation.id);
+    for (const message of result.messages) expect(anchors.get(message.id)).toEqual([{ module: "knowledge", id: result.turn.idea! }]);
+    const replay = AssistantChatResult.parse(await (await f.request("/v2/assistant/chat", "POST", body)).json());
+    expect(replay.turn.idea).toBe(result.turn.idea);
+    expect(calls).toBe(1);
+  }, model);
+});
+
+test("only verified relevant excerpts and chosen source enter the Idea, and the full screenshot is removed", () => fixture(async f => {
+  const { glance, body } = await voiceRequest(f, "How many samples does this experiment use?");
+  const result = AssistantChatResult.parse(await (await f.request("/v2/assistant/chat", "POST", body)).json());
+  expect(result.turn.status).toBe("done");
+  const minimized = Glance.parse(await (await f.request(`/v2/glances/${glance.id}`)).json());
+  expect(minimized.context_retention).toMatchObject({ status: "retained", text: [retainedExcerpt], image: false, source: true });
+  expect(minimized.ocr).toEqual([]);
+  expect(minimized.selection_text).toBeUndefined();
+  expect(minimized.window_title).toBe("Window");
+  expect((await f.request(`/v2/glances/${glance.id}/image`)).status).toBe(404);
+  expect(JSON.stringify(minimized)).not.toContain(privateMarker);
+  const note = NoteDetail.parse(await (await f.request(`/v2/knowledge/notes/${result.turn.idea}`)).json());
+  expect(note.body).toContain(body.message);
+  expect(note.body).toContain(retainedExcerpt);
+  expect(note.body).not.toContain(privateMarker);
+  expect(note.body).not.toContain("Invented excerpt");
+}, async () => retainedReply("It uses 42 samples.", { text: [retainedExcerpt, "Invented excerpt"], image: false, source: true })));
+
+test("a relevant image can remain without retaining unrelated OCR or page metadata", () => fixture(async f => {
+  const { glance, body } = await voiceRequest(f, "I want to keep this diagram with my thought.", { window_title: privateMarker });
+  const result = AssistantChatResult.parse(await (await f.request("/v2/assistant/chat", "POST", body)).json());
+  expect(result.turn.status).toBe("done");
+  const minimized = Glance.parse(await (await f.request(`/v2/glances/${glance.id}`)).json());
+  expect(minimized.context_retention).toMatchObject({ status: "retained", text: [], image: true, source: false });
+  expect(minimized.ocr).toEqual([]);
+  expect(minimized.selection_text).toBeUndefined();
+  expect(minimized.window_title).toBeUndefined();
+  expect(minimized.image?.purged).toBeUndefined();
+  expect((await f.request(`/v2/glances/${glance.id}/image`)).status).toBe(200);
+}, async () => retainedReply("[NOTE_ONLY]", { text: [], image: true, source: false })));
+
+test.each(["model-error", "invalid-envelope", "invalid-context"])("capture cleanup is fail-closed after %s", mode => fixture(async f => {
+  const { glance, body } = await voiceRequest(f, "Keep this independent thought.");
+  const result = AssistantChatResult.parse(await (await f.request("/v2/assistant/chat", "POST", body)).json());
+  expect(result.turn.idea).toBeDefined();
+  const minimized = Glance.parse(await (await f.request(`/v2/glances/${glance.id}`)).json());
+  expect(minimized.context_retention?.status).toBe("discarded");
+  expect(minimized.ocr).toEqual([]);
+  expect(JSON.stringify(minimized)).not.toContain(privateMarker);
+  expect((await f.request(`/v2/glances/${glance.id}/image`)).status).toBe(404);
+  const note = NoteDetail.parse(await (await f.request(`/v2/knowledge/notes/${result.turn.idea}`)).json());
+  expect(note.body).toContain(body.message);
+  expect(note.body).not.toContain(retainedExcerpt);
+}, async () => {
+  if (mode === "model-error") throw new Error("Synthetic model error");
+  return { content: mode === "invalid-envelope" ? '{"reply": "incomplete' : JSON.stringify({ reply: "Recorded.", context: { text: [retainedExcerpt], image: "yes", source: true } }), tool_calls: [] };
+}));
+
+test("recovery clears a pending capture after an interrupted turn without replaying the model", () => fixture(async f => {
+  const { glance, body } = await voiceRequest(f, "An interrupted thought.");
+  const result = AssistantChatResult.parse(await (await f.request("/v2/assistant/chat", "POST", body)).json());
+  const another = Glance.parse(await (await f.upload(meta({ selection_text: privateMarker }), png)).json());
+  const message = result.messages.find(message => message.role === "user")!;
+  f.hub.modules.glances.claim(another.id, another.owner, "message", message.id);
+  f.hub.modules.assistantStore.putTurn({ ...result.turn, status: "running", finished: undefined });
+  f.hub.modules.assistant.recover();
+  await f.hub.modules.voiceIdeas.recoverPending();
+  expect((await f.request(`/v2/glances/${another.id}/image`)).status).toBe(404);
+  const cleaned = Glance.parse(await (await f.request(`/v2/glances/${another.id}`)).json());
+  expect(cleaned.context_retention?.status).toBe("discarded");
+  expect(JSON.stringify(cleaned)).not.toContain(privateMarker);
+  expect((await f.request(`/v2/glances/${glance.id}`)).status).toBe(200);
+}, async () => retainedReply("[NOTE_ONLY]")));
+
+
+test("cancelling inference cleans transient context and keeps the original Idea", async () => {
+  const started = Promise.withResolvers<void>();
+  const controller = new AbortController();
+  const model: AssistantModel = { async complete(_input, options) {
+    started.resolve();
+    await new Promise<void>((resolve) => {
+      if (options.signal!.aborted) resolve();
+      else options.signal!.addEventListener("abort", () => resolve(), { once: true });
+    });
+    options.signal!.throwIfAborted();
+    return retainedReply("[NOTE_ONLY]");
+  } };
+  await fixture(async f => {
+    const { glance, body } = await voiceRequest(f, "Cancel the response but keep my thought.");
+    const pending = f.hub.modules.assistant.chat(body, f.hub.store.actors().find(actor => actor.name === "owner")!.id, { signal: controller.signal });
+    await started.promise;
+    controller.abort();
+    const result = await pending;
+    expect(result.turn.status).toBe("cancelled");
+    expect(result.turn.idea).toBeDefined();
+    const cleaned = Glance.parse(await (await f.request(`/v2/glances/${glance.id}`)).json());
+    expect(cleaned.context_retention?.status).toBe("discarded");
+    expect((await f.request(`/v2/glances/${glance.id}/image`)).status).toBe(404);
+    const note = NoteDetail.parse(await (await f.request(`/v2/knowledge/notes/${result.turn.idea}`)).json());
+    expect(note.body).toContain(body.message);
+    const anchors = f.hub.modules.assistantStore.messageAnchors(result.conversation.id);
+    for (const message of result.messages) expect(anchors.get(message.id)).toEqual([{ module: "knowledge", id: result.turn.idea! }]);
+  }, model);
+});
+
+test("context enrichment preserves a human edit made while the model is answering", async () => {
+  const started = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  await fixture(async f => {
+    const { glance, body } = await voiceRequest(f, "What about these 42 samples?");
+    const pending = f.request("/v2/assistant/chat", "POST", body);
+    await started.promise;
+    const idea = f.hub.modules.assistantStore.turns(body.conversation).find(turn => turn.idea)!.idea!;
+    const path = `/v2/knowledge/notes/${idea}/document`;
+    const current = await (await f.request(path)).json() as { revision: string; document: { note: { title: string } } };
+    expect((await f.request(path, "PUT", { request_id: randomUUID(), expected_revision: current.revision, title: current.document.note.title, body: "My edited original thought.\n" })).status).toBe(200);
+    release.resolve();
+    const result = AssistantChatResult.parse(await (await pending).json());
+    expect(result.turn.status).toBe("done");
+    const note = NoteDetail.parse(await (await f.request(`/v2/knowledge/notes/${idea}`)).json());
+    expect(note.body).toBe("My edited original thought.\n");
+    const cleaned = Glance.parse(await (await f.request(`/v2/glances/${glance.id}`)).json());
+    expect(cleaned.context_retention?.text).toEqual([retainedExcerpt]);
+  }, async () => { started.resolve(); await release.promise; return retainedReply("42.", { text: [retainedExcerpt], image: false, source: true }); });
+});
+
+
+test("recovery appends already filtered context after cleanup was interrupted before Idea enrichment", () => fixture(async f => {
+  const { body } = await voiceRequest(f, "A thought about the experiment.");
+  const result = AssistantChatResult.parse(await (await f.request("/v2/assistant/chat", "POST", body)).json());
+  const message = result.messages.find(message => message.role === "user")!;
+  const second = Glance.parse(await (await f.upload(meta({ selection_text: `${retainedExcerpt}\n${privateMarker}` }), png)).json());
+  f.hub.modules.glances.claim(second.id, second.owner, "message", message.id);
+  await f.hub.modules.glances.retainContext(second.id, second.owner, message.id, { text: [retainedExcerpt], image: false, source: false });
+  expect(f.hub.modules.glances.get(second.id, second.owner).context_retention?.enrichment_pending).toBe(true);
+  await f.hub.modules.voiceIdeas.recoverPending();
+  const note = NoteDetail.parse(await (await f.request(`/v2/knowledge/notes/${result.turn.idea}`)).json());
+  expect(note.body).toContain(retainedExcerpt);
+  expect(note.body).not.toContain(privateMarker);
+  expect(f.hub.modules.glances.get(second.id, second.owner).context_retention?.enrichment_pending).toBe(false);
+}, async () => retainedReply("[NOTE_ONLY]")));
+
+
+test("recovery cleans an orphan pending capture after its conversation was purged", () => fixture(async f => {
+  const { body } = await voiceRequest(f, "A synthetic thought.");
+  const result = AssistantChatResult.parse(await (await f.request("/v2/assistant/chat", "POST", body)).json());
+  const second = Glance.parse(await (await f.upload(meta({ selection_text: privateMarker }), png)).json());
+  const user = result.messages.find(message => message.role === "user")!;
+  f.hub.modules.glances.claim(second.id, second.owner, "message", user.id);
+  f.hub.modules.assistantStore.purge(result.conversation.id);
+  await f.hub.modules.voiceIdeas.recoverPending();
+  const cleaned = f.hub.modules.glances.get(second.id, second.owner);
+  expect(cleaned.context_retention).toMatchObject({ status: "discarded", enrichment_pending: false });
+  expect(cleaned.ocr).toEqual([]);
+  expect(JSON.stringify(cleaned)).not.toContain(privateMarker);
+  expect((await f.request(`/v2/glances/${second.id}/image`)).status).toBe(404);
+}, async () => retainedReply("[NOTE_ONLY]")));

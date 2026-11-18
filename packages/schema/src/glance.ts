@@ -148,6 +148,17 @@ export const GlancePointing = z.strictObject({
   region: GlanceBox.optional().describe("method 为 region 时轨迹围出的区域"),
 });
 
+/** 同轮模型回复选择的相关内容；摘录由 Hub 对照原文验证（ADR 0076）。 */
+export const GlanceContextRetention = z.strictObject({
+  text: z.array(z.string().trim().min(1).max(2000)).max(8),
+  image: z.boolean(),
+  source: z.boolean(),
+});
+export const GlanceAssistantReply = z.strictObject({
+  reply: z.string().max(500000),
+  context: GlanceContextRetention,
+});
+
 /** 所见记录。 */
 export const Glance = z.strictObject({
   id: idOf("gln"),
@@ -181,6 +192,11 @@ export const Glance = z.strictObject({
     message: idOf("amsg").optional(),
   }),
   created: Timestamp,
+  context_retention: GlanceContextRetention.extend({
+    status: z.enum(["pending", "retained", "discarded"]),
+    finalized: Timestamp.optional(),
+    enrichment_pending: z.boolean().optional(),
+  }).optional(),
 });
 
 export const GlanceDeleteResult = z.strictObject({ id: idOf("gln"), deleted: z.literal(true) });
@@ -218,3 +234,6 @@ export type GlanceDeleteResult = z.infer<typeof GlanceDeleteResult>;
 export type CaptureToolName = z.infer<typeof CaptureToolName>;
 export type CaptureGlanceToolArgs = z.infer<typeof CaptureGlanceToolArgs>;
 export type CaptureGlanceToolResult = z.infer<typeof CaptureGlanceToolResult>;
+
+export type GlanceContextRetention = z.infer<typeof GlanceContextRetention>;
+export type GlanceAssistantReply = z.infer<typeof GlanceAssistantReply>;

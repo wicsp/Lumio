@@ -206,6 +206,7 @@ export class BusinessModules {
       text: msg, now, id, toolActor: store.assistantActor(),
       glance: {
         claim: (owner, glance, message) => { this.glances.claim(glance, owner, "message", message); },
+        finish: (owner, glance, message, decision) => this.voiceIdeas.finish(owner, glance, message, decision),
         context: (owner, glance, message) => glanceChat(this.glances.get(glance, owner), message, this.inbox, this.glances),
       },
       recordIdea: (owner, turn, user, glance) => this.voiceIdeas.record(owner, turn, user, glance),

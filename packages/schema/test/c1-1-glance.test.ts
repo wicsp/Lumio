@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   AssistantChatRequest, CAPABILITIES, CAPTURE_TOOLS, CONTRACTS, Capture, CaptureCreate, CaptureGlanceToolArgs, CaptureGlanceToolResult,
-  GLANCE_CLIENT_DEFAULTS, GLANCE_LIMITS, Glance, GlanceCreate, GlanceDeleteResult, Id, KnowledgeAIBindingUpdate, WORKBENCH_TOOLS,
+  GLANCE_CLIENT_DEFAULTS, GLANCE_LIMITS, GlanceAssistantReply, GlanceContextRetention, Glance, GlanceCreate, GlanceDeleteResult, Id, KnowledgeAIBindingUpdate, WORKBENCH_TOOLS,
 } from "../src/index.ts";
 
 const ulid = "0".repeat(26);
@@ -70,6 +70,7 @@ test("glance record with pointing and usage", () => {
     pointing: { method: "point", text: "第一段", blocks: [0] }, used_by: { capture: `cap_${ulid}` }, created: now,
   };
   expect(Glance.safeParse(record).success).toBe(true);
+  expect(Glance.safeParse({ ...record, context_retention: { text: ["第一段"], image: false, source: true, status: "retained", finalized: now, enrichment_pending: true } }).success).toBe(true);
   expect(Glance.safeParse({ ...record, image: { ...record.image, purged: now }, used_by: { message: `amsg_${ulid}` } }).success).toBe(true);
   expect(Glance.safeParse({ ...record, image: undefined, ocr: [], pointer: undefined, pointing: { method: "none" }, lumio: { module: "work", id: `task_${ulid}` }, used_by: {} }).success).toBe(true);
   expect(Glance.safeParse({ ...record, pointing: { method: "guess" } }).success).toBe(false);
@@ -132,4 +133,15 @@ test("desktop client fixtures match the contract", () => {
     const result = contract!.safeParse(JSON.parse(readFileSync(join(dir, file), "utf8")));
     expect(result.success, `${file}: ${String(result.error)}`).toBe(true);
   }
+});
+
+// ADR 0076: strict same-response retention envelope, compatible optional record field.
+test("capture retention accepts bounded literal candidates and rejects ambiguous decisions", () => {
+  const context = { text: ["相关原文"], image: false, source: true };
+  expect(GlanceAssistantReply.parse({ reply: "[NOTE_ONLY]", context }).context).toEqual(context);
+  expect(GlanceContextRetention.safeParse({ ...context, image: "false" }).success).toBe(false);
+  expect(GlanceContextRetention.safeParse({ ...context, text: [" "] }).success).toBe(false);
+  expect(GlanceContextRetention.safeParse({ ...context, text: ["x".repeat(2001)] }).success).toBe(false);
+  expect(GlanceContextRetention.safeParse({ ...context, text: Array(9).fill("x") }).success).toBe(false);
+  expect(GlanceAssistantReply.safeParse({ reply: "ok", context, extra: "OCR" }).success).toBe(false);
 });

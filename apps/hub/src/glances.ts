@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { newId } from "@lumio/foundation";
-import { GLANCE_LIMITS, Glance, GlanceCreate, GlanceDeleteResult, ResourceRef, type Actor } from "@lumio/schema";
+import { GLANCE_LIMITS, Glance, GlanceCreate, GlanceContextRetention, GlanceDeleteResult, ResourceRef, type Actor } from "@lumio/schema";
 import { StorageError, type SqliteArtifacts } from "@lumio/storage";
 import { localHubUrl, type HubConfig } from "./config.ts";
 import { HubError } from "./errors.ts";
@@ -24,7 +24,7 @@ const forbidden = () => new HubError("FORBIDDEN", { key: "server.request_not_aut
 const digest = (bytes: Buffer | string) => createHash("sha256").update(bytes).digest("hex");
 const noStore = { "Cache-Control": "no-store" };
 const maxMultipartBytes = GLANCE_LIMITS.max_image_bytes + 1024 * 1024;
-const cleanupInterval = 60 * 60_000;
+const cleanupInterval = 60_000;
 
 interface GlanceRow { record: string; fingerprint: string }
 
@@ -66,9 +66,9 @@ export class Glances {
         AND json_extract(record,'$.used_by.capture') IS NULL;`);
   }
 
-  start(): void {
+  start(recover?: () => Promise<void>): void {
     const scan = () => {
-      if (!this.cleaning) this.cleaning = this.exclusive(() => this.sweep()).catch(() => {}).finally(() => { this.cleaning = undefined; });
+      if (!this.cleaning) this.cleaning = (async () => { await recover?.(); await this.exclusive(() => this.sweep()); })().catch(() => {}).finally(() => { this.cleaning = undefined; });
     };
     scan();
     this.timer = setInterval(scan, cleanupInterval);
@@ -96,7 +96,56 @@ export class Glances {
     const glance = this.get(id, owner);
     const previous = glance.used_by[kind];
     if (previous && previous !== ref) throw conflict();
-    return previous ? glance : this.save({ ...glance, used_by: { ...glance.used_by, [kind]: ref } });
+    return previous ? glance : this.save({ ...glance, used_by: { ...glance.used_by, [kind]: ref },
+      ...(kind === "message" ? { context_retention: { status: "pending" as const, text: [], image: false, source: false } } : {}) });
+  }
+
+  pendingContexts(): { id: string; owner: string; message: string }[] {
+    return this.store.db.query<{ id: string; owner: string; message: string }, []>(`
+      SELECT id, owner, json_extract(record,'$.used_by.message') AS message FROM hub_glances
+      WHERE json_extract(record,'$.context_retention.status')='pending'
+        OR json_extract(record,'$.context_retention.enrichment_pending')=1 LIMIT 32
+    `).all();
+  }
+
+  async retainContext(id: string, owner: string, message: string, decision?: GlanceContextRetention): Promise<Glance> {
+    return this.exclusive(async () => {
+      const original = this.get(id, owner);
+      if (original.used_by.message !== message) throw conflict();
+      if (original.context_retention?.status !== "pending") return original;
+      const requested = decision ?? { text: original.context_retention.text, image: original.context_retention.image, source: original.context_retention.source };
+      const parsed = GlanceContextRetention.safeParse(requested);
+      const wanted = parsed.success ? parsed.data : { text: [], image: false, source: false };
+      // A recovered, already filtered pending record contains only verified excerpts.
+      const originals = [original.selection_text, original.pointing.text, windowText(original), ...(original.context_retention?.text ?? [])].filter((value): value is string => !!value);
+      const retained = [...new Set(wanted.text.filter(value => originals.some(source => source.includes(value))))];
+      const keepImage = wanted.image && !!original.image && !original.image.purged;
+      const source = wanted.source;
+      if (original.used_by.capture) {
+        return this.save({ ...original, context_retention: { status: "retained", text: retained, image: !!original.image && !original.image.purged, source: true, enrichment_pending: true, finalized: this.now().toISOString() } });
+      }
+      const minimized = this.store.db.transaction(() => {
+        let next = this.save({ ...original,
+          app: source ? original.app : { name: "Screen" }, window_title: source ? original.window_title : undefined,
+          url: source ? original.url : undefined, lumio: source ? original.lumio : undefined,
+          selection_text: undefined, ocr: [], ocr_engine: undefined, pointing: { method: "none", blocks: [] },
+          pointer: keepImage ? original.pointer : undefined, trail: [],
+          context_retention: { status: "pending", text: retained, image: keepImage, source },
+        });
+        if (!keepImage) { this.removeImage(next); next = this.get(id, owner); }
+        return this.save({ ...next, context_retention: { status: retained.length || keepImage || source ? "retained" : "discarded",
+          text: retained, image: keepImage, source, enrichment_pending: true, finalized: this.now().toISOString() } });
+      })();
+      // The removal queue survives a crash between the metadata update and unlink.
+      await this.files.sweepCaptureFiles();
+      return minimized;
+    });
+  }
+
+  completeContext(id: string, owner: string, message: string): void {
+    const glance = this.get(id, owner);
+    if (glance.used_by.message !== message) throw conflict();
+    if (glance.context_retention) this.save({ ...glance, context_retention: { ...glance.context_retention, enrichment_pending: false } });
   }
 
   isHubURL(url: string | undefined): boolean {
@@ -222,7 +271,8 @@ export class Glances {
 
   private removeImage(glance: Glance): void {
     if (!glance.image || glance.image.purged) return;
-    this.files.removeCaptureFile(glance.image.file);
+    try { this.files.removeCaptureFile(glance.image.file); }
+    catch (cause) { if (!(cause instanceof StorageError) || cause.code !== "NOT_FOUND") throw cause; }
     this.save({ ...glance, image: { ...glance.image, purged: this.now().toISOString() } });
   }
 

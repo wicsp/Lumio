@@ -3,13 +3,14 @@ import {
   AssistantMessage, AssistantTurn, AssistantToolCall, AssistantMemory,
   AssistantModelRequest, AssistantModelResponse, AssistantEvent, Actor, ASSISTANT_REASONING_DELTA_LIMIT,
   AssistantMemoryCommandRequest, AssistantMemoryCommandResult, TrashItem, TRASHED_REASON, TRASH_RETENTION_DAYS,
-  type AssistantModelMessage, type AssistantToolSpec, type FocusSnapshot, type ID_PREFIXES, type ResourceRef,
+  type GlanceContextRetention, type AssistantModelMessage, type AssistantToolSpec, type FocusSnapshot, type ID_PREFIXES, type ResourceRef,
 } from "@lumio/schema";
 import {
   fragmentMessages, fragmentOnSwitch, fragmentSummary, navigatedTopic, sameWorkbenchFocus, workbenchMemories, workbenchTurns, WorkbenchResources,
   type AssistantWorkbenchContext, type AssistantWorkbenchScope, type AssistantWorkbenchStore,
 } from "./workbench.ts";
 import { workReceipt } from "./history.ts";
+import { captureReply, captureRetentionInstructions } from "./capture-context.ts";
 import { answerRewriteInstructions, isAnswerRewrite, mainConversationInstructions, runtimeInstructions } from "./prompt.ts";
 
 export { ASSISTANT_FRAGMENT_MAX_ATTEMPTS } from "./workbench.ts";
@@ -73,6 +74,7 @@ export interface AssistantContext {
   workbench?: AssistantWorkbenchContext;
   glance?: {
     claim(owner: string, id: string, message: string): void;
+    finish?(owner: string, id: string, message: string, decision?: GlanceContextRetention): Promise<void>;
     context(owner: string, id: string, message: string): {
       focus?: FocusSnapshot;
       data?: Record<string, unknown>;
@@ -361,6 +363,15 @@ export class AssistantService {
       return this.result(turn.turn, owner);
     }
     let state = turn.turn;
+    const managedCapture = !!request.glance && !!this.context.glance?.finish;
+    let captureDecision: GlanceContextRetention | undefined;
+    let captureFinished = false;
+    const finishCapture = async () => {
+      if (managedCapture && !captureFinished) {
+        await this.context.glance!.finish!(owner, request.glance!, turn.user.id, captureDecision);
+        captureFinished = true;
+      }
+    };
     const cancellation = new AbortController();
     const signal = options.signal ? AbortSignal.any([cancellation.signal, options.signal]) : cancellation.signal;
     this.running.set(state.conversation, cancellation);
@@ -475,14 +486,20 @@ export class AssistantService {
         if (state.idea) {
           system += "\nThe speaker's original words were already saved as a reading idea. Answer if the speaker clearly wants an explanation, information, or discussion. For a thought alone or a tentative action, return exactly [NOTE_ONLY]. Treat rhetorical questions as thoughts. For an explicit request to do work, briefly say it was recorded and can be continued in normal chat. This voice turn is read-only.";
         }
+        if (managedCapture) system += captureRetentionInstructions;
         const modelInput = AssistantModelRequest.parse({ ...selected?.settings,
           model: activeModel,
           ...(request.effort ? { thinking: "on", reasoning_effort: request.effort } : {}),
           messages: [{ role: "system", content: system }, ...(workbenchContext?.messages ?? []), ...messages], tools: tools.map(tool => tool.spec) });
-        this.store.putContext(state.id, step, modelInput, this.time(), this.toolActor?.id);
+        const snapshot = managedCapture ? { ...modelInput, messages: [
+          { role: "system" as const, content: JSON.stringify({ capture: request.glance, context: "See the retained Glance; transient screen data is omitted.",
+            ...(screenImage ? { screen_image: { file: screenImage.file, sha256: screenImage.sha256 } } : {}) }) },
+          { role: "user" as const, content: request.message },
+        ] } : modelInput;
+        this.store.putContext(state.id, step, snapshot, this.time(), this.toolActor?.id);
         emit({ type: "model_waiting", turn: state.id });
-        const response = AssistantModelResponse.parse(await model.complete(modelInput, {
-          signal, ...(screenImages?.length ? { screenImages } : {}), token: (delta) => { if (!signal.aborted && !state.idea) emit({ type: "token", turn: state.id, delta }); },
+        let response = AssistantModelResponse.parse(await model.complete(modelInput, {
+          signal, ...(screenImages?.length ? { screenImages } : {}), token: (delta) => { if (!signal.aborted && !state.idea && !managedCapture) emit({ type: "token", turn: state.id, delta }); },
           reasoning: (text) => {
             for (let offset = 0; offset < text.length && !signal.aborted; offset += ASSISTANT_REASONING_DELTA_LIMIT) {
               emit({ type: "reasoning", turn: state.id, delta: text.slice(offset, offset + ASSISTANT_REASONING_DELTA_LIMIT) });
@@ -490,17 +507,38 @@ export class AssistantService {
           },
         }));
         signal.throwIfAborted();
+        if (managedCapture && !response.tool_calls.length) {
+          const final = captureReply(response.content);
+          captureDecision = final.retention;
+          response = { ...response, content: final.content };
+          await finishCapture();
+          if (!captureDecision?.source && (focus || state.idea)) {
+            const focused = new Set([...(focus?.selected ?? []), ...(focus?.primary ? [focus.primary] : [])].map(ref => ref.id));
+            const navigated = this.store.calls(state.id).flatMap(call => {
+              const topic = call.status === "succeeded" ? navigatedTopic(call.name, call.args) : undefined;
+              return topic ? [topic] : [];
+            });
+            anchors = state.idea ? [{ module: "knowledge" as const, id: state.idea }, ...navigated.filter(ref => ref.id !== state.idea)]
+              : anchors.filter(ref => !focused.has(ref.id));
+            if (resolution) resolution.anchors = anchors;
+            this.store.transaction(() => {
+              for (const message of this.store.messages(state.conversation).filter(message => message.turn === state.id)) {
+                this.store.replaceMessageAnchors?.(message.id, anchors);
+              }
+            });
+          }
+        }
         if (rewrite && response.tool_calls.length) throw new AssistantError("INVALID", { key: "index.this_tool_is_not_provided", args: [] });
         if (!response.tool_calls.length && !response.content.trim()) throw new AssistantError("INVALID", { key: "index.model_returned_an_empty_reply_check_model_configuration", args: [] });
         const noteOnly = !!state.idea && !response.tool_calls.length && response.content.trim() === "[NOTE_ONLY]";
-        if (state.idea && !noteOnly && !response.tool_calls.length) emit({ type: "token", turn: state.id, delta: response.content });
-        const reply = AssistantMessage.parse({ id: this.context.id("amsg"), conversation: state.conversation, turn: state.id, role: "assistant", content: response.content, created: this.time() });
+        if ((state.idea || managedCapture) && !noteOnly && !response.tool_calls.length) emit({ type: "token", turn: state.id, delta: response.content });
+        const reply = AssistantMessage.parse({ id: this.context.id("amsg"), conversation: state.conversation, turn: state.id, role: "assistant", content: managedCapture && response.tool_calls.length ? "" : response.content, created: this.time() });
         if (!noteOnly) this.store.transaction(() => {
           this.store.putMessage(reply);
           if (anchors.length) this.store.putMessageAnchors(reply.id, anchors);
           if (response.continuation) {
             if (!this.store.putModelState) throw new AssistantError("INVALID", { key: "ai.invalid", args: [] });
-            this.store.putModelState(reply.id, response.continuation);
+            this.store.putModelState(reply.id, managedCapture ? { reasoning_content: "" } : response.continuation);
           }
         });
         if (!response.tool_calls.length) {
@@ -580,6 +618,7 @@ export class AssistantService {
         error: uncertain ? this.msg("Tool outcome unknown; verify first; no automatic retry") : cause instanceof AssistantError ? this.msg(cause.params.key, ...cause.params.args) : aborted ? this.msg("Turn cancelled") : this.msg("Assistant could not complete this turn; check model configuration or service status") };
       this.finish(state); emit({ type: "error", turn: state.id, error: state.error! }); return this.result(state, owner);
     } finally {
+      try { await finishCapture(); } catch { /* Pending capture cleanup is retried by the Hub. */ }
       if (this.running.get(state.conversation) === cancellation) this.running.delete(state.conversation);
     }
   }

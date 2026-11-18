@@ -21,6 +21,7 @@ export function glanceChat(glance: Glance, message: string, inbox: Inbox, glance
     pointing: glance.pointing.method,
     selection: clip(glance.selection_text, 2500),
     pointed_paragraph: clip(glance.pointing.text, 5500),
+    retained_text: glance.context_retention?.text,
     window_text: clip(windowText(glance), 4000),
   };
   const image = glance.image;
