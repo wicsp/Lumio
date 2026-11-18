@@ -218,6 +218,7 @@ export class WorkbenchView {
       navigate: (section, id, intent) => void this.go(section, id, intent),
       apply: (action, requestedAt) => this.applyAction(action, requestedAt),
       clearHighlights: () => this.clearHighlights(),
+      refreshNotices: this.changed,
       layout: open => shell.classList.toggle("dock-open", open),
     });
     shell.append(this.dock.element);
@@ -405,20 +406,20 @@ export class WorkbenchView {
       this.unread.set(notice.subject.id, [...this.unread.get(notice.subject.id) ?? [], notice.id]);
     }
     this.decorate();
-    this.dock.notices(notices);
     void this.dock.refreshExplorations();
   }
 
   private async refreshCounts(): Promise<void> {
     let snapshot: LiveSnapshot;
     try { snapshot = await this.live.get(); } catch { return; }
-    if (!this.current) return;
+    if (!this.current || snapshot !== this.live.latest) return;
     this.applyCounts(snapshot);
   }
 
   private applyCounts(snapshot: LiveSnapshot): void {
     const tasks = settled(snapshot.tasks), proposals = settled(snapshot.proposals), jobs = settled(snapshot.jobs);
     const attention = settled(snapshot.attention), notices = settled(snapshot.notices), live = settled(snapshot.jobAttention);
+    this.dock.notices(snapshot);
     if (notices) this.applyNotices(notices);
     const set = (section: Section, value: number | undefined, attention = false) => {
       const el = this.counts.get(section)!;

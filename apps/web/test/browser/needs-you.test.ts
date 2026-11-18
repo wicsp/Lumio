@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { WorkAttention } from "@lumio/schema";
+import { Notice, Proposal, WorkAttention } from "@lumio/schema";
 import { attentionCard, type AttentionContext } from "../../src/client/attention-card.ts";
 import { LiveData } from "../../src/client/live-data.ts";
 import { setLang } from "../../src/client/i18n.ts";
+import { MainDock } from "../../src/client/main-dock.ts";
+import { WorkbenchView } from "../../src/client/views/workbench.ts";
 
 class ElementStub extends EventTarget {
   children: (ElementStub | string)[] = [];
@@ -33,7 +35,13 @@ class ElementStub extends EventTarget {
   querySelectorAll(): ElementStub[] { return []; }
   querySelector(): undefined { return undefined; }
   focus(): void {}
-  remove(): void {}
+  remove(): void {
+    if (!this.parent) return;
+    const index = this.parent.children.indexOf(this);
+    if (index >= 0) this.parent.children.splice(index, 1);
+    this.parent = undefined;
+  }
+  get childElementCount(): number { return this.children.filter(child => child instanceof ElementStub).length; }
   // Not connected: the shared toast host must not stay attached to this file's stub body for later test files.
   isConnected = false;
   click(): void { this.dispatchEvent(new Event("click")); }
@@ -153,4 +161,65 @@ test("live data merges concurrent reads, reuses fresh results and refetches afte
   live.invalidate();
   await Promise.all([before, live.get()]);
   expect(reads).toBe(4);
+});
+
+test("workbench refresh removes handled round and approval reminders from the dock without replacing chat", async () => {
+  const otherSuffix = suffix.slice(0, -1) + "1";
+  const owner = `act_${suffix}`;
+  const round = item({ kind: "question" });
+  const otherRound = item({ kind: "question", task: `task_${otherSuffix}`, job: `job_${otherSuffix}` });
+  const approval = Proposal.parse({ id: `prop_${suffix}`, status: "pending", author: owner, created: round.since, reason: "Synthetic approval",
+    operation: { op: "exec.privileged", args: { runtime: owner, job: round.job, argv: ["/fixture/program"] } } });
+  const notices = [
+    { source: "turn", event: `turn:${round.job}`, title: "Round waiting for an answer" },
+    { source: "turn", event: `turn:${otherRound.job}`, title: "Other round asking for permission" },
+    { source: "proposal", event: `proposal:${approval.id}`, title: "Pending approval" },
+    { source: "watchdog", event: "watchdog:fixture", title: "Watchdog report", findings: [],
+      graded: { by: "gate", model: "fixture", confidence: 0.9 } },
+  ].map((notice, index) => Notice.parse({ id: `ntc_${suffix.slice(0, -1)}${index}`, owner, level: "important",
+    graded: { by: "rule" }, created: round.since, ...notice }));
+  let attention = [round, otherRound], proposals = [approval], offline = false;
+  const live = new LiveData({
+    workTasks: async () => [], jobs: async () => [], proposals: async () => proposals,
+    notices: async () => ({ notices, unread: notices.length }), jobAttention: async () => [],
+  }, { attention: async () => {
+    if (offline) throw new Error("Fixture attention request failed");
+    return attention;
+  } });
+  const messages = new ElementStub("div");
+  const chat = new ElementStub("div");
+  messages.append(chat);
+  const dock = Object.assign(Object.create(MainDock.prototype), {
+    conversation: "synthetic", messages, scroller: {}, shown: new Set(), noticeCards: new Map(), streamedNotices: new Map(),
+  }) as MainDock;
+  const counts = new Map(["work", "inbox", "approvals", "execution", "overview"].map(key => [key, {
+    textContent: "", classList: { toggle() {} },
+  }]));
+  const view = Object.assign(Object.create(WorkbenchView.prototype), {
+    live, dock, counts, current: {}, applyNotices() {},
+  }) as { refreshCounts(): Promise<void> };
+
+  await view.refreshCounts();
+  expect(messages.children).toHaveLength(5);
+  const [originalChat, firstCard, secondCard, approvalCard, watchdog] = messages.children as ElementStub[];
+  expect(originalChat).toBe(chat);
+  expect((firstCard as ElementStub).textContent).toContain(notices[0]!.title);
+  expect((secondCard as ElementStub).textContent).toContain(notices[1]!.title);
+  expect((approvalCard as ElementStub).textContent).toContain(notices[2]!.title);
+
+  // Successful mutations invalidate the shared snapshot. The old notices can still be unread on the Hub.
+  attention = [otherRound]; proposals = []; offline = true; live.invalidate();
+  await view.refreshCounts();
+  expect(messages.children).toEqual([chat, firstCard!, secondCard!, watchdog!]);
+
+  // Reconcile removals even if the assistant is currently streaming a reply.
+  Object.assign(dock, { controller: new AbortController() });
+  offline = false; live.invalidate();
+  await view.refreshCounts();
+  expect(messages.children).toEqual([chat, secondCard!, watchdog!]);
+
+  Object.assign(dock, { controller: undefined });
+  attention = []; live.invalidate();
+  await view.refreshCounts();
+  expect(messages.children).toEqual([chat, watchdog!]);
 });

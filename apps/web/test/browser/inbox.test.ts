@@ -49,7 +49,7 @@ test("the collection does not request or show a triage badge", async () => {
     captures: async () => { calls++; return { captures: [], total: 9 }; },
   };
   const view = Object.assign(Object.create(WorkbenchView.prototype), {
-    counts, current: {}, applyNotices() {}, live: new LiveData(client as never, { attention: async () => [] }),
+    counts, current: {}, applyNotices() {}, dock: { notices() {} }, live: new LiveData(client as never, { attention: async () => [] }),
   }) as { refreshCounts(): Promise<void> };
   await view.refreshCounts();
   expect(calls).toBe(0);

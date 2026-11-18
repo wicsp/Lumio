@@ -9,6 +9,7 @@ import { errorText, type Client } from "./api.ts";
 import { newRequestId } from "./commands.ts";
 import { autosize, clear, failure, h, icon, toast } from "./dom.ts";
 import { t } from "./i18n.ts";
+import { settled, type LiveSnapshot } from "./live-data.ts";
 import type { Navigate, Section } from "./navigation.ts";
 import { hydrateResourceCards } from "./resource-card.ts";
 import { openResource } from "./resources.ts";
@@ -33,6 +34,7 @@ export interface DockHost {
   /** 跳转与高亮；人正在操作时跳转返回 deferred。 */
   apply(action: Extract<WorkbenchAction, { action: "navigate" | "highlight" }>, requestedAt?: number): "applied" | "deferred";
   clearHighlights(): void;
+  refreshNotices(): void;
   /** 面板开合改变布局。 */
   layout(open: boolean): void;
 }
@@ -61,6 +63,8 @@ export class MainDock {
   private panelGeneration = 0;
   private disposed = false;
   private shown = new Set<string>();
+  private noticeCards = new Map<Notice, HTMLElement>();
+  private streamedNotices = new Map<string, Notice>();
   /** 正在探索的对象 ID（来自 Hub，定时刷新）。 */
   private exploring = new Set<string>();
 
@@ -88,14 +92,44 @@ export class MainDock {
     try { sessionStorage.setItem(SHOWN_KEY, JSON.stringify([...this.shown].slice(-200))); } catch { /* 只影响本次 */ }
   }
 
-  /** 工作台刷新时交来未读提醒：重要的、还没在面板出现过的插进对话（ADR 0059 第 4 节）。 */
-  notices(notices: readonly Notice[]): void {
-    if (this.disposed || this.controller || !this.conversation) return;
-    const fresh = notices.filter(notice => notice.level === "important" && !notice.read && !this.shown.has(notice.id))
+  /** 用工作台的同一份快照收起已处理的卡片，并插入新的重要提醒。 */
+  notices(snapshot: Pick<LiveSnapshot, "notices" | "attention" | "proposals">): void {
+    if (this.disposed) return;
+    const attention = settled(snapshot.attention);
+    const proposals = settled(snapshot.proposals);
+    const pendingTurns = attention && new Set(attention.map(item => "turn:" + item.job));
+    const pendingProposals = proposals && new Set(proposals.map(item => "proposal:" + item.id));
+    const resolved = (notice: Notice) => {
+      if (notice.source === "proposal" && notice.event.startsWith("proposal:")) return pendingProposals?.has(notice.event) === false;
+      // A rule-graded important round was created for a specific job that needed human attention.
+      if (notice.source === "turn" && notice.graded.by === "rule" && notice.event.startsWith("turn:")) {
+        return pendingTurns?.has(notice.event) === false;
+      }
+      return false;
+    };
+    for (const [notice, card] of this.noticeCards) {
+      if (!resolved(notice)) continue;
+      card.remove();
+      this.noticeCards.delete(notice);
+    }
+    if (this.controller || !this.conversation) return;
+    // Streamed notices also go through the current pending-state check.
+    for (const notice of settled(snapshot.notices) ?? []) this.streamedNotices.set(notice.id, notice);
+    const fresh = [...this.streamedNotices.values()]
+      .filter(notice => notice.level === "important" && !notice.read && !this.shown.has(notice.id) && !resolved(notice))
       .sort((a, b) => a.created.localeCompare(b.created));
-    if (!fresh.length) return;
+    this.streamedNotices.clear();
+    if (!fresh.length) {
+      if (!this.messages.childElementCount) this.renderHistory([]);
+      return;
+    }
     this.messages.querySelector(".dock-empty")?.remove();
-    for (const notice of fresh) { this.remember(notice.id); this.messages.append(this.noticeCard(notice)); }
+    for (const notice of fresh) {
+      const card = this.noticeCard(notice);
+      this.noticeCards.set(notice, card);
+      this.remember(notice.id);
+      this.messages.append(card);
+    }
     this.scroller.scrollTop = this.scroller.scrollHeight;
   }
 
@@ -121,11 +155,12 @@ export class MainDock {
     return this.ready ??= (async () => {
       try {
         const [main, config] = await Promise.all([this.client.assistantMain(newRequestId("main")), this.client.aiConfiguration().catch(() => undefined)]);
-        this.conversation = main.conversation;
         this.profile = config ? mainProfile(config) : undefined;
         const detail = await this.client.conversation(main.conversation);
         if (this.disposed) return;
         this.renderHistory(detail.messages);
+        this.conversation = main.conversation;
+        this.host.refreshNotices();
       } catch (cause) {
         this.ready = undefined;
         clear(this.notice, failure(t("Couldn't open the main conversation: {0}", errorText(cause)), () => void this.start()));
@@ -237,7 +272,7 @@ export class MainDock {
     this.scroller.scrollTop = this.scroller.scrollHeight;
     const controller = this.controller = new AbortController();
     this.setBusy(true);
-    let streamed = "", started = false;
+    let streamed = "", started = false, noticesChanged = false;
     const tools = new Map<string, HTMLElement>();
     try {
       for await (const event of this.client.assistantEvents(request, controller.signal)) {
@@ -259,7 +294,10 @@ export class MainDock {
           tools.set(event.tool.id, view);
         }
         else if (event.type === "topic") void this.topic(event.anchors, block);
-        else if (event.type === "notice") { this.remember(event.notice.id); this.messages.append(this.noticeCard(event.notice)); }
+        else if (event.type === "notice") {
+          this.streamedNotices.set(event.notice.id, event.notice);
+          noticesChanged = true;
+        }
         else if (event.type === "ui") this.act(event.action, extras, origin);
         else if (event.type === "result") {
           // 以保存的最终回复为准：模型没有逐字输出（或只在工具调用后才回复）时也能显示出来。
@@ -279,6 +317,7 @@ export class MainDock {
       content.classList.remove("streaming");
       if (!streamed && !content.childElementCount) content.remove();
       this.controller = undefined; this.setBusy(false);
+      if (noticesChanged && !this.disposed) this.host.refreshNotices();
     }
   }
 
