@@ -9,7 +9,7 @@ import { SpeechSettings } from "./speech-settings.ts";
 import { errorText, type Client } from "./api.ts";
 import { clear, failure, h, icon, openDialog, toast } from "./dom.ts";
 import { t } from "./i18n.ts";
-import { defaultAssistantProfile, saveDefaultAssistantProfile } from "./assistant-profile.ts";
+import { loadAssistantDefault, mainProfile, saveAssistantDefault } from "./assistant-profile.ts";
 import { newRequestId } from "./commands.ts";
 import { usageDetails } from "./ai-usage.ts";
 
@@ -60,6 +60,7 @@ export class AISettings {
   private runtimes: AIRuntime[] = [];
   private sessions: NativeSession[] = [];
   private defaultRows = h("div", { class: "set-rows" });
+  private defaultProfile = "";
   private auth = new Map<string, NativeConnectionView>();
   private profileRows = h("div", { class: "set-rows" });
   private connectionRows = h("div", { class: "set-rows" });
@@ -74,7 +75,7 @@ export class AISettings {
   constructor(private client: Client, group: Group) {
     this.speech = new SpeechSettings(client, kind => this.editConnection(undefined, kind), () => void this.load());
     this.element.append(
-      group(t("Default assistant model"), t("New chats start with this profile. This preference is saved in this browser."), this.defaultRows),
+      group(t("Default assistant model"), t("Chats that don't pick a profile use this one, including the main conversation and Lumio Capture."), this.defaultRows),
       group(t("AI profiles"), t("Choose an API or an official Codex session. Profiles share model settings; each conversation keeps its own permissions and history."), this.profileRows, this.newProfile),
       group(t("Connections"), t("Manage API connections, runtime sign-ins, and usage monitoring."), this.connectionRows, this.newConnection),
       group(t("Voice input"), t("Dictate into text boxes with the mic button. Audio goes through the Hub to the speech service and isn't stored."), this.speech.element));
@@ -115,6 +116,8 @@ export class AISettings {
         if (connection.revision !== prior.get(connection.id)) this.usage.delete(connection.id);
       }
       this.config = config; this.runtimes = runtimes; this.sessions = sessions;
+      this.defaultProfile = await loadAssistantDefault(this.client, config).catch(() => this.defaultProfile);
+      if (!this.active) return;
       this.render();
       this.speech.update(config);
       void this.loadUsage();
@@ -165,26 +168,41 @@ export class AISettings {
 
   private renderDefault(): void {
     const profiles = this.config.profiles.filter(profile => profile.engine === "lumio" || profile.engine === "codex");
-    const owner = profiles[0]?.owner;
-    if (!owner) {
+    if (!profiles.length) {
       clear(this.defaultRows, h("p", { class: "set-empty" }, t("Add a chat connection and create a profile to choose a default.")));
       return;
     }
     const select = h("select", { "aria-label": t("Default assistant model") },
       h("option", { value: "" }, t("No default profile")),
       ...profiles.map(profile => h("option", { value: profile.id }, profile.name)));
-    select.value = defaultAssistantProfile(profiles);
+    select.value = this.defaultProfile;
     const message = h("div", { role: "status" });
-    select.addEventListener("change", () => {
-      if (saveDefaultAssistantProfile(owner, select.value)) {
+    // Hub 实际给主对话用的 Profile：默认是 Codex 或不可用时，说明会改用哪个 API Profile（ADR 0083）。
+    const effective = (): HTMLElement | undefined => {
+      const id = mainProfile(this.config, select.value);
+      const name = this.config.profiles.find(profile => profile.id === id)?.name;
+      if (!name) return h("p", { class: "field-hint" }, t("No API profile yet. Chats that don't pick a profile use the Hub's legacy API settings."));
+      if (id !== select.value) return h("p", { class: "field-hint" }, t("The main conversation and Lumio Capture use {0}.", name));
+      return undefined;
+    };
+    const hint = h("div", {}, effective());
+    select.addEventListener("change", async () => {
+      const previous = this.defaultProfile;
+      select.disabled = true;
+      try {
+        const binding = await saveAssistantDefault(this.client, select.value);
+        this.defaultProfile = binding?.profile ?? "";
         clear(message);
         toast(t("Saved."));
-      } else {
-        select.value = defaultAssistantProfile(profiles);
-        clear(message, failure(t("This browser could not save your default profile.")));
+      } catch (cause) {
+        select.value = this.defaultProfile = previous;
+        clear(message, failure(errorText(cause)));
+      } finally {
+        select.disabled = false;
+        clear(hint, effective());
       }
     });
-    clear(this.defaultRows, h("div", { class: "set-form-wrap" }, select, message));
+    clear(this.defaultRows, h("div", { class: "set-form-wrap" }, select, hint, message));
   }
 
   private item(glyph: string, title: string, sub: string, edit: () => void): HTMLElement {

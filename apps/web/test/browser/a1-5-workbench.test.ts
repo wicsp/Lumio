@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { FOCUS_LIMITS, FocusSnapshot, type AIConfiguration } from "@lumio/schema";
 import {
-  IDLE_BEFORE_NAVIGATE_MS, anchorLabels, buildFocus, canNavigateNow, mainProfile, navigateRoute, refOf, truncateGraphemes,
+  IDLE_BEFORE_NAVIGATE_MS, anchorLabels, buildFocus, canNavigateNow, navigateRoute, refOf, truncateGraphemes,
 } from "../../src/client/workbench-assist.ts";
+import { mainProfile } from "../../src/client/assistant-profile.ts";
 
 const ULID = "01JABCDEFGHJKMNPQRSTVWXYZ0";
 const TASK = `task_${ULID}`, NOTE = `idea_${ULID}`, at = "2026-11-11T20:00:00+08:00";
@@ -65,14 +66,13 @@ describe("main conversation profile (A1-3)", () => {
   const api = `aic_${ULID}`, codex = "aic_01JABCDEFGHJKMNPQRSTVWXYZ1";
   const config = { connections: [connection(api, "https://api.deepseek.com"), connection(codex)],
     profiles: [profile("aip_01JABCDEFGHJKMNPQRSTVWXYZ1", codex, "codex"), profile(`aip_${ULID}`, api)] } as unknown as AIConfiguration;
-  const memory = (value?: string) => ({ getItem: () => value ?? null, setItem: () => {} });
 
   test("uses an API Lumio profile, never a native one", () => {
-    expect(mainProfile(config, memory())).toBe(`aip_${ULID}`);
-    expect(mainProfile(config, memory("aip_01JABCDEFGHJKMNPQRSTVWXYZ1"))).toBe(`aip_${ULID}`);
+    expect(mainProfile(config)).toBe(`aip_${ULID}`);
+    expect(mainProfile(config, "aip_01JABCDEFGHJKMNPQRSTVWXYZ1")).toBe(`aip_${ULID}`);
   });
   test("no usable profile leaves it to the Hub's legacy settings", () => {
-    expect(mainProfile({ connections: [], profiles: [] }, memory())).toBeUndefined();
+    expect(mainProfile({ connections: [], profiles: [] })).toBeUndefined();
   });
 });
 

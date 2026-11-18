@@ -192,8 +192,8 @@ export class BusinessModules {
       this.personal = new Personal(store.db, personal, requested => {
         if (requested) return this.ai.model(personal.owner, requested);
         if (options.assistantModel) return { model: options.assistantModel };
-        const profile = this.ai.list(personal.owner).profiles.find(item => item.engine === "lumio");
-        if (profile) return this.ai.model(personal.owner, profile.id);
+        const profile = this.ai.defaultAssistantProfile(personal.owner); // ADR 0083：与主对话用同一个默认
+        if (profile) return this.ai.model(personal.owner, profile);
         if (config.assistantModel) return { model: configuredModel(config.assistantModel) };
       }, id => !!this.workStore.task(id), now, this.signal);
     }
@@ -228,6 +228,8 @@ export class BusinessModules {
       allowVoiceActions: true,
       recordIdea: (owner, turn, user, glance) => this.voiceIdeas.record(owner, turn, user, glance),
       resolveModel: (profile, owner) => this.ai.model(owner, profile),
+      // 注入的模型只用于测试，与个人对话一致，优先于账号默认。
+      ...(options.assistantModel ? {} : { defaultProfile: (owner: string) => this.ai.defaultAssistantProfile(owner) }),
       workbench: new AssistantWorkbenchAnchors(this, store, this.assistantMain, this.notices),
       native: {
         validate: (conversation, request) => this.native.validate(conversation, request),

@@ -312,7 +312,9 @@ test("config API validates before writing, reloads the next conversation immedia
     expect((await client().assistantConfig()).model).toBe("retained-key");
     expect((await client().assistantChat({ request_id: requestId(), message: "After restart" })).messages.at(-1)?.content).toBe("model:retained-key");
     await client().clearAssistantConfig(); expect(await client().assistantConfig()).toEqual({ api_key_set: false, managed: true });
-    const noModel = await client().assistantChat({ request_id: requestId(), message: "After clear" }); expect(noModel.turn.status).toBe("failed");
+    // 重启时旧设置已迁成账号的 API Profile；清除旧设置后，不带 Profile 的对话改用这个 Profile（ADR 0083）。
+    const afterClear = await client().assistantChat({ request_id: requestId(), message: "After clear" });
+    expect(afterClear.turn.status).toBe("done"); expect(afterClear.messages.at(-1)?.content).toBe("model:retained-key");
   } finally { await modelServer.stop(true); }
 });
 

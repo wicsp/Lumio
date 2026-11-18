@@ -2,7 +2,7 @@ import { AgentConcurrencyView, AgentConcurrencyUpdate } from "@lumio/schema";
 import { ImageHostingSettings, ImageHostingUpdate, ImageUploadResult } from "@lumio/schema";
 import { SecurityReviewRequest, SecurityReviewResult, Glance } from "@lumio/schema";
 import { Capture, CaptureCommand, CaptureList, CaptureListArgs, CaptureProxySettings, CaptureProxyUpdate, KnowledgeAIBinding, KnowledgeAIBindingUpdate, CaptureCreate, CaptureCreateResult, KnowledgeAiNoteCommand, KnowledgeAiNoteResult, KnowledgeOriginal, KnowledgeOriginalShowArgs, ResourceSummary } from "@lumio/schema";
-import {AIConnection,AIConnectionInput,AIProfile,AIProfileInput,AIConfiguration,AIRuntime,NativeConnectionAction,NativeConnectionView,NativeSession,NativeCreate,NativeAction,NativeEventRecord} from "@lumio/schema";
+import {AIConnection,AIConnectionInput,AIProfile,AIProfileInput,AIConfiguration,AssistantDefaultBinding,AssistantDefaultBindingUpdate,AIRuntime,NativeConnectionAction,NativeConnectionView,NativeSession,NativeCreate,NativeAction,NativeEventRecord} from "@lumio/schema";
 import { AssistantMain, AssistantMainEnsure, Exploration, ExplorationCommand, ExplorationList, ExplorationListArgs, NoticeCommand, NoticeCommandResult, NoticeList, NoticeListArgs } from "@lumio/schema";
 import { AIQuotaSettings, AIQuotaView, AIQuotaViews, AliyunBillingUpdate } from "@lumio/schema";
 import { KnowledgeGraph, KnowledgeGraphArgs, Id, KnowledgeDocument, KnowledgeUpdateRequest, KnowledgeUpdateResult, KnowledgeRelatedRequest, KnowledgeRelatedResult, KnowledgeReferencesRequest, KnowledgeReferencesResult } from "@lumio/schema";
@@ -129,6 +129,11 @@ export function createClient(options: { url: string; token?: string; language?: 
       return request("/v2/knowledge/originals", validate(KnowledgeOriginalShowArgs, { ref }), KnowledgeOriginal);
     },
     aiConfiguration(){return request("/v2/ai/config",{},AIConfiguration);},
+    /** ADR 0083：账号级默认助手 Profile，存在 Hub。 */
+    assistantDefault() { return request("/v2/ai/assistant-binding", {}, AssistantDefaultBinding.nullable()); },
+    setAssistantDefault(input: AssistantDefaultBindingUpdate) {
+      return request("/v2/ai/assistant-binding", {}, AssistantDefaultBinding.nullable(), validate(AssistantDefaultBindingUpdate, input), "PUT");
+    },
     agentConcurrency() { return request("/v2/ai/concurrency", {}, AgentConcurrencyView); },
     setAgentConcurrency(input: AgentConcurrencyUpdate) {
       return request("/v2/ai/concurrency", {}, AgentConcurrencyView, validate(AgentConcurrencyUpdate, input), "PUT");

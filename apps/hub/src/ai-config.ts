@@ -15,6 +15,7 @@ import { ChatCompletionsModel, type ModelConfiguration } from "./assistant-model
 import { boundedText } from "./knowledge-authoring.ts";
 import { HubError } from "./errors.ts";
 import { DecisionGateConfiguration } from "./decision-gate-config.ts";
+import { AssistantDefaultConfiguration } from "./assistant-default-config.ts";
 
 const failure = (problem: string, code: "INVALID" | "NOT_FOUND" = "INVALID") =>
   new HubError(code, { key: `ai.${problem}`, args: [] }, { reason: `ai-${problem.replaceAll("_", "-")}` });
@@ -23,12 +24,14 @@ const MIGRATION = "ai.legacy-migration";
 export class AIConfigurationService {
   knowledgeProfileInUse?: (profile: string, nextEngine?: AIProfile["engine"]) => boolean;
   readonly decisionGate: DecisionGateConfiguration;
+  readonly assistantDefault: AssistantDefaultConfiguration;
 
   constructor(
     readonly store: SqliteAIStore,
     private readonly legacy?: ModelConfiguration,
   ) {
     this.decisionGate = new DecisionGateConfiguration(store);
+    this.assistantDefault = new AssistantDefaultConfiguration(store);
   }
 
   /** Called before serving requests. Each owner's pair and receipt commit together. */
@@ -204,6 +207,11 @@ export class AIConfigurationService {
     if (connection.kind === "typesafe-jev") throw failure("jev_chat_unsupported");
     if (profile.engine === "speech") throw failure("engine_mismatch"); // ADR 0055：语音 Profile 不能用于聊天
     return { profile, connection };
+  }
+
+  /** ADR 0083：不带 Profile 的主对话、后台摘要、探索和个人对话都用这个 Profile；没有可用的 API Profile 时为 undefined。 */
+  defaultAssistantProfile(owner: string): string | undefined {
+    return this.assistantDefault.resolve(owner, this.list(owner));
   }
 
   model(owner: string, id: string) {

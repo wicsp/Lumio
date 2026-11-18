@@ -18,7 +18,7 @@ import { toolCallView } from "./tool-call-view.ts";
 import { MAX_TASK_NODES, taskGraph } from "./graph/data.ts";
 import { dependencyGraph } from "./graph/view.ts";
 import { turnGroup, turnText } from "./turn.ts";
-import { anchorLabels, buildFocus, mainProfile, navigateRoute, noticePreview, noticeTitle, refOf, type FocusInput } from "./workbench-assist.ts";
+import { anchorLabels, buildFocus, navigateRoute, noticePreview, noticeTitle, refOf, type FocusInput } from "./workbench-assist.ts";
 
 const OPEN_KEY = "lumio.web.dock-open";
 /** 已在面板里出现过的提醒（本标签页内），避免刷新时重复插入。 */
@@ -53,7 +53,6 @@ export class MainDock {
   private send = h("button", { type: "submit", class: "btn btn-primary btn-small", "aria-label": t("Send") }, icon("send"));
   private stop = h("button", { type: "button", class: "btn btn-small", hidden: true, onclick: () => this.controller?.abort() }, icon("stop"), t("Stop"));
   private conversation?: string;
-  private profile?: string;
   private ready?: Promise<void>;
   private controller?: AbortController;
   private titles = new Map<string, string>();
@@ -154,8 +153,8 @@ export class MainDock {
   private start(): Promise<void> {
     return this.ready ??= (async () => {
       try {
-        const [main, config] = await Promise.all([this.client.assistantMain(newRequestId("main")), this.client.aiConfiguration().catch(() => undefined)]);
-        this.profile = config ? mainProfile(config) : undefined;
+        // 主对话不指定 Profile，由 Hub 按账号默认解析，网页与 F18 用同一个模型（ADR 0083）。
+        const main = await this.client.assistantMain(newRequestId("main"));
         const detail = await this.client.conversation(main.conversation);
         if (this.disposed) return;
         this.renderHistory(detail.messages);
@@ -261,7 +260,7 @@ export class MainDock {
     await this.start();
     if (!this.conversation) return;
     const request: AssistantChatRequest = { request_id: newRequestId("chat"), conversation: this.conversation, message,
-      ...(this.profile ? { profile: this.profile } : {}), ...(focus ? { focus } : {}) };
+      ...(focus ? { focus } : {}) };
     this.text.value = ""; this.text.dispatchEvent(new Event("input"));
     clear(this.notice);
     this.messages.querySelector(".dock-empty")?.remove();

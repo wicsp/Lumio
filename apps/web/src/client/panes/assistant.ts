@@ -1,5 +1,8 @@
 import { NativeSessionPanel } from "../native-session.ts";
-import { assistantProfiles, defaultAssistantProfile } from "../assistant-profile.ts";
+import { assistantProfiles, loadAssistantDefault, mainProfile } from "../assistant-profile.ts";
+
+/** 「默认」选项：发送时不带 Profile，由 Hub 按账号默认解析，之后改默认也跟着变（ADR 0083）。 */
+const DEFAULT = "@default";
 import { ChatProgress } from "../chat-progress.ts";
 import { effortLabel } from "../labels.ts";
 /**
@@ -48,6 +51,9 @@ export class AssistantPane {
   private profilesLoaded = false;
   private selectedProfile?: string;
   private boundProfile?: string;
+  /** 账号默认 Profile（可能是 Codex）与 Hub 不带 Profile 时实际使用的 API Profile。 */
+  private accountDefault = "";
+  private defaultApi?: string;
   private conversationLoading = false;
   private native: NativeSessionPanel;
   private nativeReady = true;
@@ -164,7 +170,9 @@ export class AssistantPane {
   }
 
   private loadProfiles(): Promise<void> {
-    return this.profileLoad ??= this.client.aiConfiguration().then(config => {
+    return this.profileLoad ??= this.client.aiConfiguration().then(async config => {
+      this.accountDefault = await loadAssistantDefault(this.client, config).catch(() => this.accountDefault);
+      this.defaultApi = mainProfile(config, this.accountDefault);
       if (!this.active) return;
       this.profiles = config.profiles.filter(profile => profile.engine === "lumio" || profile.engine === "codex"); // 语音 Profile 不能用于聊天（ADR 0055）
       this.connections = config.connections;
@@ -178,16 +186,26 @@ export class AssistantPane {
   private renderProfiles(): void {
     const options = assistantProfiles(this.profiles, !!this.current, this.boundProfile);
     // Without a saved default nothing is preselected; say so instead of showing an empty pill.
+    const fallback = !this.boundProfile ? this.profiles.find(profile => profile.id === this.defaultApi) : undefined;
     clear(this.profile, h("option", { value: "", disabled: true, hidden: true }, t("Choose a profile")),
+      ...(fallback ? [h("option", { value: DEFAULT }, t("Default · {0}", fallback.name))] : []),
       ...options.map(profile => h("option", { value: profile.id }, profile.name)));
-    this.profile.value = this.selectedProfile ?? (this.current ? "" : defaultAssistantProfile(options));
+    // 新对话的默认是 Codex 时直接选中它（原生会话需要明确的 Profile）；其余情况选「默认」。
+    const codexDefault = !this.current && options.some(profile => profile.id === this.accountDefault && profile.engine === "codex");
+    this.profile.value = this.selectedProfile ?? (codexDefault ? this.accountDefault : fallback ? DEFAULT : "");
     this.profile.hidden = !options.length;
     this.renderApiControls();
     this.updateComposer();
   }
 
+  /** 当前选项对应的 Profile；「默认」对应 Hub 会用的 API Profile。 */
+  private chosenProfile() {
+    const id = this.profile.value === DEFAULT ? this.defaultApi : this.profile.value;
+    return this.profiles.find(profile => profile.id === id);
+  }
+
   private renderApiControls(): void {
-    const profile = this.profiles.find(value => value.id === this.profile.value);
+    const profile = this.chosenProfile();
     const connection = this.connections.find(value => value.id === profile?.connection);
     this.apiControls.hidden = profile?.engine !== "lumio";
     if (!profile || this.apiControls.hidden) {
@@ -444,9 +462,10 @@ export class AssistantPane {
     const generation = this.generation;
     if (this.profileLoad && !this.profilesLoaded) await this.profileLoad;
     if (!this.active || generation !== this.generation || this.mode !== "chat" || this.send.disabled || !this.text.value.trim()) return;
-    const selected = this.profiles.find(profile => profile.id === this.profile.value);
+    const selected = this.chosenProfile();
     if (!selected) return;
-    this.selectedProfile = selected.id;
+    const useDefault = this.profile.value === DEFAULT;
+    this.selectedProfile = this.profile.value;
     if (!this.current && selected.engine === "codex") {
       this.setBusy(true);
       this.nativeCreate = this.nativeCreate?.profile === selected.id ? this.nativeCreate
@@ -472,7 +491,7 @@ export class AssistantPane {
       return;
     }
     const input: Omit<AssistantChatRequest, "request_id"> = {
-      profile: selected.id, conversation: this.current, message: this.text.value.trim(),
+      ...(useDefault ? {} : { profile: selected.id }), conversation: this.current, message: this.text.value.trim(),
       ...(selected.engine === "codex" ? this.native.settings() : {
         ...(this.apiModel.value && this.apiModel.value !== selected.model ? { model: this.apiModel.value } : {}),
         ...(this.apiEffort.value ? { effort: this.apiEffort.value } : {}),
@@ -572,7 +591,7 @@ export class AssistantPane {
       if (detail && detail.turns.some(turn => turn.request_id === request.request_id)) {
         const tools = await this.hub.assistantTools(detail.conversation.id).catch(() => []);
         if (!this.active) return;
-        this.selectedProfile = request.profile;
+        this.selectedProfile = request.profile ?? DEFAULT;
         this.renderDetail(detail, tools);
         const turn = detail.turns.find(value => value.request_id === request.request_id)!;
         if (turn.status === "running") clear(this.notice, h("div", { class: "notice" }, icon("alert"), h("span", {}, t("The Hub is still working on it. Refresh later to see the result. The request was not sent again."))));
