@@ -84,7 +84,7 @@ function recentComments(comments: WorkComment[], roles: ReadonlyMap<string, Acto
 
 /** Every automatic resource read is under the internal assistant agent, without private delegation. */
 export class AssistantWorkbenchAnchors implements AssistantWorkbenchContext {
-  readonly instructions = "When a discussion reaches a conclusion, suggest recording it as an AI note or a task description update. Use the existing tools and approval rules when the user wants it recorded. Do not save unfinished discussion as knowledge or memory.";
+  readonly instructions = "When the user explicitly asks to save this discussion as an Idea, use knowledge__idea__save_discussion. Creating a task from this conversation attaches its original discussion automatically when available. For other concluded discussions, suggest an AI note or task description update if useful. Use the existing authorization rules and do not save ordinary conversations to knowledge or memory without a request.";
 
   constructor(private readonly modules: Modules, private readonly hub: HubStore, private readonly main: AssistantMainConversations,
     private readonly notices: Notices) {}

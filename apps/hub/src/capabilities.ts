@@ -2,6 +2,7 @@ import { CoreError } from "@lumio/foundation";
 import type { SemanticSearch } from "./semantic-search.ts";
 import type { AiNotes } from "./ai-notes.ts";
 import type { ConversationSource, Resources } from "./resources.ts";
+import type { VoiceIdeas } from "./voice-ideas.ts";
 import type { WorkCommands } from "./work-commands.ts";
 import { WorkError, type WorkService } from "@lumio/work";
 import type { ExecutionRoutines } from "@lumio/execution";
@@ -27,6 +28,7 @@ interface CapabilityModules {
   resources: Resources;
   assistantStore: SqliteAssistantStore;
   semantic?: SemanticSearch;
+  voiceIdeas: VoiceIdeas;
 }
 interface CapabilityOptions { includePrivate?: boolean; chronologicalJobs?: boolean; conversation?: ConversationSource }
 
@@ -73,13 +75,15 @@ export class Capabilities {
           conversation = humanOwner && turn ? this.modules.resources.conversationSource(context.owner, turn) : undefined;
           if (!conversation) throw new HubError("FORBIDDEN", { key: "knowledge.ai_note_source_unavailable", args: [] });
         }
-        const outcome = await this.invoke(def.name, args, { actor, label: "assistant-tools" }, context.request, false, humanOwner, false, conversation, humanOwner ? context.owner : undefined);
+        const outcome = await this.invoke(def.name, args, { actor, label: "assistant-tools" }, context.request, false, humanOwner, false, conversation, humanOwner ? context.owner : undefined,
+          humanOwner && def.name === "work.task.create" ? { owner: context.owner, signal: context.signal } : undefined);
         context.record?.({ capability: def.name, change: outcome.change, private_read: outcome.private_read });
         return outcome.result;
       },
     }));
   }
-  private async invoke(name: string, raw: unknown, identity: Identity, requestId?: string, includePrivate = false, humanConversation = false, chronologicalJobs = false, conversation?: ConversationSource, semanticOwner?: string): Promise<CapabilityResult> {
+  private async invoke(name: string, raw: unknown, identity: Identity, requestId?: string, includePrivate = false, humanConversation = false, chronologicalJobs = false, conversation?: ConversationSource, semanticOwner?: string,
+    assistantWrite?: { owner: string; signal?: AbortSignal }): Promise<CapabilityResult> {
     const def = capability(name);
     if (!def) throw new HubError("INVALID", { key: "capability.invalid", args: [] });
     const parsed = def.args.safeParse(raw);
@@ -124,13 +128,27 @@ export class Capabilities {
           throw cause;
         }
       }
+      const command = input.data;
+      if (assistantWrite && command.operation.op === "work.task.create") {
+        const reference = await this.modules.voiceIdeas.discussionReference(assistantWrite.owner, command.request_id, assistantWrite.signal);
+        assistantWrite.signal?.throwIfAborted();
+        if (reference) {
+          const fields = command.operation.args;
+          if (!fields.references?.some(ref => ref.id === reference.id)) fields.references = [...(fields.references ?? []), reference];
+          const link = `lumio:${reference.id}`;
+          if (!fields.description?.includes(link)) {
+            const pointer = `[${msg("voice_idea.discussion")}](${link})`;
+            fields.description = [fields.description, pointer].filter(Boolean).join("\n\n");
+          }
+        }
+      }
       return this.store.db.transaction(() => {
         let before: Record<string, unknown> | undefined;
         if (name.endsWith(".update")) {
           const current = name === "work.task.update" ? this.modules.work.task(String(args.task)) : this.modules.work.project(String(args.project));
           before = Object.fromEntries(Object.keys(args.patch as object).map(key => [key, (current as unknown as Record<string, unknown>)[key] ?? null]));
         }
-        const result = this.modules.workCommands.execute(input.data, identity);
+        const result = this.modules.workCommands.execute(command, identity);
         const entity = result.kind === "task" ? result.task : result.kind === "project" ? result.project : undefined;
         const change: CapabilityChange = { capability: name, target: entity?.id ?? (result.kind === "comment" ? result.comment.task : ""),
           ...(before ? { before } : {}), ...(entity ? { after_revision: entity.revision } : {}) };

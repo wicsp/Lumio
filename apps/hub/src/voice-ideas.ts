@@ -1,10 +1,11 @@
 import { type AssistantTool } from "@lumio/assistant";
-import { DerivedFrom, Idea, idOf, toolName, type AssistantMessage, type AssistantTurn, type Glance, type GlanceContextRetention } from "@lumio/schema";
+import { DerivedFrom, Idea, idOf, toolName, type AssistantMessage, type AssistantTurn, type Glance, type GlanceContextRetention, type ResourceRef } from "@lumio/schema";
 import { FileKnowledgeRepository, noteById, readKnowledgeDocument, type SqliteAssistantStore } from "@lumio/storage";
 import { parsePaperInput } from "@lumio/knowledge";
 import type { HubConfig } from "./config.ts";
 import { HubError } from "./errors.ts";
 import type { Glances } from "./glances.ts";
+import type { Resources } from "./resources.ts";
 import type { KnowledgeAuthoring } from "./knowledge-authoring.ts";
 import { text } from "./messages.ts";
 import type { HubStore } from "./store.ts";
@@ -12,11 +13,13 @@ import { assertNoteVisible } from "./trash.ts";
 
 const ideaId = idOf("idea");
 const unavailable = () => new HubError("NOT_FOUND", { key: "voice_idea.discussion_unavailable", args: [] });
+const saveDiscussionTool = toolName("knowledge.idea.save_discussion");
+const quote = (value: string) => value.split(/\r?\n/u).map(line => `> ${line}`).join("\n");
 const normalizedTitle = (value: string) => value.replace(/\.pdf$/i, "").normalize("NFKC").trim().toLowerCase();
 
 export class VoiceIdeas {
   constructor(private readonly config: HubConfig, private readonly store: HubStore, private readonly assistant: SqliteAssistantStore,
-    private readonly glances: Glances, private readonly authoring: KnowledgeAuthoring) {}
+    private readonly glances: Glances, private readonly authoring: KnowledgeAuthoring, private readonly resources: Resources) {}
 
   private async source(glance: Glance): Promise<string | undefined> {
     if (glance.lumio?.module === "knowledge") {
@@ -49,6 +52,75 @@ export class VoiceIdeas {
     return note.id;
   }
 
+  async discussionReference(owner: string, request: string, signal?: AbortSignal): Promise<ResourceRef | undefined> {
+    if (!this.config.vault) return;
+    const call = this.assistant.call(request);
+    const turn = call?.status === "running" ? this.assistant.turn(call.turn) : undefined;
+    if (turn?.status !== "running") throw unavailable();
+    const source = this.resources.conversationSource(owner, turn.id);
+    const user = source?.message ? this.assistant.message(source.message) : undefined;
+    const identity = this.store.recoveryIdentity(owner);
+    if (!user || identity.actor.role !== "human") throw unavailable();
+
+    const agent = { actor: this.store.assistantActor(), label: "assistant-tools" };
+    if (turn.idea && (await this.resources.resolve(turn.idea, agent)).status === "visible") {
+      return { module: "knowledge", id: turn.idea, label: text("voice_idea.discussion") };
+    }
+    if (this.assistant.calls(turn.id).some(item => item.private_read)) return;
+
+    const messages = await this.discussionMessages(user);
+    signal?.throwIfAborted();
+    const body = messages.map(message => {
+      const role = text(message.role === "user" ? "voice_idea.user" : "voice_idea.assistant");
+      const excerpt = message.content.length > 12_000 ? `${message.content.slice(0, 12_000)}…` : message.content;
+      return `[${role}](lumio:${message.id})\n\n${quote(excerpt)}`;
+    }).join("\n\n");
+    const heading = messages[0]!.content.split(/\r?\n/u).find(line => line.trim())?.trim() || text("voice_idea.discussion");
+    const note = await this.authoring.create(identity, {
+      request_id: turn.id, note: { kind: "idea", tags: [], derived_from: messages.map(message => message.id) },
+      body: `# ${[...heading].slice(0, 45).join("")}\n\n${body}\n`,
+    }, new Date(user.created));
+    return { module: "knowledge", id: note.id, label: text("voice_idea.discussion") };
+  }
+
+  private async discussionMessages(user: AssistantMessage): Promise<AssistantMessage[]> {
+    const records = this.assistant.messages(user.conversation);
+    const earlier = records.slice(0, records.findIndex(message => message.id === user.id));
+    const anchors = this.assistant.messageAnchors(user.conversation);
+    const current = new Set(anchors.get(user.id)?.map(ref => ref.id));
+    const previous = earlier.filter(message => message.role === "user").slice(current.size ? -4 : -1).reverse();
+    const agent = { actor: this.store.assistantActor(), label: "assistant-tools" };
+    const messages = [user];
+    for (const message of previous) {
+      if (!message.turn || this.assistant.turn(message.turn)?.status !== "done"
+        || this.assistant.calls(message.turn).some(item => item.private_read)) break;
+      const answer = earlier.findLast(item => item.turn === message.turn && item.role === "assistant" && item.content.trim());
+      const refs = [...(anchors.get(message.id) ?? []), ...(answer ? anchors.get(answer.id) ?? [] : [])];
+      if (current.size ? !refs.some(ref => current.has(ref.id)) : refs.length > 0) break;
+      const visible = await Promise.all(refs.map(ref => this.resources.resolve(ref.id, agent)));
+      if (visible.some(ref => ref.status !== "visible")) break;
+      messages.unshift(message, ...(answer ? [answer] : []));
+    }
+    return messages;
+  }
+
+  static saveTool(current: () => VoiceIdeas): AssistantTool {
+    return {
+      effect: "write",
+      spec: { name: saveDiscussionTool,
+        description: "Save the current discussion as an Idea when the user explicitly asks. Its source messages are linked automatically. Task creation already saves and attaches its source, so saving separately is unnecessary.",
+        input_schema: { type: "object", properties: {}, additionalProperties: false } },
+      execute: async (args, context) => {
+        const self = current();
+        if (Object.keys(args).length) throw new HubError("INVALID", { key: "capability.invalid", args: [] });
+        if (self.store.assistantActor().id !== context.actor) throw unavailable();
+        const reference = await self.discussionReference(context.owner, context.request, context.signal);
+        if (!reference) throw unavailable();
+        return { idea: reference.id };
+      },
+    };
+  }
+
   async finish(owner: string, glanceId: string, messageId: string, decision?: GlanceContextRetention): Promise<void> {
     const user = this.assistant.message(messageId);
     if (!user || this.assistant.conversation(user.conversation)?.owner !== owner) throw unavailable();
@@ -72,7 +144,7 @@ export class VoiceIdeas {
     // Human edits win. The separate retained Glance remains linked by this message.
     if (current.document.body !== this.body(user)) return;
     const sections = [this.body(user).trimEnd()];
-    if (retained.text.length) sections.push(`## ${text("voice_idea.selected_passage")}\n\n${retained.text.join("\n\n").split(/\r?\n/u).map(line => `> ${line}`).join("\n")}`);
+    if (retained.text.length) sections.push(`## ${text("voice_idea.selected_passage")}\n\n${quote(retained.text.join("\n\n"))}`);
     if (retained.source) {
       const source = await this.source(glance);
       const origin = DerivedFrom.safeParse(glance.url);

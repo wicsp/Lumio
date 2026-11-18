@@ -144,7 +144,7 @@ async function startHubInstance(config: HubConfig, options: {
     await modules.trash.sweep();
     modules.trash.start();
     const authoring = new KnowledgeAuthoring(config, store, action => watch.exclusive(action), (path, message) => watch.issue(path, message), options.paperFetch, modules.semantic);
-    modules.voiceIdeas = new VoiceIdeas(config, store, modules.assistantStore, modules.glances, authoring);
+    modules.voiceIdeas = new VoiceIdeas(config, store, modules.assistantStore, modules.glances, authoring, modules.resources);
     const speech = new SpeechSessions(modules.speech, modules.funAsr, store, options.now ?? (() => new Date()), log);
     const updateArtifacts = new UpdateArtifacts(config.stateDir, store.runtimeVersion);
     const handle = async (request: Request, server: Bun.Server<SpeechSocketData>, lang: Language): Promise<Response | undefined> => {
