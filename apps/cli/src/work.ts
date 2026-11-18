@@ -87,11 +87,20 @@ export async function runWork(kind: "task" | "project", args: string[], log: (li
     return 0;
   }
   if (!reference) throw new Error(usage());
+  const autoWorktree = values["auto-worktree"];
+  if (autoWorktree !== undefined && autoWorktree !== "on" && autoWorktree !== "off") {
+    throw new Error(msg("work.auto_worktree_flag"));
+  }
+  const projectExecution = {
+    auto_worktree: autoWorktree === undefined ? undefined : autoWorktree === "on",
+    worktree_base: values["worktree-base"],
+    max_concurrent: values["max-concurrent"] === undefined ? undefined : Number(values["max-concurrent"]),
+  };
   if (action === "new" || action === "create") {
     if (rest.length) throw new Error(msg("work.quote_titles_containing_spaces"));
     if (kind === "task" && (values.to || values.status)) throw new Error(msg("work.use_turn_commands"));
     const description = values.file ? await readFile(values.file, "utf8") : values.description;
-    const fields = kind === "project" ? { goal: values.goal, repo: values.repo, deadline: values.deadline, workdir: values.workdir, default_target: defaultTarget || undefined }
+    const fields = kind === "project" ? { ...projectExecution, goal: values.goal, repo: values.repo, deadline: values.deadline, workdir: values.workdir, default_target: defaultTarget || undefined }
       : { project: values.project, parent: values.parent,
         dependencies: values.depends?.split(",").filter(Boolean), due: values.due, workdir: values.workdir, model: values.model,
         timeout_minutes: values.timeout === undefined ? undefined : Number(values.timeout), gpus: values.gpus?.split(",").map(Number) };
@@ -157,7 +166,7 @@ export async function runWork(kind: "task" | "project", args: string[], log: (li
   } else if (values.patch) {
     try { patch = JSON.parse(values.patch); } catch { throw new Error(msg("execution-routines.patch_must_be_a_json_object")); }
   } else if (action === "update") {
-    const fields = current.type === "project" ? { goal: values.goal, repo: values.repo, deadline: values.deadline, workdir: values.workdir, default_target: defaultTarget === "" ? null : defaultTarget, default_plan: defaultPlan === "" ? null : defaultPlan }
+    const fields = current.type === "project" ? { ...projectExecution, goal: values.goal, repo: values.repo, deadline: values.deadline, workdir: values.workdir, default_target: defaultTarget === "" ? null : defaultTarget, default_plan: defaultPlan === "" ? null : defaultPlan }
       : { project: values.project, parent: values.parent, dependencies: values.depends?.split(",").filter(Boolean), due: values.due, workdir: values.workdir, model: values.model,
         gpus: values.gpus?.split(",").map(Number), timeout_minutes: values.timeout === undefined ? undefined : Number(values.timeout) };
     patch = Object.fromEntries(Object.entries({ ...fields, description: values.file ? await readFile(values.file, "utf8") : values.description }).filter(([, value]) => value !== undefined));

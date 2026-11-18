@@ -13,6 +13,9 @@ export class SqliteWorkStore implements WorkStore {
         revision INTEGER NOT NULL CHECK(revision>0), status TEXT NOT NULL CHECK(status IN ('planning','active','paused','done')),
         created TEXT NOT NULL, updated TEXT NOT NULL, tags TEXT NOT NULL CHECK(json_valid(tags)), goal TEXT, repo TEXT, deadline TEXT,
         created_by TEXT NOT NULL, updated_by TEXT NOT NULL, workdir TEXT, default_target TEXT, default_plan TEXT);
+      CREATE TABLE IF NOT EXISTS work_project_execution (
+        project TEXT PRIMARY KEY REFERENCES work_projects(id) ON DELETE CASCADE,
+        settings TEXT NOT NULL CHECK(json_valid(settings)));
       CREATE TABLE IF NOT EXISTS work_tasks (
         id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL,
         revision INTEGER NOT NULL CHECK(revision>0), outcome TEXT NOT NULL CHECK(outcome IN ('open','done','cancelled')),
@@ -45,23 +48,33 @@ export class SqliteWorkStore implements WorkStore {
   transaction<T>(action: () => T): T { return this.db.transaction(action)(); }
   private readProject(row: Record<string, unknown> | null): WorkProject | undefined {
     if (!row) return;
-    const fields = Object.fromEntries(Object.entries(row).filter(([, value]) => value !== null));
-    return WorkProject.parse({ ...fields, schema_version: 2, type: "project", tags: JSON.parse(String(row.tags)) });
+    const { execution_settings, ...fields } = Object.fromEntries(Object.entries(row).filter(([, value]) => value !== null));
+    const settings = typeof execution_settings === "string" ? JSON.parse(execution_settings) : {};
+    return WorkProject.parse({ ...fields, ...settings, schema_version: 2, type: "project", tags: JSON.parse(String(row.tags)) });
   }
   project(id: string): WorkProject | undefined {
-    return this.readProject(this.db.query<Record<string, unknown>, [string]>("SELECT * FROM work_projects WHERE id=?").get(id));
+    return this.readProject(this.db.query<Record<string, unknown>, [string]>("SELECT p.*, e.settings AS execution_settings FROM work_projects p LEFT JOIN work_project_execution e ON e.project=p.id WHERE p.id=?").get(id));
   }
   projects(): WorkProject[] {
-    return this.db.query<Record<string, unknown>, []>("SELECT * FROM work_projects ORDER BY created,id").all().map((row) => this.readProject(row)!);
+    return this.db.query<Record<string, unknown>, []>("SELECT p.*, e.settings AS execution_settings FROM work_projects p LEFT JOIN work_project_execution e ON e.project=p.id ORDER BY p.created,p.id").all().map((row) => this.readProject(row)!);
   }
   putProject(input: WorkProject): void {
     const value = WorkProject.parse(input);
-    this.db.query(`INSERT INTO work_projects(id,title,description,revision,status,created,updated,tags,goal,repo,deadline,created_by,updated_by,workdir,default_target,default_plan)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-      ON CONFLICT(id) DO UPDATE SET title=excluded.title,description=excluded.description,revision=excluded.revision,
-      status=excluded.status,updated=excluded.updated,tags=excluded.tags,goal=excluded.goal,repo=excluded.repo,workdir=excluded.workdir,default_target=excluded.default_target,default_plan=excluded.default_plan,deadline=excluded.deadline,updated_by=excluded.updated_by`).run(
-      value.id, value.title, value.description, value.revision, value.status, value.created, value.updated,
-      JSON.stringify(value.tags), value.goal ?? null, value.repo ?? null, value.deadline ?? null, value.created_by, value.updated_by, value.workdir ?? null, value.default_target ?? null, value.default_plan ?? null);
+    this.transaction(() => {
+      this.db.query(`INSERT INTO work_projects(id,title,description,revision,status,created,updated,tags,goal,repo,deadline,created_by,updated_by,workdir,default_target,default_plan)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(id) DO UPDATE SET title=excluded.title,description=excluded.description,revision=excluded.revision,
+        status=excluded.status,updated=excluded.updated,tags=excluded.tags,goal=excluded.goal,repo=excluded.repo,workdir=excluded.workdir,default_target=excluded.default_target,default_plan=excluded.default_plan,deadline=excluded.deadline,updated_by=excluded.updated_by`).run(
+        value.id, value.title, value.description, value.revision, value.status, value.created, value.updated,
+        JSON.stringify(value.tags), value.goal ?? null, value.repo ?? null, value.deadline ?? null, value.created_by, value.updated_by, value.workdir ?? null, value.default_target ?? null, value.default_plan ?? null);
+      const { auto_worktree, worktree_base, max_concurrent } = value;
+      if (auto_worktree === undefined && worktree_base === undefined && max_concurrent === undefined) {
+        this.db.query("DELETE FROM work_project_execution WHERE project=?").run(value.id);
+      } else {
+        this.db.query(`INSERT INTO work_project_execution(project,settings) VALUES(?,?)
+          ON CONFLICT(project) DO UPDATE SET settings=excluded.settings`).run(value.id, JSON.stringify({ auto_worktree, worktree_base, max_concurrent }));
+      }
+    });
   }
 
   private readTask(row: Record<string, unknown> | null, batchDependencies?: Map<string, string[]>): WorkTask | undefined {

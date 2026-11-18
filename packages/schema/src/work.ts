@@ -1,6 +1,6 @@
 import { KnowledgeReferenceCount } from "./query.ts";
 import { z } from "zod";
-import { AgentTarget, ID_PREFIXES, Id, RequestId, Revision, Timestamp, idOf } from "./common.ts";
+import { AgentTarget, GitWorktreeBase, ID_PREFIXES, Id, RequestId, Revision, Timestamp, idOf } from "./common.ts";
 import { Job } from "./job.ts";
 import { HandoffPlan, PlanRun, PlanStageId, PlanTemplate, StagePermissions } from "./plan.ts";
 import { TrashItem } from "./trash.ts";
@@ -71,6 +71,9 @@ export const WorkProject = z.strictObject({
   goal: z.string().min(1).optional(),
   repo: z.string().min(1).optional().describe("关联代码仓库的 URL 或路径，只供参考；写进每一轮的输入（ADR 0033）"),
   workdir: z.string().min(1).optional().describe("项目的工作目录：任务没有自己的 workdir 时，委派那一刻用它（ADR 0033）；规则同任务 workdir"),
+  auto_worktree: z.boolean().optional(),
+  worktree_base: GitWorktreeBase.optional(),
+  max_concurrent: z.number().int().positive().optional(),
   default_target: AgentTarget.optional().describe("默认执行者：项目下还没派过的任务不带 to 委派时用它（ADR 0044）"),
   default_plan: idOf("wft").optional().describe("默认计划模板：人点「委托」且任务还没有计划时套用（ADR 0049 第 6 节）"),
   deadline: Timestamp.optional(),
@@ -223,6 +226,9 @@ export const WorkProjectPatch = z
     goal: z.string().min(1).nullable().optional().describe("null：清空"),
     repo: z.string().min(1).nullable().optional().describe("null：清空"),
     workdir: z.string().min(1).nullable().optional().describe("null：清空（ADR 0033）"),
+    auto_worktree: z.boolean().nullable().optional(),
+    worktree_base: GitWorktreeBase.nullable().optional(),
+    max_concurrent: z.number().int().positive().nullable().optional(),
     default_target: AgentTarget.nullable().optional().describe("null：清空（ADR 0044）"),
     default_plan: idOf("wft").nullable().optional().describe("null：清空（ADR 0049）"),
     deadline: Timestamp.nullable().optional().describe("null：清空"),
@@ -257,6 +263,9 @@ export const WorkProjectCreate = z.strictObject({
     goal: z.string().min(1).optional(),
     repo: z.string().min(1).optional(),
     workdir: z.string().min(1).optional(),
+    auto_worktree: z.boolean().optional(),
+    worktree_base: GitWorktreeBase.optional(),
+    max_concurrent: z.number().int().positive().optional(),
     default_target: AgentTarget.optional().describe("默认执行者（ADR 0044）"),
     default_plan: idOf("wft").optional().describe("默认计划模板（ADR 0049）"),
     deadline: Timestamp.optional(),

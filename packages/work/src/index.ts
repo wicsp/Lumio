@@ -542,17 +542,24 @@ export class WorkService {
       let result: WorkCommandResult;
       switch (operation.op) {
         case "work.project.create": {
+          if (caller.role !== "human" && (operation.args.auto_worktree !== undefined || operation.args.worktree_base !== undefined || operation.args.max_concurrent !== undefined)) {
+            throw new WorkError("FORBIDDEN", { key: "work.project_execution_admin", args: [] });
+          }
           if (operation.args.default_target) this.context.validateTarget?.(operation.args.default_target);
           if (operation.args.default_plan) this.requireTemplate(operation.args.default_plan);
           const project = WorkProject.parse({ schema_version: 2, type: "project", id: this.context.id("prj"),
-            title: operation.args.title, description: operation.args.description ?? "", tags: operation.args.tags ?? [],
-            goal: operation.args.goal, repo: operation.args.repo, workdir: operation.args.workdir, default_target: operation.args.default_target, default_plan: operation.args.default_plan, deadline: operation.args.deadline,
+            ...operation.args, description: operation.args.description ?? "", tags: operation.args.tags ?? [],
             revision: 1, status: "planning", created: time, updated: time, created_by: actor, updated_by: actor });
           this.store.putProject(project); result = { kind: "project", project }; break;
         }
         case "work.project.update": {
           const current = this.project(operation.args.project);
           if (current.revision !== operation.args.expected_revision) throw new WorkError("CONFLICT", { key: "index.project_changed_reload_before_saving", args: [] });
+          const fields = operation.args.patch;
+          if (caller.role !== "human" && (fields.auto_worktree !== undefined || fields.worktree_base !== undefined
+            || fields.max_concurrent !== undefined || current.auto_worktree && fields.workdir !== undefined)) {
+            throw new WorkError("FORBIDDEN", { key: "work.project_execution_admin", args: [] });
+          }
           if (operation.args.patch.default_target) this.context.validateTarget?.(operation.args.patch.default_target);
           if (operation.args.patch.default_plan) this.requireTemplate(operation.args.patch.default_plan);
           const project = WorkProject.parse({ ...patch(current, operation.args.patch), revision: current.revision + 1, updated: time, updated_by: actor });

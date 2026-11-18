@@ -18,6 +18,11 @@ export interface ExecutionStore {
 export interface RoutineHooks { plans(actor: string): RoutineSpec[]; adopt(actor: string, id: string, now: Date, lease?: string): Job | undefined }
 export interface ExecutionContext { id(now: Date): string; lease(): string; now(): Date }
 export { SubmitJob };
+export interface JobAdmission {
+  eligible(job: Job): boolean;
+  project(job: Job): string | undefined;
+  limit(project: string): number;
+}
 const active = (job: Job) => job.status === "assigned" || job.status === "running";
 
 /** Job lifecycle is independent of Task, Markdown and SQLite; storage and runtime capabilities are injected. */
@@ -30,8 +35,9 @@ export class ExecutionJobs {
   }
   list(status?: string, task?: string, routine?: string): Job[] { return Job.array().parse(this.store.list({ status, task, routine: task ? undefined : routine })); }
   activeForTask(task: string): Job | undefined { return this.list(undefined, task).find((job) => !job.result && job.status !== "cancelled"); }
-  create(fields: { runtime: string; run: JobSpec["run"]; workdir: string; gpus?: number[]; timeout_seconds: number; source?: JobSpec["source"] }, now: Date): Job {
-    const job = Job.parse({ spec: { ...fields, protocol_version: JOB_PROTOCOL_VERSION, id: this.context.id(now), lease: this.context.lease(), created: now.toISOString() }, status: "queued" });
+  create(fields: { runtime: string; run: JobSpec["run"]; workdir: string; gpus?: number[]; timeout_seconds: number; source?: JobSpec["source"]; worktree?: JobSpec["worktree"]; project?: string | null }, now: Date): Job {
+    const { project, ...spec } = fields;
+    const job = Job.parse({ project, spec: { ...spec, protocol_version: JOB_PROTOCOL_VERSION, id: this.context.id(now), lease: this.context.lease(), created: now.toISOString() }, status: "queued" });
     this.store.save(job); return job;
   }
   record(job: Job): void { this.store.record(Job.parse(job)); }
@@ -53,8 +59,8 @@ export class ExecutionJobs {
   cancel(id: string): Job {
     return this.store.transaction(() => {
       const job = this.get(id);
-      if (job.status === "queued") this.store.save({ ...job, status: "cancelled" });
-      else if (active(job)) this.store.requestCancel(id);
+      if (job.status === "queued" && !job.admitted) this.store.save({ ...job, status: "cancelled" });
+      else if (active(job) || job.admitted && !job.result) this.store.requestCancel(id);
       return this.get(id);
     });
   }
@@ -67,6 +73,9 @@ export class ExecutionJobs {
   ack(actor: string, ids: string[], now: Date): void {
     this.store.transaction(() => {
       const jobs = ids.map((id) => this.owned(actor, id, now));
+      if (jobs.some(job => job.project && job.status === "queued" && !job.admitted)) {
+        throw new ExecutionError("CONFLICT", { key: "jobs.job_does_not_match_runtime", args: [] });
+      }
       for (const job of jobs) if (!job.result && !job.assigned) this.store.save({ ...job, assigned: now.toISOString(), status: job.status === "queued" ? "assigned" : job.status });
     });
   }
@@ -82,7 +91,7 @@ export class ExecutionJobs {
       this.store.save({ ...job, result, status: result.status });
     });
   }
-  sync(actor: string, heartbeat: RuntimeHeartbeat, now: Date): RuntimeSync {
+  sync(actor: string, heartbeat: RuntimeHeartbeat, now: Date, admission?: JobAdmission): RuntimeSync {
     return this.store.transaction(() => {
       this.store.syncRuntime(actor, now);
       for (const id of [...heartbeat.running, ...heartbeat.queued]) if (!this.store.get(id)) this.routines?.adopt(actor, id, now);
@@ -90,8 +99,26 @@ export class ExecutionJobs {
       for (const job of this.store.list({ runtime: actor, open: true })) if (running.has(job.spec.id) && active(job)) this.store.save({ ...job, status: "running", last_seen: now.toISOString() });
       const jobs = this.store.list({ runtime: actor, open: true }), cancellations = new Set(this.store.cancellations());
       const runtime = this.store.runtimes(now).find(value => value.actor === actor);
-      return RuntimeSync.parse({ jobs: runtime && runtimeDraining(runtime) ? [] : jobs.filter((job) => job.status === "queued").map((job) => job.spec),
-        cancel: jobs.filter((job) => !job.result && job.assigned && (cancellations.has(job.spec.id) || job.status === "cancelled")).map((job) => job.spec.id),
+      const counts = new Map<string, number>();
+      if (admission) for (const item of this.store.list({ open: true })) {
+        if (!item.admitted && !active(item)) continue;
+        const project = admission.project(item);
+        if (project) counts.set(project, (counts.get(project) ?? 0) + 1);
+      }
+      const deliver = jobs.filter(job => {
+        if (job.status !== "queued" || admission && !admission.eligible(job)) return false;
+        if (job.admitted) return true;
+        if (runtime && runtimeDraining(runtime)) return false;
+        const project = admission?.project(job);
+        if (!admission || !project) return true;
+        const count = counts.get(project) ?? 0;
+        if (count >= admission.limit(project)) return false;
+        this.store.save({ ...job, project, admitted: now.toISOString() });
+        counts.set(project, count + 1);
+        return true;
+      });
+      return RuntimeSync.parse({ jobs: deliver.map(job => job.spec),
+        cancel: jobs.filter((job) => !job.result && (job.assigned || job.admitted) && (cancellations.has(job.spec.id) || job.status === "cancelled")).map((job) => job.spec.id),
         routines: this.routines?.plans(actor) ?? [] });
     });
   }

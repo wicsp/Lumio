@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AGENTS, AgentTarget, Timestamp, RuntimeName, idOf } from "./common.ts";
+import { AGENTS, AgentTarget, Timestamp, RuntimeName, RequestId, GitWorktreeBase, idOf } from "./common.ts";
 import { NativeAccountBinding } from "./ai.ts";
 import { JobAccess } from "./access.ts";
 import { PlanHook, StagePermissions } from "./plan.ts";
@@ -66,6 +66,29 @@ export const JobSource = z.strictObject({
   fired_at: Timestamp.optional().describe("例行任务这一次的计划触发时间"),
 }).refine((s) => !(s.task && s.routine), "task 与 routine 只能有一个");
 
+export const PROJECT_WORKTREE_FEATURE = "project_worktree";
+export const RUNTIME_CONCURRENCY_FEATURE = "runtime_concurrency";
+export const RuntimeConcurrency = z.number().int().positive();
+export const RuntimeConcurrencySettings = z.strictObject({
+  desired: RuntimeConcurrency.nullable(),
+  effective: RuntimeConcurrency,
+  pending: z.boolean(),
+});
+export const RuntimeConcurrencyCommand = z.strictObject({
+  runtime: idOf("act"),
+  max_concurrent: RuntimeConcurrency.nullable(),
+});
+export const RuntimeConcurrencyRequest = z.strictObject({
+  request_id: RequestId,
+  operation: z.strictObject({ op: z.literal("execution.runtime.concurrency"), args: RuntimeConcurrencyCommand }),
+});
+export const JobWorktree = z.strictObject({
+  project: idOf("prj"),
+  task: idOf("task"),
+  base: GitWorktreeBase,
+  reuse: z.literal(true).optional(),
+});
+
 /** Hub 发给执行器的一轮工作。 */
 export const JobSpec = z.strictObject({
   protocol_version: z.literal(JOB_PROTOCOL_VERSION),
@@ -75,13 +98,14 @@ export const JobSpec = z.strictObject({
   lease: z.string().min(16).describe("Hub 指派时生成的凭据；回报必须带上，过期或不匹配的回报被拒绝"),
   run: JobRun,
   workdir: z.string().min(1),
+  worktree: JobWorktree.optional(),
   gpus: z.array(z.number().int().nonnegative()).optional(),
   timeout_seconds: z.number().int().positive(),
   created: Timestamp,
 });
 
 /** Human job submission. Only the Hub builds a verified Runtime account binding. */
-export const SubmitJob = JobSpec.omit({ protocol_version: true, id: true, source: true, lease: true, created: true }).extend({
+export const SubmitJob = JobSpec.omit({ protocol_version: true, id: true, source: true, lease: true, created: true, worktree: true }).extend({
   runtime: RuntimeName, run: JobRun, connection: JobAccount.shape.connection.optional(),
   workdir: JobSpec.shape.workdir.default("~"), timeout_seconds: JobSpec.shape.timeout_seconds.default(7200),
 });
@@ -118,6 +142,7 @@ export const JobResult = z.strictObject({
     .describe("status 为 waiting_for_human 时，agent 申请的权限（汇报里的 <lumio-permission>，ADR 0049 第 3 节）；理由在 report 中"),
   session_id: SessionId.optional().describe("下一轮接着这个会话继续"),
   git: z.strictObject({ before: GitState.optional(), after: GitState.optional() }).optional(),
+  workspace: z.strictObject({ path: z.string().min(1), branch: z.string().min(1), base_commit: GitState.shape.commit }).optional(),
   log: z.string().optional().describe("完整日志在执行器上的路径"),
   error: z.string().optional().describe("给人看的失败原因；不含密钥"),
 });
@@ -126,6 +151,8 @@ export const JobResult = z.strictObject({
 export const Job = z.strictObject({
   spec: JobSpec,
   status: JobStatus,
+  project: idOf("prj").nullable().optional(),
+  admitted: Timestamp.optional(),
   assigned: Timestamp.optional().describe("执行器确认收到的时间"),
   last_seen: Timestamp.optional().describe("执行器最近一次报告这一轮仍在运行的时间"),
   result: JobResult.optional(),
@@ -138,7 +165,7 @@ export const Job = z.strictObject({
  * privileged_helper：已配置高权限助手（ADR 0020），人可在设置里看到哪台执行器还没装。
  * self_update：能按 Hub 的期望版本自更新（ADR 0063）；声明它时必须同时登记 version、platform、install。
  */
-export const RUNTIME_FEATURES = ["stage_permissions", "hooks", "permission_request", "privileged_helper", "self_update"] as const;
+export const RUNTIME_FEATURES = ["stage_permissions", "hooks", "permission_request", "privileged_helper", "self_update", PROJECT_WORKTREE_FEATURE, RUNTIME_CONCURRENCY_FEATURE] as const;
 
 /**
  * 执行器启动时登记自己的能力。
@@ -176,6 +203,7 @@ export const RuntimeInfo = RuntimeRegistered.extend({
     install: RuntimeInstall.nullable(),
   }),
   online: z.boolean().describe("最近 3 分钟内轮询过 Hub；否则显示为失联"),
+  concurrency: RuntimeConcurrencySettings.optional(),
   update: RuntimeUpdateView.nullable().describe("自动更新情况（ADR 0063）；不支持时为 null"),
 });
 
@@ -212,6 +240,7 @@ export const RuntimeHeartbeat = z.strictObject({
   running: z.array(idOf("job")),
   queued: z.array(idOf("job")),
   outbox: z.number().int().nonnegative().describe("还没交回的结果数"),
+  concurrency: z.strictObject({ override: RuntimeConcurrency.nullable(), effective: RuntimeConcurrency }).optional(),
   update: RuntimeUpdateReport.optional().describe("自更新进度（ADR 0063）；只在 Hub 的同步回复带过 update 之后报告"),
 });
 
@@ -225,6 +254,7 @@ export const RuntimeSync = z.strictObject({
     + "这样旧执行器不会遇到它不认识的字段。执行器把它与 Job 一起存进本地私有队列，只交给该轮的 agent 进程",
   ),
   accounts: z.array(JobAccount).optional(),
+  max_concurrent: RuntimeConcurrency.nullable().optional(),
   update: RuntimeUpdateDirective.optional().describe(
     "期望版本（ADR 0063）。只发给登记了 self_update 的执行器；策略为 manual 时缺失。"
     + "执行器收到过它，才在之后的心跳里带 update，避免旧 Hub 遇到不认识的字段",

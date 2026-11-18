@@ -135,6 +135,10 @@ export class BusinessModules {
         notifications.turn(this.task(change.task)!, change, this.turns(change.task).length);
       }
     }(store.db);
+    store.projectForJob = job => job.project === undefined
+      ? (job.spec.source?.task ? this.workStore.task(job.spec.source.task)?.project : undefined)
+      : job.project ?? undefined;
+    store.projectConcurrency = project => this.workStore.project(project)?.max_concurrent ?? 1;
     store.proposalCreated = proposal => {
       const operation = proposal.operation;
       const taskId = operation.op === "work.command" ? ("task" in operation.args.operation.args ? operation.args.operation.args.task : undefined) : undefined;
@@ -283,23 +287,42 @@ export class BusinessModules {
     const roundScope = roundPermissions(scope, options.permissions, restrictedRound);
     const requestHint = msg(runtime.registration.features?.includes("permission_request") && runtime.registration.features.includes("stage_permissions")
       ? "modules.round_permission_request" : "modules.round_permission_question");
-    const workdir = task.workdir ?? (task.project ? this.work.project(task.project).workdir : undefined) ?? "~";
+    const project = task.project ? this.work.project(task.project) : undefined;
+    const workdir = task.workdir ?? project?.workdir ?? "~";
+    const jobs = new Jobs(this.store);
+    const priorJobs = jobs.list(undefined, task.id);
+    const originalWorkspace = priorJobs.find(job => job.spec.worktree);
+    let worktree: import("@lumio/schema").JobSpec["worktree"];
+    if (project?.auto_worktree) {
+      if (!project.workdir || !project.worktree_base || task.workdir && task.workdir !== project.workdir) {
+        throw new PlanDispatchUnavailable({ key: "jobs.worktree_configuration", args: [] });
+      }
+      if (!runtime.registration.features?.includes("project_worktree")) {
+        throw new PlanDispatchUnavailable({ key: "jobs.worktree_unsupported", args: [] });
+      }
+      worktree = { project: project.id, task: task.id, base: project.worktree_base,
+        ...(priorJobs.some(job => job.spec.worktree && job.result?.workspace) ? { reuse: true } : {}) };
+    }
+    if (originalWorkspace && (!worktree || originalWorkspace.spec.runtime !== runtime.actor
+      || originalWorkspace.spec.workdir !== workdir || originalWorkspace.spec.worktree?.project !== worktree.project
+      || originalWorkspace.spec.worktree.base !== worktree.base)) {
+      throw new PlanDispatchUnavailable({ key: "jobs.worktree_binding_changed", args: [] });
+    }
     if (mode) requireLocalInteractiveWorkdir(this.config, runtime.registration.name, workdir);
     else if (this.config.vault && runtime.registration.name === this.config.localRuntime && workdirInVault(this.config.vault, workdir)) {
       throw new HubError("INVALID", { key: "modules.working_directory_must_be_outside_the_knowledge_directory", args: [] });
     }
-    const jobs = new Jobs(this.store);
-    const previous = previousJob === undefined ? jobs.list(undefined, task.id).at(-1) : previousJob ? jobs.get(previousJob) : undefined;
+    const previous = previousJob === undefined ? priorJobs.at(-1) : previousJob ? jobs.get(previousJob) : undefined;
     if (grant && (!previous || previous.spec.runtime !== runtime.actor || previous.spec.run.kind !== "agent"
       || previous.spec.run.engine !== engine.name || previous.spec.workdir !== workdir)) {
       throw new PlanDispatchUnavailable({ key: "work.permission_context_changed", args: [] });
     }
     let session: AgentRun["session"];
-    if (previous?.spec.run.kind === "agent" && sameJobAccount(this.store, previous, binding) && previous.spec.run.engine === engine.name && previous.spec.run.interaction === mode && previous.spec.runtime === runtime.actor && previous.result?.session_id) {
+    if (previous?.spec.run.kind === "agent" && Boolean(previous.spec.worktree) === Boolean(worktree) && sameJobAccount(this.store, previous, binding) && previous.spec.run.engine === engine.name && previous.spec.run.interaction === mode && previous.spec.runtime === runtime.actor && previous.result?.session_id) {
       session = { id: previous.result.session_id, resume: true };
     } else if (engine.name === "pi" || engine.name === "claude-code") session = { id: randomUUID(), resume: false };
     const prefix = stage?.kind === "agent" ? `Lumio stage ID: ${stage.id}\n` : "";
-    const job = jobs.create({ runtime: runtime.actor, workdir, timeout_seconds: (task.timeout_minutes ?? 120) * 60,
+    const job = jobs.create({ runtime: runtime.actor, project: project?.id ?? null, worktree, workdir, timeout_seconds: (task.timeout_minutes ?? 120) * 60,
       ...(task.gpus ? { gpus: task.gpus } : {}), source: { task: task.id, round, ...(previous ? { previous: previous.spec.id } : {}) },
       run: { kind: "agent", engine: engine.name, ...(mode ? { interaction: mode } : {}), ...(task.model ? { model: task.model } : {}), ...(session ? { session } : {}), ...options,
         prompt: prefix + msg("modules.you_are_completing_round_of_a_user_task_work_only_in_the_working_dir", round, roundScope, input, requestHint) },

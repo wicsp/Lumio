@@ -9,7 +9,7 @@ import { AIConnection, JOB_ACCOUNT_FEATURE, JobActivityCapabilities, NativeConne
 import { cp, mkdir, writeFile, mkdtemp, readFile, realpath, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ApiError, Job, JobResult, RuntimeAck, RuntimeInfo, RuntimeRegistered, RuntimeSync, StoredArtifact, RunLogEvent, BackupManifest } from "@lumio/schema";
+import { PROJECT_WORKTREE_FEATURE, RUNTIME_CONCURRENCY_FEATURE, RuntimeConcurrencyRequest, RuntimeConcurrencySettings, type WorkTask, ApiError, Job, JobResult, RuntimeAck, RuntimeInfo, RuntimeRegistered, RuntimeSync, StoredArtifact, RunLogEvent, BackupManifest } from "@lumio/schema";
 import { startHub } from "../src/server.ts";
 import { readConfig } from "../src/config.ts";
 import { HubStore } from "../src/store.ts";
@@ -306,6 +306,107 @@ test("compiled runtime preserves the durable-start worker path", async () => {
   expect((await get(job.spec.id)).result!.exit_code).toBe(0);
 }, 20_000);
 
+test("project admission survives retries and limits jobs across runtimes", async () => {
+  const engines = [{ name: "codex", version: "0.166.0", sandbox: "os" }];
+  const register = async (token: string, name: string, feature?: string) =>
+    RuntimeRegistered.parse(await (await request("/v1/runtime/register", token, { ...registration, name, engines }, feature)).json());
+  await register(runtime, "server", PROJECT_WORKTREE_FEATURE);
+  await register(other, "other");
+  const command = async (operation: unknown) => {
+    const input = WorkCommandRequest.parse({ operation, request_id: randomUUID() });
+    return request("/v2/work/commands", human, input);
+  };
+  const read = async (operation: unknown) => WorkCommandResult.parse(await (await command(operation)).json());
+  const project = await read({ op: "work.project.create", args: {
+    title: "Synthetic project", workdir: "/synthetic/project", worktree_base: "origin/main",
+  } });
+  if (project.kind !== "project") throw new Error("Expected a project");
+  const tasks: WorkTask[] = [];
+  for (const title of ["One", "Two", "Three"]) {
+    const result = await read({ op: "work.task.create", args: { title, project: project.project.id } });
+    if (result.kind !== "task") throw new Error("Expected a task");
+    tasks.push(result.task);
+  }
+  const dispatch = async (task: typeof tasks[number], to: string) =>
+    read({ op: "work.task.dispatch", args: { task: task.id, expected_revision: task.revision, to } });
+  const first = await dispatch(tasks[0]!, "codex@server");
+  const second = await dispatch(tasks[1]!, "codex@other");
+  await dispatch(tasks[2]!, "codex@other");
+  if (first.kind !== "job" || second.kind !== "job") throw new Error("Expected jobs");
+  const sync = async (token: string, feature?: string) =>
+    RuntimeSync.parse(await (await request("/v1/runtime/sync", token, heartbeat, feature)).json());
+  expect((await sync(runtime)).jobs.map(job => job.id)).toEqual([first.job.spec.id]);
+  await hub!.stop();
+  hub = await boot();
+  port = hub.server.port!;
+  expect((await sync(runtime)).jobs.map(job => job.id)).toEqual([first.job.spec.id]);
+  expect((await sync(other)).jobs).toEqual([]);
+  const update = await read({ op: "work.project.update", args: { project: project.project.id, expected_revision: project.project.revision, patch: { max_concurrent: 2 } } });
+  if (update.kind !== "project") throw new Error("Expected an updated project");
+  expect((await sync(other)).jobs.map(job => job.id)).toEqual([second.job.spec.id]);
+  const reset = await read({ op: "work.project.update", args: { project: project.project.id, expected_revision: update.project.revision, patch: { max_concurrent: 1, auto_worktree: true } } });
+  if (reset.kind !== "project") throw new Error("Expected an updated project");
+  expect((await sync(other)).jobs.map(job => job.id)).toEqual([second.job.spec.id]);
+  for (const [token, result] of [[runtime, first], [other, second]] as const) {
+    const spec = result.job.spec;
+    await request("/v1/runtime/ack", token, { accepted: [spec.id] });
+    const response = await request("/v1/runtime/results", token, JobResult.parse({ job: spec.id, lease: spec.lease, status: "done", finished: new Date().toISOString() }));
+    expect(response.status).toBe(200);
+  }
+  const remaining = (await sync(other)).jobs[0];
+  if (!remaining) throw new Error("Expected a third admitted job");
+  const added = await read({ op: "work.task.create", args: { title: "Managed checkout", project: project.project.id } });
+  if (added.kind !== "task") throw new Error("Expected a task");
+  const rejected = await read({ op: "work.task.dispatch", args: { task: added.task.id, to: "codex@other" } });
+  if (rejected.kind !== "task") throw new Error("Expected refusal without dispatch");
+  expect(rejected.task.turn).toMatchObject({ holder: "human", reason: "failed" });
+  const managed = await dispatch(rejected.task, "codex@server");
+  if (managed.kind !== "job") throw new Error("Expected a job");
+  expect(managed.job.spec.worktree).toMatchObject({ project: project.project.id, task: added.task.id, base: "origin/main" });
+  expect((await sync(runtime, PROJECT_WORKTREE_FEATURE)).jobs).toEqual([]);
+  const cancel = await request(`/v2/execution/jobs/${remaining.id}/cancel`, human, {});
+  expect(cancel.status).toBe(200);
+  const redelivery = await sync(other);
+  expect(redelivery.jobs.map(job => job.id)).toEqual([remaining.id]);
+  expect(redelivery.cancel).toEqual([remaining.id]);
+  expect((await sync(runtime, PROJECT_WORKTREE_FEATURE)).jobs).toEqual([]);
+  await request("/v1/runtime/ack", other, { accepted: [remaining.id] });
+  expect((await request("/v1/runtime/results", other, JobResult.parse({
+    job: remaining.id, lease: remaining.lease, status: "cancelled", finished: new Date().toISOString(),
+  }))).status).toBe(200);
+  expect((await sync(runtime)).jobs).toEqual([]);
+  expect((await sync(runtime, PROJECT_WORKTREE_FEATURE)).jobs.map(job => job.id)).toEqual([managed.job.spec.id]);
+});
+
+test("runtime concurrency applies live, drains on decrease and restores the local limit", async () => {
+  const child = await startRuntime(), list = async () =>
+    RuntimeInfo.array().parse(await (await request("/v2/execution/runtimes")).json());
+  const device = (await list())[0]!;
+  expect(device.concurrency).toEqual({ desired: null, effective: 1, pending: false });
+  const set = async (value: number | null, token = human) => request("/v2/execution/commands", token,
+    RuntimeConcurrencyRequest.parse({ request_id: randomUUID(),
+      operation: { op: "execution.runtime.concurrency", args: { runtime: device.actor, max_concurrent: value } } }));
+  expect((await set(2, agent)).status).toBe(403);
+  expect(RuntimeConcurrencySettings.parse(await (await set(2)).json())).toMatchObject({ desired: 2 });
+  await eventually(async () => (await list())[0]?.concurrency?.effective === 2);
+  const first = await submit("quiet", join(temp, "first"), 1000);
+  const second = await submit("quiet", join(temp, "second"), 1000);
+  await eventually(async () => (await get(first.spec.id)).status === "running" && (await get(second.spec.id)).status === "running");
+  expect(RuntimeConcurrencySettings.parse(await (await set(null)).json())).toMatchObject({ desired: null });
+  await eventually(async () => (await list())[0]?.concurrency?.effective === 1);
+  expect((await get(first.spec.id)).status).toBe("running");
+  expect((await get(second.spec.id)).status).toBe("running");
+  const third = await submit("quiet", join(temp, "third"));
+  await eventually(async () => (await get(third.spec.id)).status === "done");
+  expect((await get(first.spec.id)).status).toBe("done");
+  expect((await get(second.spec.id)).status).toBe("done");
+  const done = await get(third.spec.id);
+  const earlier = await Promise.all([get(first.spec.id), get(second.spec.id)]);
+  expect(Date.parse(done.result!.started!)).toBeGreaterThanOrEqual(
+    Math.max(...earlier.map(job => Date.parse(job.result!.finished))));
+  expect(child.exitCode).toBeNull();
+});
+
 test("Job activity uses device connectivity while waiting and job heartbeats once running", async () => {
   RuntimeRegistered.parse(await (await request("/v1/runtime/register", runtime, registration)).json());
   const job = await submit(), id = job.spec.id, url = `/v2/execution/jobs/${id}/live`;
@@ -429,6 +530,67 @@ async function activityRuntime(reuse = false) {
   });
   return project;
 }
+
+test("a real Runtime executes and continues tasks in separate project worktrees", async () => {
+  const repository = join(temp, "repository"), bin = join(temp, "bin");
+  await mkdir(repository); await mkdir(bin);
+  const env = { HOME: temp, PATH: `${bin}:/usr/bin:/bin` };
+  const git = (...args: string[]) => {
+    const result = Bun.spawnSync(["git", "-C", repository, ...args], { env, stdout: "pipe", stderr: "pipe" });
+    if (result.exitCode !== 0) throw new Error(result.stderr.toString());
+  };
+  git("init", "-b", "main");
+  await writeFile(join(repository, "source.txt"), "original");
+  git("add", "source.txt");
+  git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-m", "fixture: initial");
+  await writeFile(join(bin, "codex"), `#!${process.execPath}
+import { appendFileSync, writeFileSync } from "node:fs";
+if (process.argv[2] === "--version") console.log("codex-cli 0.166.0");
+else {
+  appendFileSync("working.txt", "round\\n");
+  writeFileSync(process.argv[process.argv.indexOf("--output-last-message") + 1], "Synthetic report");
+}
+`, { mode: 0o700 });
+  await startRuntime(undefined, undefined, { PATH: env.PATH, LUMIO_RUNTIME_MAX_CONCURRENT: "2" });
+  const command = async (operation: unknown) => {
+    const response = await request("/v2/work/commands", human, WorkCommandRequest.parse({ operation, request_id: randomUUID() }));
+    const value = await response.json();
+    if (!response.ok) throw new Error(JSON.stringify(value));
+    return WorkCommandResult.parse(value);
+  };
+  const project = await command({ op: "work.project.create", args: {
+    title: "Managed project", workdir: repository, worktree_base: "main", auto_worktree: true, max_concurrent: 2,
+  } });
+  if (project.kind !== "project") throw new Error("Expected a project");
+  const task = async (title: string) => {
+    const result = await command({ op: "work.task.create", args: { title, project: project.project.id } });
+    if (result.kind !== "task") throw new Error("Expected a task");
+    return result.task.id;
+  };
+  const dispatch = async (id: string) => {
+    const result = await command({ op: "work.task.dispatch", args: { task: id, to: "codex@server" } });
+    if (result.kind !== "job") throw new Error("Expected a job");
+    return result.job;
+  };
+  const firstTask = await task("First task"), secondTask = await task("Second task");
+  const first = await dispatch(firstTask), second = await dispatch(secondTask);
+  const complete = async (job: Job) => {
+    await eventually(async () => !!(await get(job.spec.id)).result);
+    const result = (await get(job.spec.id)).result!;
+    expect(result.status).toBe("done");
+    if (!result.workspace) throw new Error("Expected a managed workspace");
+    return result.workspace;
+  };
+  const [left, right] = await Promise.all([complete(first), complete(second)]);
+  expect(left.path).not.toBe(right.path);
+  expect(left.branch).not.toBe(right.branch);
+  expect(await exists(join(repository, "working.txt"))).toBe(false);
+  const next = await dispatch(firstTask);
+  expect(next.spec.worktree?.reuse).toBe(true);
+  expect(await complete(next)).toEqual(left);
+  expect(await readFile(join(left.path, "working.txt"), "utf8")).toBe("round\nround\n");
+  expect(await readFile(join(right.path, "working.txt"), "utf8")).toBe("round\n");
+}, 20_000);
 
 test("a dispatched headless Job shows the first tool before completion through the actual Runtime", async () => {
   const project = await activityRuntime();
