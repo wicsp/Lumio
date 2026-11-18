@@ -5,18 +5,23 @@ import { WorkPane } from "../../src/client/panes/work.ts";
 import { WorkEditor } from "../../src/client/panes/work-editor.ts";
 import { WorkbenchView } from "../../src/client/views/workbench.ts";
 import { MainDock } from "../../src/client/main-dock.ts";
+import { resourceLinks } from "../../src/client/resources.ts";
 import { buildFocus, type FocusInput } from "../../src/client/workbench-assist.ts";
 import type { Client, HubExtras } from "../../src/client/api.ts";
 
 class ElementStub extends EventTarget {
   children: unknown[] = [];
+  attributes = new Map<string, string>();
+  style = { height: "" };
   private listeners = new Map<string, EventListener[]>();
   className = ""; disabled = false;
   #parent?: ElementStub;
   get isConnected(): boolean { return Object.is(this, globalThis.document?.body) || this.#parent?.isConnected === true; }
   value = ""; scrollTop = 0; hidden = false; innerHTML = ""; textContent = "";
   classList = { add() {}, remove() {}, toggle() {} };
-  setAttribute() {}
+  setAttribute(name: string, value: string) { this.attributes.set(name, value); }
+  removeAttribute(name: string) { this.attributes.delete(name); }
+  get dataset() { return { resource: this.attributes.get("data-resource") }; }
   append(...items: unknown[]) {
     for (const item of items) if (item instanceof ElementStub) item.#parent = this;
     this.children.push(...items);
@@ -27,7 +32,11 @@ class ElementStub extends EventTarget {
   }
   querySelectorAll() { return []; }
   querySelector() { return null; }
-  closest() { return null; }
+  contains(element: ElementStub): boolean {
+    return element === this || (element.#parent !== undefined && this.contains(element.#parent));
+  }
+  closest(selector: string) { return selector === "[data-resource]" && this.dataset.resource ? this : null; }
+  after() {}
   remove() {}
   override addEventListener(type: string, callback: EventListenerOrEventListenerObject | null, options?: boolean | AddEventListenerOptions) {
     super.addEventListener(type, callback, options);
@@ -42,6 +51,8 @@ beforeEach(() => {
   const values = {
     document: { body: new ElementStub(), documentElement: { lang: "en" }, createElement: () => new ElementStub(), createElementNS: () => new ElementStub() },
     window: Object.assign(new EventTarget(), { getSelection: () => null }), Node: ElementStub,
+    ResizeObserver: class { observe() {} disconnect() {} }, MutationObserver: class { observe() {} disconnect() {} },
+    requestAnimationFrame: () => 1, cancelAnimationFrame() {},
     location: { hash: "#work/tasks" }, history: { replaceState() {} },
   };
   const old = Object.keys(values).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const);
@@ -56,6 +67,63 @@ const first = WorkTaskDetail.parse({ task: WorkTask.parse(seed), comments: [], e
 const second = WorkTaskDetail.parse({ ...first, task: { ...first.task, id: "task_00000000000000000000000002", title: "Synthetic second task" } });
 const project = WorkProject.parse({ schema_version: 2, type: "project", created_by: "act_00000000000000000000000001", updated_by: "act_00000000000000000000000001", id: "prj_00000000000000000000000001", title: "Synthetic project",
   description: "", revision: 3, status: "active", created: seed.created, updated: seed.updated, tags: [] });
+
+test("task knowledge references open the resolved resource or show why it is unavailable", async () => {
+  const idea = "idea_00000000000000000000000001";
+  const source = "src_00000000000000000000000001";
+  const note = "ain_00000000000000000000000001";
+  const trashed = "ain_00000000000000000000000002";
+  const missing = "src_00000000000000000000000002";
+  const detail = WorkTaskDetail.parse({ ...first, task: { ...first.task, references: [
+    { module: "knowledge", id: idea, label: "Discussion" },
+    { module: "knowledge", id: source },
+    { module: "knowledge", id: note, label: "AI note" },
+    { module: "knowledge", id: trashed, label: "Trashed note" },
+    { module: "knowledge", id: missing, label: "Missing source" },
+    { module: "work", id: second.task.id, label: "Other task" },
+  ] } });
+  const root = new ElementStub();
+  const navigations: unknown[][] = [];
+  const lookups: string[] = [];
+  const navigate = (...args: unknown[]) => { navigations.push(args); };
+  const client = {
+    actors: async () => [],
+    workTasks: async () => [],
+    async resource(id: string) {
+      lookups.push(id);
+      if (id === trashed) return { id, status: "trashed" };
+      if (id === missing) return { id, status: "unavailable" };
+      return { id, status: "visible", title: id };
+    },
+  } as unknown as Client;
+  const editor = new WorkEditor(root as unknown as HTMLElement, root as unknown as HTMLElement,
+    client, {} as HubExtras, detail, [], { navigate, back() {}, openProject() {}, changed() {}, reload() {} }, null);
+  const disposeLinks = resourceLinks(root as unknown as HTMLElement, client, navigate);
+  const descendants = (node: ElementStub): ElementStub[] =>
+    [node, ...node.children.flatMap(child => child instanceof ElementStub ? descendants(child) : [])];
+  try {
+    const links = descendants(root).filter(node => node.className === "resource-link");
+    expect(links.map(link => [link.attributes.get("href"), link.children[0]])).toEqual([
+      [`lumio:${idea}`, "Discussion"], [`lumio:${source}`, source], [`lumio:${note}`, "AI note"],
+      [`lumio:${trashed}`, "Trashed note"], [`lumio:${missing}`, "Missing source"],
+    ]);
+    for (const link of links) {
+      const click = new Event("click", { cancelable: true });
+      Object.defineProperty(click, "target", { value: link });
+      root.dispatchEvent(click);
+      expect(click.defaultPrevented).toBe(true);
+    }
+    await Bun.sleep(0);
+    expect(lookups).toEqual([idea, source, note, trashed, missing]);
+    expect(navigations).toEqual([["knowledge", idea], ["knowledge", source], ["knowledge", note]]);
+    const notices = descendants(document.body as unknown as ElementStub).flatMap(node => node.children);
+    expect(notices).toContain("This item is in Recently deleted.");
+    expect(notices).toContain("This item isn't available to you.");
+  } finally {
+    disposeLinks();
+    editor.dispose();
+  }
+});
 
 function setup(mode: "tasks" | "projects" = "tasks", hash = "#work/tasks") {
   let result: Promise<WorkTaskDetail | WorkProject> = Promise.resolve(first);
