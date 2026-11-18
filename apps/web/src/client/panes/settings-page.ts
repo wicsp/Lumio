@@ -152,8 +152,9 @@ export class SettingsPane {
         const interaction = new JobInteractionSettings(this.session.client);
         const concurrency = new AgentConcurrencySettings(this.session.client);
         return { element: page(
-          this.group(t("Task execution"), t("Live interaction can use an existing Codex connection. Claude Agent SDK uses a provider API key. Interactive rounds require allowed project folders on the runtime."), interaction.element),
-          this.group(t("Agent concurrency"), t("Connections that share an upstream quota can use the same group name. The limit applies across runtimes."), concurrency.element)),
+          this.group(t("Agent concurrency defaults"), t("These defaults apply across runtimes. Tasks also need a slot in their project."), concurrency.element),
+          this.group(t("Project concurrency"), t("Open a project to change its limit. For parallel coding tasks in the same repository, enable automatic worktrees."), concurrency.projects),
+          this.group(t("Task execution"), t("Live interaction can use an existing Codex connection. Claude Agent SDK uses a provider API key. Interactive rounds require allowed project folders on the runtime."), interaction.element)),
           dispose: () => { interaction.dispose(); concurrency.dispose(); } };
       }
       case "devices": {

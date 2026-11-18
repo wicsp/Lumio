@@ -985,6 +985,8 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 .concurrency-field:has(input[type=number]) { flex: 0 1 96px; }
 .concurrency-row > [role=status]:empty { display: none; }
 .concurrency-row > [role=status] { flex-basis: 100%; color: var(--red); }
+.concurrency-advanced { border-top: 1px solid var(--line); }
+.concurrency-note { margin: 0; padding: 10px 14px; }
 /* 语音热词表默认收起。 */
 .vocabulary-fold > summary { display: flex; align-items: baseline; gap: 8px; cursor: pointer; font-size: var(--fs-md); }
 .vocabulary-fold > summary .set-sub { display: inline; }
