@@ -28,6 +28,8 @@ export function jobActivitySummary(view: JobLiveView): string {
   if (view.connected === false) return [t("Runtime disconnected"),
     view.last_heartbeat ? t("Last heartbeat {0}", ago(view.last_heartbeat)) : null].filter(Boolean).join(" · ");
   if (view.pending) return t("Waiting for you");
+  if (view.connected && !view.phase && !view.started && !view.last_heartbeat
+    && (view.status === "queued" || view.status === "assigned")) return t("Waiting to run");
   const tool = view.active_tools.at(-1);
   const parts = [
     tool ? t("Running {0}", tool.label) : view.phase ? t(phases[view.phase]) : view.assigned ? t("Runtime received the run")

@@ -18,8 +18,18 @@ test("Job summaries distinguish observable work, a queued round and a disconnect
   expect(jobActivitySummary(view)).toContain("Last heartbeat");
   expect(jobActivitySummary({ ...view, connected: false })).toContain("Runtime disconnected");
   expect(jobActivitySummary({ ...view, stop_requested: true })).toContain("confirm it stopped");
-  expect(jobActivitySummary({ ...view, assigned: null, started: null, last_activity: null, last_heartbeat: null,
-    active_tools: [], phase: null, connected: null, status: "queued" })).toBe("Waiting for the Runtime");
+  const waiting = { ...view, assigned: null, started: null, last_activity: null, last_heartbeat: null,
+    active_tools: [], phase: null, connected: null, status: "queued" } satisfies JobLiveView;
+  expect(jobActivitySummary(waiting)).toBe("Waiting for the Runtime");
+  expect(jobActivitySummary({ ...waiting, connected: true })).toBe("Waiting to run");
+  const assigned = { ...waiting, assigned: at, status: "assigned" } as const;
+  expect(jobActivitySummary({ ...assigned, connected: false })).toBe("Runtime disconnected");
+  setLang("zh", false);
+  try {
+    expect(jobActivitySummary({ ...assigned, connected: true })).toBe("等待执行");
+  } finally {
+    setLang("en", false);
+  }
 });
 test("the delegation and plan editors preserve explicitly requested interaction", () => {
   const task = { id: "task_00000000000000000000000001", revision: 1 };
