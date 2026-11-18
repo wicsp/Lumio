@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { AssistantChatRequest, WorkTask, WorkTaskDetail, WorkProject, type ResourceRef } from "@lumio/schema";
+import { AssistantChatRequest, WorkCommandRequest, WorkTask, WorkTaskDetail, WorkProject, type ResourceRef } from "@lumio/schema";
 import seed from "../../../../fixtures/work/readiness.json";
 import { WorkPane } from "../../src/client/panes/work.ts";
 import { WorkEditor } from "../../src/client/panes/work-editor.ts";
@@ -11,13 +11,23 @@ import type { Client, HubExtras } from "../../src/client/api.ts";
 class ElementStub extends EventTarget {
   children: unknown[] = [];
   private listeners = new Map<string, EventListener[]>();
+  className = ""; disabled = false;
+  #parent?: ElementStub;
+  get isConnected(): boolean { return Object.is(this, globalThis.document?.body) || this.#parent?.isConnected === true; }
   value = ""; scrollTop = 0; hidden = false; innerHTML = ""; textContent = "";
   classList = { add() {}, remove() {}, toggle() {} };
   setAttribute() {}
-  append(...items: unknown[]) { this.children.push(...items); }
-  replaceChildren() { this.children = []; }
+  append(...items: unknown[]) {
+    for (const item of items) if (item instanceof ElementStub) item.#parent = this;
+    this.children.push(...items);
+  }
+  replaceChildren() {
+    for (const child of this.children) if (child instanceof ElementStub) child.#parent = undefined;
+    this.children = [];
+  }
   querySelectorAll() { return []; }
   querySelector() { return null; }
+  closest() { return null; }
   remove() {}
   override addEventListener(type: string, callback: EventListenerOrEventListenerObject | null, options?: boolean | AddEventListenerOptions) {
     super.addEventListener(type, callback, options);
@@ -30,7 +40,7 @@ class ElementStub extends EventTarget {
 let restore: () => void;
 beforeEach(() => {
   const values = {
-    document: { documentElement: { lang: "en" }, createElement: () => new ElementStub(), createElementNS: () => new ElementStub() },
+    document: { body: new ElementStub(), documentElement: { lang: "en" }, createElement: () => new ElementStub(), createElementNS: () => new ElementStub() },
     window: Object.assign(new EventTarget(), { getSelection: () => null }), Node: ElementStub,
     location: { hash: "#work/tasks" }, history: { replaceState() {} },
   };
@@ -209,4 +219,51 @@ test("interacting with a visible Work detail acknowledges the open card", async 
     detail.userInput("click");
     expect(reads).toEqual([]);
   } finally { pane.dispose(); }
+});
+
+test("project to-dos delegate in place and refresh into the agents group", async () => {
+  const eligible = WorkTask.parse({ ...first.task, project: project.id, next_target: { target: "codex@test", source: "project" } });
+  const blocked = WorkTask.parse({ ...second.task, project: project.id, next_target: eligible.next_target, dependencies: [eligible.id], blocked_by: [eligible.id] });
+  let tasks = [eligible, blocked];
+  const reads: string[] = [];
+  const commands: WorkCommandRequest[] = [];
+  const navigations: unknown[][] = [];
+  let changes = 0;
+  const editor = Object.assign(Object.create(WorkEditor.prototype), {
+    active: true,
+    client: {
+      workTasks: async ({ project }: { project: string }) => { reads.push(project); return tasks; },
+      workCommand: async (request: unknown) => {
+        commands.push(WorkCommandRequest.parse(request));
+        tasks = [WorkTask.parse({ ...eligible, revision: eligible.revision + 1, next_target: undefined,
+          turn: { holder: "codex@test", reason: "working", since: eligible.updated, job: "job_00000000000000000000000001" } }), blocked];
+        return { kind: "job", job: { spec: { id: tasks[0]!.turn.job } } };
+      },
+    },
+    hooks: { navigate: (...args: unknown[]) => navigations.push(args), changed: () => changes++ },
+  }) as { projectTasks(project: WorkProject): ElementStub };
+
+  const section = editor.projectTasks(project);
+  document.body.append(section as unknown as Node);
+  const descendants = (node: ElementStub): ElementStub[] =>
+    [node, ...node.children.flatMap(child => child instanceof ElementStub ? descendants(child) : [])];
+  const find = (name: string) => descendants(section).filter(node => node.className.split(" ").includes(name));
+  await Bun.sleep(0);
+
+  expect(find("run")).toHaveLength(2);
+  expect(find("quick-delegate")).toHaveLength(1);
+  const delegate = find("quick-delegate")[0]!;
+  expect(find("task-action-row")[0]?.children).toEqual([find("run")[0], find("quick-delegate-group")[0]]);
+  delegate.dispatchEvent(new Event("click"));
+  delegate.dispatchEvent(new Event("click"));
+  await Bun.sleep(0);
+
+  expect(commands.map(command => command.operation)).toEqual([
+    { op: "work.task.dispatch", args: { task: eligible.id, expected_revision: eligible.revision } },
+  ]);
+  expect(reads).toEqual([project.id, project.id]);
+  expect(changes).toBe(1);
+  expect(navigations).toEqual([]);
+  expect(find("quick-delegate")).toHaveLength(0);
+  expect(descendants(section).flatMap(node => node.children)).toContain("codex@test is working");
 });

@@ -12,7 +12,7 @@ import { attentionCard, attentionFor } from "../attention-card.ts";
 import { jobActivityBadge } from "../job-activity.ts";
 import { jobInteractionChoice, jobInteractionStatus } from "../job-interaction-settings.ts";
 import { answerCommand, commentCommand, dispatchCommand, engineTargets, formatTime, newRequestId, workPatchCommand } from "../commands.ts";
-import { nextTargetText } from "../delegate.ts";
+import { nextTargetText, quickDelegateActions } from "../delegate.ts";
 import { autosize, clear, confirmDialog, failure, field, h, icon, openDialog, openMenu, promptDialog, select, statusIcon, toast, type MenuItem } from "../dom.ts";
 import { speechButton } from "../speech-input.ts";
 import { ago, dateInputValue, dueLabel, isoFromDateInput } from "../format.ts";
@@ -580,38 +580,62 @@ export class WorkEditor {
     const VIEW_KEY = "lumio.web.project-task-view";
     let view = (() => { try { return localStorage.getItem(VIEW_KEY) === "graph" ? "graph" : "list"; } catch { return "list"; } })();
     const listBtn = h("button", { type: "button" }, t("List")), graphBtn = h("button", { type: "button" }, t("Dependency graph"));
-    let tasks: WorkTask[] | undefined;
+    let tasks: WorkTask[] | undefined, generation = 0;
     const render = () => {
       listBtn.setAttribute("aria-pressed", String(view === "list")); graphBtn.setAttribute("aria-pressed", String(view === "graph"));
       if (!tasks || !this.active) return;
-      if (view === "graph") { void this.renderProjectGraph(body, tasks, project.id); return; }
+      if (view === "graph") {
+        const current = tasks;
+        void this.renderProjectGraph(body, current, project.id, () => view === "graph" && tasks === current);
+        return;
+      }
       if (!tasks.length) { clear(body, h("p", { class: "muted" }, t("No tasks in this project yet."))); return; }
       const groups = groupTasksByTurn(tasks);
       clear(body, ...groups.map(([group, list]) => h("div", { class: "project-task-group" },
         h("p", { class: "project-task-head" }, turnIcon(group), TURN_GROUP_LABELS[group], h("span", { class: "count" }, list.length)),
-        h("div", { class: "runs" }, ...list.map(task => h("button", { type: "button", class: "run", onclick: () => this.hooks.navigate("work", task.id) },
-          turnIcon(turnGroup(task)), h("span", { class: "run-round" }, task.title),
-          group === "todo" || group === "done" || group === "cancelled" ? null : group === "blocked" ? h("span", { class: "muted" }, t("Waiting on {0}", task.blocked_by!.length)) : h("span", { class: "muted" }, turnText(task)),
-          h("span", { class: "row-meta" }, icon("chevron"))))))));
+        h("div", { class: "runs" }, ...list.map(task => {
+          const row = h("button", { type: "button", class: "run", onclick: () => this.hooks.navigate("work", task.id) },
+            turnIcon(group), h("span", { class: "run-round" }, task.title),
+            group === "todo" || group === "done" || group === "cancelled" ? null : group === "blocked" ? h("span", { class: "muted" }, t("Waiting on {0}", task.blocked_by!.length)) : h("span", { class: "muted" }, turnText(task)),
+            h("span", { class: "row-meta" }, icon("chevron")));
+          const delegation = quickDelegateActions(this.client, task, this.hooks.navigate, changed => {
+            if (changed) this.hooks.changed();
+            return load();
+          });
+          return delegation ? h("div", { class: "task-action-row" }, row, delegation) : row;
+        })))));
+    };
+    const load = async () => {
+      if (!this.active) return;
+      const request = ++generation;
+      try {
+        const list = await this.client.workTasks({ project: project.id });
+        if (!this.active || request !== generation || JSON.stringify(tasks) === JSON.stringify(list)) return;
+        tasks = list;
+        render();
+      } catch (cause) {
+        if (!this.active || request !== generation) return;
+        if (tasks) toast(errorText(cause), "error");
+        else clear(body, failure(errorText(cause), load));
+      }
     };
     const choose = (next: "list" | "graph") => { view = next; try { localStorage.setItem(VIEW_KEY, next); } catch { /* 只在本次显示 */ } render(); };
     listBtn.addEventListener("click", () => choose("list")); graphBtn.addEventListener("click", () => choose("graph"));
-    void this.client.workTasks({ project: project.id }).then(list => { tasks = list; render(); })
-      .catch(cause => { if (this.active) clear(body, failure(errorText(cause))); });
+    void load();
     render();
     return h("section", { class: "section" }, h("div", { class: "section-head" }, h("h3", {}, t("Tasks")),
       h("div", { class: "detail-actions" }, h("div", { class: "segmented segmented-small", role: "group", "aria-label": t("View") }, listBtn, graphBtn), add)), body);
   }
 
   /** 项目依赖图：未完成任务自左向右按依赖分层，可开工的高亮；项目外未完成的前置以虚线标出。 */
-  private async renderProjectGraph(body: HTMLElement, tasks: WorkTask[], projectId: string): Promise<void> {
+  private async renderProjectGraph(body: HTMLElement, tasks: WorkTask[], projectId: string, canRender: () => boolean): Promise<void> {
     const open = tasks.filter(task => task.outcome === "open");
     if (!open.length) { clear(body, h("p", { class: "muted" }, t("No unfinished tasks to draw."))); return; }
     if (open.length > MAX_TASK_NODES) { clear(body, h("p", { class: "muted" }, t("This project has {0} unfinished tasks — too many for a readable graph. Use the list instead.", open.length))); return; }
     // 项目外的前置要标题：需要时才读一次全部任务。
     const needsAll = open.some(task => task.dependencies.some(id => !tasks.some(other => other.id === id)));
     const all = needsAll ? await this.client.workTasks().catch(() => tasks) : tasks;
-    if (!this.active) return;
+    if (!this.active || !canRender()) return;
     const projectTitle = (id?: string) => this.projects.find(p => p.id === id)?.title;
     const { nodes, edges } = taskGraph(tasks, all, task => {
       const group = turnGroup(task), outside = task.project !== projectId;

@@ -570,7 +570,7 @@ export class GamepadNavigation {
   }
 
   private actionScope(row: HTMLElement): HTMLElement {
-    return row.closest<HTMLElement>(".today-row-wrap")
+    return row.closest<HTMLElement>(".task-action-row")
       ?? (row.hasAttribute("data-pad-action") ? row.closest<HTMLElement>(".detail-pane") : undefined)
       ?? row;
   }

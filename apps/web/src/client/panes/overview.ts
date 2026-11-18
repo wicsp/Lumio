@@ -9,8 +9,8 @@ import { noticePreview, noticeTitle } from "../workbench-assist.ts";
 import { errorText, type Client, type HubExtras } from "../api.ts";
 import { executionGroups } from "../execution-groups.ts";
 import { attentionCard } from "../attention-card.ts";
-import { engineTargets, formatTime, newRequestId } from "../commands.ts";
-import { quickDelegateTarget, quickDispatchCommand, nextTargetText } from "../delegate.ts";
+import { formatTime, newRequestId } from "../commands.ts";
+import { quickDelegateActions } from "../delegate.ts";
 import { clear, failure, h, icon, loading, openMenu, statusIcon, toast } from "../dom.ts";
 import { ago, dueLabel, jobTitle } from "../format.ts";
 import { JOB_LABELS } from "../labels.ts";
@@ -155,53 +155,17 @@ export class OverviewPane {
             project && h("span", { class: "project-chip" }, icon("folder"), project),
             task.turn.holder !== "human" && h("span", { class: "who-chip" }, icon(task.turn.holder === "external" ? "clock" : "bot"), turnText(task)))),
         due && h("span", { class: `due-tag${due.overdue ? " overdue" : due.soon ? " soon" : ""}` }, due.overdue ? t("Overdue · {0}", due.text) : due.text));
-      const next = quickDelegateTarget(task);
-      const delegation = next && this.delegateActions(task, next);
+      const delegation = quickDelegateActions(this.client, task, this.navigate, changed => {
+        if (changed) this.changed();
+        return this.load();
+      });
       row.addEventListener("lumio-task-menu", () => {
-        const pick = delegation?.querySelector<HTMLButtonElement>(".today-delegate-pick:not(:disabled)");
+        const pick = delegation?.querySelector<HTMLButtonElement>(".quick-delegate-pick:not(:disabled)");
         taskTurnMenu(this.client, task, row, () => { this.changed(); void this.load(); }, () => { void this.load(); },
           pick ? [{ label: t("Delegate to someone else"), run: () => pick.click() }] : []);
       });
-      return delegation ? h("div", { class: "today-row-wrap" }, row, delegation) : row;
+      return delegation ? h("div", { class: "task-action-row" }, row, delegation) : row;
     }));
-  }
-
-  /** 一键委派（ADR 0044）：按 Hub 推导的目标派出；小箭头换人，之后这个任务一直交给新的 agent。 */
-  private delegateActions(task: WorkTask, next: NonNullable<WorkTask["next_target"]>): HTMLElement {
-    const go = h("button", { type: "button", class: "btn btn-small today-delegate", "data-pad-action": "delegate", title: t("Delegate to {0}", nextTargetText(next)), "aria-label": t("Delegate to {0}", next.target) },
-      icon("play"), h("span", { class: "today-delegate-label" }, t("Delegate")));
-    const pick = h("button", { type: "button", class: "btn btn-small today-delegate-pick", title: next.source === "plan" ? t("Set by the plan step") : t("Delegate to someone else"),
-      "aria-label": t("Delegate to someone else"), disabled: next.source === "plan" }, icon("down"));
-    const group = h("span", { class: "today-delegate-group" }, go, pick);
-    let requestId = newRequestId(), previous: string | undefined;
-    const send = async (to?: string) => {
-      if (group.classList.contains("is-busy")) return;
-      if (previous !== undefined && previous !== (to ?? "")) requestId = newRequestId();
-      previous = to ?? "";
-      group.classList.add("is-busy"); go.disabled = pick.disabled = true;
-      try {
-        const result = await this.client.workCommand(quickDispatchCommand(task, to, requestId));
-        const who = result.kind === "job" ? result.target ?? to ?? next.target : to ?? next.target;
-        if (result.kind === "proposal") toast(t("Waiting for your approval"));
-        else if (result.kind === "job") toast(t("Dispatched to {0}", who), "ok", {
-          label: t("View run"), run: () => this.navigate("execution", result.job.spec.id, "from-dispatch-toast"),
-        });
-        this.changed();
-        void this.load();
-      } catch (cause) {
-        toast(errorText(cause), "error");
-        group.classList.remove("is-busy"); go.disabled = false; pick.disabled = next.source === "plan";
-        void this.load();
-      }
-    };
-    go.addEventListener("click", () => void send());
-    pick.addEventListener("click", async () => {
-      try {
-        const targets = engineTargets(await this.client.runtimes());
-        openMenu(pick, targets.map(x => ({ value: x.target, label: x.label, selected: x.target === next.target, icon: icon("bot") })), value => void send(value));
-      } catch (cause) { toast(errorText(cause), "error"); }
-    });
-    return group;
   }
 
   private needsYou(approvals: Proposal[] | undefined, jobs: Job[], error: unknown, tasks: WorkTask[], rounds: WorkAttention[], liveRequests: JobAttention): HTMLElement | null {
