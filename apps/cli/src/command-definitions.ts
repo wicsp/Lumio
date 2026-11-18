@@ -10,10 +10,11 @@ export const WORK_OPTIONS = {
   timeout: { type: "string" }, patch: { type: "string" }, revision: { type: "string" }, "request-id": { type: "string" },
   comment: { type: "string" }, turn: { type: "string" }, note: { type: "string" },
   from: { type: "string" }, stage: { type: "string" }, action: { type: "string" }, "back-to": { type: "string" },
+  "auto-worktree": { type: "string" }, "worktree-base": { type: "string" }, "max-concurrent": { type: "string" },
   goal: { type: "string" }, repo: { type: "string" }, deadline: { type: "string" }, "default-target": { type: "string" }, "default-plan": { type: "string" },
 } as const;
 export interface CommandDefinition { path: string; positional?: string; options?: string[]; required?: string[]; capability?: string; aliases?: string[]; tail?: string }
-const write = ["request-id"], body = ["description", "file"], taskFields = ["project", "parent", "depends", "due", "workdir", "model", "gpus", "timeout"], projectFields = ["goal", "repo", "deadline", "workdir", "default-target"];
+const write = ["request-id"], body = ["description", "file"], taskFields = ["project", "parent", "depends", "due", "workdir", "model", "gpus", "timeout"], projectFields = ["goal", "repo", "deadline", "workdir", "default-target", "auto-worktree", "worktree-base", "max-concurrent"];
 const def = (path: string, positional = "", options: string[] = [], capability?: string, extra: Partial<CommandDefinition> = {}): CommandDefinition => ({ path, positional, options, capability, ...extra });
 export const COMMANDS: CommandDefinition[] = [
   def("search", "<query>", ["type", "limit", "include-private", "vault"], "knowledge.note.search"),

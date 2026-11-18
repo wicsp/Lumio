@@ -1,3 +1,4 @@
+import { prepareProjectWorktree } from "./project-worktree.ts";
 import { createHash } from "node:crypto";
 import type { CodexJobCredential, ConnectionAuth } from "./native/connection-auth.ts";
 import { splitPermissionRequest } from "./permission-request.ts";
@@ -68,8 +69,16 @@ export class Executor {
   private running = new Map<string, RunningJob>();
   private pending = new Set<Promise<void>>();
   private stopping = false;
+  private maxConcurrent: number;
+  private worktrees = new Set<string>();
+  private repositoryPreparation: Promise<unknown> = Promise.resolve();
   constructor(private queue: Queue, private config: RuntimeConfig, private env: NodeJS.ProcessEnv, private wake: () => void,
-    private engines: Engines = [], private sudo?: SudoGate, private activity?: RuntimeJobActivity, private accounts?: ConnectionAuth) {}
+    private engines: Engines = [], private sudo?: SudoGate, private activity?: RuntimeJobActivity, private accounts?: ConnectionAuth) {
+    this.maxConcurrent = config.registration.max_concurrent;
+  }
+  setConcurrency(override: number | null): number {
+    return this.maxConcurrent = override ?? this.config.registration.max_concurrent;
+  }
   async recover() {
     for (const job of this.queue.jobs().filter((j) => j.state === "running")) {
       if (job.pid && groupExists(job.pid)) await killGroup(job.pid);
@@ -106,8 +115,11 @@ export class Executor {
   pump() {
     if (this.stopping) return;
     for (const job of this.queue.jobs()) {
-      if (this.pending.size >= this.config.registration.max_concurrent) break;
+      if (this.pending.size >= this.maxConcurrent) break;
       if (job.state !== "queued" || !job.acked) continue;
+      const workspace = job.spec.worktree?.task;
+      if (workspace && this.worktrees.has(workspace)) continue;
+      if (workspace) this.worktrees.add(workspace);
       // start() is synchronous, preventing the next pump from selecting the same job.
       this.queue.start(job.spec.id, new Date().toISOString());
       const slot: RunningJob = { child: {} as ChildProcess };
@@ -115,6 +127,7 @@ export class Executor {
       const pending = this.execute(job, slot).finally(() => {
         this.running.delete(job.spec.id);
         this.pending.delete(pending);
+        if (workspace) this.worktrees.delete(workspace);
         this.wake();
       });
       this.pending.add(pending);
@@ -128,6 +141,7 @@ export class Executor {
     const roundDirectory = join(this.config.stateDir, "agent-config", job.spec.id);
     const spec = job.spec, started = this.queue.jobs().find((j) => j.spec.id === spec.id)!.started!;
     let trace: RunLogWriter | undefined;
+    let managedWorkspace: import("@lumio/schema").JobResult["workspace"];
     const activity = this.activity;
     activity?.record(spec.id, { type: "phase", phase: "preparing" });
     const finish = async (fields: Parameters<Queue["finish"]>[0]) => {
@@ -136,7 +150,7 @@ export class Executor {
       if (fields.status === "failed") activity?.record(spec.id, { type: "error", category: "engine" });
       activity?.record(spec.id, { type: "phase", phase: "finishing" });
       const unavailable = this.sudo?.unavailableFor(spec.id);
-      this.queue.finish({ ...fields, ...(unavailable ? { privileged_unavailable: { program: redact(unavailable) } } : {}),
+      this.queue.finish({ ...fields, ...(managedWorkspace ? { workspace: managedWorkspace } : {}), ...(unavailable ? { privileged_unavailable: { program: redact(unavailable) } } : {}),
         ...(fields.report === undefined ? {} : { report: redact(fields.report) }),
         ...(fields.question === undefined ? {} : { question: redact(fields.question) }),
         ...(fields.error === undefined ? {} : { error: redact(fields.error) }) });
@@ -164,14 +178,25 @@ export class Executor {
       if (!versionSupported(adapter, detected.version)) {
         await fail(msg("executor.is_outside_verified_version_range_verify_the_new_version_before_exte", run.engine, detected.version, adapter.versions.min, adapter.versions.below)); return;
       }
+      if (run.interaction && activity?.supported()) interactive = await interactiveEngine(run.engine, detected.version, this.env, Boolean(account));
+      if (run.interaction && (!interactive || run.permissions?.access === "full")) { await fail(msg("executor.interactive_unavailable")); return; }
+      if (spec.worktree) {
+        if (interactive && !await interactiveWorkspace(workdir, this.config.stateDir, interactive, [], Boolean(account))) {
+          await fail(msg("executor.interactive_workdir")); return;
+        }
+        // Serialize Git registry mutations while other jobs may already be executing.
+        const preparation = this.repositoryPreparation.then(() => prepareProjectWorktree(this.config.stateDir, workdir, spec.worktree!, this.env));
+        this.repositoryPreparation = preparation.catch(() => {});
+        try { managedWorkspace = await preparation; workdir = managedWorkspace.path; }
+        catch { await fail(msg("executor.project_worktree_unavailable")); return; }
+        if (interactive?.roots.length) interactive = { ...interactive, roots: [workdir] };
+      }
       if (run.engine === "codex" && run.permissions?.git && run.permissions.access !== "full") {
         if (detected.version !== "0.166.0") { await fail(msg("executor.git_profile_version")); return; }
         gitPaths = gitWritePaths(workdir, this.env);
         if (!gitPaths.length) { await fail(msg("executor.git_profile_workdir")); return; }
       }
-      if (run.interaction) {
-        if (activity?.supported()) interactive = await interactiveEngine(run.engine, detected.version, this.env, Boolean(account));
-        if (!interactive || run.permissions?.access === "full") { await fail(msg("executor.interactive_unavailable")); return; }
+      if (interactive) {
         if (run.engine !== "codex" && run.permissions?.git) {
           gitPaths = gitWritePaths(workdir, this.env);
           if (!gitPaths.length) { await fail(msg("executor.git_profile_workdir")); return; }

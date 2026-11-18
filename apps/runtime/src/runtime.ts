@@ -5,8 +5,8 @@ import { withLanguage, text as msg } from "./messages.ts";
 import { SudoGate } from "./sudo.ts";
 import { privateFile } from "./service.ts";
 import { join } from "node:path";
-import { mkdir } from "node:fs/promises";
-import { JOB_ACCOUNT_FEATURE, JOB_ACTIVITY_FEATURE, RuntimeAck, RuntimeRegistered, RuntimeRegistration, RuntimeSync } from "@lumio/schema";
+import { mkdir, readFile } from "node:fs/promises";
+import { JOB_ACCOUNT_FEATURE, JOB_ACTIVITY_FEATURE, PROJECT_WORKTREE_FEATURE, RUNTIME_CONCURRENCY_FEATURE, RuntimeConcurrency, RuntimeAck, RuntimeRegistered, RuntimeRegistration, RuntimeSync } from "@lumio/schema";
 import type { RuntimeConfig } from "./config.ts";
 import { detectEngines } from "./engines.ts";
 import { Queue } from "./queue.ts";
@@ -79,10 +79,17 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
   const executor = new Executor(queue, config, options.env ?? process.env, () => { events.notify(); deliveries.notify(); archiveWake.notify(); }, registration.engines, sudo, activity, accounts);
   let registered = false, disconnected = false, activityNegotiated = false, accountNegotiated = false;
   let nextActivityRegistration = 0;
+  let concurrency: { override: number | null; effective: number } | undefined;
+  const concurrencyFile = join(config.stateDir, "job-concurrency.json");
+  const savedConcurrency = RuntimeConcurrency.nullable().safeParse(
+    await readFile(concurrencyFile, "utf8").then(value => JSON.parse(value)).catch(() => undefined));
+  if (savedConcurrency.success) concurrency = { override: savedConcurrency.data, effective: executor.setConcurrency(savedConcurrency.data) };
+  const projectFeatures = `, ${RUNTIME_CONCURRENCY_FEATURE}`
+    + (Bun.which("git", { PATH: env.PATH ?? "" }) ? `, ${PROJECT_WORKTREE_FEATURE}` : "");
   let backoff = Math.min(config.pollSeconds, 60);
   async function send(path: string, body: unknown) {
     return fetcher(`${config.url}${path}`, {
-      method: "POST", headers: { Authorization: `Bearer ${config.token}`, "Content-Type": "application/json", ...(path === "/v1/runtime/sync" ? { "X-Lumio-Features": accountNegotiated ? `job-access, ${JOB_ACCOUNT_FEATURE}` : "job-access" } : path === "/v1/runtime/register" ? { "X-Lumio-Features": accounts ? `${JOB_ACTIVITY_FEATURE}, ${JOB_ACCOUNT_FEATURE}` : JOB_ACTIVITY_FEATURE } : {}) },
+      method: "POST", headers: { Authorization: `Bearer ${config.token}`, "Content-Type": "application/json", ...(path === "/v1/runtime/sync" ? { "X-Lumio-Features": (accountNegotiated ? `job-access, ${JOB_ACCOUNT_FEATURE}` : "job-access") + projectFeatures } : path === "/v1/runtime/register" ? { "X-Lumio-Features": (accounts ? `${JOB_ACTIVITY_FEATURE}, ${JOB_ACCOUNT_FEATURE}` : JOB_ACTIVITY_FEATURE) + projectFeatures } : {}) },
       body: JSON.stringify(body), redirect: "error", signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
     });
   }
@@ -149,6 +156,10 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
           if (!response.ok) throw new Error(msg("selftest.hub_request_failed"));
           const info = RuntimeRegistered.parse(await response.json());
           actor = info.actor;
+          if (!info.registration.features?.includes(RUNTIME_CONCURRENCY_FEATURE)) {
+            concurrency = undefined;
+            executor.setConcurrency(null);
+          }
           await privateFile(join(config.stateDir, "registered.json"), JSON.stringify(info));
           activity.disable();
           const features = response.headers.get("X-Lumio-Features")?.split(",").map(value => value.trim()) ?? [];
@@ -162,7 +173,11 @@ async function runRuntimeInstance(config: RuntimeConfig, options: {
           archives.retryNow(); archiveWake.notify();
         } else {
           const report = updater?.heartbeat();
-          const sync = await post("/v1/runtime/sync", { ...queue.heartbeat(), ...(report ? { update: report } : {}) }, RuntimeSync);
+          const sync = await post("/v1/runtime/sync", { ...queue.heartbeat(), ...(report ? { update: report } : {}), ...(concurrency ? { concurrency } : {}) }, RuntimeSync);
+          if (sync.max_concurrent !== undefined) {
+            if (concurrency?.override !== sync.max_concurrent) await privateFile(concurrencyFile, JSON.stringify(sync.max_concurrent));
+            concurrency = { override: sync.max_concurrent, effective: executor.setConcurrency(sync.max_concurrent) };
+          }
           await updater?.install.confirm(version);
           queue.receive(sync.jobs, sync.access, sync.accounts);
           const accepted = queue.jobs().filter((j) => !j.acked).map((j) => j.spec.id);

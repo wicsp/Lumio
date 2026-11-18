@@ -52,10 +52,13 @@ export function taskCreateCommand(input: { title: string; description?: string; 
     ...(input.parent ? { parent: input.parent } : {}) } } };
 }
 
-export function projectCreateCommand(input: { title: string; description?: string; goal?: string; workdir?: string }, requestId = newRequestId()): WorkCommandRequest {
+export function projectCreateCommand(input: { title: string; description?: string; goal?: string; workdir?: string; auto_worktree?: boolean; worktree_base?: string; max_concurrent?: number }, requestId = newRequestId()): WorkCommandRequest {
   return { request_id: requestId, operation: { op: "work.project.create", args: {
     title: input.title.trim(), ...(input.description ? { description: input.description } : {}), ...(input.goal?.trim() ? { goal: input.goal.trim() } : {}),
-    ...(input.workdir?.trim() ? { workdir: input.workdir.trim() } : {}) } } };
+    ...(input.workdir?.trim() ? { workdir: input.workdir.trim() } : {}),
+    ...(input.auto_worktree ? { auto_worktree: true } : {}),
+    ...(input.worktree_base?.trim() ? { worktree_base: input.worktree_base.trim() } : {}),
+    ...(input.max_concurrent === undefined ? {} : { max_concurrent: input.max_concurrent }) } } };
 }
 
 export function commentCommand(task: string, body: string, requestId = newRequestId()): WorkCommandRequest {

@@ -412,12 +412,22 @@ export class WorkPane {
     const goal = h("input", { name: "goal", placeholder: t("What should this phase achieve?"), autocomplete: "off" });
     const project = select("project", [["", t("No project")], ...this.projects.filter(p => p.status !== "done" || p.id === preset).map(p => [p.id, p.title] as [string, string])], preset ?? this.projectFilter);
     const workdir = h("input", { name: "workdir", placeholder: t("~ (runtime's home directory)"), autocomplete: "off", spellcheck: "false" });
+    const autoWorktree = h("input", { name: "auto-worktree", type: "checkbox" });
+    const worktreeBase = h("input", { name: "worktree-base", placeholder: "origin/main", spellcheck: "false" });
+    const concurrency = h("input", { name: "max-concurrent", type: "number", min: "1", step: "1", placeholder: "1" });
+    autoWorktree.addEventListener("change", () => {
+      workdir.required = autoWorktree.checked;
+      worktreeBase.required = autoWorktree.checked;
+    });
     const error = h("div", { class: "form-message", role: "alert" });
     const formId = `create-${newRequestId()}`;
     const form = h("form", { id: formId, class: "form-stack" },
       field(isTask ? t("Title") : t("Name"), title),
       isTask ? field(t("Project"), project) : field(t("Goal"), goal),
       isTask ? null : field(t("Working directory"), workdir, t("Tasks in this project run here unless they set their own.")),
+      isTask ? null : field(t("Automatic Git worktrees"), autoWorktree),
+      isTask ? null : field(t("Worktree base"), worktreeBase),
+      isTask ? null : field(t("Project concurrency"), concurrency),
       field(t("Description"), description), error);
     const save = h("button", { type: "submit", form: formId, class: "btn btn-primary" }, isTask ? t("Create task") : t("Create project"), h("kbd", {}, "⌘↵"));
     const parentTitle = parent ? this.tasks.find(task => task.id === parent)?.title ?? parent : undefined;
@@ -430,13 +440,15 @@ export class WorkPane {
       if (pending) return;
       pending = true; save.disabled = true; clear(error);
       // 同样的内容重试时复用 request_id，Hub 据此去重；内容变了才换新的。
-      const key = JSON.stringify([title.value, description.value, project.value, goal.value, workdir.value]);
+      const key = JSON.stringify([title.value, description.value, project.value, goal.value, workdir.value, autoWorktree.checked, worktreeBase.value, concurrency.value]);
       if (prior && key !== prior) requestId = newRequestId();
       prior = key; dialog.dataset.previous = prior; dialog.dataset.requestId = requestId;
       try {
         const request = isTask
           ? taskCreateCommand({ title: title.value, description: description.value, project: project.value || undefined, parent }, requestId)
-          : projectCreateCommand({ title: title.value, description: description.value, goal: goal.value, workdir: workdir.value }, requestId);
+          : projectCreateCommand({ title: title.value, description: description.value, goal: goal.value, workdir: workdir.value,
+            auto_worktree: autoWorktree.checked, worktree_base: worktreeBase.value,
+            max_concurrent: concurrency.value ? Number(concurrency.value) : undefined }, requestId);
         const result = await this.client.workCommand(request);
         if (!this.active) return;
         dialog.dataset.dirty = "false"; dialog.close();

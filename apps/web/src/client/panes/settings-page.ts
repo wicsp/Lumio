@@ -8,7 +8,7 @@ import type { RuntimeInfo } from "@lumio/schema";
 import { errorText, type Session } from "../api.ts";
 import { clear, confirmDialog, h, icon, toast } from "../dom.ts";
 import { ago } from "../format.ts";
-import { formatTime } from "../commands.ts";
+import { formatTime, newRequestId } from "../commands.ts";
 import { helperState, installCommandBlock } from "../privileged-helper.ts";
 import { lang, setLang, t, type Lang } from "../i18n.ts";
 import { onTheme, setTheme, themeChoice, type ThemeChoice } from "../theme.ts";
@@ -341,6 +341,39 @@ export class SettingsPane {
     }
   }
 
+  private runtimeConcurrency(runtime: RuntimeInfo): HTMLElement {
+    const state = runtime.concurrency;
+    if (!state) return h("span", { class: "set-sub" }, t("Job concurrency: {0}. Update this runtime to edit it.", runtime.registration.max_concurrent));
+    const status = h("span", { class: "set-sub", role: "status" });
+    const input = h("input", { type: "number", min: "1", step: "1", class: "prop-input",
+      "aria-label": t("Job concurrency"), placeholder: t("Use local configuration") });
+    input.value = state.desired?.toString() ?? "";
+    let generation = 0;
+    const display = (value: typeof state, current: number) => {
+      status.textContent = value.pending ? t("Job concurrency: {0} · Waiting for runtime", value.effective) : t("Job concurrency: {0}", value.effective);
+      if (value.pending) setTimeout(async () => {
+        if (!status.isConnected || current !== generation) return;
+        try {
+          const latest = (await this.session.client.runtimes()).find(device => device.actor === runtime.actor);
+          if (status.isConnected && current === generation && latest?.concurrency) display(latest.concurrency, current);
+        } catch { /* Keep the last known state. */ }
+      }, 2500);
+    };
+    display(state, generation);
+    const button = h("button", { type: "submit", class: "btn btn-small" }, t("Save"));
+    return h("form", { class: "button-row", onsubmit: async (event: Event) => {
+      event.preventDefault();
+      if (!input.reportValidity() || button.disabled) return;
+      const current = ++generation;
+      button.disabled = true;
+      try {
+        const next = await this.session.client.setRuntimeConcurrency(runtime.actor, input.value === "" ? null : Number(input.value), newRequestId());
+        display(next, current);
+      } catch (error) { status.textContent = errorText(error); }
+      finally { button.disabled = false; }
+    } }, input, button, status);
+  }
+
   private async loadRuntimes(rows: HTMLElement): Promise<void> {
     const request = ++this.runtimeLoad;
     const current = () => this.active && this.runtimeRows === rows && this.runtimeLoad === request;
@@ -364,9 +397,10 @@ export class SettingsPane {
             : helper === "missing" ? t("Administrator helper: not installed") : t("Administrator helper: unknown (update this runtime to see)"))),
         h("span", { class: "set-value muted" }, runtime.online ? t("Online") : t("Last seen {0}", ago(runtime.last_seen))),
         remove);
-      if (helper !== "missing") return [row];
+      const concurrency = h("div", { class: "set-row" }, this.runtimeConcurrency(runtime));
+      if (helper !== "missing") return [row, concurrency];
       // 没装助手时说明它的用途，并给出可复制的安装命令（ADR 0020）。
-      return [row, h("div", { class: "set-row helper-row" },
+      return [row, concurrency, h("div", { class: "set-row helper-row" },
         h("p", { class: "field-hint" }, t("Only needed when an agent must install software or change system settings on {0}. Without it, everything else still works. To install, run this once in a terminal on {0}; it asks for that machine's password, and each request still needs your approval.", runtime.registration.name)),
         installCommandBlock())];
     }));

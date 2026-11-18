@@ -243,10 +243,14 @@ export class ExecutionPane {
       const meta: Array<[string, Node | string]> = [
         [t("Runtime"), this.runtimeName(job.spec.runtime)],
         [t("Engine"), job.spec.run.kind === "agent" ? job.spec.run.engine : t("Command")],
-        [t("Working directory"), h("span", { class: "mono" }, job.spec.workdir)],
+        [t("Working directory"), h("span", { class: "mono" }, job.result?.workspace?.path ?? job.spec.workdir)],
         [t("Created"), formatTime(job.spec.created)],
         [t("Time limit"), t("{0} min", Math.round(job.spec.timeout_seconds / 60))],
       ];
+      if (job.result?.workspace) {
+        meta.push([t("Worktree branch"), h("span", { class: "mono" }, job.result.workspace.branch)]);
+        meta.push([t("Worktree base"), h("span", { class: "mono" }, job.result.workspace.base_commit)]);
+      }
       if (job.result?.finished) meta.push([t("Finished"), formatTime(job.result.finished)]);
       if (job.result?.exit_code !== undefined) meta.push([t("Exit code"), String(job.result.exit_code)]);
       const live = LIVE.includes(job.status);

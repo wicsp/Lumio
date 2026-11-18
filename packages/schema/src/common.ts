@@ -111,6 +111,7 @@ export const Base = z.looseObject({
 export const AGENTS = ["claude-code", "codex", "pi"] as const;
 
 /** 执行器名称（设备名），如 server、mac。 */
+export const GitWorktreeBase = z.string().min(1).refine(value => !value.startsWith("-") && !/\s/.test(value));
 export const RuntimeName = z.string().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/, "执行器名称只能用小写字母、数字和 . _ -");
 
 const ASSIGNEE_MESSAGE = "负责人必须是 human、agent 或 agent@执行器，例如 pi@server";

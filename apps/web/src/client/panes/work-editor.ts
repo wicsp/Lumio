@@ -251,6 +251,12 @@ export class WorkEditor {
       row(t("Goal"), "check", this.textInput("goal", r.goal, t("What should this phase achieve?")));
       row(t("Due"), "calendar", this.dateInput("deadline", r.deadline));
       row(t("Working directory"), "terminal", this.textInput("workdir", r.workdir, t("~ (runtime's home directory)")));
+      const worktree = h("input", { type: "checkbox", "aria-label": t("Automatic Git worktrees") });
+      worktree.checked = r.auto_worktree ?? false;
+      worktree.addEventListener("change", () => void this.patch({ auto_worktree: worktree.checked }, worktree, t("Project settings saved")));
+      row(t("Automatic Git worktrees"), "folder", worktree);
+      row(t("Worktree base"), "route", this.textInput("worktree_base", r.worktree_base, "origin/main"));
+      row(t("Project concurrency"), "clock", this.textInput("max_concurrent", r.max_concurrent?.toString(), "1", "number"));
       row(t("Default agent"), "bot", this.defaultTargetControl(r));
       row(t("Default plan"), "route", this.defaultPlanControl(r));
       row(t("Repository"), "link", this.textInput("repo", r.repo, t("URL or path, for reference")));
@@ -415,7 +421,7 @@ export class WorkEditor {
     const commit = () => {
       const raw = input.value.trim();
       const next = !raw ? null : type === "number" ? Number(raw) : raw;
-      if (type === "number" && next !== null && (!Number.isInteger(next) || (next as number) < 1)) { this.writer.property(key, raw); this.writer.error = {code:"INVALID",message:t("Enter a whole number of minutes")}; this.saved(); return; }
+      if (type === "number" && next !== null && (!Number.isInteger(next) || (next as number) < 1)) { this.writer.property(key, raw); this.writer.error = {code:"INVALID",message:t(key === "max_concurrent" ? "Enter a positive whole number" : "Enter a whole number of minutes")}; this.saved(); return; }
       this.writer.property(key, next);
       clearTimeout(this.timer); this.timer = setTimeout(() => void this.flush(), 800);
     };

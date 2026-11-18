@@ -35,7 +35,7 @@ beforeEach(async () => {
 });
 afterEach(async () => { await hub?.stop(); await rm(temp, { recursive: true, force: true }); });
 test("directory precedence, repo snapshots, changed project directory, clear, and automatic handoff", async () => {
-  const p = await project();
+  const p = await project({ max_concurrent: 3 });
   for (const [args, expected] of [[{ project: p.id, workdir: "/synthetic/task" }, "/synthetic/task"], [{ project: p.id }, "/synthetic/project"], [{}, "~"]] as const) {
     const t = await task(args), r = await applied("work.task.dispatch", { task: t.id, to: "codex" }); if (r.kind !== "job") throw Error();
     expect(r.job.spec.workdir).toBe(expected);
@@ -47,7 +47,7 @@ test("directory precedence, repo snapshots, changed project directory, clear, an
   await applied("work.task.plan.set", { task: t.id, expected_revision: t.revision, plan: { stages: [{ kind: "agent", id: "one", agent: "codex@mac", instruction: "Synthetic one" }, { kind: "agent", id: "two", agent: "codex@mac", instruction: "Synthetic two" }] } });
   const first = await applied("work.task.dispatch", { task: t.id }); if (first.kind !== "job") throw Error();
   await applied("work.project.update", { project: p.id, expected_revision: p.revision, patch: { workdir: "/synthetic/new" } });
-  await api("/v1/runtime/ack", { accepted: [first.job.spec.id] }, runtime);
+  await acknowledge(first.job);
   expect((await api("/v1/runtime/results", { job: first.job.spec.id, lease: first.job.spec.lease, status: "done", finished: new Date().toISOString(), report: "Synthetic result" }, runtime)).status).toBe(200);
   hub.modules.reconcile();
   const jobs = await client().jobs(undefined, t.id); expect(jobs.map(j => j.spec.workdir)).toEqual(["/synthetic/project", "/synthetic/new"]);
@@ -132,7 +132,7 @@ test("inherited directories pass the existing local vault guard", async () => {
 });
 
 test("implicit dispatch and task reads share plan, last round, and project precedence", async () => {
-  const p = await project({ default_target: "codex" });
+  const p = await project({ default_target: "codex", max_concurrent: 2 });
   const mac = hub.store.runtimes(new Date())[0]!;
   hub.store.registerRuntime(mac.actor, { ...mac.registration, version: undefined, platform: undefined, install: undefined, engines: [...mac.registration.engines,
     { name: "claude-code", version: "synthetic", sandbox: "os" }] }, new Date(0));
@@ -156,7 +156,7 @@ test("implicit dispatch and task reads share plan, last round, and project prece
   const first = await applied("work.task.dispatch", { task: t.id, to: "claude-code@mac" });
   if (first.kind !== "job") throw Error("Expected a job");
   expect(first).toMatchObject({ target: "claude-code@mac", target_source: "explicit" });
-  await api("/v1/runtime/ack", { accepted: [first.job.spec.id] }, runtime);
+  await acknowledge(first.job);
   const question = await api("/v1/runtime/results", { job: first.job.spec.id, lease: first.job.spec.lease,
     status: "waiting_for_human", finished: new Date().toISOString(), question: "Synthetic question?" }, runtime);
   expect(question.status).toBe(200);
@@ -165,6 +165,7 @@ test("implicit dispatch and task reads share plan, last round, and project prece
   expect((await list()).find(value => value.id === untouched.id)?.next_target).toEqual({ target: "claude-code@mac", source: "project" });
   expect((await show(implicit.id)).task.next_target).toEqual({ target: "codex@mac", source: "last_round" });
   expect((await client().jobs(undefined, implicit.id))[0]?.spec.run).toMatchObject({ engine: "codex" });
+  register({}, new Date(0));
   const replay = await command("work.task.dispatch", { task: implicit.id }, human, request);
   expect(replay.headers.get("X-Lumio-Offline-Targets")).toBe("codex@mac");
   expect(WorkCommandResult.parse(await replay.json())).toEqual(initial);
@@ -174,7 +175,7 @@ test("implicit dispatch and task reads share plan, last round, and project prece
   expect((await show(t.id)).executions.at(-1)?.input_snapshot).toContain("Synthetic answer");
 
   if (answer.kind !== "job") throw Error("Expected a job");
-  await api("/v1/runtime/ack", { accepted: [answer.job.spec.id] }, runtime);
+  await acknowledge(answer.job);
   const done = await api("/v1/runtime/results", { job: answer.job.spec.id, lease: answer.job.spec.lease,
     status: "done", finished: new Date().toISOString(), report: "Synthetic completion" }, runtime);
   expect(done.status).toBe(200);
@@ -253,8 +254,15 @@ async function setPlan(t: WorkTask, value: unknown) {
   const plan = HandoffPlan.parse(value);
   return applied("work.task.plan.set", { task: t.id, expected_revision: t.revision, plan });
 }
-async function answerJob(job: Job, status: "done" | "waiting_for_human") {
+async function acknowledge(job: Job) {
+  if (job.project) {
+    const sync = await api("/v1/runtime/sync", { running: [], queued: [], outbox: 0 }, runtime);
+    expect(sync.status).toBe(200);
+  }
   expect((await api("/v1/runtime/ack", { accepted: [job.spec.id] }, runtime)).status).toBe(200);
+}
+async function answerJob(job: Job, status: "done" | "waiting_for_human") {
+  await acknowledge(job);
   const result = { job: job.spec.id, lease: job.spec.lease, status, finished: new Date().toISOString(), report: "Synthetic result",
     ...(status === "waiting_for_human" ? { question: "Synthetic question?", session_id: "synthetic-existing-session" } : {}) };
   expect((await api("/v1/runtime/results", result, runtime)).status).toBe(200);
@@ -366,7 +374,7 @@ test("only a human implicit dispatch attaches and snapshots the project default 
   const plan = HandoffPlan.parse({ stages: [stage("template")] });
   const saved = await applied("work.plan_template.save", { name: "Synthetic default", plan });
   if (saved.kind !== "template") throw new Error("Template expected");
-  const p = await project({ default_plan: saved.template.id });
+  const p = await project({ default_plan: saved.template.id, max_concurrent: 2 });
   const direct = await task({ project: p.id });
   expect(direct.next_target).toEqual({ source: "project", target: "codex@mac" });
   const input = { task: direct.id, expected_revision: direct.revision };

@@ -25,6 +25,7 @@
 - 已编译的 Runtime 把该实例的程序目录放在 agent 的 PATH 前面；agent 使用同版本 `lumio`，凭据限当前 Job。
 - **高权限申请**（ADR 0020）：每轮单独的本地 socket 凭据经 `lumio runtime sudo -- <绝对路径程序>` 发起，Runtime 向 `/v2/approval/privileged` 提交并经 `/v1/runtime/privileged` 查询与回报；人用 `lumio proposals` 查看并批准或拒绝。批准后 Hub 签发 10 分钟有效的一次性凭据，root 助手独立验证并在执行前记为已用；输出只返回调用者，执行状态离线时保留交回。Linux 与 macOS 安装见 [高权限助手](../../infra/sudo-helper.md)。
   执行器登记 `privileged_helper` 能力表示已配置助手；没配置时拒绝请求，并在这一轮结果的 `privileged_unavailable` 里记下第一次请求的程序（不含参数），供 Web 提示人安装。
+- **项目工作区与并发（ADR 0077）**：Runtime 在 Agent 启动前从项目基线创建任务专用 worktree，绑定任务与分支并在续跑时验证原目录。准备失败时交回任务。Hub 同步下发每台执行器的人类配置覆盖值，Runtime 在本地热更新上限并回报应用结果。清除覆盖恢复本机配置或默认 1。降限不取消运行中的 Job。
 - **适配器**：`codex exec`、`claude -p`、`pi -p` 的非交互模式；锁定验证过的版本；如实声明隔离级别（`os`/`none`）。
   不经过 shell；command 类型只执行登记过的程序；密钥在执行节点上才解析。
 - **阶段权限与钩子**（ADR 0049，H1-4）：Codex 默认使用工作区写入沙箱，可按阶段改为只读或显式全权限；Git 写入授权只覆盖已验证版本上当前 checkout 的元数据。无 OS 沙箱的引擎由执行器账号权限约束。
