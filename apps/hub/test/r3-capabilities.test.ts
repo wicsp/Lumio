@@ -3,7 +3,7 @@ import { cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promi
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Actor, ApiError, AssistantChatResult, AssistantConfigView, AssistantToolCall, CAPABILITIES, WorkAttention,
-  WorkCommandResult, WorkTask, WorkTaskDetail, Job, ORIGINAL_CAPABILITY_NAME, Source, toolName } from "@lumio/schema";
+  WorkCommandResult, WorkTask, WorkTaskDetail, Job, NoteDetail, ORIGINAL_CAPABILITY_NAME, Source, toolName } from "@lumio/schema";
 import { entityDirectory, parseFrontmatter } from "@lumio/knowledge";
 import { writeOriginal } from "@lumio/storage";
 import type { AssistantModel } from "@lumio/assistant";
@@ -93,7 +93,7 @@ for (const [op, args, reason] of [
 test("catalog tools validate arguments, preserve identity, expose todo/create/comment, and return a clear denial to the model", async () => {
   let step = 0, created = "";
   model = { async complete(input) {
-    expect(input.tools.map(value => value.name)).toEqual([...CAPABILITIES.map(value => toolName(value.name)), toolName("knowledge.idea.discussion")]);
+    expect(input.tools.map(value => value.name)).toEqual([...CAPABILITIES.map(value => toolName(value.name)), toolName("knowledge.idea.discussion"), toolName("knowledge.idea.save_discussion")]);
     if (step++ === 0) return { content: "", tool_calls: [{ id: "provider-1", name: toolName("work.task.list"), args: { status: "todo" } }] };
     if (step === 2) { expect(JSON.parse(input.messages.at(-1)!.content)).toEqual([]); return { content: "", tool_calls: [{ id: "provider-2", name: toolName("work.task.create"), args: { title: "From conversation" } }] }; }
     if (step === 3) { created = JSON.parse(input.messages.at(-1)!.content).task.id; return { content: "", tool_calls: [{ id: "provider-3", name: toolName("work.task.comment"), args: { task: created, body: "Synthetic comment" } }] }; }
@@ -193,6 +193,32 @@ test("private reads require the in-process tool closure and a human owner; each 
   const injection = await api("/v2/work/tasks?humanConversation=true", undefined, agent); expect(injection.status).toBe(400);
   // Private reads never become implicit memory.
   expect(await hub.modules.assistant.memories(hub.store.authenticate(`Bearer ${human}`)!.actor.id)).toEqual([]);
+});
+
+test("task provenance omits preceding exchanges that accessed private notes", async () => {
+  const read = "Read the private fixture";
+  const create = "Create a public task to check the keyboard.";
+  const toolResponse = (name: string, args: Record<string, unknown>) => ({ content: "",
+    tool_calls: [{ id: "synthetic", name: toolName(name), args }] });
+  let step = 0;
+  model = { async complete() {
+    switch (step++) {
+      case 0: return toolResponse("knowledge.note.show", { ref: "Private" });
+      case 1: return { content: "Synthetic private answer for provenance", tool_calls: [] };
+      case 2: return toolResponse("work.task.create", { title: "Public keyboard task" });
+      default: return { content: "Task created", tool_calls: [] };
+    }
+  } };
+  const prior = await client().assistantChat({ request_id: requestId(), message: read });
+  expect((await client().assistantTools(prior.conversation.id))[0]?.private_read).toBe(true);
+  const current = await client().assistantChat({ request_id: requestId(), message: create, conversation: prior.conversation.id });
+  const result = WorkCommandResult.parse((await client().assistantTools(prior.conversation.id)).at(-1)?.result);
+  if (result.kind !== "task") throw new Error("Expected a task");
+  const note = await checked(`/v2/knowledge/notes/${result.task.references[0]?.id}`, NoteDetail);
+  expect(note.frontmatter.derived_from).toEqual([current.messages[0]!.id]);
+  expect(note.body).toContain(create);
+  expect(note.body).not.toContain(read);
+  expect(note.body).not.toContain("Synthetic private answer for provenance");
 });
 
 test("update changes record nullable before fields; undo uses revision checks, survives retries and refuses conflicts", async () => {

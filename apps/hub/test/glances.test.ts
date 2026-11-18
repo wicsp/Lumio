@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PNG } from "pngjs";
 import { encode } from "jpeg-js";
-import { AIConnection, AIProfile, AssistantEvent, AssistantMain, AssistantChatResult, AssistantChatRequest, Capture, CaptureCreateResult, Glance, GlanceCreate, KnowledgeOriginal, KnowledgeCreateResult, SearchResult, NoteDetail, AssistantModelRequest, type AssistantModelResponse } from "@lumio/schema";
+import { AIConnection, AIProfile, AssistantEvent, AssistantMain, AssistantChatResult, AssistantChatRequest, Capture, CaptureCreateResult, Glance, GlanceCreate, KnowledgeOriginal, KnowledgeCreateResult, SearchResult, NoteDetail, AssistantModelRequest, AssistantToolCall, ExecutionTarget, Proposal, WorkCommandResult, WorkTask, WorkTaskDetail, toolName, type AssistantModelResponse } from "@lumio/schema";
 import { backupBusiness, verifyBusinessBackup } from "@lumio/storage";
 import type { AssistantModel } from "@lumio/assistant";
 import { ChatCompletionsModel } from "../src/assistant-model.ts";
@@ -375,7 +375,7 @@ test("voice ideas persist before model work, link the selected paper and recover
   const model: AssistantModel = { async complete(input) {
     const last = input.messages.at(-1)!;
     if (input.messages[0]!.content.includes("[NOTE_ONLY]")) {
-      expect(input.tools.some(tool => tool.name === "work__task__create")).toBe(false);
+      expect(input.tools.some(tool => tool.name === "work__task__create")).toBe(true);
       if (last.content.includes("Synthetic timeout")) throw new Error("Synthetic timeout");
       const quiet = last.content.includes("Recording-only thought");
       return { content: JSON.stringify({ reply: quiet ? "[NOTE_ONLY]" : answer,
@@ -434,6 +434,118 @@ test("voice ideas persist before model work, link the selected paper and recover
     expect(await f.request(`/v2/knowledge/notes/${stopped.turn.idea}`)).toHaveProperty("status", 200);
   }, model);
 });
+
+const assistantCall = (name: string, args: Record<string, unknown> = {}): AssistantModelResponse => ({
+  content: "", tool_calls: [{ id: "synthetic-call", name: toolName(name), args }],
+});
+const capturedAnswer = (reply: string): AssistantModelResponse => ({
+  content: JSON.stringify({ reply, context: { text: [], image: false, source: false } }), tool_calls: [],
+});
+
+test("voice can create a task and propose Codex in one turn, with one approval and the same Idea", () => {
+  const utterance = "Have Codex fix the keyboard rule.";
+  let step = 0;
+  return fixture(async f => {
+    const device = f.hub.store.actors().find(actor => actor.name === "runtime")!;
+    f.hub.store.registerRuntime(device.id, { protocol_version: 2, name: "runtime", engines: [{ name: "codex", version: "synthetic", sandbox: "none" }],
+      tags: [], max_concurrent: 1 }, new Date(at));
+    const { body, main } = await voiceRequest(f, utterance);
+    const send = async () => AssistantChatResult.parse(await (await f.request("/v2/assistant/chat", "POST", body)).json());
+    const result = await send();
+    expect(result.turn.status).toBe("done");
+    expect(result.messages.at(-1)?.content).toBe("Created the task. Approval is pending.");
+    const calls = AssistantToolCall.array().parse(await (await f.request(`/v2/assistant/conversations/${main.conversation}/tools`)).json());
+    expect(calls.map(call => call.status)).toEqual(["succeeded", "succeeded", "succeeded"]);
+    const created = WorkCommandResult.parse(calls[1]!.result);
+    if (created.kind !== "task") throw new Error("Expected a task");
+    const task = created.task;
+    const proposal = WorkCommandResult.parse(calls[2]!.result);
+    if (proposal.kind !== "proposal") throw new Error("Expected a pending proposal");
+    expect(task.references).toEqual([{ module: "knowledge", id: result.turn.idea!, label: "原讨论" }]);
+    expect(task.description).toContain(`lumio:${result.turn.idea}`);
+    const note = NoteDetail.parse(await (await f.request(`/v2/knowledge/notes/${result.turn.idea}`)).json());
+    expect(note.body).toContain(utterance);
+    expect(note.body).toContain(`lumio:${result.messages[0]!.id}`);
+
+    expect(Proposal.parse(f.hub.store.proposal(proposal.proposal)).status).toBe("pending");
+    const detail = async () => WorkTaskDetail.parse(await (await f.request(`/v2/work/tasks/${task.id}`)).json());
+    expect((await detail()).executions).toEqual([]);
+    expect((await send()).turn.id).toBe(result.turn.id);
+    expect(f.hub.store.proposals("pending")).toHaveLength(1);
+    expect((await f.request(`/v2/approval/proposals/${proposal.proposal}/accept`, "POST", {})).status).toBe(200);
+    const started = await detail();
+    expect(started.executions).toHaveLength(1);
+    expect(started.task.turn.holder).toBe("codex@runtime");
+  }, input => {
+    const last = input.messages.at(-1)!;
+    if (step++ === 0) {
+      expect(last.content).toBe(utterance);
+      expect(input.tools.map(tool => tool.name)).toContain(toolName("work.task.dispatch"));
+      expect(input.tools.map(tool => tool.name)).not.toContain(toolName("approval.proposal.accept"));
+      return assistantCall("execution.target.list");
+    }
+    if (step === 2) {
+      expect(ExecutionTarget.array().parse(JSON.parse(last.content)).map(target => target.target)).toEqual(["codex@runtime"]);
+      return assistantCall("work.task.create", { title: "Fix the keyboard rule", description: "Scope it to the built-in keyboard." });
+    }
+    if (step === 3) {
+      const created = WorkCommandResult.parse(JSON.parse(last.content));
+      if (created.kind !== "task") throw new Error("Expected a task");
+      return assistantCall("work.task.dispatch", { task: created.task.id, to: "codex@runtime", expected_revision: created.task.revision });
+    }
+    expect(WorkCommandResult.parse(JSON.parse(last.content)).kind).toBe("proposal");
+    return capturedAnswer("Created the task. Approval is pending.");
+  });
+});
+
+test("direct voice creation uses the saved Idea and a save-only request just records it", () => fixture(async f => {
+  const send = async (message: string) => {
+    const { body } = await voiceRequest(f, message);
+    return AssistantChatResult.parse(await (await f.request("/v2/assistant/chat", "POST", body)).json());
+  };
+  const created = await send("Create a keyboard task.");
+  const saved = await send("Just save this thought.");
+  expect(created.turn.status).toBe("done");
+  expect(saved.turn.idea).toBeDefined();
+  expect(saved.messages.map(message => message.role)).toEqual(["user"]);
+  const tasks = WorkTask.array().parse(await (await f.request("/v2/work/tasks")).json());
+  expect(tasks).toHaveLength(1);
+  expect(tasks[0]!.references[0]?.id).toBe(created.turn.idea!);
+  expect(f.hub.store.proposals("pending")).toEqual([]);
+}, input => {
+  const last = input.messages.at(-1)!;
+  if (last.role === "tool") return capturedAnswer("Task saved.");
+  if (last.content === "Create a keyboard task.") return assistantCall("work.task.create", { title: "Keyboard task" });
+  return capturedAnswer("[NOTE_ONLY]");
+}));
+
+test("ordinary chat can save its raw discussion and attach it to a task without duplicating the Idea", () => fixture(async f => {
+  const main = AssistantMain.parse(await (await f.request("/v2/assistant/main", "POST", { request_id: randomUUID() })).json());
+  const chat = async (message: string) => AssistantChatResult.parse(await (await f.request("/v2/assistant/chat", "POST",
+    { conversation: main.conversation, request_id: randomUUID(), message })).json());
+  const first = await chat("The synthetic keyboard has two layouts.");
+  expect(SearchResult.parse(await (await f.request("/v2/knowledge/search?q=keyboard&type=idea")).json()).hits).toEqual([]);
+  const saved = await chat("Save our discussion as an Idea and create the task.");
+  expect(saved.turn.status).toBe("done");
+  const calls = AssistantToolCall.array().parse(await (await f.request(`/v2/assistant/conversations/${main.conversation}/tools`)).json());
+  const savedId = (calls[0]!.result as { idea: string }).idea;
+  const created = WorkCommandResult.parse(calls[1]!.result);
+  if (created.kind !== "task") throw new Error("Expected a task");
+  const task = created.task;
+  expect(task.references.map(ref => ref.id)).toEqual([savedId]);
+  expect(task.description).toContain(`lumio:${savedId}`);
+  const note = NoteDetail.parse(await (await f.request(`/v2/knowledge/notes/${savedId}`)).json());
+  expect(note.body).toContain("The synthetic keyboard has two layouts.");
+  expect(note.body).toContain("Use the layout that belongs to the device.");
+  expect(note.body).toContain("Save our discussion as an Idea and create the task.");
+  expect(note.frontmatter.derived_from).toEqual([first.messages[0]!.id, first.messages[1]!.id, saved.messages[0]!.id]);
+}, input => {
+  const last = input.messages.at(-1)!;
+  if (last.content === "The synthetic keyboard has two layouts.") return { content: "Use the layout that belongs to the device.", tool_calls: [] };
+  if (last.role === "user") return assistantCall("knowledge.idea.save_discussion");
+  if (JSON.parse(last.content).idea) return assistantCall("work.task.create", { title: "Pick the built-in layout" });
+  return { content: "Saved and linked.", tool_calls: [] };
+}));
 
 test("configured embeddings find paraphrased ideas and keep private input off the provider", () => fixture(async f => {
   const sent: string[] = [];

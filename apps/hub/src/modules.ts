@@ -213,6 +213,7 @@ export class BusinessModules {
         finish: (owner, glance, message, decision) => this.voiceIdeas.finish(owner, glance, message, decision),
         context: (owner, glance, message) => glanceChat(this.glances.get(glance, owner), message, this.inbox, this.glances),
       },
+      allowVoiceActions: true,
       recordIdea: (owner, turn, user, glance) => this.voiceIdeas.record(owner, turn, user, glance),
       resolveModel: (profile, owner) => this.ai.model(owner, profile),
       workbench: new AssistantWorkbenchAnchors(this, store, this.assistantMain, this.notices),
@@ -223,7 +224,8 @@ export class BusinessModules {
       },
     };
     this.assistant = new WorkbenchAssistant(this.assistantStore, options.assistantModel ?? configuredModel(config.assistantModel),
-      [...this.capabilities.tools(), VoiceIdeas.tool(() => this.voiceIdeas), ...(options.assistantTools ?? [])], assistantContext, this.assistantMain, this.workbench);
+      [...this.capabilities.tools(), VoiceIdeas.tool(() => this.voiceIdeas),
+        ...(config.vault ? [VoiceIdeas.saveTool(() => this.voiceIdeas)] : []), ...(options.assistantTools ?? [])], assistantContext, this.assistantMain, this.workbench);
     this.assistant.recover();
     this.reconcile();
     let nextEmbedding = 0;
