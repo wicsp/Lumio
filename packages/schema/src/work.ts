@@ -14,7 +14,7 @@ import { TrashItem } from "./trash.ts";
  * - Task 的 outcome 与 turn 由独立命令改变；委派必须用 work.task.dispatch（ADR 0032）。
  */
 
-export const MODULES = ["knowledge", "work", "execution", "assistant"] as const;
+export const MODULES = ["knowledge", "work", "execution", "assistant", "personal"] as const;
 export const Module = z.enum(MODULES);
 
 /** 每个模块的 ResourceRef 可以指向哪些前缀的对象。 */
@@ -23,7 +23,14 @@ export const MODULE_ID_PREFIXES = {
   work: [ID_PREFIXES.project, ID_PREFIXES.task, ID_PREFIXES.work_comment],
   execution: [ID_PREFIXES.job, ID_PREFIXES.routine, ID_PREFIXES.log_event, ID_PREFIXES.artifact],
   assistant: [ID_PREFIXES.conversation, ID_PREFIXES.assistant_message, ID_PREFIXES.assistant_turn, ID_PREFIXES.tool_call, ID_PREFIXES.memory],
+  personal: [ID_PREFIXES.personal_event, ID_PREFIXES.personal_todo, ID_PREFIXES.personal_journal],
 } as const satisfies Record<(typeof MODULES)[number], readonly string[]>;
+
+/** Personal labels must be resolved under the current viewer's permissions. */
+export const PersonalResourceRef = z.strictObject({
+  module: z.literal("personal"),
+  id: z.union([idOf("pev"), idOf("ptd"), idOf("jrn")]),
+});
 
 /**
  * 跨模块引用（ADR 0025 第 5 节）：只存 ID，展示时经所属模块的接口读取可见信息。
@@ -39,7 +46,11 @@ export const ResourceRef = z
   .refine(
     (ref) => (MODULE_ID_PREFIXES[ref.module] as readonly string[]).includes(ref.id.slice(0, ref.id.indexOf("_"))),
     { message: "id 的前缀不属于该模块", path: ["id"] },
-  );
+  )
+  .refine((ref) => ref.module !== "personal" || ref.label === undefined, {
+    message: "个人资源引用不能保存标题",
+    path: ["label"],
+  });
 
 export const PROJECT_STATUSES = ["planning", "active", "paused", "done"] as const;
 export const ProjectStatus = z.enum(PROJECT_STATUSES);

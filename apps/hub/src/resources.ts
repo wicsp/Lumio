@@ -47,6 +47,8 @@ export class Resources {
     const prefix = id.slice(0, id.indexOf("_"));
     try {
       switch (prefix) {
+        case "pev": case "ptd": case "jrn":
+          return unavailable; // Personal references require a dedicated owner-scoped resolver.
         case "conv": case "amsg": case "turn": case "tool": {
           const message = prefix === "amsg" ? assistant.message(id) : undefined;
           const call = prefix === "tool" ? assistant.call(id) : undefined;

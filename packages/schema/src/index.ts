@@ -19,6 +19,7 @@ export * from "./query.ts";
 export * from "./actor.ts";
 export * from "./operation.ts";
 export * from "./proposal.ts";
+export * from "./personal.ts";
 export * from "./api.ts";
 export * from "./security-review.ts";
 import { SecurityReviewRequest, SecurityReviewResult } from "./security-review.ts";
@@ -61,6 +62,10 @@ import { Operation } from "./operation.ts";
 import { PrivilegedApproval, PrivilegedReport, PrivilegedStatus } from "./privileged.ts";
 import { CliConfig, ClientInvite, ClientInviteRequest, ClientJoin, ClientJoinRequest, IPhoneShortcutPairing, HubSigningKey, RuntimeInvite, RuntimeInviteRequest, RuntimeJoin, RuntimeJoinRequest } from "./setup.ts";
 import { Proposal } from "./proposal.ts";
+import {
+  PersonalCommand, PersonalCommandProposal, PersonalCommandResult, PersonalEvent, PersonalJournalEntry,
+  PersonalTodo, PersonalTodoStatusCommand,
+} from "./personal.ts";
 import { CheckResult, LinksResult, NoteDetail, ResourceSummary, SearchResult } from "./query.ts";
 
 /** 需要导出为 JSON Schema 的全部契约，键名即输出文件名。 */
@@ -162,6 +167,13 @@ export const CONTRACTS = {
   "security-review-result": SecurityReviewResult,
   // v2 业务对象（ADR 0025，R0-1）
   "resource-ref": ResourceRef,
+  "personal-event": PersonalEvent,
+  "personal-todo": PersonalTodo,
+  "personal-journal-entry": PersonalJournalEntry,
+  "personal-command": PersonalCommand,
+  "personal-command-proposal": PersonalCommandProposal,
+  "personal-command-result": PersonalCommandResult,
+  "personal-todo-status-command": PersonalTodoStatusCommand,
   "work-project": WorkProject,
   "work-task": WorkTask,
   "work-comment": WorkComment,

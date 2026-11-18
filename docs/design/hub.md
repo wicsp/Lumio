@@ -42,6 +42,7 @@
 
 ## HTTP 接口
 
+- [Personal](personal.md) 的私密提议载荷绑定所有者和对话。命令结果区分提议进度与 CalDAV 写入进度。
 - human 与 agent 使用 `/v2` 模块路径。知识查询是 `/v2/knowledge/search`、`/v2/knowledge/notes/<ref>` 与 `/v2/knowledge/check`；状态与身份从 `/v2/system` 读取，Job 与设备从 `/v2/execution` 读取，提议从 `/v2/approval` 读取与决定。
 - 客户端与 Runtime 配对在 `/v2/setup`。设备的 Job 协议与高权限消息见 [Execution](execution.md#job-协议与执行边界adr-0019002000250068)。
 

@@ -7,6 +7,11 @@ import { KnowledgeRevision } from "./knowledge-editing.ts";
 import { LinksResult, NOTE_TYPES, NoteDetail, NoteRef, SearchResult } from "./query.ts";
 import { OriginalFrontmatter } from "./inbox.ts";
 import {
+  PersonalCommandResult, PersonalEventCreateArgs, PersonalEventListArgs, PersonalEventListResult, PersonalEventUpdateArgs,
+  PersonalJournalCreateArgs, PersonalJournalListArgs, PersonalJournalListResult,
+  PersonalTodoCreateArgs, PersonalTodoListArgs, PersonalTodoListResult, PersonalTodoUpdateArgs,
+} from "./personal.ts";
+import {
   ProjectStatus, TaskStatus, WorkCommandResult, WorkProject, WorkProjectCreate, WorkProjectUpdate,
   WorkAttention, WorkTask, WorkTaskComment, WorkTaskCreate, WorkTaskDetail, WorkTaskDispatch, WorkTaskHand, WorkTaskPlanSet, WorkTaskUpdate,
 } from "./work.ts";
@@ -142,6 +147,26 @@ interface CapabilityDef<A extends z.ZodType, R extends z.ZodType> {
   result: R;
 }
 const define = <A extends z.ZodType, R extends z.ZodType>(def: CapabilityDef<A, R>) => def;
+
+/** ADR 0080: register these only through the owner-scoped foreground chat integration. */
+export const PERSONAL_CAPABILITIES = [
+  define({ name: "personal.event.list", kind: "read", args: PersonalEventListArgs, result: PersonalEventListResult,
+    summary: { en: "List visible events and busy intervals within a time range.", zh: "列出指定时间范围内可见的日程与忙碌时段。" } }),
+  define({ name: "personal.todo.list", kind: "read", args: PersonalTodoListArgs, result: PersonalTodoListResult,
+    summary: { en: "List personal to-dos, with optional due dates and completion filters.", zh: "列出个人待办，可按截止日期和完成状态筛选。" } }),
+  define({ name: "personal.journal.list", kind: "read", args: PersonalJournalListArgs, result: PersonalJournalListResult,
+    summary: { en: "Read journal entries within the range the owner selected for this turn.", zh: "读取所有者为本轮明确选择的日期范围内的生活日志。" } }),
+  define({ name: "personal.event.create", kind: "write", args: PersonalEventCreateArgs, result: PersonalCommandResult,
+    summary: { en: "Propose an event for the owner to approve.", zh: "提出一条日程，等待所有者批准。" } }),
+  define({ name: "personal.event.update", kind: "write", args: PersonalEventUpdateArgs, result: PersonalCommandResult,
+    summary: { en: "Propose a change to an event using its last observed revision.", zh: "用上次读取的版本提出日程改动。" } }),
+  define({ name: "personal.todo.create", kind: "write", args: PersonalTodoCreateArgs, result: PersonalCommandResult,
+    summary: { en: "Propose a personal to-do with an optional due date or time.", zh: "提出一条个人待办，可选填截止日期或时间。" } }),
+  define({ name: "personal.todo.update", kind: "write", args: PersonalTodoUpdateArgs, result: PersonalCommandResult,
+    summary: { en: "Propose a change to a to-do using its last observed revision.", zh: "用上次读取的版本提出待办改动。" } }),
+  define({ name: "personal.journal.create", kind: "write", args: PersonalJournalCreateArgs, result: PersonalCommandResult,
+    summary: { en: "Propose a journal entry based on an experience described by the owner.", zh: "根据所有者明确描述的经历提出一条生活日志。" } }),
+] as const;
 
 /** Work 写入能力直接复用 Work 命令的参数和结果。 */
 export const CAPABILITIES = [

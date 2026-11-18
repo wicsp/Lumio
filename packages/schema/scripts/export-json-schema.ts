@@ -7,7 +7,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import { CAPABILITIES, CONTRACTS } from "../src/index.ts";
+import { CAPABILITIES, CONTRACTS, PERSONAL_CAPABILITIES } from "../src/index.ts";
 
 const outDir = join(import.meta.dir, "..", "json");
 await mkdir(outDir, { recursive: true });
@@ -21,7 +21,7 @@ for (const [name, schema] of Object.entries(CONTRACTS)) {
 }
 
 // 能力目录（ADR 0029）：每项能力的参数与结果各一份，文件名 capability.<名称>.args|result.json
-for (const item of CAPABILITIES) {
+for (const item of [...CAPABILITIES, ...PERSONAL_CAPABILITIES]) {
   for (const [part, schema] of [["args", item.args], ["result", item.result]] as const) {
     const json = z.toJSONSchema(schema, { target: "draft-2020-12", io: part === "args" ? "input" : "output" });
     const file = join(outDir, `capability.${item.name}.${part}.json`);

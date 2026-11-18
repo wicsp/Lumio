@@ -12,7 +12,10 @@ function clip(value: string | undefined, size: number): string | undefined {
 }
 
 export function glanceChat(glance: Glance, message: string, inbox: Inbox, glances: Glances): ReturnType<NonNullable<AssistantContext["glance"]>["context"]> {
-  if (glance.lumio) return { focus: { selected: [glance.lumio], primary: glance.lumio, section: glance.lumio.module } };
+  if (glance.lumio) {
+    if (glance.lumio.module === "personal") return {};
+    return { focus: { selected: [glance.lumio], primary: glance.lumio, section: glance.lumio.module } };
+  }
   const data = {
     captured: glance.captured,
     app: glance.app,
