@@ -20,6 +20,7 @@ async function fixture(options: {
     official?: boolean;
     connectionAuth?: boolean;
     connectionUsage?: boolean;
+    codexVersion?: string;
 } = {}) {
     const root = await mkdtemp(join(await realpath(tmpdir()),"lumio-native-integration-"));
     const state = join(root, "hub"), local = join(root, "runtime");
@@ -29,7 +30,8 @@ async function fixture(options: {
     const owner = hub.store.createActor("synthetic-human", "human"), token = hub.store.createToken("synthetic-human", owner.name);
     const actor = hub.store.createActor("synthetic-runtime", "runtime"), runtimeToken = hub.store.createToken("synthetic-runtime", actor.name);
     const url = `http://127.0.0.1:${hub.server.port}`, client = createClient({ url, token });
-    const registration = await fetch(`${url}/v1/runtime/register`, { method: "POST", headers: { Authorization: `Bearer ${runtimeToken}`, "Content-Type": "application/json" }, body: JSON.stringify({ protocol_version: 2, name: "synthetic-runtime", engines: [{ name: "codex", version: "0.166.0", sandbox: "os" }], tags: [], max_concurrent: 2 }) });
+    const codexVersion = options.codexVersion ?? "0.166.0";
+    const registration = await fetch(`${url}/v1/runtime/register`, { method: "POST", headers: { Authorization: `Bearer ${runtimeToken}`, "Content-Type": "application/json" }, body: JSON.stringify({ protocol_version: 2, name: "synthetic-runtime", engines: [{ name: "codex", version: codexVersion, sandbox: "os" }], tags: [], max_concurrent: 2 }) });
     expect(registration.ok).toBe(true);
     const store = new NativeLocalStore(local);
     let channel: string | undefined, abort: AbortController | undefined, reading: Promise<void> | undefined, flushing = false, pendingFlush = false;
@@ -48,7 +50,9 @@ async function fixture(options: {
         flushing = false;
     } })(); };
     const fake = resolve("fixtures/native/fake-codex.ts");
-    const accounts = options.connectionAuth ? new ConnectionAuth(local, { codex: fake, unsafeTestCommand: [process.execPath, fake] }) : undefined;
+    const accounts = options.connectionAuth ? new ConnectionAuth(local, {
+        codex: fake, unsafeTestCommand: [process.execPath, fake, `--fixture-version=${codexVersion}`],
+    }) : undefined;
     const manager = new NativeManager(store, local, flush, { runtimeName: "synthetic-runtime", ...(options.official ? { mcp: { command: process.execPath, args: [resolve("apps/runtime/src/main.ts"), "native-mcp"] } } : { codex: fake, unsafeTestCommand: [process.execPath, fake] }) }, accounts);
     const connect = async () => {
         abort = new AbortController();
@@ -107,12 +111,13 @@ async function fixture(options: {
     const close = async () => { await manager.stop(); await accounts?.stop(); channel = undefined; abort?.abort(); await reading; await hub.stop(); store.close(); await rm(root, { recursive: true, force: true }); };
     return { root, local, hub, client, profile, connection, create, close, store, manager, accounts, url, owner, connect };
 }
-test("Codex quota is negotiated, read without a chat and cleared at logout", async () => {
-    const f = await fixture({ connectionAuth: true, connectionUsage: true });
+test.each(["0.166.0", "0.169.0"])("Codex %s quota is negotiated, read without a chat and cleared at logout", async codexVersion => {
+    const f = await fixture({ connectionAuth: true, connectionUsage: true, codexVersion });
     try {
         const id = f.connection.id;
         expect((await f.client.refreshAIUsage(id)).status).toBe("credentials");
-        await f.client.nativeConnectionAction(id, { request_id: "fixture-usage-login", action: "login" });
+        const login = await f.client.nativeConnectionAction(id, { request_id: "fixture-usage-login", action: "login" });
+        expect(login.state).toBe("authorizing");
         await until(() => f.client.nativeConnection(id), view => view.state === "ready");
         const view = await f.client.refreshAIUsage(id);
         expect(view.status).toBe("ready");
@@ -125,6 +130,13 @@ test("Codex quota is negotiated, read without a chat and cleared at logout", asy
         await f.client.nativeConnectionAction(id, { request_id: "fixture-usage-logout", action: "logout" });
         expect((await f.client.aiUsage())[0]).toMatchObject({ status: "credentials" });
         expect((await f.client.aiUsage())[0]?.snapshot).toBeUndefined();
+    } finally { await f.close(); }
+}, 20_000);
+test("Codex account login rejects an unverified CLI version", async () => {
+    const f = await fixture({ connectionAuth: true, codexVersion: "0.170.0" });
+    try {
+        const view = await f.client.nativeConnectionAction(f.connection.id, { request_id: "fixture-unsupported-version", action: "login" });
+        expect(view).toMatchObject({ state: "error", error: "native.version_unsupported" });
     } finally { await f.close(); }
 }, 20_000);
 test("native conversation keeps one official thread, dynamic model settings, idempotency and owner boundary", async () => {

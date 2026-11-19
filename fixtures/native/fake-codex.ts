@@ -3,6 +3,12 @@ import { createInterface } from "node:readline";
 import { readFile, writeFile, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { CAPABILITIES, toolName } from "../../packages/schema/src/index.ts";
+if (process.argv.at(-1) === "--version") {
+    const prefix = "--fixture-version=";
+    const version = process.argv.find(arg => arg.startsWith(prefix))?.slice(prefix.length) ?? "0.166.0";
+    console.log(`codex-cli ${version}`);
+    process.exit(0);
+}
 const home = process.env.CODEX_HOME!;
 await mkdir(home, { recursive: true });
 const path = join(home, "fixture-state.json");
