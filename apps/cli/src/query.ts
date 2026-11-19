@@ -1,7 +1,7 @@
 import { text as msg } from "./messages.ts";
 import { buildBib, checkLinks, collectCitations, exportBib, noteLinks, searchNotes, showNote, type SearchOptions } from "@lumio/storage";
 import { createClient } from "@lumio/api-client";
-import { NOTE_TYPES, type NoteRef } from "@lumio/schema";
+import { lumioLink, NOTE_TYPES, type NoteRef } from "@lumio/schema";
 import { KnowledgeService } from "@lumio/knowledge";
 import { FileKnowledgeRepository } from "@lumio/storage";
 
@@ -64,6 +64,7 @@ export async function runQuery(root: string | undefined, command: QueryCommand, 
       for (const link of result.outgoing) log(`  [${link.source}] ${link.target}${link.dangling ? msg("query.dangling") : ` → ${link.note!.path}`}`);
       log(msg("query.backlinks"));
       for (const link of result.incoming) log(`  [${link.source}] ${link.note.title}  ${link.note.path}`);
+      for (const { task } of result.work_incoming ?? []) log(`  [${msg("query.task_reference")}] ${task.title}  ${lumioLink(task.id)}`);
     }
   }
   return 0;

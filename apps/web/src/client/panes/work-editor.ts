@@ -6,7 +6,7 @@
  * - 委派是单独的明确动作；一轮成功也不会自动完成任务。有交接计划时，下一轮交给计划里写明的 agent。
  * - 讨论、轮次和交接记录按时间合并成一条时间线。
  */
-import { PROJECT_STATUSES, type ResourceRef, type WorkAttention, type WorkProject, type WorkTask, type WorkTaskDetail, type WorkCommandRequest } from "@lumio/schema";
+import { lumioLink, PROJECT_STATUSES, type ResourceRef, type WorkAttention, type WorkProject, type WorkTask, type WorkTaskDetail, type WorkCommandRequest } from "@lumio/schema";
 import { errorText, isConflict, type Client, type HubExtras } from "../api.ts";
 import { attentionCard, attentionFor } from "../attention-card.ts";
 import { jobActivityBadge } from "../job-activity.ts";
@@ -146,7 +146,12 @@ export class WorkEditor {
       else void attentionFor(hub, input.task.id).then(show).catch(() => { /* 旧 Hub：没有这个接口 */ });
       if (input.task.references.length) detail.append(h("section", { class: "section" },
         h("div", { class: "section-head" }, h("h3", {}, t("References")), h("span", { class: "count" }, input.task.references.length)),
-        h("ul", {}, ...input.task.references.map(ref => h("li", {}, ref.label ?? ref.id)))));
+        h("ul", {}, ...input.task.references.map(ref => {
+          const label = ref.label ?? ref.id;
+          return h("li", {}, ref.module === "knowledge"
+            ? h("a", { href: lumioLink(ref.id), class: "resource-link", "data-resource": ref.id }, label)
+            : label);
+        }))));
     } else detail.append(this.projectTasks(input));
   }
 

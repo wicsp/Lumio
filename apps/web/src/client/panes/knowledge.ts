@@ -15,7 +15,7 @@ import { resourceStatusText } from "../resources.ts";
  * 私密内容默认隐藏，需显式打开；关闭时清空已显示的详情并丢弃迟到的私密响应。
  * 旧版任务/项目/例行笔记默认不出现在「全部」里，可在类型菜单中单独查看。
  */
-import { NOTE_TYPES, type NoteDetail, type LinksResult, type SearchResult } from "@lumio/schema";
+import { lumioLink, NOTE_TYPES, type NoteDetail, type LinksResult, type SearchResult } from "@lumio/schema";
 import { errorText, type Client } from "../api.ts";
 import { clear, debounce, empty, failure, h, icon, loading, openDialog, openMenu, placeholder, highlightedText, toast } from "../dom.ts";
 import { noteGraph } from "../graph/data.ts";
@@ -46,18 +46,19 @@ function editableId(note: NoteDetail["note"]): string | undefined {
  * 其他笔记另有「AI 笔记提到」，不混进人的反链。
  */
 function linkSections(links: LinksResult): HTMLElement[] {
-  const section = (title: string, items: LinksResult["outgoing"]) => {
-    const rows = items.map(link => h("li", {}, link.note
-      ? h("a", { href: "#", "data-note": link.note.id ?? link.note.path }, link.note.title)
-      : h("span", { class: "muted" }, t("{0} (not found)", link.target))));
-    return h("section", {}, h("h3", {}, t("{0} ({1})", title, items.length)),
-      rows.length ? h("ul", {}, ...rows) : h("p", { class: "muted" }, t("None")));
-  };
+  const noteRows = (items: LinksResult["outgoing"]) => items.map(link => h("li", {}, link.note
+    ? h("a", { href: "#", "data-note": link.note.id ?? link.note.path }, link.note.title)
+    : h("span", { class: "muted" }, t("{0} (not found)", link.target))));
+  const taskRows = (links.work_incoming ?? []).map(({ task }) => h("li", {},
+    h("a", { href: lumioLink(task.id), class: "resource-link", "data-resource": task.id }, task.title),
+    h("span", { class: "muted" }, ` · ${t("Task reference")}`)));
+  const section = (title: string, rows: HTMLLIElement[]) => h("section", {}, h("h3", {}, t("{0} ({1})", title, rows.length)),
+    rows.length ? h("ul", {}, ...rows) : h("p", { class: "muted" }, t("None")));
   const ai = links.note.type === "ai-note";
   return [
-    section(t("Links to"), ai ? links.ai_outgoing ?? [] : links.outgoing),
-    section(t("Linked from"), links.incoming),
-    ...(links.ai_incoming ? [section(t("Mentioned in AI notes"), links.ai_incoming)] : []),
+    section(t("Links to"), noteRows(ai ? links.ai_outgoing ?? [] : links.outgoing)),
+    section(t("Linked from"), [...noteRows(links.incoming), ...taskRows]),
+    ...(links.ai_incoming ? [section(t("Mentioned in AI notes"), noteRows(links.ai_incoming))] : []),
   ];
 }
 

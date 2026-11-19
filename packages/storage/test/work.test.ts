@@ -44,6 +44,42 @@ test("shared transaction rollback restores task, execution and request receipt t
   } finally { db.close(); }
 });
 
+test("knowledge backlinks backfill existing tasks and track reference changes in the task transaction", () => {
+  const db = new Database(":memory:");
+  try {
+    const f = fixture(db);
+    const idea = "idea_00000000000000000000000003", source = "src_00000000000000000000000001";
+    const original = f.command("work.task.create", { title: "Existing task" });
+    if (original.kind !== "task") throw new Error("task expected");
+    db.exec(`
+      DROP TRIGGER work_task_knowledge_refs_insert;
+      DROP TRIGGER work_task_knowledge_refs_update;
+      DROP TABLE work_task_knowledge_refs;
+    `);
+    db.query("UPDATE work_tasks SET refs=? WHERE id=?").run(JSON.stringify([
+      { module: "knowledge", id: idea }, { module: "knowledge", id: idea, label: "Duplicate" },
+      { module: "work", id: source },
+    ]), original.task.id);
+    const store = new SqliteWorkStore(db);
+    expect(store.tasksReferencingKnowledge(idea)).toEqual([{ id: original.task.id, title: "Existing task" }]);
+    expect(store.tasksReferencingKnowledge(source)).toEqual([]);
+    const change = () => f.command("work.task.update", { task: original.task.id, expected_revision: 1,
+      patch: { title: "Updated task", references: [{ module: "knowledge", id: source }] } });
+    // Replace the deliberately invalid stored entry after exercising the backfill filter.
+    db.query("UPDATE work_tasks SET refs=? WHERE id=?").run(JSON.stringify([{ module: "knowledge", id: idea }]), original.task.id);
+    expect(() => db.transaction(() => { change(); throw new Error("synthetic rollback"); })()).toThrow("synthetic rollback");
+    expect(store.tasksReferencingKnowledge(idea)).toHaveLength(1);
+    expect(store.tasksReferencingKnowledge(source)).toEqual([]);
+    change();
+    expect(store.tasksReferencingKnowledge(idea)).toEqual([]);
+    expect(new SqliteWorkStore(db).tasksReferencingKnowledge(source)).toEqual([{ id: original.task.id, title: "Updated task" }]);
+    const deleted = f.command("work.task.delete", { task: original.task.id, expected_revision: 2 });
+    if (deleted.kind !== "trashed") throw new Error("trash expected");
+    store.purge(deleted.item);
+    expect(db.query("SELECT * FROM work_task_knowledge_refs WHERE task=?").all(original.task.id)).toEqual([]);
+  } finally { db.close(); }
+});
+
 test("v3 store persists actors and append-only turns across reopen", () => {
   const db = new Database(":memory:");
   try {

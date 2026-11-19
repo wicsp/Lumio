@@ -1288,6 +1288,7 @@ export const ZH: Record<string, string> = {
   "Chats": "对话",
   "Light": "浅色",
   "Linked from": "被引用",
+  "Task reference": "任务引用",
   "Links to": "引用了",
   "Load latest": "载入最新内容",
   "Loading the latest version discards your unsaved changes. Continue?": "载入最新内容会放弃当前未保存修改，确定继续吗？",
