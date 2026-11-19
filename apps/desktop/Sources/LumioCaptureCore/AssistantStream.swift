@@ -9,6 +9,11 @@ public struct AssistantStream {
             let result: Result?
             enum CodingKeys: CodingKey { case result }
             init(from decoder: Decoder) throws {
+                // A workbench UI event carries the tool ID, while a tool event carries its result.
+                if (try? decoder.singleValueContainer().decode(String.self)) != nil {
+                    result = nil
+                    return
+                }
                 let container = try decoder.container(keyedBy: CodingKeys.self)
                 result = try? container.decode(Result.self, forKey: .result)
             }

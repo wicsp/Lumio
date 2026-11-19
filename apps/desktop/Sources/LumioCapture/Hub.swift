@@ -1,5 +1,6 @@
 import Foundation
 import LumioCaptureCore
+import OSLog
 import Security
 
 struct CaptureFailure: LocalizedError {
@@ -56,8 +57,16 @@ struct Hub {
     private struct Join: Decodable { let token: String }
     private struct JoinRequest: Encodable { let code: String }
     private struct ErrorResponse: Decodable {
-        struct Detail: Decodable { let message: String }
+        struct Detail: Decodable {
+            let message: String
+            let code: String?
+        }
         let error: Detail
+    }
+    private struct RequestFailure: LocalizedError {
+        let status: Int
+        let detail: ErrorResponse.Detail?
+        var errorDescription: String? { detail?.message ?? "Hub 请求失败（\(status)）" }
     }
     private struct CaptureResult: Decodable {
         struct Capture: Decodable {
@@ -71,12 +80,21 @@ struct Hub {
 
     let origin: URL
     let token: String?
+    private let load: (URLRequest) async throws -> (Data, URLResponse)
+    private static let logger = Logger(subsystem: "io.lumio.capture", category: "upload")
     static let session: URLSession = {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 15
         config.httpShouldSetCookies = false
         return URLSession(configuration: config, delegate: NoRedirects(), delegateQueue: nil)
     }()
+
+    init(origin: URL, token: String?,
+         load: @escaping (URLRequest) async throws -> (Data, URLResponse) = { try await Hub.session.data(for: $0) }) {
+        self.origin = origin
+        self.token = token
+        self.load = load
+    }
 
     static func origin(from value: String) throws -> URL {
         guard var parts = URLComponents(string: value.trimmingCharacters(in: .whitespacesAndNewlines)),
@@ -108,11 +126,11 @@ struct Hub {
     }
 
     private func send(_ request: URLRequest) async throws -> Data {
-        let (data, response) = try await Self.session.data(for: request)
+        let (data, response) = try await load(request)
         guard let response = response as? HTTPURLResponse else { throw CaptureFailure("Hub 响应无效") }
         if (200..<300).contains(response.statusCode) { return data }
-        let message = (try? JSONDecoder().decode(ErrorResponse.self, from: data))?.error.message
-        throw CaptureFailure(message ?? "Hub 请求失败（\(response.statusCode)）")
+        let detail = (try? JSONDecoder().decode(ErrorResponse.self, from: data))?.error
+        throw RequestFailure(status: response.statusCode, detail: detail)
     }
 
     func ping() async throws { _ = try await send(request("health", method: "GET")) }
@@ -121,7 +139,19 @@ struct Hub {
         return try JSONDecoder().decode(Join.self, from: data).token
     }
 
-    func upload(_ meta: GlanceRequest, image: Data?, page: BrowserPage? = nil) async throws -> Glance {
+    func upload(_ meta: GlanceRequest, image: Data?, page: BrowserPage? = nil) async throws -> (glance: Glance, omittedPage: Bool) {
+        do {
+            return (try await sendGlance(meta, image: image, page: page), false)
+        } catch let failure as RequestFailure where failure.status == 400 && failure.detail?.code == "INVALID"
+            && page != nil && image != nil {
+            // The page is optional. Earlier Hubs reject it before creating the glance.
+            try Task.checkCancellation()
+            Self.logger.notice("Glance request \(meta.request_id, privacy: .public): Hub returned 400 INVALID with a page; retrying without the page")
+            return (try await sendGlance(meta, image: image, page: nil), true)
+        }
+    }
+
+    private func sendGlance(_ meta: GlanceRequest, image: Data?, page: BrowserPage?) async throws -> Glance {
         let boundary = "Lumio-\(UUID())"
         var meta = meta
         meta.page = page?.metadata
