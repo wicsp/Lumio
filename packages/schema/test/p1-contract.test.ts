@@ -34,6 +34,19 @@ describe("query contracts", () => {
     expect(LinksResult.safeParse({ note: ref, outgoing: [], incoming: [{ source: "wikilink", target: "x", dangling: true }] }).success).toBe(false);
   });
 
+  test("Work backlinks have a task ID and a reference relation", () => {
+    const base = { note: ref, outgoing: [], incoming: [] };
+    const backlink = { task: { module: "work", id: `task_${U}`, title: "Synthetic task" }, relation: "references" } as const;
+    expect(LinksResult.parse(base).work_incoming).toBeUndefined();
+    expect(LinksResult.parse({ ...base, work_incoming: [backlink] }).work_incoming).toEqual([backlink]);
+    for (const invalid of [
+      [],
+      [{ ...backlink, task: { ...backlink.task, module: "knowledge" } }],
+      [{ ...backlink, task: { ...backlink.task, id: ref.id } }],
+      [{ ...backlink, relation: "derived_from" }],
+    ]) expect(LinksResult.safeParse({ ...base, work_incoming: invalid }).success).toBe(false);
+  });
+
   test("check result lists dangling links with their source note", () => {
     const parsed = CheckResult.parse({ unsupported_work_notes: [], dangling: [{ from: ref, source: "wikilink", target: "Old_2020_Name" }], total: 1 });
     expect(parsed.dangling[0]?.target).toBe("Old_2020_Name");

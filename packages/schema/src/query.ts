@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Id, Sha256, Timestamp } from "./common.ts";
+import { Id, idOf, Sha256, Timestamp } from "./common.ts";
 import { Citekey, ReadingStatus } from "./entities.ts";
 
 /**
@@ -54,6 +54,10 @@ export const LinksResult = z.strictObject({
   // ADR 0053：AI 笔记正文里的链接单独列出，不计入人的链接图、全库图谱与引用导出。缺失表示没有。
   ai_outgoing: z.array(Link).min(1).optional().describe("这篇 AI 笔记正文里的链接（只有 AI 笔记有）"),
   ai_incoming: z.array(Link.extend({ note: NoteRef })).min(1).optional().describe("哪些 AI 笔记提到了这里"),
+  work_incoming: z.array(z.strictObject({
+    task: z.strictObject({ module: z.literal("work"), id: idOf("task"), title: z.string().min(1) }),
+    relation: z.literal("references"),
+  })).min(1).optional().describe("哪些可见的数据库任务引用了这篇笔记"),
 });
 
 /**

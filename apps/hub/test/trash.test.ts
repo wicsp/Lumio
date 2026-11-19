@@ -4,20 +4,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   ApiError, AssistantChatResult, AssistantConversationDetail, Job, KnowledgeDocument, KnowledgeReferencesResult,
-  LinksResult, SearchResult, TrashListResult, TrashPurgeResult, TrashRestoreResult, TrashResult, WorkCommandResult,
+  LinksResult, ResourceSummary, SearchResult, TrashListResult, TrashPurgeResult, TrashRestoreResult, TrashResult, WorkCommandResult,
   WorkTask, WorkTaskDetail, type AssistantModelResponse,
 } from "@lumio/schema";
 import type { AssistantModel } from "@lumio/assistant";
 import { readConfig } from "../src/config.ts";
 import { startHub } from "../src/server.ts";
+import { authorize } from "../src/authorize.ts";
 
-async function fixture(withVault = false, assistantModel?: AssistantModel) {
+async function fixture(withVault = false, assistantModel?: AssistantModel, access = authorize) {
   const root = await mkdtemp(join(tmpdir(), "lumio-trash-"));
   const vault = join(root, "vault");
   if (withVault) await cp(new URL("../../../fixtures/query-vault", import.meta.url).pathname, vault, { recursive: true });
   let time = new Date("2026-11-06T12:00:00Z"), sequence = 0;
   const config = { ...readConfig({ LUMIO_STATE_DIR: join(root, "state"), ...(withVault ? { LUMIO_VAULT: vault } : {}) }), port: 0, localRuntime: "server" };
-  const options = { now: () => time, assistantHome: join(root, "assistant"), log() {}, assistantModel };
+  const options = { now: () => time, assistantHome: join(root, "assistant"), log() {}, assistantModel, authorize: access };
   let hub = await startHub(config, options);
   const token = (name: string, role: "human" | "agent" | "runtime" = "human") => {
     const actor = hub.store.createActor(name, role);
@@ -46,6 +47,68 @@ async function trashed(response: Response) {
   expect(response.status).toBe(404);
   expect(ApiError.parse(await response.json()).error).toMatchObject({ code: "NOT_FOUND", reason: "trashed" });
 }
+
+test("Knowledge Links returns visible task references by canonical note ID and follows trash and restore", async () => {
+  const f = await fixture(true, undefined, (actor, request) => actor?.name === "knowledge-only" && request.operation === "work.read"
+    ? { result: "deny", reason: "fixture-work-read-denied" } : authorize(actor, request));
+  try {
+    const idea = "idea_00000000000000000000000004";
+    const source = "src_00000000000000000000000005";
+    const hidden = "ast_00000000000000000000000007";
+    const notePath = (id: string) => `/v2/knowledge/notes/${encodeURIComponent(id)}`;
+    const links = async (id: string, credential?: string, includePrivate = false) => {
+      const result = await f.request(`${notePath(id)}/links${includePrivate ? "?include_private=true" : ""}`, "GET", undefined, credential);
+      expect(result.status).toBe(200);
+      return LinksResult.parse(await result.json());
+    };
+    const baseline = await links(idea);
+    const create = async (title: string) => {
+      const result = await f.command("work.task.create", { title, references: [
+        { module: "knowledge", id: idea, label: "Synthetic label" },
+        { module: "knowledge", id: idea, revision: "fixture" },
+        { module: "knowledge", id: source }, { module: "knowledge", id: hidden },
+      ] });
+      if (result.kind !== "task") throw new Error("task expected");
+      return result.task;
+    };
+    const task = await create("Original task title"), other = await create("Another task");
+    const row = (id: string, title: string) => ({ task: { module: "work", id, title }, relation: "references" } as const);
+    const expected = [row(task.id, task.title), row(other.id, other.title)].sort((a, b) => a.task.id.localeCompare(b.task.id));
+    for (const ref of [idea, "Main", baseline.note.path, source]) expect((await links(ref)).work_incoming).toEqual(expected);
+    expect((await links(idea)).incoming).toEqual(baseline.incoming);
+    expect((await links(idea)).outgoing).toEqual(baseline.outgoing);
+    expect((await links("NoID")).work_incoming).toBeUndefined();
+    const denied = f.token("knowledge-only").token;
+    expect((await links(idea, denied)).work_incoming).toBeUndefined();
+    expect((await links(idea, f.token("agent", "agent").token)).work_incoming).toEqual(expected);
+    expect((await f.request(`${notePath(hidden)}/links`)).status).toBe(404);
+    expect((await links(hidden, undefined, true)).work_incoming).toEqual(expected);
+    expect(ResourceSummary.parse(await (await f.request(`/v2/resources/${idea}`)).json())).toMatchObject({ status: "visible", id: idea });
+    expect(ResourceSummary.parse(await (await f.request(`/v2/resources/${task.id}`)).json())).toMatchObject({ status: "visible", title: task.title });
+    await f.command("work.task.update", { task: task.id, expected_revision: task.revision, patch: {
+      title: "Renamed task", references: [{ module: "knowledge", id: idea }, { module: "work", id: other.id }],
+    } });
+    expect((await links(source)).work_incoming).toEqual([row(other.id, other.title)]);
+    const renamed = row(task.id, "Renamed task");
+    expect((await links(idea)).work_incoming).toContainEqual(renamed);
+    await f.command("work.task.delete", { task: task.id, expected_revision: task.revision + 1 });
+    expect((await links(idea)).work_incoming).toEqual([row(other.id, other.title)]);
+    const restore = (id: string) => f.request(`/v2/trash/${id}/restore`, "POST", { request_id: f.requestId() });
+    expect((await restore(task.id)).status).toBe(200);
+    expect((await links(idea)).work_incoming).toContainEqual(renamed);
+    const doc = KnowledgeDocument.parse(await (await f.request(`${notePath(idea)}/document`)).json());
+    expect((await f.request(notePath(idea), "DELETE", { request_id: f.requestId(), expected_revision: doc.revision })).status).toBe(200);
+    await trashed(await f.request(`${notePath(idea)}/links`));
+    expect((await f.request(`${notePath(baseline.note.path)}/links`)).status).toBe(404);
+    expect((await restore(idea)).status).toBe(200);
+    expect((await links(idea)).work_incoming).toContainEqual(renamed);
+    expect((await f.request(notePath(idea), "DELETE", { request_id: f.requestId(), expected_revision: doc.revision })).status).toBe(200);
+    expect((await f.request(`/v2/trash/${idea}`, "DELETE", { request_id: f.requestId() })).status).toBe(200);
+    expect((await f.request(`${notePath(idea)}/links`)).status).toBe(404);
+    expect(WorkTaskDetail.parse(await (await f.request(`/v2/work/tasks/${task.id}`)).json()).task.references)
+      .toContainEqual({ module: "knowledge", id: idea });
+  } finally { await f.close(); }
+});
 
 test("Work deletion cancels a round atomically and retains incoming references and execution history", async () => {
   const f = await fixture();

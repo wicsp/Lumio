@@ -1,6 +1,6 @@
 # 0084 任务引用资料的反链
 
-- 状态：Proposed（2026-11-19）
+- 状态：Implemented（2026-11-19，PR #305）
 - 领域：Knowledge、Work、Hub、链接查询契约
 - 任务：`task_01M7QKTRQVDQKTX04DSBES25K9`
 - 关联：ADR 0025、0038、0051、0053
@@ -9,7 +9,7 @@
 
 任务的 `references` 已经保存资料的稳定 ID，其中 `module: "knowledge"` 标识被引用的资料。知识侧当前按目标笔记查询正文链接，`LinksResult.incoming` 要求每条结果对应一篇 vault 笔记。现有 `resource_links` 按资料正文中的跨模块引用建立，来源键是笔记的路径。数据库任务没有这个路径。
 
-## 提议
+## 决定
 
 1. 在现有 `LinksResult` 增加可选字段 `work_incoming`。每项包含 `task: { module: "work", id: <task_ ID>, title: <当前任务标题> }` 和 `relation: "references"`。按任务 ID 去重并稳定排序，结果为空时省略字段。Web 在资料的「被链接」区显示任务当前标题及引用关系，用 `lumio:<task ID>` 经过现有资源入口打开任务。正文、AI 笔记的链接及图谱沿用现有契约。
 2. Hub 复用现有知识 Links 查询完成目标解析，按解析后的知识 ID 使用 Work 的反查接口补入结果。同一笔记用 ID、文件名或路径查询时得到相同的反链。无 ID 的笔记没有任务反链。返回结果要求资料在当前请求下可见且支持同一身份的 `work.read`。回收站或已删除的资料沿用知识查询的不可见处理，回收站或已永久删除的任务从反链中排除。恢复后以当前引用重新显示。没有 Hub 的本地知识查询继续只返回知识侧的链接。

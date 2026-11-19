@@ -7,7 +7,8 @@ import { type PendingStageGrant, type WorkStore } from "@lumio/work";
 export class SqliteWorkStore implements WorkStore {
   constructor(private readonly db: Database) {
     db.exec("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;");
-    db.transaction(() => db.exec(`
+    db.transaction(() => {
+      db.exec(`
       CREATE TABLE IF NOT EXISTS work_projects (
         id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL,
         revision INTEGER NOT NULL CHECK(revision>0), status TEXT NOT NULL CHECK(status IN ('planning','active','paused','done')),
@@ -43,7 +44,40 @@ export class SqliteWorkStore implements WorkStore {
       CREATE TABLE IF NOT EXISTS work_pending_grants (
         task TEXT PRIMARY KEY REFERENCES work_tasks(id), job TEXT NOT NULL, stage TEXT,
         permissions TEXT NOT NULL CHECK(json_valid(permissions)));
-    `)).immediate();
+      `);
+      this.ensureKnowledgeReferences();
+    }).immediate();
+  }
+  private ensureKnowledgeReferences(): void {
+    // The table's presence records a completed backfill because setup runs in the same transaction.
+    const exists = this.db.query("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='work_task_knowledge_refs'").get();
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS work_task_knowledge_refs (
+        knowledge TEXT NOT NULL, task TEXT NOT NULL REFERENCES work_tasks(id) ON DELETE CASCADE,
+        PRIMARY KEY(knowledge,task));
+      CREATE INDEX IF NOT EXISTS work_task_knowledge_refs_task ON work_task_knowledge_refs(task);
+      CREATE TRIGGER IF NOT EXISTS work_task_knowledge_refs_insert AFTER INSERT ON work_tasks
+      BEGIN
+        INSERT OR IGNORE INTO work_task_knowledge_refs(knowledge,task)
+        SELECT json_extract(ref.json,ref.fullkey || '.id'), NEW.id FROM json_each(NEW.refs) AS ref
+        WHERE json_extract(ref.json,ref.fullkey || '.module')='knowledge';
+      END;
+      CREATE TRIGGER IF NOT EXISTS work_task_knowledge_refs_update AFTER UPDATE OF refs ON work_tasks
+      WHEN NEW.refs IS NOT OLD.refs
+      BEGIN
+        DELETE FROM work_task_knowledge_refs WHERE task=NEW.id;
+        INSERT OR IGNORE INTO work_task_knowledge_refs(knowledge,task)
+        SELECT json_extract(ref.json,ref.fullkey || '.id'), NEW.id FROM json_each(NEW.refs) AS ref
+        WHERE json_extract(ref.json,ref.fullkey || '.module')='knowledge';
+      END;
+    `);
+    if (!exists) this.db.exec(`
+      INSERT OR IGNORE INTO work_task_knowledge_refs(knowledge,task)
+      SELECT json_extract(ref.json,ref.fullkey || '.id'), task.id
+      FROM work_tasks AS task, json_each(task.refs) AS ref
+      WHERE json_extract(ref.json,ref.fullkey || '.module')='knowledge'
+        AND NOT EXISTS (SELECT 1 FROM work_purged_tasks WHERE id=task.id);
+    `);
   }
   transaction<T>(action: () => T): T { return this.db.transaction(action)(); }
   private readProject(row: Record<string, unknown> | null): WorkProject | undefined {
@@ -89,6 +123,16 @@ export class SqliteWorkStore implements WorkStore {
     return !!this.db.query("SELECT 1 FROM work_purged_tasks WHERE id=?").get(id);
   }
   task(id: string): WorkTask | undefined { return this.readTask(this.db.query<Record<string, unknown>, [string]>("SELECT * FROM work_tasks WHERE id=? AND id NOT IN (SELECT id FROM work_purged_tasks)").get(id)); }
+  tasksReferencingKnowledge(id: string): Pick<WorkTask, "id" | "title">[] {
+    return this.db.query<Pick<WorkTask, "id" | "title">, [string]>(`
+      SELECT task.id, task.title FROM work_task_knowledge_refs AS ref
+      JOIN work_tasks AS task ON task.id=ref.task
+      WHERE ref.knowledge=?
+        AND NOT EXISTS (SELECT 1 FROM work_trash WHERE id=ref.task)
+        AND NOT EXISTS (SELECT 1 FROM work_purged_tasks WHERE id=ref.task)
+      ORDER BY ref.task
+    `).all(id);
+  }
   tasks(): WorkTask[] {
     const dependencies = new Map<string, string[]>();
     for (const row of this.db.query<{ task: string; dependency: string }, []>("SELECT task,dependency FROM work_dependencies ORDER BY rowid").all()) {

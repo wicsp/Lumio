@@ -55,13 +55,16 @@ test("default binding is loopback; public health and every registered route call
   const paths = { "knowledge.document": "/v2/knowledge/notes/missing/document", "knowledge.update": "/v2/knowledge/notes/missing/document", "knowledge.related": "/v2/knowledge/related", "knowledge.references": "/v2/knowledge/references", "knowledge.template": "/v2/knowledge/templates", "knowledge.resolve": "/v2/knowledge/papers/resolve", "knowledge.create": "/v2/knowledge/notes", "runtime.invite": "/v2/setup/runtime-invites", "client.invite": "/v2/setup/client-invites", "runtime.join": "/v2/setup/runtime/join", "client.join": "/v2/setup/client/join", "runtime.signing-key": "/v2/setup/runtime/signing-key", "runtime.remove": "/v2/execution/runtimes/missing", check: "/v2/knowledge/check", actors: "/v2/system/actors", proposals: "/v2/approval/proposals", operations: "/v2/approval/privileged", "proposal.accept": `/v2/approval/proposals/${first.id}/accept`, "proposal.reject": `/v2/approval/proposals/${second.id}/reject`, status: "/v2/system/status", health: "/health", search: "/v2/knowledge/search?q=index", show: "/v2/knowledge/notes/Main", links: "/v2/knowledge/notes/Main/links", routines: "/v2/execution/routines" };
   const existingRoutes = ROUTES.filter((route) => !([...RUNTIME_OPERATIONS, ...JOB_OPERATIONS] as readonly string[]).includes(route.operation));
   for (const route of existingRoutes) {
+    const start = decisions.length;
     const response = route.operation === "operations"
       ? await fetch(`${base()}/v2/approval/privileged`, { method: "POST", headers: { "Accept-Language": "zh", Authorization: `Bearer ${human}`, "Content-Type": "application/json" }, body: JSON.stringify({ operation: { op: "exec.privileged", args: { runtime: "act_00000000000000000000000001", job: "job_00000000000000000000000012", argv: ["/bin/true"] } } }) })
       : await request(paths[route.operation as keyof typeof paths], (route.operation === "health" || route.operation.endsWith(".join")) ? undefined : human, {}, "method" in route ? route.method : "GET");
     const pairingStatus = { "knowledge.document": 400, "knowledge.update": 400, "knowledge.related": 400, "knowledge.references": 400, "knowledge.template": 400, "knowledge.resolve": 400, "knowledge.create": 400, "runtime.invite": 400, "client.invite": 400, "runtime.join": 401, "client.join": 401, "runtime.signing-key": 403, "runtime.remove": 404 };
     expect(response.status).toBe(pairingStatus[route.operation as keyof typeof pairingStatus] ?? (route.operation === "operations" ? 403 : route.operation === "proposal.accept" ? 409 : 200));
     if (route.operation === "health") expect(await response.json()).toEqual({ ok: true, version: "0.0.0-dev" });
-    expect(decisions.at(-1)?.operation).toBe(route.operation === "operations" ? "exec.privileged" : route.operation);
+    const operations = decisions.slice(start).map(decision => decision.operation);
+    if (route.operation === "links") expect(operations.slice(-2)).toEqual(["links", "work.read"]);
+    else expect(operations.at(-1)).toBe(route.operation === "operations" ? "exec.privileged" : route.operation);
   }
   expect(decisions.length).toBeGreaterThanOrEqual(existingRoutes.length);
 });

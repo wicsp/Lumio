@@ -4,7 +4,7 @@
 
 ## 数据库 Work（ADR 0025、0032）
 
-> 任务资料引用的反查见 [ADR 0084](../adr/0084-task-knowledge-backlinks.md)（Proposed，待批准）。
+- **资料引用**（[ADR 0084](../adr/0084-task-knowledge-backlinks.md)）：Work 按知识 ID 反查任务的结构化引用。Hub 在资料 Links 查询中返回当前身份可读取的任务，任务标题取当前值，回收站与永久删除的任务不返回。索引可从任务引用重建。
 
 - `/v2/work/commands` 使用 `WorkCommandRequest` 与 `WorkCommandResult`；Task/Project 查询返回严格业务对象，必含 `created_by`、`updated_by`，路径只用于知识文件。
 - **任务模型**（ADR 0032，R4-2）：任务只回答三个问题——结局（open / done / cancelled，由人决定，可经检查点授权自动完成）、轮到谁（你 / 某个 agent / 外部 / 无人，附原因：todo、answer、review、failed、working、waiting、on_hold）、发生过什么（讨论、轮次、交接记录，只追加）。没有状态与负责人字段。「需要你处理」= 轮到你且原因是 answer、review 或 failed。一轮结束：提问 → answer，失败 → failed，取消 → todo，交付 → 没有交接计划时 review，有计划时进入下一步。每一轮的输入只放摘要与 ID，agent 用 skill 沿 ID 取回更多（Inline & Spill）。

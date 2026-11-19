@@ -9,6 +9,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CheckResult, LinksResult, NoteDetail, SearchResult } from "@lumio/schema";
+import { createClient } from "@lumio/api-client";
+import { runQuery } from "../src/query.ts";
 const cliHome = isolatedHome();
 
 const fixture = fileURLToPath(new URL("../../../fixtures/query-vault", import.meta.url));
@@ -104,6 +106,18 @@ test("human show and links render details and dangling targets", () => {
   expect(links.stdout).toContain("反向链接：");
   expect(links.stdout).toContain("Ghost（悬空）");
   expect(links.stdout).not.toContain("AIFake");
+});
+
+test("Hub links print task backlinks with their relation and deep link", async () => {
+  const task = { module: "work", id: "task_00000000000000000000000001", title: "Synthetic task" };
+  const response = LinksResult.parse({
+    note: { id: "idea_00000000000000000000000004", title: "Main graph", type: "idea", path: "research/ideas/Main.md" },
+    outgoing: [], incoming: [], work_incoming: [{ task, relation: "references" }],
+  });
+  const remote = createClient({ url: "https://fixture.invalid", fetch: Object.assign(async () => Response.json(response), { preconnect() {} }) });
+  const lines: string[] = [];
+  expect(await runQuery(undefined, { command: "links", argument: response.note.id! }, line => lines.push(line), () => {}, remote)).toBe(0);
+  expect(lines).toContain(`  [任务引用] Synthetic task  lumio:${task.id}`);
 });
 
 test("export uses default/custom paths, warns on stderr, and leaves unchanged output untouched", async () => {

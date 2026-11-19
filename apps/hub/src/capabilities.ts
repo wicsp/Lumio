@@ -10,7 +10,7 @@ import { assertNoteVisible } from "./trash.ts";
 import { AI_NOTE_CAPABILITY_NAMES, KnowledgeAiNoteCommand, ORIGINAL_CAPABILITY_NAME, capability, RESPONSE_REASONS, CAPABILITIES, toolName, WorkCommandRequest, WorkAttention, type CapabilityChange, type CapabilityNameOf, type WorkTaskDetail } from "@lumio/schema";
 import type { AssistantTool } from "@lumio/assistant";
 import { KnowledgeService } from "@lumio/knowledge";
-import { FileKnowledgeRepository, readKnowledgeDocument, showOriginal, type SqliteAssistantStore } from "@lumio/storage";
+import { FileKnowledgeRepository, readKnowledgeDocument, showOriginal, type SqliteAssistantStore, type SqliteWorkStore } from "@lumio/storage";
 import type { HubStore, Identity } from "./store.ts";
 import type { HubConfig } from "./config.ts";
 import { authorize } from "./authorize.ts";
@@ -22,6 +22,7 @@ import { text as msg } from "./messages.ts";
 interface CapabilityModules {
   workCommands: WorkCommands;
   work: WorkService;
+  workStore: Pick<SqliteWorkStore, "tasksReferencingKnowledge">;
   workTaskDetail(id: string): WorkTaskDetail;
   routines: ExecutionRoutines;
   aiNotes?: AiNotes;
@@ -182,7 +183,15 @@ export class Capabilities {
             throw cause;
           }
         }
-        return this.knowledge!.links(String(args.ref), options);
+        const links = await this.knowledge!.links(String(args.ref), options);
+        const id = links.note.id;
+        if (!id) return links;
+        assertNoteVisible(this.store.db, id);
+        if (this.decide(identity.actor, { operation: "work.read" }).result !== "allow") return links;
+        const workIncoming = this.modules.workStore.tasksReferencingKnowledge(id).map(task => ({
+          task: { module: "work", ...task }, relation: "references",
+        }));
+        return workIncoming.length ? { ...links, work_incoming: workIncoming } : links;
       };
       result = await read(includePrivate || humanConversation);
       // Compare the public projection so private link targets, titles, snippets and counts are audited too.

@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { AssistantChatRequest, WorkCommandRequest, WorkTask, WorkTaskDetail, WorkProject, type ResourceRef } from "@lumio/schema";
+import { AssistantChatRequest, LinksResult, NoteDetail, WorkCommandRequest, WorkTask, WorkTaskDetail, WorkProject, type ResourceRef } from "@lumio/schema";
 import seed from "../../../../fixtures/work/readiness.json";
 import { WorkPane } from "../../src/client/panes/work.ts";
 import { WorkEditor } from "../../src/client/panes/work-editor.ts";
+import { KnowledgePane } from "../../src/client/panes/knowledge.ts";
 import { WorkbenchView } from "../../src/client/views/workbench.ts";
 import { MainDock } from "../../src/client/main-dock.ts";
 import { resourceLinks } from "../../src/client/resources.ts";
@@ -68,7 +69,7 @@ const second = WorkTaskDetail.parse({ ...first, task: { ...first.task, id: "task
 const project = WorkProject.parse({ schema_version: 2, type: "project", created_by: "act_00000000000000000000000001", updated_by: "act_00000000000000000000000001", id: "prj_00000000000000000000000001", title: "Synthetic project",
   description: "", revision: 3, status: "active", created: seed.created, updated: seed.updated, tags: [] });
 
-test("task knowledge references open the resolved resource or show why it is unavailable", async () => {
+test("task and knowledge details link back to each other, with hints for unavailable references", async () => {
   const idea = "idea_00000000000000000000000001";
   const source = "src_00000000000000000000000001";
   const note = "ain_00000000000000000000000001";
@@ -101,24 +102,49 @@ test("task knowledge references open the resolved resource or show why it is una
   const disposeLinks = resourceLinks(root as unknown as HTMLElement, client, navigate);
   const descendants = (node: ElementStub): ElementStub[] =>
     [node, ...node.children.flatMap(child => child instanceof ElementStub ? descendants(child) : [])];
+  const clickLink = (link: ElementStub) => {
+    const click = new Event("click", { cancelable: true });
+    Object.defineProperty(click, "target", { value: link });
+    root.dispatchEvent(click);
+    expect(click.defaultPrevented).toBe(true);
+  };
   try {
     const links = descendants(root).filter(node => node.className === "resource-link");
     expect(links.map(link => [link.attributes.get("href"), link.children[0]])).toEqual([
       [`lumio:${idea}`, "Discussion"], [`lumio:${source}`, source], [`lumio:${note}`, "AI note"],
       [`lumio:${trashed}`, "Trashed note"], [`lumio:${missing}`, "Missing source"],
     ]);
-    for (const link of links) {
-      const click = new Event("click", { cancelable: true });
-      Object.defineProperty(click, "target", { value: link });
-      root.dispatchEvent(click);
-      expect(click.defaultPrevented).toBe(true);
-    }
+    for (const link of links) clickLink(link);
     await Bun.sleep(0);
     expect(lookups).toEqual([idea, source, note, trashed, missing]);
     expect(navigations).toEqual([["knowledge", idea], ["knowledge", source], ["knowledge", note]]);
     const notices = descendants(document.body as unknown as ElementStub).flatMap(node => node.children);
     expect(notices).toContain("This item is in Recently deleted.");
     expect(notices).toContain("This item isn't available to you.");
+    const material = NoteDetail.parse({
+      note: { id: navigations.at(-1)?.[1], title: "Synthetic AI note", type: "ai-note", path: "ai/notes/sample.md" },
+      frontmatter: {}, body: "Synthetic body",
+    });
+    const backlink = LinksResult.parse({ note: material.note, outgoing: [], incoming: [], work_incoming: [{
+      task: { id: detail.task.id, title: detail.task.title, module: "work" }, relation: "references",
+    }] });
+    const noteDetail = new ElementStub();
+    root.append(noteDetail);
+    const pane = Object.assign(Object.create(KnowledgePane.prototype), {
+      client, detail: noteDetail, outline: { refresh() {} }, enableEditing() {},
+    }) as { render(note: NoteDetail, links: LinksResult): void };
+    pane.render(material, backlink);
+    const footer = descendants(noteDetail).find(node => node.className === "backlinks")!;
+    const footerText = descendants(footer).flatMap(node => node.children);
+    expect(footerText).toContain("Linked from (1)");
+    expect(footerText).toContain(" · Task reference");
+    const taskLink = descendants(footer).find(node => node.className === "resource-link")!;
+    expect(taskLink.attributes.get("href")).toBe(`lumio:${detail.task.id}`);
+    expect(taskLink.children).toEqual([detail.task.title]);
+    clickLink(taskLink);
+    await Bun.sleep(0);
+    expect(lookups.at(-1)).toBe(detail.task.id);
+    expect(navigations.at(-1)).toEqual(["work", detail.task.id]);
   } finally {
     disposeLinks();
     editor.dispose();
