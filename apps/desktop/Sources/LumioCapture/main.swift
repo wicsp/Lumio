@@ -243,21 +243,22 @@ enum Connection: Equatable {
                     catch { speechFailure = error.localizedDescription }
                 }
                 try Task.checkCancellation()
-                let glance = try await hub.upload(meta, image: image, page: page)
+                let (glance, omittedPage) = try await hub.upload(meta, image: image, page: page)
+                let attachmentNote = omittedPage ? "\nHub 未接受网页正文，已上传截图" : ""
                 uploaded = glance
                 try Task.checkCancellation()
                 if transcript.isEmpty {
                     let saved = try await hub.save(glance, waitForPage: page != nil)
                     let note = speechFailure.map { "\n语音不可用 · \($0)" } ?? ""
                     let status = saved.ready ? "已收藏" : "正在入库"
-                    panel.show("\(status) · \(saved.title)\(note)", sound: sound && saved.ready ? "Glass" : nil)
+                    panel.show("\(status) · \(saved.title)\(attachmentNote)\(note)", sound: sound && saved.ready ? "Glass" : nil)
                 } else {
                     let conversation = try await hub.mainConversation()
                     let url = hub.conversationURL(conversation)
-                    panel.show("正在保存想法…", seconds: nil, url: url)
+                    panel.show("正在保存想法…\(attachmentNote)", seconds: nil, url: url)
                     try await hub.chat(ChatRequest(conversation: conversation, message: transcript, glance: glance.id, recordIdea: true)) { state in
                         savedIdea = state.idea ?? savedIdea
-                        let status = savedIdea == nil ? "正在保存想法…" : "已记下想法"
+                        let status = (savedIdea == nil ? "正在保存想法…" : "已记下想法") + attachmentNote
                         let reply = state.reply.isEmpty ? status : "\(status)\n\n\(state.reply)"
                         let target = state.reply.isEmpty ? savedIdea.map(hub.noteURL) ?? url : url
                         panel.show(reply, seconds: state.finished ? 25 : nil, url: target, expandable: !state.reply.isEmpty)
