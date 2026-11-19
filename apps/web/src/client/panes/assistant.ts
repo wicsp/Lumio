@@ -12,7 +12,7 @@ import { effortLabel } from "../labels.ts";
 import type { AIConnection, AIProfile, NativeCreate, NativeEventRecord, AssistantConversation, AssistantConversationDetail, AssistantMemory, AssistantChatRequest, AssistantToolCall } from "@lumio/schema";
 import { errorText, type Client, type HubExtras } from "../api.ts";
 import { formatTime, newRequestId } from "../commands.ts";
-import { autosize, clear, empty, failure, h, icon, loading, openDialog, toast } from "../dom.ts";
+import { autosize, clear, empty, failure, h, icon, loading, openConfirmation, openDialog, toast } from "../dom.ts";
 import { speechButton } from "../speech-input.ts";
 import { ago } from "../format.ts";
 import { renderMarkdown } from "../utils/markdown.ts";
@@ -652,15 +652,14 @@ export class AssistantPane {
   }
 
   private forget(memory: AssistantMemory): void {
-    const message = h("div", { role: "alert" });
-    const button = h("button", { type: "button", class: "btn btn-danger", onclick: async () => {
-      button.disabled = true;
-      try {
-        await this.client.memoryCommand({ request_id: newRequestId("forget"), operation: { op: "assistant.memory.forget", args: { memory: memory.id } } });
-        dialog.close(); toast(t("Forgotten"));
+    openConfirmation({
+      title: t("Forget this memory?"), confirm: t("Forget"), danger: true,
+      body: h("div", { class: "form-stack" }, h("p", {}, memory.content)),
+      run: () => this.client.memoryCommand({ request_id: newRequestId("forget"), operation: { op: "assistant.memory.forget", args: { memory: memory.id } } }),
+      completed: () => {
+        toast(t("Forgotten"));
         if (this.active) void this.loadMemories();
-      } catch (cause) { clear(message, failure(errorText(cause))); button.disabled = false; }
-    } }, t("Forget"));
-    const dialog = openDialog(t("Forget this memory?"), h("div", { class: "form-stack" }, h("p", {}, memory.content), message), [button]);
+      },
+    });
   }
 }

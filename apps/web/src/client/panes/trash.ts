@@ -5,7 +5,7 @@
 import type { TrashItem, TrashKind } from "@lumio/schema";
 import { errorText, type Client } from "../api.ts";
 import { formatTime, newRequestId } from "../commands.ts";
-import { clear, empty, failure, h, icon, loading, openDialog, toast } from "../dom.ts";
+import { clear, empty, failure, h, icon, loading, openConfirmation, toast } from "../dom.ts";
 import { ago } from "../format.ts";
 import type { Navigate } from "../navigation.ts";
 import { t, translated } from "../i18n.ts";
@@ -86,20 +86,19 @@ export class TrashPane {
   }
 
   private confirmPurge(item: TrashItem): void {
-    const error = h("div", { role: "alert" });
     const requestId = newRequestId("purge");
-    const button = h("button", { type: "button", class: "btn btn-danger", "data-pad-hold": true, onclick: async () => {
-      button.disabled = true; clear(error);
-      try {
-        await this.client.purgeTrash(item.id, { request_id: requestId });
-        dialog.close(); toast(t("Deleted permanently"));
-        if (this.active) void this.load(true);
-      } catch (cause) { clear(error, failure(errorText(cause))); button.disabled = false; }
-    } }, t("Delete permanently"));
     const note = item.kind === "task" ? t("Its run records are kept.") : item.kind === "note" ? t("The file is removed from the vault's .trash folder.") : "";
-    const dialog = openDialog(t("Delete permanently?"), h("div", { class: "form-stack delete-confirm" },
-      h("p", { class: "delete-name" }, item.title || t("Untitled")),
-      h("p", { class: "delete-consequence" }, icon("alert"), h("span", {}, t("This can't be undone."))),
-      note && h("p", { class: "muted" }, note), error), [button]);
+    openConfirmation({
+      title: t("Delete permanently?"), confirm: t("Delete permanently"), danger: true, hold: true,
+      body: h("div", { class: "form-stack delete-confirm" },
+        h("p", { class: "delete-name" }, item.title || t("Untitled")),
+        h("p", { class: "delete-consequence" }, icon("alert"), h("span", {}, t("This can't be undone."))),
+        note && h("p", { class: "muted" }, note)),
+      run: () => this.client.purgeTrash(item.id, { request_id: requestId }),
+      completed: () => {
+        toast(t("Deleted permanently"));
+        if (this.active) void this.load(true);
+      },
+    });
   }
 }

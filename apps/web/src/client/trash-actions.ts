@@ -5,7 +5,7 @@
 import type { TrashItem } from "@lumio/schema";
 import { errorText, type Client } from "./api.ts";
 import { newRequestId } from "./commands.ts";
-import { clear, failure, h, icon, openDialog, toast } from "./dom.ts";
+import { h, icon, openConfirmation, toast } from "./dom.ts";
 import { t } from "./i18n.ts";
 
 /** Keep the delete button outside the row's open control, including for keyboard activation. */
@@ -29,26 +29,20 @@ export interface DeleteOptions {
 }
 
 export function confirmDelete(client: Client, options: DeleteOptions): void {
-  const error = h("div", { role: "alert" });
   // One request ID per dialog: retrying after an unclear failure can't delete twice.
   const requestId = newRequestId("delete");
-  const button = h("button", { type: "button", class: "btn btn-danger", onclick: async () => {
-    button.disabled = true; clear(error);
-    try {
-      const item = await options.run(requestId);
-      dialog.close();
+  openConfirmation({
+    title: options.title, confirm: t("Delete"), danger: true, icon: icon("trash"),
+    body: h("div", { class: "form-stack delete-confirm" },
+      h("p", { class: "delete-name" }, options.name),
+      ...(options.consequences ?? []).map(text => h("p", { class: "delete-consequence" }, icon("alert"), h("span", {}, text))),
+      h("p", { class: "muted" }, t("It stays in Recently deleted for 30 days, where you can restore it or delete it permanently."))),
+    run: () => options.run(requestId),
+    completed: item => {
       options.deleted(item);
       toast(t("Moved to Recently deleted"), "ok", { label: t("Undo"), run: () => void restoreItem(client, item, options.restored) });
-    } catch (cause) {
-      clear(error, failure(errorText(cause)));
-      button.disabled = false;
-    }
-  } }, icon("trash"), t("Delete"));
-  const dialog = openDialog(options.title, h("div", { class: "form-stack delete-confirm" },
-    h("p", { class: "delete-name" }, options.name),
-    ...(options.consequences ?? []).map(text => h("p", { class: "delete-consequence" }, icon("alert"), h("span", {}, text))),
-    h("p", { class: "muted" }, t("It stays in Recently deleted for 30 days, where you can restore it or delete it permanently.")),
-    error), [button]);
+    },
+  });
 }
 
 export async function restoreItem(client: Client, item: TrashItem, restored?: (item: TrashItem) => void, quiet = false): Promise<boolean> {
