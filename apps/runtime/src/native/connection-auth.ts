@@ -7,6 +7,8 @@ import { codexExecutable, isolatedEnvironment, NativeError, sandboxCommand } fro
 import { NativeRpc } from "./rpc.ts";
 import { codexWindows } from "./quota.ts";
 
+const VERIFIED_CODEX_ACCOUNT_VERSIONS = new Set(["codex-cli 0.166.0", "codex-cli 0.169.0"]);
+
 type Command = Extract<NativeRuntimeCommand, { type: "connection_auth" }>;
 type Metadata = { owner: string; generation: number; account?: string };
 export type CodexJobCredential = { accessToken: string; chatgptAccountId: string; chatgptPlanType: null };
@@ -52,11 +54,10 @@ export class ConnectionAuth {
     const exe = await codexExecutable(this.options.codex);
     const env = isolatedEnvironment(root, home, exe);
     const command = this.options.unsafeTestCommand ?? sandboxCommand(root, exe);
-    if (!this.options.unsafeTestCommand) {
-      const probe = Bun.spawn([...command, "--version"], { cwd: root, env, stdout: "pipe", stderr: "ignore" });
-      if ((await new Response(probe.stdout).text()).trim() !== "codex-cli 0.166.0" || (await probe.exited) !== 0)
-        throw new NativeError("native.version_unsupported");
-    }
+    const probe = Bun.spawn([...command, "--version"], { cwd: root, env, stdout: "pipe", stderr: "ignore" });
+    const version = (await new Response(probe.stdout).text()).trim();
+    if ((await probe.exited) !== 0 || !VERIFIED_CODEX_ACCOUNT_VERSIONS.has(version))
+      throw new NativeError("native.version_unsupported");
     await writeFile(join(home, "config.toml"), 'cli_auth_credentials_store = "file"\n[features]\napps = false\nplugins = false\nhooks = false\n', { mode: 0o600 });
     const rpc = new NativeRpc([...command, "app-server", "--listen", "stdio://"], root, env);
     account.rpc = rpc;
