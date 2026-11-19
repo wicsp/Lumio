@@ -3,11 +3,10 @@
  * 不碰 DOM，便于单测；界面在 main-dock.ts 与 views/workbench.ts。
  */
 import {
-  type AIConfiguration, FOCUS_LIMITS, FocusSnapshot, MODULE_ID_PREFIXES, ResourceRef, WORKBENCH_SECTIONS,
+  FOCUS_LIMITS, FocusSnapshot, MODULE_ID_PREFIXES, ResourceRef, WORKBENCH_SECTIONS,
   type WorkbenchAction, type WorkbenchSection,
 } from "@lumio/schema";
 import type { Section } from "./navigation.ts";
-import { defaultAssistantProfile } from "./assistant-profile.ts";
 import { t } from "./i18n.ts";
 import type { Notice } from "@lumio/schema";
 
@@ -100,17 +99,6 @@ export function navigateRoute(action: Navigate): [Section, string | undefined] {
 /** 话题分隔线上显示的名称：有标签用标签，否则用 ID 等待补全。 */
 export function anchorLabels(anchors: readonly ResourceRef[], titles: ReadonlyMap<string, string> = new Map()): string[] {
   return anchors.map(ref => titles.get(ref.id) ?? ref.label ?? ref.id);
-}
-
-/**
- * 主对话只接受 API 连接的 Lumio Profile（A1-3）。优先本浏览器为该账号选的默认 Profile，
- * 否则取第一个可用的；都没有时不指定，由 Hub 的旧 API 设置兜底。
- */
-export function mainProfile(config: AIConfiguration, storage?: Pick<Storage, "getItem" | "setItem">): string | undefined {
-  const usable = config.profiles.filter(profile => profile.engine === "lumio" &&
-    config.connections.some(connection => connection.id === profile.connection && connection.host === "hub" && !!connection.base_url));
-  const saved = defaultAssistantProfile(usable, storage);
-  return saved || usable[0]?.id;
 }
 
 const NOTICE_SOURCE: Record<Notice["source"], string> = {

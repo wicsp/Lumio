@@ -37,6 +37,17 @@ export const AIConfiguration = z.strictObject({ connections: z.array(AIConnectio
 export const AIConfigurationDelete = z.strictObject({ request_id: RequestId, expected_revision: Revision });
 export const AIConfigurationDeleted = z.strictObject({ id: z.union([idOf("aic"), idOf("aip")]), deleted: z.literal(true) });
 export const AIModel = z.strictObject({ id: z.string().min(1), default_effort: z.string().optional(), efforts: z.array(z.string()) });
+/**
+ * ADR 0083：账号级默认助手 Profile，存在 Hub。没有指定 Profile 的聊天（网页、F18、后台摘要、探索、个人对话）都按它解析。
+ * 只记录人的选择；Hub 解析时只采用连接在 Hub 上、带 API 地址的 `lumio` Profile，其余情况回到第一个可用的 API Profile。
+ */
+export const AssistantDefaultBinding = z.strictObject({ purpose: z.literal("assistant.default"), profile: idOf("aip"), revision: Revision });
+export const AssistantDefaultBindingUpdate = z.strictObject({
+  request_id: RequestId,
+  /** null 表示清除默认。 */
+  profile: idOf("aip").nullable(),
+  expected_revision: Revision.optional(),
+});
 export const NativeAccountBinding = z.strictObject({ account: z.string().regex(/^[a-f0-9]{64}$/), generation: Revision });
 export const NativeConnectionAction = z.strictObject({ request_id: RequestId, action: z.enum(["login", "cancel", "logout"]) });
 export const NativeConnectionView = z.strictObject({
@@ -99,6 +110,8 @@ export type AIConfiguration = z.infer<typeof AIConfiguration>;
 export type AIConfigurationDelete = z.infer<typeof AIConfigurationDelete>;
 export type AIConfigurationDeleted = z.infer<typeof AIConfigurationDeleted>;
 export type AIUsageBinding = z.infer<typeof AIUsageBinding>;
+export type AssistantDefaultBinding = z.infer<typeof AssistantDefaultBinding>;
+export type AssistantDefaultBindingUpdate = z.infer<typeof AssistantDefaultBindingUpdate>;
 export type AIModel = z.infer<typeof AIModel>;
 export type NativeAccountBinding = z.infer<typeof NativeAccountBinding>;
 export type NativeConnectionAction = z.infer<typeof NativeConnectionAction>;

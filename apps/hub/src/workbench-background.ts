@@ -200,10 +200,10 @@ export class Explorations {
   async stop(): Promise<void> { this.running?.controller.abort(); await this.worker?.catch(() => {}); }
 
   private model(owner: string): { model: AssistantModel; name?: string } | undefined {
-    const profiles = this.modules.ai.list(owner).profiles;
-    for (const profile of profiles) {
-      if (profile.engine !== "lumio") continue;
-      try { const selected = this.modules.ai.model(owner, profile.id); return { model: selected.model, name: selected.settings.model }; } catch { /* 下一个 */ }
+    // ADR 0083：与主对话用同一个默认 Profile。
+    const profile = this.modules.ai.defaultAssistantProfile(owner);
+    if (profile) {
+      try { const selected = this.modules.ai.model(owner, profile); return { model: selected.model, name: selected.settings.model }; } catch { /* 用旧设置兜底 */ }
     }
     const fallback = this.fallback();
     return fallback ? { model: fallback } : undefined;

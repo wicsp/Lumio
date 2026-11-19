@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AIConfiguration, AIConfigurationDelete, AIConfigurationDeleted, AIConnection, AIConnectionInput, AIProfile, AIProfileInput, ApiError, DASHSCOPE_BASE_URLS, TYPESAFE_JEV_BASE_URL } from "@lumio/schema";
+import { AIConfiguration, AIConfigurationDelete, AIConfigurationDeleted, AssistantDefaultBinding, AIConnection, AIConnectionInput, AIProfile, AIProfileInput, ApiError, DASHSCOPE_BASE_URLS, TYPESAFE_JEV_BASE_URL } from "@lumio/schema";
 import { HubStore } from "../src/store.ts";
 import { readConfig } from "../src/config.ts";
 import { startHub } from "../src/server.ts";
@@ -252,4 +252,41 @@ test("speech profiles only pair with DashScope connections and cannot back chat 
   } finally {
     await f.close();
   }
+});
+
+test("the default assistant profile lives on the Hub and resolves chats that don't pick one (ADR 0083)", async () => {
+  const f = await fixture();
+  try {
+    const put = (body: unknown, bearer?: string) => f.request("/v2/ai/assistant-binding", body, "en", bearer, "PUT");
+    const legacy = AIConfiguration.parse(await (await f.request("/v2/ai/config")).json());
+    const first = legacy.profiles[0]!;
+    const second = AIProfile.parse(await (await f.request("/v2/ai/profiles", AIProfileInput.parse({
+      name: "Second API", connection: first.connection, engine: "lumio", model: "synthetic-second", thinking: "default",
+    }))).json());
+    expect(await (await f.request("/v2/ai/assistant-binding")).json()).toBeNull();
+    // 没有选默认时，主对话用第一个可用的 API Profile，而不是空着交给旧设置。
+    expect(f.hub.modules.ai.defaultAssistantProfile(f.owner.id)).toBe(first.id);
+
+    const request_id = "synthetic-default-0001";
+    const saved = AssistantDefaultBinding.parse(await (await put({ request_id, profile: second.id })).json());
+    expect(saved).toEqual({ purpose: "assistant.default", profile: second.id, revision: 1 });
+    expect(AssistantDefaultBinding.parse(await (await f.request("/v2/ai/assistant-binding")).json())).toEqual(saved);
+    expect(f.hub.modules.ai.defaultAssistantProfile(f.owner.id)).toBe(second.id);
+    expect(AssistantDefaultBinding.parse(await (await put({ request_id, profile: second.id })).json())).toEqual(saved);
+    expect((await put({ request_id, profile: first.id })).status).toBe(409);
+    expect((await put({ request_id: "synthetic-default-0002", profile: first.id, expected_revision: 9 })).status).toBe(409);
+    expect((await put({ request_id: "synthetic-default-0003", profile: "aip_01J00000000000000000000009" })).status).toBe(404);
+    expect((await put({ request_id: "synthetic-default-0004", profile: second.id }, f.agentToken)).status).toBe(403);
+
+    // 删除默认 Profile 不受阻；默认自动失效，回到第一个可用的 API Profile。
+    const removed = await f.request("/v2/ai/profiles/" + second.id,
+      AIConfigurationDelete.parse({ request_id: crypto.randomUUID(), expected_revision: second.revision }), "en", undefined, "DELETE");
+    expect(removed.status).toBe(200);
+    expect(await (await f.request("/v2/ai/assistant-binding")).json()).toBeNull();
+    expect(f.hub.modules.ai.defaultAssistantProfile(f.owner.id)).toBe(first.id);
+
+    expect(await (await put({ request_id: "synthetic-default-0005", profile: null })).json()).toBeNull();
+    await f.restart();
+    expect(f.hub.modules.ai.defaultAssistantProfile(f.owner.id)).toBe(first.id);
+  } finally { await f.close(); }
 });

@@ -736,6 +736,12 @@ export class NativeAssistant {
         gate.update(owner, await request.json().catch(() => undefined));
       return Response.json(binding, { headers: { "Cache-Control": "no-store" } });
     }
+    if (path === "/v2/ai/assistant-binding" && (request.method === "GET" || request.method === "PUT")) {
+      const defaults = this.modules.ai.assistantDefault;
+      const binding = request.method === "GET" ? defaults.binding(owner) :
+        defaults.update(owner, await request.json().catch(() => undefined));
+      return Response.json(binding, { headers: { "Cache-Control": "no-store" } });
+    }
     if (path === "/v2/ai/concurrency" && (request.method === "GET" || request.method === "PUT")) {
       const policy = this.hub.agentConcurrency;
       const value = request.method === "GET" ? policy.view(owner) : policy.update(owner, await request.json().catch(() => undefined));

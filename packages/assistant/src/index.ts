@@ -89,6 +89,8 @@ export interface AssistantContext {
   allowVoiceActions?: boolean;
   recordIdea?(owner: string, turn: AssistantTurn, user: AssistantMessage, glance: string): Promise<string>;
   resolveModel?(profile:string,owner:string):{model:AssistantModel;settings:Pick<AssistantModelRequest,"model"|"thinking"|"reasoning_effort">};
+  /** ADR 0083：请求和会话都没指定 Profile 时，账号的默认助手 Profile。没有时用构造时传入的模型。 */
+  defaultProfile?(owner:string):string|undefined;
   native?:{
     cancel?(conversation:string):void;
     validate(conversation:AssistantConversation,request:AssistantChatRequest):void;
@@ -306,7 +308,7 @@ export class AssistantService {
       if (!(await resources.visible(fragment.anchors))) return;
       const messages = fragmentMessages(fragment, this.anchoredHistory(conversation.id, records, turns));
       if (!messages.length) return;
-      const profile = this.receivedChat(conversation.owner, source)?.profile ?? conversation.profile;
+      const profile = this.receivedChat(conversation.owner, source)?.profile ?? conversation.profile ?? this.context.defaultProfile?.(conversation.owner);
       const selected = profile ? this.context.resolveModel?.(profile, conversation.owner) : undefined;
       const model = selected?.model ?? this.model;
       const input = AssistantModelRequest.parse({
@@ -403,7 +405,7 @@ export class AssistantService {
         state={...state,status:outcome.status,error:outcome.error,finished:this.time()};this.store.putTurn(state);
         const result=this.result(state,owner);emit(outcome.status==="done"?{type:"result",turn:state.id,messages:result.messages}:{type:"error",turn:state.id,error:outcome.error??this.msg("ai.unknown")});return result;
       }
-      const profile=request.profile??conversation.profile;selected=profile?this.context.resolveModel?.(profile,owner):undefined;model=selected?.model??model;
+      const profile=request.profile??conversation.profile??this.context.defaultProfile?.(owner);selected=profile?this.context.resolveModel?.(profile,owner):undefined;model=selected?.model??model;
       const records = this.store.messages(state.conversation);
       const workbench = this.mainWorkbench(conversation);
       const scope: AssistantWorkbenchScope = { owner, conversation: conversation.id, turn: state.id };

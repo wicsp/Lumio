@@ -1,6 +1,6 @@
 import { ImageHostingSettings, ImageHostingUpdate, ImageUploadResult } from "./image-hosting.ts";
 import { AIQuotaSnapshot, AIQuotaSettings, AIQuotaView, AIQuotaViews, AliyunBillingUpdate, ClaudeQuotaBindings, ClaudeQuotaSample, ClaudeBackgroundResult } from "./ai-usage.ts";
-import {AIConnection,AIConnectionInput,AIProfile,AIProfileInput,AIUsageBinding,AIConfiguration,AIConfigurationDelete,AIConfigurationDeleted,AIModel,AIRuntime,NativeAccountBinding,NativeConnectionAction,NativeConnectionView,NativeSession,NativeRuntimeView,NativeApproval,NativeAction,NativeCreate,NativeEventData,NativeEventRecord,NativeRuntimeCommand,NativeRuntimeMessage,NativeMCPRequest,NativeMCPResult} from "./ai.ts";
+import {AIConnection,AIConnectionInput,AIProfile,AIProfileInput,AIUsageBinding,AssistantDefaultBinding,AssistantDefaultBindingUpdate,AIConfiguration,AIConfigurationDelete,AIConfigurationDeleted,AIModel,AIRuntime,NativeAccountBinding,NativeConnectionAction,NativeConnectionView,NativeSession,NativeRuntimeView,NativeApproval,NativeAction,NativeCreate,NativeEventData,NativeEventRecord,NativeRuntimeCommand,NativeRuntimeMessage,NativeMCPRequest,NativeMCPResult} from "./ai.ts";
 import { KnowledgeDocument, KnowledgeUpdateRequest, KnowledgeUpdateResult, KnowledgeContext, KnowledgeRelatedRequest, KnowledgeRelatedResult, KnowledgeReferencesRequest, KnowledgeReferencesResult } from "./knowledge-editing.ts";
 /**
  * @lumio/schema —— Lumio 的契约，唯一事实来源（ADR 0003）。
@@ -275,6 +275,8 @@ export const CONTRACTS = {
   "exploration-command": ExplorationCommand,
   "decision-gate-binding": DecisionGateBinding,
   "decision-gate-binding-update": DecisionGateBindingUpdate,
+  "assistant-default-binding": AssistantDefaultBinding,
+  "assistant-default-binding-update": AssistantDefaultBindingUpdate,
   // 全局捕获键（ADR 0066，C1-1）
   "glance-create": GlanceCreate,
   "glance-browser-page": GlanceBrowserPage,
