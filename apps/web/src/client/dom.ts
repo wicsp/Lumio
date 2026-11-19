@@ -1,3 +1,4 @@
+import { errorText } from "./api.ts";
 import { drafts } from "./drafts.ts";
 import { t } from "./i18n.ts";
 import { matchRanges } from "./note-matches.ts";
@@ -229,16 +230,64 @@ export interface ConfirmOptions {
   danger?: boolean;
 }
 
+interface ConfirmationOptions<T> {
+  title: string;
+  body: HTMLElement;
+  confirm?: string;
+  danger?: boolean;
+  hold?: boolean;
+  compact?: boolean;
+  icon?: Node;
+  run(): T | Promise<T>;
+  completed?(result: T): void;
+}
+
+/** A confirmation owns its submit state and uses native modal dismissal and focus restoration. */
+export function openConfirmation<T>(options: ConfirmationOptions<T>): HTMLDialogElement {
+  const error = h("div", { role: "alert" });
+  const button = h("button", {
+    type: "button", autofocus: true, class: `btn ${options.danger ? "btn-danger" : "btn-primary"}`,
+    "data-pad-hold": options.hold,
+    onclick: async () => {
+      if (!dialog.open || button.disabled) return;
+      button.disabled = true;
+      clear(error);
+      let result: T;
+      try {
+        result = await options.run();
+      } catch (cause) {
+        if (!dialog.open) return;
+        options.body.append(error);
+        clear(error, failure(errorText(cause)));
+        button.disabled = false;
+        if (document.activeElement === document.body || document.activeElement === dialog) button.focus();
+        return;
+      }
+      dialog.close();
+      options.completed?.(result);
+    },
+  }, options.icon, options.confirm ?? t("Confirm"));
+  const dialog = openDialog(options.title, options.body, [button], { narrow: options.compact, cancelLabel: t("Cancel") });
+  if (options.compact) dialog.classList.add("dialog-confirm");
+  dialog.addEventListener("keydown", event => {
+    // Enter follows focus. Cancel, inputs and any other controls keep their native behavior.
+    if (event.key !== "Enter" || event.target !== button || event.defaultPrevented) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!event.repeat && !event.isComposing && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) button.click();
+  });
+  return dialog;
+}
+
 export function confirmDialog(options: ConfirmOptions): Promise<boolean> {
   return new Promise(resolve => {
     let ok = false;
-    const button = h("button", { type: "button", class: `btn ${options.danger ? "btn-danger" : "btn-primary"}`, "data-pad-hold": options.danger, onclick: () => { ok = true; dialog.close(); } },
-      options.confirm ?? t("Confirm"));
-    const dialog = openDialog(options.title, h("div", { class: "confirm-body" }, options.message ? h("p", {}, options.message) : null), [button],
-      { narrow: true, cancelLabel: t("Cancel") });
-    dialog.classList.add("dialog-confirm");
+    const dialog = openConfirmation({
+      ...options, compact: true, hold: options.danger,
+      body: h("div", { class: "confirm-body" }, options.message ? h("p", {}, options.message) : null),
+      run: () => { ok = true; },
+    });
     dialog.addEventListener("close", () => resolve(ok));
-    button.focus();
   });
 }
 
