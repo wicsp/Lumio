@@ -1,4 +1,4 @@
-import { AgentConcurrencyView, AgentConcurrencyUpdate } from "@lumio/schema";
+import { AgentConcurrencyView, AgentConcurrencyUpdate, ApprovalSummaryRequest, ApprovalSummaryResult } from "@lumio/schema";
 import { ImageHostingSettings, ImageHostingUpdate, ImageUploadResult } from "@lumio/schema";
 import { SecurityReviewRequest, SecurityReviewResult, Glance } from "@lumio/schema";
 import { Capture, CaptureCommand, CaptureList, CaptureListArgs, CaptureProxySettings, CaptureProxyUpdate, KnowledgeAIBinding, KnowledgeAIBindingUpdate, CaptureCreate, CaptureCreateResult, KnowledgeAiNoteCommand, KnowledgeAiNoteResult, KnowledgeOriginal, KnowledgeOriginalShowArgs, ResourceSummary } from "@lumio/schema";
@@ -336,6 +336,12 @@ export function createClient(options: { url: string; token?: string; language?: 
     targets(args: { online?: boolean } = {}) { const value = validate(ExecutionTargetListArgs, args); return request("/v2/execution/targets", value.online === undefined ? {} : { online: String(value.online) }, ExecutionTarget.array()); },
     withdrawProposal(id: string) { return request(`/v2/approval/proposals/${encodeURIComponent(validate(idOf("prop"), id))}/withdraw`, {}, Proposal, {}); },
     proposals(status: ProposalStatus = "pending") { return request("/v2/approval/proposals", { status: validate(ProposalStatus, status) }, Proposal.array()); },
+    approvalSummary(id: string, signal?: AbortSignal) {
+      return request(`/v2/approval/proposals/${validate(idOf("prop"), id)}/summary`, {}, ApprovalSummaryResult, undefined, "GET", signal);
+    },
+    generateApprovalSummary(id: string, input: ApprovalSummaryRequest, signal?: AbortSignal) {
+      return request(`/v2/approval/proposals/${validate(idOf("prop"), id)}/summary`, {}, ApprovalSummaryResult, validate(ApprovalSummaryRequest, input), "POST", signal);
+    },
     acceptProposal(id: string) { return request(`/v2/approval/proposals/${encodeURIComponent(id)}/accept`, {}, Proposal, {}); },
     rejectProposal(id: string) { return request(`/v2/approval/proposals/${encodeURIComponent(id)}/reject`, {}, Proposal, {}); },
     search(query: string, options: SearchOptions = {}) {

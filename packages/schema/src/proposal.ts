@@ -23,3 +23,28 @@ export const Proposal = z.strictObject({
 
 export type ProposalStatus = z.infer<typeof ProposalStatus>;
 export type Proposal = z.infer<typeof Proposal>;
+
+/** 摘要是分析建议。它没有提交命令或决定审批的字段（ADR 0085）。 */
+export const ApprovalSummaryRequest = z.strictObject({ refresh: z.literal(true).optional() });
+
+const summaryLine = z.string().trim().min(1).max(400).regex(/^[^\p{Cc}\p{Cf}\u2028\u2029]+$/u);
+export const ApprovalSummaryAnalysis = z.strictObject({
+  intent: summaryLine,
+  access: z.enum(["read", "write", "unknown"]),
+  targets: z.array(z.string().min(1).max(160).regex(/^[^\p{Cc}\p{Cf}\u2028\u2029]+$/u)).max(8),
+  network: z.enum(["none", "connection", "exposure", "unknown"]),
+  recommendation: z.enum(["approve", "caution", "reject"]),
+  reason: summaryLine,
+});
+const summaryModel = z.string().trim().min(1).max(200);
+export const ApprovalSummary = ApprovalSummaryAnalysis.extend({ model: summaryModel, privileged: z.literal(true) });
+export const ApprovalSummaryResult = z.discriminatedUnion("status", [
+  z.strictObject({ status: z.literal("disabled") }),
+  z.strictObject({ status: z.literal("empty"), model: summaryModel }),
+  z.strictObject({ status: z.literal("blocked"), reason: z.enum(["sensitive", "too_large"]) }),
+  z.strictObject({ status: z.literal("failed"), model: summaryModel, previous: ApprovalSummary.optional() }),
+  z.strictObject({ status: z.literal("ready"), summary: ApprovalSummary }),
+]);
+
+export type ApprovalSummaryRequest = z.infer<typeof ApprovalSummaryRequest>;
+export type ApprovalSummaryResult = z.infer<typeof ApprovalSummaryResult>;

@@ -60,6 +60,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env) {
   return {
     glanceRetentionDays, captureCardInputTokens, captureSummaryLanguage, decisionGateTimeoutMs, decisionGateMinConfidence,
     watchdogIntervalMinutes, explorationMaxTokens, explorationMaxMs: explorationMaxMinutes * 60_000,
+    approvalSummaryProfile: env.LUMIO_APPROVAL_SUMMARY_PROFILE?.trim() || undefined,
     assistantModel: env.LUMIO_ASSISTANT_MANAGED === "1" ? undefined : modelConfiguration(env),
     personal: personalConfig(env),
     assistantHome: env.HOME ?? (env === process.env ? homedir() : stateDirectory(env)),
