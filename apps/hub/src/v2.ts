@@ -1,3 +1,4 @@
+import type { Language } from "@lumio/platform";
 import { JobSpec } from "@lumio/schema";
 import { text as msg } from "./messages.ts";
 import { Id, KnowledgeAiNoteCommand, KnowledgeAiNoteResult, ResourceSummary, KnowledgeGraph, KnowledgeGraphArgs, AgentInfo, AgentTokenRequest, AgentRevokeRequest, AssistantChatRequest, WorkCommandRequest, ExecutionRoutineCommandRequest, RequestId, AssistantToolCall, capability, ExecutionRoutine, PlanTemplate, WorkCommandResult, AssistantEvent, KnowledgeDeleteRequest, AssistantConversationDeleteRequest, TrashListArgs, TrashPurgeRequest, TrashRestoreRequest } from "@lumio/schema";
@@ -43,6 +44,10 @@ export const V2_ROUTES = [
   { operation: "trash.restore", method: "POST", pattern: /^\/v2\/trash\/([a-z]+_[0-9A-HJKMNP-TV-Z]{26})\/restore$/, path: "/v2/trash/<id>/restore" },
   { operation: "trash.purge", method: "DELETE", pattern: /^\/v2\/trash\/([a-z]+_[0-9A-HJKMNP-TV-Z]{26})$/, path: "/v2/trash/<id>" },
   { operation: "execution.read", method: "GET", pattern: /^\/v2\/execution\/targets$/, path: "/v2/execution/targets" },
+  ...(["GET", "POST"] as const).map(method => ({
+    operation: "proposal.summary" as const, method, pattern: /^\/v2\/approval\/proposals\/(prop_[0-9A-HJKMNP-TV-Z]{26})\/summary$/,
+    path: "/v2/approval/proposals/<id>/summary",
+  })),
   { operation: "work.command", method: "POST", pattern: /^\/v2\/approval\/proposals\/(prop_[0-9A-HJKMNP-TV-Z]{26})\/withdraw$/, path: "/v2/approval/proposals/<id>/withdraw" },
   { operation: "notifications.push", method: "GET", pattern: /^\/v2\/notifications\/push\/key$/, path: "/v2/notifications/push/key" },
   { operation: "notifications.push", method: "GET", pattern: /^\/v2\/notifications\/push\/devices$/, path: "/v2/notifications/push/devices" },
@@ -91,7 +96,7 @@ export function moduleError(cause: unknown): HubError | undefined {
   if (cause instanceof WorkError || cause instanceof AssistantError) return new HubError(cause.code, cause.params, { reason: cause.reason });
 }
 export async function handleV2(request: Request, server: Pick<Bun.Server<undefined>, "timeout">, route: V2Route, identity: Identity, store: HubStore,
-  modules: BusinessModules, decide: typeof authorize, now = new Date()): Promise<Response> {
+  modules: BusinessModules, decide: typeof authorize, now = new Date(), language: Language = "en"): Promise<Response> {
   let decision = decide(identity.actor, { operation: route.operation,
     includePrivate: ["resource.read", "execution.read", "knowledge.graph"].includes(route.operation) && new URL(request.url).searchParams.get("include_private") === "true" });
   let execution = "applied";
@@ -119,6 +124,10 @@ export async function handleV2(request: Request, server: Pick<Bun.Server<undefin
       return await modules.securityReview(request);
     }
     const url = new URL(request.url), id = route.pattern.exec(url.pathname)?.[1];
+    if (route.operation === "proposal.summary") {
+      server.timeout(request, 15);
+      return await modules.approvalSummaries.handle(request, id!, identity.actor, store, language);
+    }
     if (route.operation === "knowledge.image-settings" || route.operation === "knowledge.image-upload") {
       if (identity.actor.role !== "human") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] });
       if (route.operation === "knowledge.image-upload") server.timeout(request, 50);

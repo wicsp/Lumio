@@ -1,4 +1,5 @@
 import { authorizeJobAccount, sameJobAccount, type JobAccountSelection } from "./job-accounts.ts";
+import { ApprovalSummaries } from "./approval-summary.ts";
 import { reviewSecurity } from "./security-review.ts";
 import { Resources } from "./resources.ts";
 import { AssistantWorkbenchAnchors } from "./assistant-workbench-anchors.ts";
@@ -69,6 +70,7 @@ export class BusinessModules {
   readonly ai:AIConfigurationService;
   readonly personal?: Personal;
   readonly decisionGate: DecisionGate;
+  readonly approvalSummaries: ApprovalSummaries;
   readonly native:NativeAssistant;
   readonly speech: SpeechConfiguration;
   readonly funAsr: FunAsr;
@@ -179,6 +181,7 @@ export class BusinessModules {
     this.assistantMain = new AssistantMainConversations(store, this.assistantStore);
     this.workbench = new WorkbenchTools(this.assistantMain, this.assistantStore, this.resources);
     this.ai=new AIConfigurationService(store.aiStore,config.assistantModel);
+    this.approvalSummaries = new ApprovalSummaries(this.ai, config.approvalSummaryProfile);
     this.semantic = new SemanticSearch(config, owner => {
       const id = this.inbox?.embeddingProfile(owner);
       if (!id) return;

@@ -73,6 +73,8 @@ test("operation/proposal/actors methods use their endpoints, methods, request bo
     { path: "/v2/approval/proposals?status=rejected", body: [{ ...proposal, status: "rejected" }], call: (client: ReturnType<typeof createClient>) => client.proposals("rejected") },
     { path: "/v2/approval/privileged", body: { status: "pending_approval", proposal }, payload: { operation, reason: proposal.reason }, status: 202, call: (client: ReturnType<typeof createClient>) => client.operation({ operation, reason: proposal.reason }) },
     { path: "/v2/approval/privileged", body: { status: "applied", operation }, payload: { operation }, call: (client: ReturnType<typeof createClient>) => client.operation({ operation }) },
+    { path: `/v2/approval/proposals/${proposal.id}/summary`, body: { status: "empty", model: "fixture" }, call: (client: ReturnType<typeof createClient>) => client.approvalSummary(proposal.id) },
+    { path: `/v2/approval/proposals/${proposal.id}/summary`, body: { status: "failed", model: "fixture" }, payload: { refresh: true }, call: (client: ReturnType<typeof createClient>) => client.generateApprovalSummary(proposal.id, { refresh: true }) },
     { path: `/v2/approval/proposals/${proposal.id}/accept`, body: { ...proposal, status: "accepted" }, payload: {}, call: (client: ReturnType<typeof createClient>) => client.acceptProposal(proposal.id) },
     { path: `/v2/approval/proposals/${proposal.id}/reject`, body: { ...proposal, status: "rejected" }, payload: {}, call: (client: ReturnType<typeof createClient>) => client.rejectProposal(proposal.id) },
   ];

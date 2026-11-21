@@ -50,6 +50,11 @@ function* scan({ text, ...location }: Section): Generator<SecurityFinding> {
   }
 }
 
+/** Reuse local pattern checks before forwarding command text to a model. */
+export function containsSensitiveText(text: string): boolean {
+  return !scan({ field: "file", text }).next().done;
+}
+
 async function* readSections(resource: SecurityReviewRequest, { vault, stateDir }: HubConfig, work: WorkService, store: HubStore): AsyncGenerator<Section> {
   if (resource.kind === "task") {
     const { task, comments } = work.detail(resource.ref);

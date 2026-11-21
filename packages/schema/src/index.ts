@@ -61,7 +61,7 @@ import { ExecutionRuntimeUpdateCommandRequest, ReleaseManifest, RuntimeUpdateDir
 import { Operation } from "./operation.ts";
 import { PrivilegedApproval, PrivilegedReport, PrivilegedStatus } from "./privileged.ts";
 import { CliConfig, ClientInvite, ClientInviteRequest, ClientJoin, ClientJoinRequest, IPhoneShortcutPairing, HubSigningKey, RuntimeInvite, RuntimeInviteRequest, RuntimeJoin, RuntimeJoinRequest } from "./setup.ts";
-import { Proposal } from "./proposal.ts";
+import { ApprovalSummaryRequest, ApprovalSummaryResult, Proposal } from "./proposal.ts";
 import {
   PersonalCommand, PersonalCommandProposal, PersonalCommandResult, PersonalEvent, PersonalJournalEntry,
   PersonalTodo, PersonalTodoStatusCommand, PersonalProposal, PersonalProposalDecision, PersonalChatRequest, PersonalChatResult, PersonalView, PersonalJournalCommand,
@@ -162,6 +162,8 @@ export const CONTRACTS = {
   "operation-request": OperationRequest,
   "operation-result": OperationResult,
   proposal: Proposal,
+  "approval-summary-request": ApprovalSummaryRequest,
+  "approval-summary-result": ApprovalSummaryResult,
   "api-error": ApiError,
   "security-review-request": SecurityReviewRequest,
   "security-review-result": SecurityReviewResult,

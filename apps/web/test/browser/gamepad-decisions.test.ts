@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { Actor, JOB_PROTOCOL_VERSION, Job, Proposal, WorkAttention, WorkProject, WorkTaskDetail, type TrashItem } from "@lumio/schema";
+import { Actor, ApprovalSummaryResult, type ApprovalSummaryRequest, JOB_PROTOCOL_VERSION, Job, Proposal, WorkAttention, WorkProject, WorkTaskDetail, type TrashItem } from "@lumio/schema";
 import { isWorkProposal, proposalCard, riskyProposal } from "../../src/client/proposal-card.ts";
 import { attentionCard, type AttentionContext } from "../../src/client/attention-card.ts";
 import { ApprovalsPane } from "../../src/client/panes/approvals.ts";
@@ -171,6 +171,13 @@ test("privileged approval remains disabled until its run is checked and renders 
   } } });
   const detail = new ElementStub("section");
   let resolve!: (value: Job) => void;
+  const model = "fixture-small";
+  const ready = ApprovalSummaryResult.parse({ status: "ready", summary: {
+    intent: "Inspect the fixture.", access: "read", targets: ["/usr/bin/fixture"], privileged: true, network: "unknown",
+    recommendation: "caution", reason: "Review how the fixture handles its arguments.", model,
+  } });
+  const requests: ApprovalSummaryRequest[] = [];
+  const firstSummary = Promise.withResolvers<ApprovalSummaryResult>();
   const navigations: [string, string | undefined][] = [];
   const pane = Object.assign(Object.create(ApprovalsPane.prototype), {
     active: true, detailGeneration: 0, list: new ElementStub("div"), split: new ElementStub("div"), detail,
@@ -179,6 +186,12 @@ test("privileged approval remains disabled until its run is checked and renders 
       runtimes: async () => [{ actor: runtimeId, registration: { name: "fixture" } }],
       actors: async () => [Actor.parse({ id: runtimeId, name: "fixture-runtime-actor", role: "runtime", created })],
       job: () => new Promise(done => { resolve = done; }),
+      approvalSummary: async () => ApprovalSummaryResult.parse({ status: "empty", model }),
+      generateApprovalSummary: async (id: string, input: ApprovalSummaryRequest) => {
+        expect(id).toBe(proposal.id);
+        requests.push(input);
+        return requests.length === 1 ? firstSummary.promise : ready;
+      },
       workTask: async () => WorkTaskDetail.parse(delegation.taskDetail),
       workProject: async (id: string) => {
         expect(id).toBe(project.id);
@@ -213,6 +226,27 @@ test("privileged approval remains disabled until its run is checked and renders 
   expect(taskLink?.textContent).toBe(delegation.taskDetail.task.title);
   taskLink?.dispatchEvent(new Event("click"));
   expect(navigations).toEqual([["work", taskId]]);
+  expect(requests).toEqual([]);
+  expect(detail.textContent).toContain("Generating a summary sends the command arguments");
+  const generate = detail.find(node => node.tag === "button" && node.textContent === "Generate summary")!;
+  generate.dispatchEvent(new Event("click"));
+  const reject = detail.find(node => node.attrs["data-pad-action"] === "reject")!;
+  expect(primary.disabled).toBe(false);
+  expect(reject.disabled).toBe(false);
+  firstSummary.resolve(ApprovalSummaryResult.parse({ status: "failed", model }));
+  await Bun.sleep(0);
+  expect(detail.textContent).toContain("No summary available");
+  const retry = detail.find(node => node.tag === "button" && node.textContent === "Retry")!;
+  retry.dispatchEvent(new Event("click"));
+  await Bun.sleep(0);
+  for (const message of ["AI-generated guidance", "Inspect the fixture.", "Runs as administrator", "Use caution", model]) {
+    expect(detail.textContent).toContain(message);
+  }
+  detail.find(node => node.tag === "button" && node.textContent === "Refresh summary")!.dispatchEvent(new Event("click"));
+  await Bun.sleep(0);
+  expect(requests).toEqual([{}, {}, { refresh: true }]);
+  expect(primary.disabled).toBe(false);
+  expect(reject.disabled).toBe(false);
 });
 
 test("approvals show a human submitter, project and task destination, and keep template history readable", async () => {
@@ -234,6 +268,7 @@ test("approvals show a human submitter, project and task destination, and keep t
   const [dispatchCard, handoffCard, templateCard] = cards;
   for (const card of [dispatchCard!, handoffCard!]) {
     expect(card.textContent).toContain("reviewer (person)");
+    expect(card.textContent).not.toContain("AI command summary");
     expect(card.textContent).toContain(project.title);
     const link = card.find(node => node.attrs["data-pad-action"] === "detail");
     expect(link?.textContent).toContain(delegation.taskDetail.task.title);

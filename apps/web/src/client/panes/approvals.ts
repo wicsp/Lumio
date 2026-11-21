@@ -3,6 +3,7 @@
  * 管理员命令先核对所属执行仍在运行、执行器身份一致；核对不了就不允许批准。
  */
 import type { Job, Proposal } from "@lumio/schema";
+import { approvalSummaryCard } from "../approval-summary.ts";
 import { errorText, type Client } from "../api.ts";
 import { clear, empty, failure, h, icon, loading, placeholder, toast } from "../dom.ts";
 import { JOB_LABELS } from "../labels.ts";
@@ -160,7 +161,7 @@ export class ApprovalsPane {
       h("section", { class: "section" }, h("div", { class: "section-head" }, h("h3", {}, t("Command"))),
         h("pre", { class: "code-block" }, argv.map(a => JSON.stringify(a)).join(" "))),
       h("dl", { class: "meta-grid section" }, ...meta.map(([k, v]) => h("div", {}, h("dt", {}, k), h("dd", {}, v))), project),
-      context, note,
+      context, approvalSummaryCard(this.client, proposal.id), note,
       proposal.status === "pending" && h("div", { class: "button-row section" }, accept, reject)));
     buttons();
 

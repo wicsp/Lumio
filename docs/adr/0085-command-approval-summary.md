@@ -1,6 +1,6 @@
 # 0085 命令审批的 AI 摘要
 
-- 状态：Proposed
+- 状态：Accepted（2026-11-21，Lumio 任务回复 `wmsg_01M7Z0ZEM42ZH3QSK31309E2J6` 批准）
 - 领域：Approval、AI 模型、Web
 - 关联：ADR 0020、0041、0064，任务 `task_01M7VRPBMD2E4G44BHT9G1MACK`
 
