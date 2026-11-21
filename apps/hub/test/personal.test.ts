@@ -136,8 +136,14 @@ test("owner chat proposes, explicit approval writes, and Apple transitions appen
     expect(initial.journal).toEqual([]);
     const [href, row] = [...calendar.items].find(([path]) => path.includes("/todos/"))!;
     expect(row.value).toContain("STATUS:NEEDS-ACTION");
+    const alarm = ["BEGIN:VALARM", "ACTION:DISPLAY", "TRIGGER;RELATED=END:-PT15M", "DESCRIPTION:Fixture reminder", "END:VALARM", ""].join("\r\n");
+    const withAlarm = row.value.replace("END:VTODO", alarm + "END:VTODO");
+    calendar.update(href, withAlarm);
+    personal.tick(true);
+    await personal.drain();
+    expect((await view()).todos[0]).toMatchObject({ status: "open", read_only: false });
     now("2026-11-18T08:20:00Z");
-    calendar.update(href, row.value.replace("STATUS:NEEDS-ACTION", "STATUS:COMPLETED\r\nCOMPLETED:20261118T081630Z\r\nPERCENT-COMPLETE:100"));
+    calendar.update(href, withAlarm.replace("STATUS:NEEDS-ACTION", "STATUS:COMPLETED\r\nCOMPLETED:20261118T081630Z\r\nPERCENT-COMPLETE:100"));
     personal.tick(true);
     await personal.drain();
     personal.tick(true);
@@ -146,7 +152,7 @@ test("owner chat proposes, explicit approval writes, and Apple transitions appen
       kind: "todo_completed", occurred_at: "2026-11-18T08:16:30.000Z", source: expect.objectContaining({ kind: "caldav" }),
     })]);
     const completion = (await view()).journal[0]!;
-    calendar.update(href, row.value);
+    calendar.update(href, withAlarm);
     personal.tick(true);
     await personal.drain();
     expect((await view()).journal[0]).toMatchObject({ kind: "todo_reopened", corrects: completion.id });
@@ -159,6 +165,7 @@ test("owner chat proposes, explicit approval writes, and Apple transitions appen
     await personal.drain();
     expect(PersonalCommandResult.parse(await (await request("/v2/personal/todo-status", command)).json()).status).toBe("confirmed");
     expect((await view()).todos[0]?.status).toBe("completed");
+    expect(calendar.items.get(href)?.value).toContain("PERCENT-COMPLETE:100\r\n" + alarm);
   }, input => {
     if (input.messages.at(-1)?.role === "tool") return reply("请批准两项安排。");
     return { content: "", tool_calls: [
