@@ -748,6 +748,8 @@ div.note-rich-preview { padding:4px 0; }
 .today-row:first-child { border-top: 0; }
 .today-row:hover { background: var(--hover); }
 .today-row .row-sub { gap: 12px; font-size: var(--fs-xs); }
+.today-personal { overflow-wrap: anywhere; }
+.today-personal .row-sub { display: block; white-space: normal; }
 /* 一键委派（ADR 0044）：行内按钮放在行按钮旁边，不嵌套按钮 */
 .task-action-row { display: flex; align-items: center; border-top: 1px solid var(--line); }
 .task-action-row:first-child { border-top: 0; }

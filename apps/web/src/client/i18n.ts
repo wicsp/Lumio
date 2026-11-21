@@ -30,6 +30,7 @@ export const ZH: Record<string, string> = {
   "Calendar sync is pending or unavailable.": "正在同步日历，或日历暂时不可用。",
   "Set up a Lumio API profile to use personal chat.": "请设置 Lumio API 配置后使用个人聊天。",
   "Nothing to show.": "暂无记录。",
+  "No personal events or to-dos due today.": "今天没有个人日程或到期待办。",
   "Next seven days": "未来七天",
   "Personal to-dos": "个人待办",
   "Journal · last seven days": "最近七天的生活日志",
