@@ -71,6 +71,7 @@ export class Personal {
   private nextTick = 0;
   private syncOk = false;
   private writeOffset = 0;
+  private refreshTodoBaseline: boolean;
 
   constructor(db: Database, private readonly config: Config, private readonly modelFor: (profile?: string) => Model | undefined,
     private readonly taskExists: (id: string) => boolean, private readonly now: () => Date,
@@ -78,6 +79,8 @@ export class Personal {
     this.owner = config.owner;
     this.scope = { owner: config.owner, connection: config.connection };
     this.store = new SqlitePersonalStore(db);
+    // Cached projections may predate support for alarms on otherwise editable to-dos.
+    this.refreshTodoBaseline = this.todos().some(todo => todo.read_only);
     const id = (prefix: "pev" | "ptd" | "jrn") => this.id(prefix);
     this.sync = new PersonalSync(this.store, id);
     this.commands = new PersonalCommands(this.store, id, () => this.now().toISOString());
@@ -89,9 +92,12 @@ export class Personal {
   tick(force = false) {
     if (this.running || this.signal.aborted || (!force && this.now().getTime() < this.nextTick)) return;
     const run = async () => {
-      const results = await Promise.allSettled(Object.values(collections).map(collection =>
-        reconcilePersonalCalendar(this.scope, collection, this.config.timezone, this.store, this.sync,
-          this.config.remotes[collection.kind], () => this.now().toISOString(), this.signal)));
+      const results = await Promise.allSettled(Object.values(collections).map(async collection => {
+        await reconcilePersonalCalendar(this.scope, collection, this.config.timezone, this.store, this.sync,
+          this.config.remotes[collection.kind], () => this.now().toISOString(), this.signal,
+          collection.kind === "todo" && this.refreshTodoBaseline);
+        if (collection.kind === "todo") this.refreshTodoBaseline = false;
+      }));
       this.syncOk = results.every(result => result.status === "fulfilled");
       const writes = this.store.pendingWrites(this.scope);
       const start = this.writeOffset % Math.max(1, writes.length);

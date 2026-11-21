@@ -120,7 +120,9 @@ export function decodeCalendarResource(resource: { href: string; etag: string; t
         if (stack.length === 1 && name === componentName[collection.kind]) {
           fields = new Map();
           complex = false;
-        } else if (fields) complex = true;
+        } else if (fields && (collection.kind !== "todo" || stack.length !== 2 || name !== "VALARM")) {
+          complex = true;
+        }
         stack.push(name);
       } else if (part.name === "END") {
         if (stack.pop() !== part.value.toUpperCase()) return invalid();
@@ -152,9 +154,10 @@ export async function reconcilePersonalCalendar(
   remote: CaldavCollection,
   now: () => string,
   signal?: AbortSignal,
+  refreshBaseline = false,
 ): Promise<void> {
   const expectedToken = store.token(scope, collection);
-  const report = await remote.pull(expectedToken, signal);
+  const report = await remote.pull(refreshBaseline ? null : expectedToken, signal);
   const resources = report.resources.map(resource => decodeCalendarResource(resource, collection, timezone));
   sync.apply(scope, collection, { ...report, expectedToken, resources, observedAt: now() });
 }

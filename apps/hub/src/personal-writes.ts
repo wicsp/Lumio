@@ -30,7 +30,7 @@ function dateLine(name: string, value: PersonalDateTime): string {
   return value.kind === "date" ? `${name};VALUE=DATE:${value.date.replaceAll("-", "")}` : `${name}:${utc(value.at)}`;
 }
 
-function edit(write: PersonalWrite, mark: string, original?: Resource): string {
+function edit(write: PersonalWrite, mark: string, original?: Resource): string | undefined {
   const target = write.target!;
   const operation = write.command.operation;
   const fields = new Map<string, string | null>([
@@ -68,11 +68,26 @@ function edit(write: PersonalWrite, mark: string, original?: Resource): string {
       `UID:${target.uid}`, ...body, `END:${name}`, "END:VCALENDAR"];
   } else {
     lines = [];
-    let inside = false;
+    let depth = 0;
+    let insideTarget = false;
+    let fieldsWritten = false;
     for (const line of linesOf(original.text)) {
-      if (line.toUpperCase() === `BEGIN:${name}`) inside = true;
-      else if (line.toUpperCase() === `END:${name}`) { lines.push(...body); inside = false; }
-      if (!inside || !fields.has(nameOf(line))) lines.push(line);
+      const property = nameOf(line);
+      // A relative end alarm on an editable to-do needs its due date.
+      if (insideTarget && depth === 3 && property === "TRIGGER" && fields.get("DUE") === null
+        && /;RELATED=(?:END|"END")(?=[;:])/i.test(line)) return;
+      if (insideTarget && depth === 2 && !fieldsWritten && (property === "BEGIN" || property === "END")) {
+        lines.push(...body);
+        fieldsWritten = true;
+      }
+      if (property === "BEGIN") {
+        depth++;
+        if (depth === 2 && line.toUpperCase() === `BEGIN:${name}`) insideTarget = true;
+      } else if (property === "END" && depth === 2 && insideTarget) {
+        insideTarget = false;
+      }
+      if (!insideTarget || depth !== 2 || !fields.has(property)) lines.push(line);
+      if (property === "END") depth--;
     }
   }
   return lines.map(fold).join("\r\n") + "\r\n";
@@ -144,8 +159,10 @@ export class PersonalWriteWorker {
         const old = parsed(current).components;
         if (old.length !== 1 || old[0]!.uid !== target.uid || old[0]!.item.read_only) return settle({ status: "conflict", request_id });
       }
+      const body = edit(write, mark, current);
+      if (body === undefined) return settle({ status: "conflict", request_id });
       try {
-        await remote.write(href, edit(write, mark, current), target, signal);
+        await remote.write(href, body, target, signal);
       } catch (cause) {
         if (!(cause instanceof CaldavError) || cause.code !== "CONFLICT") throw cause;
         return confirm(await remote.read(href, undefined, signal)) ?? settle({ status: "conflict", request_id });
