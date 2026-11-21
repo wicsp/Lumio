@@ -89,7 +89,7 @@ export class PersonalPane {
       h("div", { class: "personal-columns" },
         list(t("Next seven days"), view.events.map(event =>
           h("li", {}, h("strong", {}, event.title), h("div", { class: "muted" }, personalSchedule(event.schedule))))),
-        list(t("Personal to-dos"), view.todos.map(todo => this.todo(todo))),
+        list(t("Personal to-dos"), view.todos.map(todo => this.todo(todo, view.timezone))),
         list(t("Journal · last seven days"), view.journal.map(entry => this.entry(entry, view.timezone, amended.has(entry.id))),
           h("button", { type: "button", class: "btn btn-small", onclick: () => this.editJournal("entry") }, t("New entry"))),
       ),
@@ -97,7 +97,7 @@ export class PersonalPane {
     );
   }
 
-  private todo(todo: PersonalTodo) {
+  private todo(todo: PersonalTodo, timezone: string) {
     const completed = todo.status === "completed";
     const click = async (event: Event) => {
       const button = event.currentTarget as HTMLButtonElement;
@@ -114,7 +114,11 @@ export class PersonalPane {
     };
     return h("li", {},
       h("strong", {}, todo.title),
-      h("div", { class: "muted" }, [completed ? t("Completed") : null, todo.due && date(todo.due)].filter(Boolean).join(" · ")),
+      h("div", { class: "muted" }, [
+        completed && (todo.completed_at ? `${t("Completed")} ${format(todo.completed_at, timezone)}` : t("Completed")),
+        todo.due && `${t("Due")} ${date(todo.due)}`,
+        todo.read_only && t("Read only"),
+      ].filter(Boolean).join(" · ")),
       todo.read_only ? null : h("button", { type: "button", class: "btn btn-small", onclick: click }, completed ? t("Reopen") : t("Mark complete")));
   }
 
