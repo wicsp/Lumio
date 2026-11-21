@@ -19,7 +19,8 @@ test("development publisher selects managed platforms, signs all artifacts, reta
       await publishBuildUpdates({ root: updates, build, version: `0.2.3-dev.local.${n}`, commit: String(n).repeat(40), previous, key: key.privateKey, platforms: ["linux-x64", "linux-arm64"],
         compile: async (_, path) => { await writeFile(path, "synthetic program"); }, run: async argv => { const p = Bun.spawn(argv); expect(await p.exited).toBe(0); } });
     }
-    expect((await readdir(updates)).filter(name => name.startsWith("0."))).toEqual(["0.2.3-dev.local.2", "0.2.3-dev.local.3"]);
+    const versions = (await readdir(updates)).filter(name => name.startsWith("0.")).sort();
+    expect(versions).toEqual(["0.2.3-dev.local.2", "0.2.3-dev.local.3"]);
     const directory = join(updates, "0.2.3-dev.local.3");
     const manifest = verifyManifest(await readFile(join(directory, "manifest.json")), await readFile(join(directory, "manifest.sig"), "utf8"), [key.publicKey], "0.2.3-dev.local.3");
     expect(manifest.artifacts).toHaveLength(2);
