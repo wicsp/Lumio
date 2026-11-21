@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { Proposal, WorkAttention, WorkTaskDetail, type TrashItem } from "@lumio/schema";
+import { Actor, JOB_PROTOCOL_VERSION, Job, Proposal, WorkAttention, WorkProject, WorkTaskDetail, type TrashItem } from "@lumio/schema";
 import { isWorkProposal, proposalCard, riskyProposal } from "../../src/client/proposal-card.ts";
 import { attentionCard, type AttentionContext } from "../../src/client/attention-card.ts";
 import { ApprovalsPane } from "../../src/client/panes/approvals.ts";
@@ -51,8 +51,10 @@ class ElementStub extends EventTarget {
 }
 
 const suffix = "01JABCDEFGHJKMNPQRSTVWXYZ0";
-const taskId = `task_${suffix}`, jobId = `job_${suffix}`, runtimeId = `act_${suffix}`;
+const taskId = `task_${suffix}`, jobId = `job_${suffix}`, runtimeId = `act_${suffix}`, projectId = `prj_${suffix}`;
 const created = "2026-11-11T00:00:00Z";
+const project = WorkProject.parse({ schema_version: 2, type: "project", id: projectId, title: "Fixture project",
+  description: "", revision: 1, status: "active", created, updated: created, created_by: runtimeId, updated_by: runtimeId, tags: [] });
 const base = { id: `prop_${suffix}`, author: runtimeId, reason: "Synthetic request", status: "pending", created };
 let body: ElementStub;
 let restore: () => void;
@@ -151,10 +153,11 @@ test("the pending approval card retains the proposer, stored target and decision
   await Promise.resolve(); await Promise.resolve();
   const summary = card.find(node => node.className === "dispatch-summary");
   expect(summary?.children.map(child => typeof child === "string" ? child : child.textContent)).toEqual([
-    "Proposed by", proposal.author,
-    "Task title", "整理论文复现实验材料",
+    "Proposed by", `Unknown object ${proposal.author}`,
+    "Task title", `Unknown object ${delegation.taskDetail.task.id}`,
     "Task description", "Task description unavailable.",
     "Assigned to", delegation.proposal.operation.args.operation.args.to,
+    "Project", "—",
   ]);
   expect(card.textContent).toContain(delegation.proposal.operation.args.operation.args.comment);
   expect(card.textContent).toContain("目标执行器目前离线。");
@@ -167,10 +170,21 @@ test("privileged approval remains disabled until its run is checked and renders 
     runtime: runtimeId, job: jobId, argv: ["/usr/bin/fixture", "--argument", "value with spaces"],
   } } });
   const detail = new ElementStub("section");
-  let resolve!: (value: unknown) => void;
+  let resolve!: (value: Job) => void;
+  const navigations: [string, string | undefined][] = [];
   const pane = Object.assign(Object.create(ApprovalsPane.prototype), {
     active: true, detailGeneration: 0, list: new ElementStub("div"), split: new ElementStub("div"), detail,
-    client: { job: () => new Promise(done => { resolve = done; }) },
+    navigate: (section: string, id?: string) => { navigations.push([section, id]); },
+    client: {
+      runtimes: async () => [{ actor: runtimeId, registration: { name: "fixture" } }],
+      actors: async () => [Actor.parse({ id: runtimeId, name: "fixture-runtime-actor", role: "runtime", created })],
+      job: () => new Promise(done => { resolve = done; }),
+      workTask: async () => WorkTaskDetail.parse(delegation.taskDetail),
+      workProject: async (id: string) => {
+        expect(id).toBe(project.id);
+        return project;
+      },
+    },
   }) as { openProposal(proposal: Proposal): void };
   pane.openProposal(proposal);
   const primary = detail.find(node => node.attrs["data-pad-action"] === "primary")!;
@@ -179,9 +193,58 @@ test("privileged approval remains disabled until its run is checked and renders 
   for (const text of ['"/usr/bin/fixture"', '"--argument"', '"value with spaces"', jobId, runtimeId, base.reason]) {
     expect(detail.textContent).toContain(text);
   }
-  resolve({ spec: { runtime: runtimeId, workdir: "/synthetic" }, status: "running" });
-  await Promise.resolve(); await Promise.resolve();
+  resolve(Job.parse({ project: project.id, spec: {
+    id: jobId, runtime: runtimeId, protocol_version: JOB_PROTOCOL_VERSION, lease: "synthetic-lease-0001", timeout_seconds: 3600,
+    workdir: "/synthetic", created, run: { kind: "agent", engine: "codex", prompt: "Fixture" }, source: { task: taskId, round: 2 },
+  }, status: "running" }));
+  await Bun.sleep(0);
   expect(primary.disabled).toBe(false);
+  expect(detail.textContent).toContain("codex@fixture");
+  expect(detail.textContent).toContain("Round 2");
+  expect(detail.textContent).toContain(project.title);
+  expect(detail.textContent).not.toContain(jobId);
+  expect(detail.textContent).not.toContain(runtimeId);
+  expect(detail.find(node => node.attrs.title === jobId)).toBeDefined();
+  expect(detail.find(node => node.attrs.title === runtimeId)).toBeDefined();
+  const time = detail.find(node => node.tag === "time");
+  expect(time?.attrs.datetime).toBe(created);
+  expect(time?.textContent).not.toBe(created);
+  const taskLink = detail.find(node => node.tag === "button" && node.attrs.title === taskId);
+  expect(taskLink?.textContent).toBe(delegation.taskDetail.task.title);
+  taskLink?.dispatchEvent(new Event("click"));
+  expect(navigations).toEqual([["work", taskId]]);
+});
+
+test("approvals show a human submitter, project and task destination, and keep template history readable", async () => {
+  const client = {
+    actors: async () => [Actor.parse({ id: runtimeId, name: "reviewer", role: "human", created })],
+    workTask: async () => WorkTaskDetail.parse({ ...delegation.taskDetail, task: { ...delegation.taskDetail.task, project: project.id } }),
+    workProject: async () => project,
+  };
+  const navigations: [string, string | undefined][] = [];
+  const ctx = { client: client as never, navigate: (section: string, id?: string) => { navigations.push([section, id]); }, changed() {} };
+  const dispatch = Proposal.parse(delegation.proposal);
+  const handoff = planProposal({ access: "write" });
+  const template = Proposal.parse({ ...planProposal({ access: "write" }, true), status: "accepted", decided: created });
+  const cards = [dispatch, handoff, template].map(proposal => {
+    if (!isWorkProposal(proposal)) throw new Error("Expected a work proposal");
+    return proposalCard(proposal, ctx, "approvals") as unknown as ElementStub;
+  });
+  await Bun.sleep(0);
+  const [dispatchCard, handoffCard, templateCard] = cards;
+  for (const card of [dispatchCard!, handoffCard!]) {
+    expect(card.textContent).toContain("reviewer (person)");
+    expect(card.textContent).toContain(project.title);
+    const link = card.find(node => node.attrs["data-pad-action"] === "detail");
+    expect(link?.textContent).toContain(delegation.taskDetail.task.title);
+    link?.dispatchEvent(new Event("click"));
+  }
+  expect(navigations).toEqual([["work", taskId], ["work", taskId]]);
+  expect(dispatchCard?.textContent).toContain(delegation.proposal.operation.args.operation.args.to);
+  expect(templateCard?.textContent).toContain("reviewer (person) proposes saving a plan template “Synthetic plan”");
+  expect(templateCard?.find(node => node.attrs["data-pad-action"] === "detail")).toBeUndefined();
+  expect(templateCard?.find(node => node.attrs["data-pad-action"] === "primary")).toBeUndefined();
+  expect(templateCard?.textContent).toContain("Decided");
 });
 
 test("the permanent-delete confirmation uses the same hold guard as privileged approvals", () => {

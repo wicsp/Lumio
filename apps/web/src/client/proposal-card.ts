@@ -11,22 +11,10 @@ import { ago } from "./format.ts";
 import { t } from "./i18n.ts";
 import { hookText, permissionSummary, planRows } from "./plan.ts";
 import type { Navigate } from "./navigation.ts";
+import { actorLabel, proposalActor, proposalProject, proposalTime, unknownObject } from "./proposal-context.ts";
 
 export type WorkProposal = Proposal & { operation: WorkCommandProposal };
 export const isWorkProposal = (proposal: Proposal): proposal is WorkProposal => proposal.operation.op === "work.command";
-
-const namesByClient = new WeakMap<Client, Promise<Map<string, string>>>();
-function actorName(client: Client, id: string, fallback = t("An agent")): Promise<string> {
-  let names = namesByClient.get(client);
-  if (!names) {
-    names = client.actors().then(list => new Map(list.map(actor => [actor.id, actor.name.startsWith("work-system-") ? "Lumio" : actor.name])), () => {
-      namesByClient.delete(client);
-      return new Map<string, string>();
-    });
-    namesByClient.set(client, names);
-  }
-  return names.then(map => map.get(id) ?? fallback);
-}
 
 type DispatchArgs = Extract<WorkCommandProposal["args"]["operation"], { op: "work.task.dispatch" }>["args"];
 
@@ -37,23 +25,25 @@ export function pendingDispatchArgs(proposal: Proposal): DispatchArgs | undefine
 }
 
 export function dispatchSummary(proposal: Proposal, args: DispatchArgs, client: Client, openTask?: () => void): HTMLElement {
-  const proposer = h("dd", {}, proposal.author);
-  const fallbackTitle = proposal.reason.split("\n", 1)[0]?.replace(/^work\.task\.dispatch: /, "") || args.task;
-  const title = openTask
-    ? h("button", { type: "button", class: "dispatch-task-link", "data-pad-action": "detail", onclick: openTask }, fallbackTitle)
-    : h("strong", {}, fallbackTitle);
+  const proposer = h("dd", { title: proposal.author }, unknownObject(proposal.author));
+  const title = h("dd", { title: args.task }, unknownObject(args.task));
   const description = h("dd", { class: "dispatch-description" }, t("Loading…"));
-  void actorName(client, proposal.author, proposal.author).then(name => { proposer.textContent = name; });
+  const project = h("dd", {}, "—");
+  void proposalActor(client, proposal.author).then(actor => { if (actor) proposer.textContent = actorLabel(actor); });
   void client.workTask(args.task).then(({ task }) => {
-    title.textContent = task.title;
+    clear(title, openTask
+      ? h("button", { type: "button", class: "dispatch-task-link", "data-pad-action": "detail", onclick: openTask }, task.title)
+      : h("strong", {}, task.title));
     description.textContent = task.description.trim() || t("No description.");
+    if (openTask) clear(project, task.project ? proposalProject(client, task.project) : t("No project"));
   }, () => { description.textContent = t("Task description unavailable."); });
   // Hub freezes the destination in the proposal. The task's current next_target may differ.
   return h("dl", { class: "dispatch-summary" },
     h("dt", {}, t("Proposed by")), proposer,
-    h("dt", {}, t("Task title")), h("dd", {}, title),
+    h("dt", {}, t("Task title")), title,
     h("dt", {}, t("Task description")), description,
-    h("dt", {}, t("Assigned to")), h("dd", {}, h("span", { class: "mono" }, args.to ?? t("Target not recorded"))));
+    h("dt", {}, t("Assigned to")), h("dd", {}, h("span", { class: "mono" }, args.to ?? t("Target not recorded"))),
+    openTask ? h("dt", {}, t("Project")) : null, openTask ? project : null);
 }
 
 /** 一句话标题（审批列表、今日卡片）。 */
@@ -98,22 +88,39 @@ export interface ProposalContext { client: Client; navigate: Navigate; changed()
 
 /** 今日与审批页共用的卡片。 */
 export function proposalCard(proposal: WorkProposal, ctx: ProposalContext, layout?: "approvals"): HTMLElement {
-  const args = proposal.operation.args.operation.args;
+  const op = proposal.operation.args.operation;
+  const args = op.args;
   // 计划模板提议没有任务（ADR 0049 第 6 节）：标题不是跳转按钮。
   const task = "task" in args ? args.task : undefined;
-  const dispatch = layout === "approvals" ? pendingDispatchArgs(proposal) : undefined;
+  const dispatch = layout === "approvals" && op.op === "work.task.dispatch" ? op.args : undefined;
   const advisory = dispatch ? proposal.reason.split("\n").slice(1).join("\n") : "";
   let heading: HTMLElement;
+  let project: HTMLElement | undefined;
   if (dispatch) {
     heading = dispatchSummary(proposal, dispatch, ctx.client, () => ctx.navigate("work", dispatch.task));
   } else {
-    heading = task
-      ? h("button", { type: "button", class: "attn-title", "data-pad-action": "detail", onclick: () => ctx.navigate("work", task) }, proposal.reason)
-      : h("p", { class: "attn-title" }, proposal.reason);
-    void Promise.all([actorName(ctx.client, proposal.author), task ? ctx.client.workTask(task).then(detail => detail.task.title, () => proposal.reason) : Promise.resolve("")])
-      .then(([author, title]) => { heading.textContent = proposalTitle(proposal, author, title); });
+    const openTask = task ? () => ctx.navigate("work", task) : undefined;
+    const taskButton = (text: string) =>
+      h("button", { type: "button", class: "attn-title", title: task, "data-pad-action": "detail", onclick: openTask }, text);
+    heading = layout === "approvals"
+      ? h("div", { title: proposal.author }, h("p", { class: "attn-title", title: task }, proposal.reason))
+      : task ? taskButton(proposal.reason) : h("p", { class: "attn-title" }, proposal.reason);
+    if (task && layout === "approvals") project = h("span", {}, "—");
+    const projectValue = project;
+    const detail = task ? ctx.client.workTask(task).catch(() => undefined) : Promise.resolve(undefined);
+    void detail.then(result => {
+      if (result && projectValue) clear(projectValue, result.task.project ? proposalProject(ctx.client, result.task.project) : t("No project"));
+    });
+    void Promise.all([proposalActor(ctx.client, proposal.author), detail]).then(([actor, result]) => {
+      const author = actor ? actorLabel(actor) : layout === "approvals" ? unknownObject(proposal.author) : t("An agent");
+      const taskTitle = result?.task.title ?? (task && layout === "approvals" ? unknownObject(task) : proposal.reason);
+      const text = proposalTitle(proposal, author, taskTitle);
+      if (layout === "approvals") {
+        clear(heading, result ? taskButton(text) : h("p", { class: "attn-title", title: task }, text));
+      } else heading.textContent = text;
+    });
   }
-  const card = h("article", { tabindex: "0", "data-pad-row": proposal.id, class: `attn ${proposal.status === "pending" ? "attn-ochre" : "attn-done-state"}` });
+  const card = h("article", { tabindex: "0", "data-pad-row": proposal.id, title: layout === "approvals" ? proposal.id : undefined, class: `attn ${proposal.status === "pending" ? "attn-ochre" : "attn-done-state"}` });
   const error = h("div", { role: "alert" });
   const approve = h("button", { type: "button", class: "btn btn-primary btn-small", "data-pad-action": "primary", "data-pad-hold": riskyProposal(proposal) }, icon("check"), t("Approve"));
   const reject = h("button", { type: "button", class: "btn btn-small", "data-pad-action": "reject" }, icon("close"), t("Reject"));
@@ -139,7 +146,11 @@ export function proposalCard(proposal: WorkProposal, ctx: ProposalContext, layou
       h("div", { class: "attn-heading" },
         dispatch ? null : h("p", { class: "attn-kind" }, proposal.status === "pending" ? t("Waiting for your approval") : proposal.status === "accepted" ? t("Approved") : proposal.status === "rejected" ? t("Rejected") : t("Withdrawn")),
         heading,
-        h("p", { class: "attn-meta", title: formatTime(proposal.created) }, ago(proposal.created)))),
+        project && h("p", { class: "attn-meta" }, t("Project"), " · ", project),
+        layout === "approvals"
+          ? proposalTime(proposal.created, "attn-meta")
+          : h("p", { class: "attn-meta", title: formatTime(proposal.created) }, ago(proposal.created)),
+        layout === "approvals" && proposal.decided ? h("p", { class: "attn-meta" }, t("Decided"), " · ", proposalTime(proposal.decided)) : null)),
     advisory ? h("p", { class: "dispatch-advisory" }, advisory) : null,
     proposalBody(proposal),
     proposal.status === "pending" ? h("div", { class: "attn-actions" }, approve, reject)
