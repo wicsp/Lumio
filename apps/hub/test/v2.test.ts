@@ -4,6 +4,8 @@ beforeLocale(() => { previousLocale = process.env.LUMIO_LANG; process.env.LUMIO_
 afterLocale(() => { if (previousLocale === undefined) delete process.env.LUMIO_LANG; else process.env.LUMIO_LANG = previousLocale; });
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { mkdir, mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
+import { once } from "node:events";
+import { createConnection, createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AssistantMemory, AssistantMemoryCommandResult, ApiError, WorkCommandResult, WorkTaskDetail, AssistantChatResult, AssistantEvent, Job, ExecutionRoutine, ExecutionRoutineInfo, RuntimeSync, StoredArtifact, type RuntimeRegistration } from "@lumio/schema";
@@ -32,22 +34,45 @@ function request(path: string, body?: unknown, token = human) {
   return fetch(`http://127.0.0.1:${hub.server.port}${path}`, { method: body === undefined ? "GET" : "POST",
     headers: { "Accept-Language": "zh", Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 }
-test("runtime update downloads have a longer per-request idle timeout", async () => {
+test("Runtime update downloads survive a slow proxy without extending the health timeout", async () => {
   const version = hub.store.runtimeVersion;
   const folder = join(temp, "updates", version);
   const archive = "lumio-darwin-arm64.tar.gz";
+  const bytes = Buffer.alloc(8 * 1024 * 1024, 0x5a);
   await mkdir(folder, { recursive: true });
   await writeFile(join(folder, "manifest.json"), "{}");
-  await writeFile(join(folder, archive), "synthetic archive");
+  await writeFile(join(folder, archive), bytes);
+
+  const relay = createServer(client => {
+    const upstream = createConnection(hub.server.port!, "127.0.0.1");
+    let resume: ReturnType<typeof setTimeout> | undefined;
+    client.on("error", () => upstream.destroy());
+    upstream.on("error", () => client.destroy());
+    client.once("close", () => { clearTimeout(resume); upstream.destroy(); });
+    client.pipe(upstream);
+    upstream.once("data", first => {
+      upstream.pause();
+      client.write(first);
+      // Fill the upstream connection's buffers until after Bun's 10-second default expires.
+      resume = setTimeout(() => upstream.pipe(client), 16_000);
+    });
+  });
   const timeout = spyOn(hub.server, "timeout");
   try {
-    const response = await request(`/v2/execution/updates/${version}/${archive}`, undefined, runtime);
+    relay.listen(0, "127.0.0.1");
+    await once(relay, "listening");
+    const { port } = relay.address() as AddressInfo;
+    const response = await fetch(`http://127.0.0.1:${port}/v2/execution/updates/${version}/${archive}`, {
+      headers: { Authorization: `Bearer ${runtime}`, Connection: "close" }, signal: AbortSignal.timeout(25_000),
+    });
     expect(response.status).toBe(200);
-    expect(await response.text()).toBe("synthetic archive");
+    expect(createHash("sha256").update(Buffer.from(await response.arrayBuffer())).digest("hex"))
+      .toBe(createHash("sha256").update(bytes).digest("hex"));
     expect(timeout).toHaveBeenCalledWith(expect.any(Request), 120);
     expect((await request("/health")).status).toBe(200);
     expect(timeout).toHaveBeenCalledTimes(1);
   } finally {
+    relay.close();
     timeout.mockRestore();
   }
 });

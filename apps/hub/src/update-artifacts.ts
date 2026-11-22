@@ -1,5 +1,7 @@
+import { createReadStream } from "node:fs";
 import { lstat, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { Readable } from "node:stream";
 import { LumioVersion } from "@lumio/schema";
 import { downloadRelease, verifyArtifact, verifyManifest, type releasePublicKeys } from "@lumio/platform";
 import type { Identity } from "./store.ts";
@@ -60,15 +62,21 @@ export class UpdateArtifacts {
     if (identity.actor.role !== "runtime") throw new HubError("FORBIDDEN", { key: "server.request_not_authorized", args: [] });
     const parts = new URL(request.url).pathname.split("/");
     const version = parts[4], file = parts[5];
-    if (request.method !== "GET" || parts.length !== 6 || !LumioVersion.safeParse(version).success ||
-      !/^(manifest\.(json|sig)|lumio-(darwin-arm64|linux-x64|linux-arm64)\.tar\.gz)$/.test(file ?? "")) throw missing();
+    if (request.method !== "GET" || parts.length !== 6 || !LumioVersion.safeParse(version).success || !file ||
+      !/^(manifest\.(json|sig)|lumio-(darwin-arm64|linux-x64|linux-arm64)\.tar\.gz)$/.test(file)) throw missing();
     await this.initialize();
     if (version !== this.version && version !== this.previous) throw missing();
     try {
       await this.cache(version!);
-      const directory = join(this.root, version!), path = join(directory, file!);
+      const directory = join(this.root, version!), path = join(directory, file);
       if (!(await lstat(directory)).isDirectory() || !(await lstat(path)).isFile()) throw missing();
-      return new Response(Bun.file(path), { headers: { "Cache-Control": "private, no-store", "Content-Type": file === "manifest.json" ? "application/json" : "application/octet-stream" } });
+      // Bun 1.4.4's native file response resets the per-request idle timeout on backpressure.
+      const body = file.endsWith(".tar.gz")
+        ? Readable.toWeb(createReadStream(path, { signal: request.signal }), {
+          strategy: { highWaterMark: 64 * 1024, size: (chunk: Uint8Array) => chunk.byteLength },
+        })
+        : Bun.file(path);
+      return new Response(body, { headers: { "Cache-Control": "private, no-store", "Content-Type": file === "manifest.json" ? "application/json" : "application/octet-stream" } });
     } catch { throw missing(); }
   }
 }
