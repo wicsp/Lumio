@@ -43,7 +43,9 @@ verify_web() {
   curl -fsS --max-time 4 "$endpoint/health" |
     jq -e --arg version "$expected" '.ok == true and .version == $version' >/dev/null || return
   for path in / /assets/app.js /assets/app.css; do
-    curl -fsS --max-time 5 "$endpoint$path" -o /dev/null || return
+    # A Runtime downloading its update can share the public link with this check.
+    curl -fsS --compressed --connect-timeout 5 --max-time 60 --speed-limit 1024 --speed-time 15 \
+      "$endpoint$path" -o /dev/null || return
   done
 }
 
