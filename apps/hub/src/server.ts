@@ -191,7 +191,13 @@ async function startHubInstance(config: HubConfig, options: {
             return response;
           }
           if(url.pathname.startsWith("/v2/runtime/native")){const response=await modules!.native.channel(request,identity!);status=response.status;return response;}
-          if (url.pathname.startsWith("/v2/execution/updates/")) { const response = await updateArtifacts.handle(request, identity!); status = response.status; return response; }
+          if (url.pathname.startsWith("/v2/execution/updates/")) {
+            // Allow stalls during large downloads through a reverse proxy.
+            server.timeout(request, 120);
+            const response = await updateArtifacts.handle(request, identity!);
+            status = response.status;
+            return response;
+          }
           if(url.pathname==="/v2/runtime/claude-usage"){const response=await modules!.native.usage.claude(request,identity!);status=response.status;return response;}
           if(url.pathname==="/v2/ai/usage"||/^\/v2\/ai\/connections\/[^/]+\/usage\//.test(url.pathname)){
             const response=await modules!.native.usage.human(request,identity!);
