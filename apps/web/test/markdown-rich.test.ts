@@ -1,6 +1,8 @@
-import { describe, test, expect } from "bun:test";
-import { renderMarkdown, renderInline, renderMath } from "../src/client/utils/markdown.ts";
+import { beforeAll, describe, test, expect } from "bun:test";
+import { loadMathRenderer, renderMarkdown, renderInline, renderMath } from "../src/client/utils/markdown.ts";
 import { richBlocks, inlineMath, tableCells } from "../src/client/utils/markdown-extra.ts";
+
+beforeAll(loadMathRenderer);
 
 describe("shared Markdown tables", () => {
   test("renders headers, alignment and inline markup without inline styles", () => {
