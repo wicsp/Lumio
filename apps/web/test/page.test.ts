@@ -49,6 +49,32 @@ describe("files", () => {
     expect(WEB_CSP).not.toContain("unsafe-inline");
     expect(WEB_CSP).not.toMatch(/https?:/);
   });
+  test("entry URLs identify their bytes and only versioned resources are immutable", () => {
+    const scriptPath = (table: ReturnType<typeof webFiles>) => /<script type="module" src="([^"]+)"/.exec(String(table.get("/")!.body))![1]!;
+    const version = scriptPath(files);
+    expect(version).toMatch(/^\/assets\/app-[a-f0-9]{16}\.js$/);
+    expect(files.get(version)).toMatchObject({ immutable: true, body: assets.js });
+    const css = /<link rel="stylesheet" href="([^"]+)"/.exec(String(files.get("/")!.body))![1]!;
+    expect(css).toMatch(/^\/assets\/app-[a-f0-9]{16}\.css$/);
+    expect(files.get(css)).toMatchObject({ immutable: true, body: assets.css });
+    for (const path of ["/", "/assets/app.js", "/assets/app.css", "/sw.js"]) expect(files.get(path)?.immutable).toBeUndefined();
+    const changed = webFiles({ ...assets, js: "console.log(2)" }, { apiBase: "" });
+    expect(scriptPath(changed)).not.toBe(version);
+    expect(changed.get(version)).toBeUndefined();
+    expect(changed.get(css)).toEqual(files.get(css));
+  });
+  test("only eager chunks appear in HTML, and every chunk can be fetched by its emitted path", () => {
+    const table = webFiles({ ...assets,
+      chunks: { "chunk-12345678.js": "export const shell = 1;", "chunk-23456789.js": "export const editor = 1;" },
+      preloads: ["chunk-12345678.js"],
+    }, { apiBase: "" });
+    const html = String(table.get("/")!.body);
+    expect(html).toContain('<link rel="modulepreload" href="/assets/chunk-12345678.js">');
+    expect(html).not.toContain("chunk-23456789.js");
+    for (const name of ["chunk-12345678.js", "chunk-23456789.js"]) {
+      expect(table.get("/assets/" + name)).toMatchObject({ type: "text/javascript; charset=utf-8", immutable: true });
+    }
+  });
   test("entry module exposes only the build and file-table functions", () => {
     expect(Object.keys(entry).sort()).toEqual(["WEB_CSP", "buildWebAssets", "webFiles"]);
   });

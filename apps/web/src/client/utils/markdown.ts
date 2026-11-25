@@ -1,6 +1,6 @@
 import { markdownImageAt, previewImageUrl } from "./markdown-images.ts";
 /**
- * 安全 Markdown 渲染（ADR 0026）：纯函数，不依赖 DOM，便于测试。
+ * 安全 Markdown 渲染（ADR 0026）：生成 HTML，不依赖 DOM。公式模块载入前保留可读的原文。
  *
  * 支持安全的 Markdown 子集、管道表格及 LaTeX 公式。
  * 原文中的 HTML 一律转义；外部链接只允许 http(s)；图片仅在显式允许的来源加载；
@@ -9,7 +9,6 @@ import { markdownImageAt, previewImageUrl } from "./markdown-images.ts";
  */
 import { idOfLumioLink } from "@lumio/schema";
 import { t } from "../i18n.ts";
-import katex from "katex";
 import { mathAt, richBlocks, type RichBlock } from "./markdown-extra.ts";
 
 export function escapeHtml(text: string): string {
@@ -41,12 +40,19 @@ export function parseWikilink(inner: string): { target: string; label: string } 
 
 const INLINE = /`([^`]+)`|\[\[([^\]\n]+)\]\]|!\[([^\]]*)\]\(([^)\s]+)\)|\[([^\]]+)\]\(([^)\s]+)\)|\*\*([^*]+)\*\*|【【([^】\n]+)】】/y;
 const mathCache = new Map<string, string | undefined>();
+let katex: typeof import("katex").default | undefined;
+
+export async function loadMathRenderer(): Promise<void> {
+  if (!katex) katex = (await import("katex")).default;
+}
+
 
 /** Native MathML needs no remote fonts, inline styles or relaxed CSP. */
-export function renderMath(tex: string, display: boolean): string | undefined {
+export function renderMath(tex: string, display: boolean, source = tex): string | undefined {
   if (tex.length > 4096) return;
   let depth = 0;
   for (const char of tex) { if (char === "{" && ++depth > 64) return; if (char === "}") depth--; }
+  if (!katex) return `<lumio-math data-tex="${escapeHtml(tex)}"${display ? " data-display" : ""}>${escapeHtml(source)}</lumio-math>`;
   const key = `${display ? "block" : "inline"}:${tex}`;
   if (mathCache.has(key)) return mathCache.get(key);
   let result: string | undefined;
@@ -61,7 +67,7 @@ export function renderMath(tex: string, display: boolean): string | undefined {
 
 export function renderRichBlock(block: RichBlock, source: string, imageOrigins?: ReadonlySet<string>): string {
   if (block.kind === "math") {
-    const math = renderMath(block.tex, true);
+    const math = renderMath(block.tex, true, source.slice(block.from, block.to));
     return math ? `<div class="math-display">${math}</div>` : `<pre class="math-source">${escapeHtml(source.slice(block.from, block.to))}</pre>`;
   }
   const cell = (value: string, index: number, tag: "th" | "td") => `<${tag}${tag === "th" ? ' scope="col"' : ""}${block.align[index] ? ` class="align-${block.align[index]}"` : ""}>${renderInline(value, imageOrigins)}</${tag}>`;
@@ -73,7 +79,7 @@ export function renderInline(text: string, imageOrigins?: ReadonlySet<string>): 
   for (let i = 0; i < text.length;) {
     const math = mathAt(text, i);
     if (math) {
-      const html = renderMath(math.tex, math.display);
+      const html = renderMath(math.tex, math.display, text.slice(i, math.to));
       out += html ? `<span class="${math.display ? "math-display" : "math-inline"}">${html}</span>` : escapeHtml(text.slice(i, math.to));
       i = math.to; continue;
     }

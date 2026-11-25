@@ -231,7 +231,7 @@ export class NoteEditor {
         };
         for (const block of blocks) preview(block.from, block.to, renderRichBlock(block, text, this.options.imageOrigins), true, t(block.kind === "table" ? "Edit table" : "Edit formula"));
         for (const formula of formulas) {
-            const html = renderMath(formula.tex, formula.display);
+            const html = renderMath(formula.tex, formula.display, text.slice(formula.from, formula.to));
             if (html) preview(formula.from, formula.to, html, false, t("Edit formula"));
         }
         if (this.options.imageOrigins?.size) for (const match of text.matchAll(/!\[/g)) {

@@ -1,12 +1,11 @@
 import { referenceLinks } from "../reference-links.ts";
 import { resourceLinks } from "../resources.ts";
 import { drafts } from "../drafts.ts";
-import { executionGroups } from "../execution-groups.ts";
 import { turnGroup } from "../turn.ts";
 import type { Session } from "../api.ts";
-import { h, icon, toast, typing } from "../dom.ts";
+import { h, icon, toast, typing, loading, failure } from "../dom.ts";
 import { OverviewPane } from "../panes/overview.ts";
-import { KnowledgePane } from "../panes/knowledge.ts";
+import type { KnowledgePane } from "../panes/knowledge.ts";
 import { WorkPane } from "../panes/work.ts";
 import { ExecutionPane } from "../panes/execution.ts";
 import { AssistantPane } from "../panes/assistant.ts";
@@ -127,9 +126,13 @@ export class WorkbenchView {
     if (!force && Date.now() - this.lastRefresh < 2000) return;
     this.refreshing = true; this.lastRefresh = Date.now();
     try {
-      await this.refreshCounts();
+      const counts = this.refreshCounts();
+      const pane = this.current;
+      // Today shares the in-flight snapshot; ancillary sections can refresh while it loads.
+      if (this.section === "overview" && !document.querySelector("dialog[open]")) pane?.pane.liveRefresh?.();
+      await counts;
       // 对话框打开时不刷新底下的模块：确认框指向的内容不能在人眼前变掉。
-      if (!document.querySelector("dialog[open]")) this.current?.pane.liveRefresh?.();
+      if (this.section !== "overview" && !document.querySelector("dialog[open]")) this.current?.pane.liveRefresh?.();
       void this.usage.refresh();
     } finally {
       this.refreshing = false;
@@ -255,6 +258,7 @@ export class WorkbenchView {
     window.addEventListener("lumio-refresh", this.refreshNow);
     document.addEventListener("visibilitychange", this.onVisible);
     const route = this.readRoute();
+    this.lastRefresh = Date.now();
     this.show(route.section, route.id);
     void this.refreshCounts();
   }
@@ -338,7 +342,7 @@ export class WorkbenchView {
     let pane: Pane;
     if (section === "overview") pane = new OverviewPane(target, client, this.session.hub, navigate, this.name, changed, this.live);
     else if (section === "settings") pane = new SettingsPane(target, this.session, this.name, () => void this.signOut(), () => this.leaveSettings(), sub => void this.go("settings", sub), id, this.gamepad);
-    else if (section === "knowledge") pane = new KnowledgePane(target, client, id, () => this.dock?.pageChanged());
+    else if (section === "knowledge") return this.mountKnowledge(target, id);
     else if (section === "work") pane = new WorkPane(target, client, this.session.hub, this.workMode, id, navigate, changed,
       resetSharing => this.dock?.pageChanged(resetSharing), subject => this.readSubject(subject));
     else if (section === "execution") pane = new ExecutionPane(target, client, this.session.hub, id, navigate, changed);
@@ -348,6 +352,35 @@ export class WorkbenchView {
     else if (section === "inbox") pane = new InboxPane(target, client, navigate, changed);
     else pane = new ApprovalsPane(target, client, changed, navigate);
     return { target, pane };
+  }
+
+  private mountKnowledge(target: HTMLElement, initialId?: string): MountedPane {
+    let id = initialId;
+    let intent: string | undefined;
+    let LoadedPane: typeof KnowledgePane | undefined;
+    let disposed = false;
+    const activate = () => {
+      if (!LoadedPane || disposed || target.hidden) return;
+      target.replaceChildren();
+      const pane = new LoadedPane(target, this.session.client, id, () => this.dock?.pageChanged());
+      mounted.pane = pane;
+      if (intent) pane.intent(intent);
+    };
+    const mounted: MountedPane = { target, pane: {
+      open: next => { id = next; }, intent: next => { intent = next; },
+      resume: activate, dispose: () => { disposed = true; },
+    } };
+    target.append(loading());
+    void import("../panes/knowledge.ts").then(module => {
+      LoadedPane = module.KnowledgePane;
+      activate();
+    }, () => {
+      if (disposed) return;
+      // The page can outlive a Hub upgrade. Leave other open panes and drafts intact.
+      target.replaceChildren(failure(t("Could not load Knowledge. Reload the page to get the current version.")),
+        h("button", { type: "button", class: "btn btn-small", onclick: () => location.reload() }, t("Reload page")));
+    });
+    return mounted;
   }
 
   /** 知识与工作页使用实际加载的对象，模块内切换不会更新工作台的路由缓存。 */
@@ -425,8 +458,8 @@ export class WorkbenchView {
   }
 
   private applyCounts(snapshot: LiveSnapshot): void {
-    const tasks = settled(snapshot.tasks), proposals = settled(snapshot.proposals), jobs = settled(snapshot.jobs);
-    const attention = settled(snapshot.attention), notices = settled(snapshot.notices), live = settled(snapshot.jobAttention);
+    const tasks = settled(snapshot.tasks), proposals = settled(snapshot.proposals), execution = settled(snapshot.execution);
+    const notices = settled(snapshot.notices);
     this.dock.notices(snapshot);
     if (notices) this.applyNotices(notices);
     const set = (section: Section, value: number | undefined, attention = false) => {
@@ -437,10 +470,11 @@ export class WorkbenchView {
     set("work", tasks?.filter(t => turnGroup(t) === "needs" || turnGroup(t) === "todo").length);
     set("inbox", undefined);
     set("approvals", proposals?.length, true);
-    const groups = jobs ? executionGroups(jobs, tasks, attention) : undefined;
-    set("execution", groups ? groups.live.length + groups.needs.length : undefined);
+    set("execution", execution?.execution_count);
     // 今日的数字与 Today 页「需要你处理」的卡片数一致，再加上待看的提醒（ADR 0030）；窄屏底栏只看得到这一个数。
-    set("overview", needsYouCount(snapshot) + (notices ? pendingNotices(notices).length : 0), true);
+    const complete = [snapshot.execution, snapshot.attention, snapshot.proposals, snapshot.jobAttention, snapshot.notices]
+      .every(result => result.status === "fulfilled");
+    set("overview", complete ? needsYouCount(snapshot) + pendingNotices(notices ?? []).length : undefined, true);
   }
 
   private leaveSettings(): void {

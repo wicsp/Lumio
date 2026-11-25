@@ -6,8 +6,12 @@ import { lang, t } from "./i18n.ts";
 import { applyTheme } from "./theme.ts";
 import { sharedCapture, stashShare } from "./panes/inbox.ts";
 import { preventPageZoom, trackViewport } from "./viewport.ts";
+import { registerMathElement } from "./math-element.ts";
+import { toast } from "./dom.ts";
 
 applyTheme();
+registerMathElement(() => toast(t("Could not load formula rendering. Reload the page to try again."), "error",
+  { label: t("Reload page"), run: () => location.reload() }));
 preventPageZoom();
 trackViewport();
 document.documentElement.lang = lang() === "zh" ? "zh-CN" : "en";
