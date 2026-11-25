@@ -1,5 +1,5 @@
 import type { Language } from "@lumio/platform";
-import { JobSpec } from "@lumio/schema";
+import { ExecutionOverview, ExecutionOverviewQuery, RESPONSE_REASONS, JobSpec } from "@lumio/schema";
 import { text as msg } from "./messages.ts";
 import { Id, KnowledgeAiNoteCommand, KnowledgeAiNoteResult, ResourceSummary, KnowledgeGraph, KnowledgeGraphArgs, AgentInfo, AgentTokenRequest, AgentRevokeRequest, AssistantChatRequest, WorkCommandRequest, ExecutionRoutineCommandRequest, RequestId, AssistantToolCall, capability, ExecutionRoutine, PlanTemplate, WorkCommandResult, AssistantEvent, KnowledgeDeleteRequest, AssistantConversationDeleteRequest, TrashListArgs, TrashPurgeRequest, TrashRestoreRequest } from "@lumio/schema";
 import { AssistantConversation, AssistantMain, AssistantMainEnsure } from "@lumio/schema";
@@ -72,6 +72,7 @@ export const V2_ROUTES = [
   { operation: "work.read", method: "GET", pattern: /^\/v2\/work\/projects$/, path: "/v2/work/projects" },
   { operation: "work.read", method: "GET", pattern: /^\/v2\/work\/projects\/(prj_[0-9A-HJKMNP-TV-Z]{26})$/, path: "/v2/work/projects/<id>" },
   { operation: "work.command", method: "POST", pattern: /^\/v2\/work\/commands$/, path: "/v2/work/commands" },
+  { operation: "execution.overview", method: "GET", pattern: /^\/v2\/execution\/overview$/, path: "/v2/execution/overview" },
   { operation: "execution.read", method: "GET", pattern: /^\/v2\/execution\/jobs$/, path: "/v2/execution/jobs" },
   { operation: "execution.read", method: "GET", pattern: /^\/v2\/execution\/jobs\/([^/]+)$/, path: "/v2/execution/jobs/<job>" },
   { operation: "execution.read", method: "GET", pattern: /^\/v2\/execution\/routines$/, path: "/v2/execution/routines" },
@@ -312,6 +313,20 @@ export async function handleV2(request: Request, server: Pick<Bun.Server<undefin
       return respond(result);
     }
     const read = async (name: string, args: Record<string, unknown>) => Response.json((await modules.capabilities.execute(name, args, identity)).result);
+    if (route.operation === "execution.overview") {
+      const { before } = ExecutionOverviewQuery.parse(Object.fromEntries(url.searchParams));
+      const overview = store.executionStore.transaction(() => {
+        const tasks = modules.work.tasks();
+        return store.executionStore.overview({
+          visible: tasks.map(task => task.id),
+          current: tasks.flatMap(({ turn }) => [turn.job, ...(turn.parallel ?? []).map(branch => branch.job)].filter((id): id is string => !!id)),
+          needs: tasks.flatMap(({ outcome, turn }) => outcome === "open" && turn.holder === "human" && turn.round && turn.job
+            && (RESPONSE_REASONS as readonly string[]).includes(turn.reason) ? [turn.job] : []),
+        }, before);
+      });
+      if (!overview) throw new HubError("INVALID", { key: "jobs.job_not_found", args: [] });
+      return Response.json(ExecutionOverview.parse(overview));
+    }
     if (route.operation === "execution.read" && url.pathname.startsWith("/v2/execution/jobs")) {
       if (id && !JobSpec.shape.id.safeParse(id).success) throw new HubError("NOT_FOUND", { key: "jobs.job_not_found", args: [] });
       const filters = Object.fromEntries([...url.searchParams].map(([key, value]) => [key, key === "limit" ? Number(value) : value]));
