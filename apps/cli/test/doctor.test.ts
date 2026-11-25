@@ -9,7 +9,7 @@ import { readFile } from "node:fs/promises";
 const token = "synthetic-secret-never-print";
 const runtime = { actor: "act_00000000000000000000000001", update: null, registration: { version: null, platform: null, install: null, protocol_version: 2, name: "server", engines: [{ name: "pi", version: "1.4.0", sandbox: "none" }], tags: [], max_concurrent: 1 }, last_seen: "2026-10-29T00:00:00Z", online: true };
 const routine = { routine: { schema_version: 2, revision: 1, id: "rtn_00000000000000000000000001", title: "fixture", description: "", created: runtime.last_seen, updated: runtime.last_seen, assignee: "pi@server", context: "none", schedule: "* * * * *", timezone: "UTC", status: "active" } };
-function fixture() {
+function fixture(scriptPath = "/assets/app.js") {
   const files: Record<string, string> = { "/synthetic/.config/lumio/config.json": JSON.stringify({ hub_url: "http://127.0.0.1:7420", token }), "/synthetic/.config/lumio/hub.env": 'LUMIO_PUBLIC_URL="http://remote.synthetic"' };
   const modes: Record<string, number> = {};
   const bodies: Record<string, unknown> = { "/health": { ok: true, version: "0.0.0-dev" }, "/v2/system/actors": [], "/v2/system/status": { watching: true, issues: [] }, "/v2/execution/runtimes": [runtime], "/v2/execution/routines": [routine], "/v2/approval/proposals": [] };
@@ -20,14 +20,19 @@ function fixture() {
     run: async (argv) => { commands.push(argv); return { code: fail.has("service") ? 1 : 0, stdout: argv.includes("--version") ? "0.0.0-dev" : "", stderr: token }; },
     fetch: (async (input, init) => {
       const u = new URL(String(input)); urls.push(u.href);
-      if (!["/health", "/", "/assets/app.js"].includes(u.pathname)) expect(new Headers(init?.headers).get("Authorization")).toBe(`Bearer ${token}`);
+      if (!["/health", "/", scriptPath].includes(u.pathname)) expect(new Headers(init?.headers).get("Authorization")).toBe(`Bearer ${token}`);
       if (fail.has(u.pathname)) throw new Error(token);
-      if (u.pathname === "/") return new Response('<script src="/assets/app.js"></script>', { headers: { "Content-Type": "text/html" } });
-      if (u.pathname === "/assets/app.js") return new Response("synthetic();", { headers: { "Content-Type": "text/javascript" } });
+      if (u.pathname === "/") return new Response(`<script src="${scriptPath}"></script>`, { headers: { "Content-Type": "text/html" } });
+      if (u.pathname === scriptPath) return new Response("synthetic();", { headers: { "Content-Type": "text/javascript" } });
       return Response.json(bodies[u.pathname]);
     }) as typeof fetch };
   return { options, files, modes, bodies, fail, commands, urls };
 }
+test("doctor verifies the fingerprinted script referenced by the installed page", async () => {
+  const path = "/assets/app-123456789abcdef0.js", f = fixture(path);
+  expect((await doctor(f.options)).every(check => check.ok)).toBe(true);
+  expect(f.urls).toContain(`http://127.0.0.1:7420${path}`);
+});
 test("CLI doctor reports every item, HTTP warning and pending proposals without failing or exposing credentials", async () => {
   const f = fixture();
   let checks = await doctor(f.options); expect(checks.every((c) => c.ok)).toBe(true);

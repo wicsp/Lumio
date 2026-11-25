@@ -14,12 +14,11 @@ export async function buildBinary(options: BinaryOptions): Promise<void> {
   if (options.target !== undefined && !/^bun-(darwin-arm64|linux-x64|linux-arm64)$/.test(options.target)) throw new Error(msg("build-binary.unsupported_build_target"));
   const assets = await buildWebAssets(), work = await mkdtemp(join(tmpdir(), "lumio-binary-"));
   try {
-    await Bun.write(join(work, "app.js.txt"), assets.js); await Bun.write(join(work, "app.css.txt"), assets.css);
+    await Bun.write(join(work, "web-assets.json"), JSON.stringify(assets));
     await Bun.write(join(work, "entry.ts"), [
-      'import js from "./app.js.txt" with { type: "text" };',
-      'import css from "./app.css.txt" with { type: "text" };',
+      'import assets from "./web-assets.json" with { type: "json" };',
       `import { main } from ${JSON.stringify(fileURLToPath(new URL("./main.ts", import.meta.url)))};`,
-      'await main({ js, css });',
+      'await main(assets);',
     ].join("\n") + "\n");
     const child = Bun.spawn([process.execPath, "build", "--compile", join(work, "entry.ts"), "--outfile", resolve(options.outfile),
       ...(options.target ? [`--target=${options.target}`] : []),

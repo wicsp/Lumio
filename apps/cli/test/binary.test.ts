@@ -36,8 +36,18 @@ test("compiled program serves embedded Web/PWA from an empty directory through b
   for (const [name, args] of [["lumio", ["hub", "serve"]]] as const) {
     const { child, url } = await start(name, [...args]);
     try {
-      const page = await fetch(url); expect(page.status).toBe(200); expect(await page.text()).toContain('name="lumio-api-base" content=""');
+      const page = await fetch(url); expect(page.status).toBe(200);
+      const html = await page.text(); expect(html).toContain('name="lumio-api-base" content=""');
       expect(page.headers.get("content-security-policy")).toContain("connect-src 'self'");
+      const entry = /<script\b[^>]*\ssrc="([^"]+)"/.exec(html)?.[1];
+      expect(entry).toBeDefined();
+      const scripts = new Set([entry!]);
+      for (const path of scripts) {
+        const script = await fetch(url + path);
+        expect(script.status).toBe(200);
+        expect(script.headers.get("content-type")).toContain("javascript");
+        for (const [, chunk] of (await script.text()).matchAll(/"(\/assets\/chunk-[a-z0-9]+\.js)"/g)) scripts.add(chunk!);
+      }
       expect((await (await fetch(url + "/assets/app.js")).text()).length).toBeGreaterThan(1000);
       expect((await (await fetch(url + "/assets/app.css")).text()).length).toBeGreaterThan(1000);
       const manifest = await (await fetch(url + "/manifest.webmanifest")).json() as { icons: { src: string }[] };
