@@ -4,6 +4,8 @@
 
 ## 对话、模型与记忆（ADR 0025、0027、0029）
 
+主对话首屏读取最近 40 条有正文的用户或助手消息，可向前翻页。按消息 ID 接续较早页面，顺序和所有者权限与完整详情一致（[ADR 0086](../adr/0086-assistant-visible-message-pages.md)）。
+
 - `/v2/assistant/chat` 支持 JSON 与 NDJSON；对话、轮次、工具调用和记忆归 Assistant。CLI 用 `chat`、`chat list/show`。
   模型和工具通过注入接口提供。Hub 的兼容 Chat Completions 适配器须配置 LUMIO_ASSISTANT_BASE_URL 与 LUMIO_ASSISTANT_MODEL，凭据仅运行时环境注入；无默认供应商或模型。用 `lumio hub assistant setup` 配置：验证后写入 Hub 服务的私有环境文件（600，与 Hub 令牌同一文件）并重启，密钥只从隐藏输入或标准输入读取，不经命令行参数、不进日志（ADR 0027）。支持 SSE 与 JSON 响应，限制响应字节/时限，工具仅在完整响应校验后交付，不自动重试。
   模型设置和显式记忆见 [助手使用说明](../assistant.md)。按 ADR 0029（R3 实施中）：助手接上能力目录，可读取与做低风险写入；模型也可在 Web 设置页配置，写入后进程内重载，不再重启。

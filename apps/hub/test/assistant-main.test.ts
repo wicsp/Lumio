@@ -7,7 +7,7 @@ import type { AssistantModel } from "@lumio/assistant";
 import { parseFrontmatter } from "@lumio/knowledge";
 import {
   AI_NOTE_CAPABILITY_NAMES, AiNote, ApiError, AssistantChatResult, AssistantConversationDetail, AssistantEvent,
-  AssistantMain, AssistantModelRequest, KnowledgeAiNoteResult, ResourceRef, WorkCommandRequest, WorkCommandResult,
+  AssistantMain, AssistantMessagePage, AssistantModelRequest, KnowledgeAiNoteResult, ResourceRef, WorkCommandRequest, WorkCommandResult,
   WorkTaskDetail, toolName, type WorkCommand,
 } from "@lumio/schema";
 import { authorize } from "../src/authorize.ts";
@@ -54,6 +54,51 @@ async function fixture(model: AssistantModel, authorizeRead = authorize) {
 }
 
 const reply = { content: "Synthetic reply", tool_calls: [] };
+
+test("message pages bound dock history, preserve insertion order and enforce conversation visibility", async () => {
+  const f = await fixture({ async complete() { return reply; } });
+  try {
+    const conversation = AssistantMain.parse(await (await f.ensure()).json()).conversation;
+    const path = `/v2/assistant/conversations/${conversation}/messages`;
+    const page = async (search = "") => {
+      const response = await f.api(path + search, "GET");
+      expect(response.status).toBe(200);
+      return AssistantMessagePage.parse(await response.json());
+    };
+    const id = (n: number) => `amsg_${String(n).padStart(26, "0")}`;
+    const add = (n: number, content: string, role: "user" | "assistant" | "tool" = "user") =>
+      f.hub.modules.assistantStore.putMessage({ id: id(n), conversation, role, content,
+        created: "2026-11-25T00:00:00Z", ...(role === "tool" ? { tool_call: "tool_00000000000000000000000001" } : {}) });
+    expect(await page()).toEqual({ messages: [] });
+    for (let i = 1; i <= 44; i++) add(i, `Synthetic message ${i}`, i % 2 ? "user" : "assistant");
+    add(45, "Fixture tool output ".repeat(60_000), "tool");
+    add(46, "\u3000\t\r\n", "assistant");
+    const recent = await page();
+    expect(recent.messages.map(m => m.id)).toEqual(Array.from({ length: 40 }, (_, i) => id(i + 5)));
+    expect(recent.next_before).toBe(id(5));
+    expect(JSON.stringify(recent).length).toBeLessThan(8000);
+    add(47, "Appended after the first page");
+    const older = await page(`?before=${recent.next_before}&limit=2`);
+    expect(older.messages.map(m => m.id)).toEqual([id(3), id(4)]);
+    expect(await page(`?before=${older.next_before}`)).toEqual({ messages: [
+      { id: id(1), role: "user", content: "Synthetic message 1" }, { id: id(2), role: "assistant", content: "Synthetic message 2" },
+    ] });
+    const detail = AssistantConversationDetail.parse(await (await f.api(`/v2/assistant/conversations/${conversation}`, "GET")).json());
+    expect(detail.messages).toHaveLength(47);
+    const other = f.credential("other");
+    const otherChat = AssistantChatResult.parse(await (await f.chat({ message: "Another conversation" })).json());
+    for (const query of ["limit=41", "limit=0", "limit=2.5", "limit=3&limit=4", "extra=1", "before=bad",
+      `before=${id(99)}`, `before=${id(45)}`, `before=${id(46)}`, `before=${otherChat.messages[0]!.id}`]) {
+      const response = await f.api(`${path}?${query}`, "GET");
+      expect(response.status).toBe(400);
+      expect(ApiError.parse(await response.json()).error.code).toBe("INVALID");
+    }
+    expect((await f.api(path, "GET", undefined, other.token)).status).toBe(404);
+    expect((await f.api(path, "GET", undefined, f.credential("agent", "agent").token)).status).toBe(403);
+    expect((await f.api(path.slice(0, -"/messages".length), "DELETE", { request_id: randomUUID() })).status).toBe(200);
+    expect((await f.api(path, "GET")).status).toBe(404);
+  } finally { await f.close(); }
+});
 const events = async (response: Response) => {
   expect(response.status).toBe(200);
   return (await response.text()).trim().split("\n").map(line => AssistantEvent.parse(JSON.parse(line)));

@@ -2,7 +2,7 @@ import type { Language } from "@lumio/platform";
 import { ExecutionOverview, ExecutionOverviewQuery, RESPONSE_REASONS, JobSpec } from "@lumio/schema";
 import { text as msg } from "./messages.ts";
 import { Id, KnowledgeAiNoteCommand, KnowledgeAiNoteResult, ResourceSummary, KnowledgeGraph, KnowledgeGraphArgs, AgentInfo, AgentTokenRequest, AgentRevokeRequest, AssistantChatRequest, WorkCommandRequest, ExecutionRoutineCommandRequest, RequestId, AssistantToolCall, capability, ExecutionRoutine, PlanTemplate, WorkCommandResult, AssistantEvent, KnowledgeDeleteRequest, AssistantConversationDeleteRequest, TrashListArgs, TrashPurgeRequest, TrashRestoreRequest } from "@lumio/schema";
-import { AssistantConversation, AssistantMain, AssistantMainEnsure } from "@lumio/schema";
+import { AssistantConversation, AssistantMain, AssistantMainEnsure, AssistantMessagePageQuery } from "@lumio/schema";
 import { newId } from "@lumio/foundation";
 import { randomBytes } from "node:crypto";
 import { AssistantError } from "@lumio/assistant";
@@ -62,6 +62,7 @@ export const V2_ROUTES = [
   { operation: "assistant.config", method: "PUT", pattern: /^\/v2\/assistant\/config$/, path: "/v2/assistant/config" },
   { operation: "assistant.config", method: "DELETE", pattern: /^\/v2\/assistant\/config$/, path: "/v2/assistant/config" },
   { operation: "assistant.read", method: "GET", pattern: /^\/v2\/assistant\/conversations\/(conv_[0-9A-HJKMNP-TV-Z]{26})\/tools$/, path: "/v2/assistant/conversations/<id>/tools" },
+  { operation: "assistant.read", method: "GET", pattern: /^\/v2\/assistant\/conversations\/(conv_[0-9A-HJKMNP-TV-Z]{26})\/messages$/, path: "/v2/assistant/conversations/<id>/messages" },
   { operation: "assistant.undo", method: "POST", pattern: /^\/v2\/assistant\/tools\/(tool_[0-9A-HJKMNP-TV-Z]{26})\/undo$/, path: "/v2/assistant/tools/<id>/undo" },
   { operation: "work.read", method: "GET", pattern: /^\/v2\/work\/attention$/, path: "/v2/work/attention" },
   { operation: "work.plan_templates.read", method: "GET", pattern: /^\/v2\/work\/plan-templates$/, path: "/v2/work/plan-templates" },
@@ -347,6 +348,16 @@ export async function handleV2(request: Request, server: Pick<Bun.Server<undefin
         store.audit(identity, route.operation, decision.result, undefined, "applied");
       });
       audited = true; return Response.json(result);
+    }
+    if (route.operation === "assistant.read" && url.pathname.endsWith("/messages")) {
+      const params = Object.fromEntries(url.searchParams);
+      const query = AssistantMessagePageQuery.safeParse({
+        ...params, ...(params.limit === undefined ? {} : { limit: /^\d+$/.test(params.limit) ? Number(params.limit) : NaN }),
+      });
+      if (!query.success || url.searchParams.size !== Object.keys(params).length) {
+        throw new HubError("INVALID", { key: "v2.invalid_assistant_request_parameters", args: [] });
+      }
+      return Response.json(modules.assistant.messagePage(id!, identity.actor.id, query.data), { headers: { "Cache-Control": "no-store" } });
     }
     if (route.operation === "assistant.read") return Response.json(id ? modules.assistant.detail(id, identity.actor.id) : modules.assistant.conversations(identity.actor.id));
     if (route.operation === "assistant.main") {

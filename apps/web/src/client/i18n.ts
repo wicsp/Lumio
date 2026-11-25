@@ -1296,6 +1296,7 @@ export const ZH: Record<string, string> = {
   "Load latest": "载入最新内容",
   "Loading the latest version discards your unsaved changes. Continue?": "载入最新内容会放弃当前未保存修改，确定继续吗？",
   "Loading…": "载入中…",
+  "Load earlier messages": "加载更早的消息",
   "Looking for files…": "正在查找产物…",
   "Lumio connects to your own Hub. Your data stays on your machine; the browser is just a window.": "Lumio 连接你自己的 Hub。数据留在你的机器上，浏览器只是一扇窗。",
   "Main navigation": "主导航",

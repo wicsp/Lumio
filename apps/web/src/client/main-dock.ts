@@ -4,7 +4,7 @@
  * 跳转与高亮由工作台执行（views/workbench.ts）；人正在操作时跳转降级为「带我过去」。
  */
 import { WORKBENCH_TOOLS, toolName } from "@lumio/schema";
-import type { AssistantChatRequest, AssistantMessage, Notice, ResourceRef, WorkbenchAction, WorkbenchPanel, WorkTask } from "@lumio/schema";
+import type { AssistantChatRequest, AssistantMessagePage, Notice, ResourceRef, WorkbenchAction, WorkbenchPanel, WorkTask } from "@lumio/schema";
 import { errorText, type Client } from "./api.ts";
 import { newRequestId } from "./commands.ts";
 import { autosize, clear, failure, h, icon, toast } from "./dom.ts";
@@ -24,7 +24,6 @@ const OPEN_KEY = "lumio.web.dock-open";
 /** 已在面板里出现过的提醒（本标签页内），避免刷新时重复插入。 */
 const SHOWN_KEY = "lumio.web.dock-notices";
 const EXPLORABLE = /^(idea|task|prj)_/;
-const HISTORY = 40;
 const WORKBENCH_TOOL_NAMES = new Set<string>(WORKBENCH_TOOLS.map(name => toolName(name)));
 
 export interface DockHost {
@@ -156,9 +155,9 @@ export class MainDock {
       try {
         // 主对话不指定 Profile，由 Hub 按账号默认解析，网页与 F18 用同一个模型（ADR 0083）。
         const main = await this.client.assistantMain(newRequestId("main"));
-        const detail = await this.client.conversation(main.conversation);
+        const page = await this.client.conversationMessages(main.conversation);
         if (this.disposed) return;
-        this.renderHistory(detail.messages);
+        this.renderHistory(page.messages, page.next_before ? this.olderMessages(main.conversation, page.next_before) : undefined);
         this.conversation = main.conversation;
         // 工作台的首份快照可能先于历史到达；若还在读取，applyCounts 会把它送来。
         const snapshot = this.host.latestNotices();
@@ -170,11 +169,35 @@ export class MainDock {
     })();
   }
 
-  private renderHistory(messages: AssistantMessage[]): void {
-    const shown = messages.filter(message => (message.role === "user" || message.role === "assistant") && message.content.trim()).slice(-HISTORY);
-    clear(this.messages, ...(shown.length ? shown.map(message => message.role === "user" ? this.userBubble(message.content) : this.reply(message.content))
+  private historyBubbles(messages: AssistantMessagePage["messages"]): HTMLElement[] {
+    return messages.map(message => message.role === "user" ? this.userBubble(message.content) : this.reply(message.content));
+  }
+
+  private renderHistory(messages: AssistantMessagePage["messages"], earlier?: HTMLButtonElement): void {
+    clear(this.messages, ...(messages.length ? this.historyBubbles(messages)
       : [h("p", { class: "dock-empty muted" }, t("Ask about the page you're on, or anything else. The conversation keeps going as you move between pages."))]));
+    if (earlier) this.messages.prepend(earlier);
     this.scroller.scrollTop = this.scroller.scrollHeight;
+  }
+
+  private olderMessages(conversation: string, before: string): HTMLButtonElement {
+    const button = h("button", { type: "button", class: "btn btn-small" }, t("Load earlier messages"));
+    button.addEventListener("click", async () => {
+      if (button.disabled) return;
+      button.disabled = true;
+      try {
+        const page = await this.client.conversationMessages(conversation, { before });
+        if (this.disposed) return;
+        const height = this.scroller.scrollHeight, top = this.scroller.scrollTop;
+        const nodes = this.historyBubbles(page.messages);
+        if (page.next_before) nodes.unshift(this.olderMessages(conversation, page.next_before));
+        button.replaceWith(...nodes);
+        this.scroller.scrollTop = top + this.scroller.scrollHeight - height;
+      } catch (cause) {
+        if (!this.disposed) toast(errorText(cause), "error");
+      } finally { button.disabled = false; }
+    });
+    return button;
   }
 
   private userBubble(text: string): HTMLElement {

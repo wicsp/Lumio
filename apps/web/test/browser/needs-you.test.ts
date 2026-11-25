@@ -26,10 +26,11 @@ class ElementStub extends EventTarget {
     for (const child of children) { if (child instanceof ElementStub) child.parent = this; this.children.push(child); }
   }
   replaceChildren(): void { this.children = []; }
-  replaceWith(node: ElementStub): void {
+  replaceWith(...nodes: ElementStub[]): void {
     if (!this.parent) return;
     const index = this.parent.children.indexOf(this);
-    this.parent.children[index] = node; node.parent = this.parent;
+    this.parent.children.splice(index, 1, ...nodes);
+    for (const node of nodes) node.parent = this.parent;
   }
   contains(node: ElementStub): boolean { return node === this || this.children.some(child => child instanceof ElementStub && child.contains(node)); }
   querySelectorAll(): ElementStub[] { return []; }
@@ -77,6 +78,29 @@ const item = (patch: Record<string, unknown> = {}) => WorkAttention.parse({ task
   kind: "review", round: 2, since: "2026-11-17T00:00:00Z", agent: "codex@fixture", summary: longSummary, ...patch });
 const settle = async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); };
 const button = (root: ElementStub, text: string) => root.find(node => node.tag === "button" && node.textContent === text);
+
+test("loading older dock history prepends messages once and preserves the latest bubbles and reading position", async () => {
+  const messages = new ElementStub("div"), latest = new ElementStub("div");
+  const cursors: string[] = [];
+  const dock = Object.assign(Object.create(MainDock.prototype), {
+    client: { conversationMessages: async (_id: string, query: { before: string }) => {
+      cursors.push(query.before);
+      return { messages: [{ role: "user", content: query.before }], ...(query.before === "middle" ? { next_before: "oldest" } : {}) };
+    } },
+    userBubble: (text: string) => { const node = new ElementStub("div"); node.textContent = text; return node; },
+    scroller: { scrollTop: 10, get scrollHeight() { return messages.childElementCount * 30; } },
+  }) as { scroller: { scrollTop: number }; olderMessages(id: string, before: string): ElementStub };
+  const load = dock.olderMessages("conversation", "middle");
+  messages.append(load, latest);
+  load.click(); load.click(); await settle();
+  expect(cursors).toEqual(["middle"]);
+  expect(dock.scroller.scrollTop).toBe(40);
+  button(messages, "Load earlier messages")!.click(); await settle();
+  expect(cursors).toEqual(["middle", "oldest"]);
+  expect(messages.textContent).toBe("oldestmiddle");
+  expect(messages.children.at(-1)).toBe(latest);
+  expect(button(messages, "Load earlier messages")).toBeUndefined();
+});
 
 function context(extra: Partial<AttentionContext> = {}) {
   const commands: unknown[] = [];
@@ -174,7 +198,7 @@ test.each(["snapshot", "history"])("opening the main dock preserves notices with
   const messages = new ElementStub("div");
   const dock = Object.assign(Object.create(MainDock.prototype), {
     messages, scroller: {}, shown: new Set(), noticeCards: new Map(), streamedNotices: new Map(),
-    client: { assistantMain: async () => ({ conversation: "synthetic" }), conversation: async () => ({ messages: [] }) },
+    client: { assistantMain: async () => ({ conversation: "synthetic" }), conversationMessages: async () => ({ messages: [] }) },
     host: { latestNotices: () => live.latest, refreshNotices: () => { live.invalidate(); void live.get(); } },
     renderHistory: () => messages.append(new ElementStub("div")),
   }) as { start(): Promise<void>; notices: MainDock["notices"] };

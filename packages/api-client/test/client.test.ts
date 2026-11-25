@@ -7,6 +7,18 @@ function mock(body: unknown, status = 200, inspect?: (url: URL, init: RequestIni
   return (async (url: URL, init?: RequestInit) => { inspect?.(url, init); return Response.json(body, { status }); }) as unknown as typeof fetch;
 }
 
+test("the conversation message window sends its cursor and rejects invalid page inputs and outputs", async () => {
+  const conversation = "conv_00000000000000000000000001", before = "amsg_00000000000000000000000001";
+  const client = createClient({ url: "http://localhost", fetch: mock({ messages: [] }, 200, url => {
+    expect(url.pathname).toBe(`/v2/assistant/conversations/${conversation}/messages`);
+    expect(Object.fromEntries(url.searchParams)).toEqual({ before, limit: "2" });
+  }) });
+  expect(await client.conversationMessages(conversation, { before, limit: 2 })).toEqual({ messages: [] });
+  expect(() => client.conversationMessages(conversation, { limit: 0 })).toThrow();
+  const invalid = createClient({ url: "http://localhost", fetch: mock({ messages: [], next_before: before }) });
+  await expect(invalid.conversationMessages(conversation)).rejects.toBeInstanceOf(ApiClientError);
+});
+
 test("client encodes references/options and validates all success schemas", async () => {
   const cases = [
     { method: "search" as const, argument: "中文 &", body: { query: "中文 &", hits: [], total: 0 }, schema: SearchResult },

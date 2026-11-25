@@ -16,6 +16,7 @@ export function memoryStore(): AssistantStore {
     conversation: id => conversations.get(id), conversations: owner => [...conversations.values()].filter(value => value.owner === owner),
     putConversation: value => { conversations.set(value.id, value); },
     messages: conversation => [...messages.values()].filter(value => value.conversation === conversation),
+    messagePage() { throw new Error("Not used by this fixture"); },
     putMessage: value => { messages.set(value.id, value); },
     turns: conversation => [...turns.values()].filter(value => !conversation || value.conversation === conversation),
     putTurn: value => { turns.set(value.id, value); },

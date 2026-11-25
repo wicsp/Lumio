@@ -8,6 +8,7 @@ import { AIQuotaSettings, AIQuotaView, AIQuotaViews, AliyunBillingUpdate } from 
 import { KnowledgeGraph, KnowledgeGraphArgs, Id, KnowledgeDocument, KnowledgeUpdateRequest, KnowledgeUpdateResult, KnowledgeRelatedRequest, KnowledgeRelatedResult, KnowledgeReferencesRequest, KnowledgeReferencesResult } from "@lumio/schema";
 import { KnowledgeTemplateRequest, KnowledgeTemplateResult, PaperResolveRequest, PaperResolveResult, KnowledgeCreateRequest, KnowledgeCreateResult } from "@lumio/schema";
 import { ExecutionTarget, ExecutionTargetListArgs } from "@lumio/schema";
+import { AssistantMessagePage, AssistantMessagePageQuery } from "@lumio/schema";
 import { AssistantConversationDeleteRequest, KnowledgeDeleteRequest, TrashListArgs, TrashListResult, TrashPurgeRequest, TrashPurgeResult, TrashRestoreRequest, TrashRestoreResult, TrashResult } from "@lumio/schema";
 import { PushSubscriptionInput, PushDevice, PushDeviceUpdate, PushPublicKey, PushTestResult } from "@lumio/schema";
 import { AgentInfo, AgentTokenIssued, AgentTokenRequest, AgentRevokeRequest, ClientInvite, ClientInviteRequest, ClientJoin, ClientJoinRequest, RuntimeInvite, RuntimeInviteRequest } from "@lumio/schema";
@@ -273,6 +274,12 @@ export function createClient(options: { url: string; token?: string; language?: 
     assistantChat(input: AssistantChatRequest) { return request("/v2/assistant/chat", {}, AssistantChatResult, validate(AssistantChatRequest, input)); },
     conversations() { return request("/v2/assistant/conversations", {}, AssistantConversation.array()); },
     conversation(id: string) { return request(`/v2/assistant/conversations/${validate(idOf("conv"), id)}`, {}, AssistantConversationDetail); },
+    conversationMessages(id: string, query: AssistantMessagePageQuery = {}) {
+      const { limit, before } = validate(AssistantMessagePageQuery, query);
+      return request(`/v2/assistant/conversations/${validate(idOf("conv"), id)}/messages`, {
+        ...(limit === undefined ? {} : { limit: String(limit) }), ...(before ? { before } : {}),
+      }, AssistantMessagePage);
+    },
     async *assistantEvents(input: AssistantChatRequest, signal?: AbortSignal, progress = false): AsyncGenerator<AssistantEvent> {
       const payload = validate(AssistantChatRequest, input);
       let release: (() => Promise<void>) | undefined;

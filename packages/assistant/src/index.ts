@@ -1,6 +1,6 @@
 import {
   AssistantChatRequest, AssistantChatResult, AssistantConversation, AssistantConversationDetail,
-  AssistantMessage, AssistantTurn, AssistantToolCall, AssistantMemory,
+  AssistantMessage, AssistantMessagePage, type AssistantMessagePageQuery, ASSISTANT_MESSAGE_PAGE_SIZE, AssistantTurn, AssistantToolCall, AssistantMemory,
   AssistantModelRequest, AssistantModelResponse, AssistantEvent, Actor, ASSISTANT_REASONING_DELTA_LIMIT,
   AssistantMemoryCommandRequest, AssistantMemoryCommandResult, TrashItem, TRASHED_REASON, TRASH_RETENTION_DAYS,
   type GlanceContextRetention, type AssistantModelMessage, type AssistantToolSpec, type FocusSnapshot, type ID_PREFIXES, type ResourceRef,
@@ -33,6 +33,8 @@ export interface AssistantStore extends AssistantWorkbenchStore {
   conversations(owner: string): AssistantConversation[];
   putConversation(value: AssistantConversation): void;
   messages(conversation: string): AssistantMessage[];
+  /** An undefined page means the cursor is invalid for this conversation. */
+  messagePage(conversation: string, limit: number, before?: string): AssistantMessagePage | undefined;
   putMessage(value: AssistantMessage): void;
   turns(conversation?: string): AssistantTurn[];
   putTurn(value: AssistantTurn): void;
@@ -124,6 +126,12 @@ export class AssistantService {
   detail(id: string, owner: string): AssistantConversationDetail {
     const conversation = this.ownedConversation(id, owner);
     return AssistantConversationDetail.parse({ conversation, messages: this.store.messages(id), turns: this.store.turns(id) });
+  }
+  messagePage(id: string, owner: string, query: AssistantMessagePageQuery): AssistantMessagePage {
+    this.ownedConversation(id, owner);
+    const page = this.store.messagePage(id, query.limit ?? ASSISTANT_MESSAGE_PAGE_SIZE, query.before);
+    if (!page) throw new AssistantError("INVALID", { key: "v2.invalid_assistant_request_parameters", args: [] });
+    return AssistantMessagePage.parse(page);
   }
   trash(id: string, owner: string): TrashItem {
     return this.store.transaction(() => {
