@@ -3,8 +3,14 @@ import { text as msg } from "./messages.ts";
 import { ApiError } from "@lumio/schema";
 import { HubError } from "./errors.ts";
 
+export interface HubWebFile {
+  body: string | Uint8Array;
+  type: string;
+  /** Only content-addressed build outputs can be reused across deployments. */
+  immutable?: boolean;
+}
 export interface HubWeb {
-  files: ReadonlyMap<string, { body: string | Uint8Array; type: string }>;
+  files: ReadonlyMap<string, HubWebFile>;
   csp: string;
 }
 export function browserOrigins(input: string | undefined): string[] {
@@ -30,16 +36,16 @@ export function browserAllowed(request: Request, config: { hostname: string; pub
 export function browserDenied(): Response {
   return Response.json(ApiError.parse({ error: { code: "FORBIDDEN", message: msg("web.browser_origin_or_host_is_not_allowed") } }), { status: 403 });
 }
-export function webResponse(response: Response, csp?: string): Response {
+export function webResponse(response: Response, csp?: string, immutableAsset = false): Response {
   const headers = new Headers(response.headers);
-  headers.set("Cache-Control", "no-store");
+  headers.set("Cache-Control", immutableAsset && response.status === 200 ? "public, max-age=31536000, immutable" : "no-store");
   headers.set("X-Frame-Options", "DENY"); headers.set("X-Content-Type-Options", "nosniff"); headers.set("Referrer-Policy", "no-referrer");
   if (csp && !headers.has("Content-Security-Policy")) headers.set("Content-Security-Policy", csp);
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
 /** Nonce is per response, only for editor style elements; scripts retain self-only CSP. */
-export function webFileResponse(file: {body:string|Uint8Array;type:string}, method:string, csp:string, imageOrigins: readonly string[] = []):Response {
+export function webFileResponse(file: HubWebFile, method:string, csp:string, imageOrigins: readonly string[] = []):Response {
  const headers=new Headers({"Content-Type":file.type});let body=file.body;
  if(file.type.startsWith("text/html") && csp.includes("style-src 'self'")) {
   const nonce=randomBytes(24).toString("base64");
