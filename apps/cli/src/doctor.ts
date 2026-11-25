@@ -52,14 +52,18 @@ export async function doctor(options: DoctorOptions = {}): Promise<Check[]> {
     checks.push({ name: msg("doctor.hub_version_cli", hubVersion, version), ok: hubVersion === version,
       ...(hubVersion !== version ? { problem: localAddress(new URL(base)) ? msg("doctor.another_hub_is_on_this_port_version_mismatch") : msg("doctor.version_mismatch"), fix: msg("doctor.run_lumio_upgrade") } : {}) });
   });
+  let scriptPath = "/assets/app.js";
   await check(msg("doctor.hub_web_page"), msg("doctor.run_lumio_upgrade_to_update_hub_and_embedded_web_page"), async () => {
     if (!base) throw new Error();
     const response = await io.fetch(`${base}/`);
-    if (!response.ok || !response.headers.get("content-type")?.includes("text/html") || !(await response.text()).includes("/assets/app.js")) throw new Error();
+    if (!response.ok || !response.headers.get("content-type")?.includes("text/html")) throw new Error();
+    const path = /<script\b[^>]*\ssrc="(\/assets\/app(?:-[a-f0-9]{16})?\.js)"/.exec(await response.text())?.[1];
+    if (!path) throw new Error();
+    scriptPath = path;
   });
   await check(msg("doctor.hub_web_assets"), msg("doctor.run_lumio_upgrade_to_repair_web_assets"), async () => {
     if (!base) throw new Error();
-    const response = await io.fetch(`${base}/assets/app.js`);
+    const response = await io.fetch(`${base}${scriptPath}`);
     if (!response.ok || !response.headers.get("content-type")?.includes("javascript") || !(await response.text()).trim()) throw new Error();
   });
   await check(msg("doctor.local_program"), msg("doctor.run_lumio_upgrade"), async () => {
