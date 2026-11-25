@@ -1,4 +1,5 @@
 import type { Database, SQLQueryBindings } from "bun:sqlite";
+import { overviewIndex, readExecutionOverview, type OverviewTurns } from "./execution-overview.ts";
 import { Job, type RuntimeInfo } from "@lumio/schema";
 import type { ExecutionStore } from "@lumio/execution";
 
@@ -7,7 +8,9 @@ export class SqliteExecutionStore implements ExecutionStore {
     runtimes(now: Date): RuntimeInfo[]; syncRuntime(actor: string, now: Date): void;
   }) {
     db.exec("CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY,record TEXT NOT NULL,cancel INTEGER NOT NULL DEFAULT 0)");
+    db.exec(overviewIndex);
   }
+  overview(turns: OverviewTurns, before?: string) { return readExecutionOverview(this.db, turns, before); }
   transaction<T>(action: () => T): T { return this.db.transaction(action)(); }
   get(id: string): Job | undefined {
     const row = this.db.query<{ record: string }, [string]>("SELECT record FROM jobs WHERE id=?").get(id);

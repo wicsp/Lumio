@@ -8,7 +8,7 @@ import { once } from "node:events";
 import { createConnection, createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AssistantMemory, AssistantMemoryCommandResult, ApiError, WorkCommandResult, WorkTaskDetail, AssistantChatResult, AssistantEvent, Job, ExecutionRoutine, ExecutionRoutineInfo, RuntimeSync, StoredArtifact, type RuntimeRegistration } from "@lumio/schema";
+import { ExecutionOverview, AssistantMemory, AssistantMemoryCommandResult, ApiError, WorkCommandResult, WorkTaskDetail, AssistantChatResult, AssistantEvent, Job, ExecutionRoutine, ExecutionRoutineInfo, RuntimeSync, StoredArtifact, type RuntimeRegistration } from "@lumio/schema";
 import { createHash } from "node:crypto";
 import { routineJobId } from "@lumio/execution";
 import { startHub } from "../src/server.ts";
@@ -320,4 +320,13 @@ test("injected assistant tools use a persistent agent identity without a credent
   expect(hub.store.db.query("SELECT * FROM tokens WHERE actor_id=?").all(toolActor)).toEqual([]);
   await hub.stop(); hub = await startHub({ ...readConfig({ LUMIO_STATE_DIR: temp }), port: 0 }, { log() {} });
   expect(hub.store.assistantActor().id).toBe(toolActor);
+});
+
+test("only human clients can read the bounded execution overview", async () => {
+  const path = "/v2/execution/overview";
+  const overview = ExecutionOverview.parse(await (await request(path)).json());
+  expect(overview).toEqual({ activity: [], activity_live_count: 0, execution_count: 0, standalone_attention: { total: 0, items: [] } });
+  for (const token of [agent, runtime]) expect((await request(path, undefined, token)).status).toBe(403);
+  expect((await request(path + "?before=invalid")).status).toBe(400);
+  expect((await request(path + "?limit=1")).status).toBe(400);
 });

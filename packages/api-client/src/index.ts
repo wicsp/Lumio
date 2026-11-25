@@ -13,7 +13,7 @@ import { PushSubscriptionInput, PushDevice, PushDeviceUpdate, PushPublicKey, Pus
 import { AgentInfo, AgentTokenIssued, AgentTokenRequest, AgentRevokeRequest, ClientInvite, ClientInviteRequest, ClientJoin, ClientJoinRequest, RuntimeInvite, RuntimeInviteRequest } from "@lumio/schema";
 import { AssistantConfigView, AssistantConfigUpdate, AssistantToolCall, ExecutionJobListArgs, RequestId, WorkTaskListArgs, WorkAttention, WorkCommandRequest, WorkCommandResult, PlanTemplate, type WorkCommand, WorkTask, WorkTaskDetail, WorkProject, ExecutionRoutine, ExecutionRoutineCommandRequest, ExecutionRoutineInfo,
   ProjectStatus, AssistantMemory, AssistantMemoryCommandRequest, AssistantMemoryCommandResult, AssistantChatRequest, AssistantChatResult, AssistantConversation, AssistantConversationDetail, AssistantEvent, StoredArtifact, idOf } from "@lumio/schema";
-import { JobLiveView, JobActivityPage, JobActivityQuery, JobAction, JobActionReceipt, JobAttention, JobActivityCapabilities } from "@lumio/schema";
+import { ExecutionOverview, ExecutionOverviewQuery, JobLiveView, JobActivityPage, JobActivityQuery, JobAction, JobActionReceipt, JobAttention, JobActivityCapabilities } from "@lumio/schema";
 import { Job, JobSpec, JobStatus, RuntimeName, SubmitJob, RuntimeInfo, Actor, OperationRequest, OperationResult, Proposal, ProposalStatus, ApiError, CheckResult, LinksResult, NoteDetail, SearchResult, type ApiErrorCode, type NoteRef } from "@lumio/schema";
 
 export class ApiClientError extends Error {
@@ -327,6 +327,9 @@ export function createClient(options: { url: string; token?: string; language?: 
       return request(`/v2/execution/jobs/${encodeURIComponent(validate(JobSpec.shape.id, id))}/actions`, {}, JobActionReceipt, validate(JobAction, input));
     },
     jobActivityCapabilities() { return request("/v2/execution/activity/capabilities", {}, JobActivityCapabilities); },
+    executionOverview(before?: string) {
+      return request("/v2/execution/overview", validate(ExecutionOverviewQuery, before === undefined ? {} : { before }), ExecutionOverview);
+    },
     jobAttention() { return request("/v2/execution/attention", {}, JobAttention); },
     cancelJob(id: string) { return request(`/v2/execution/jobs/${encodeURIComponent(validate(JobSpec.shape.id, id))}/cancel`, {}, Job, {}); },
     runtimes() { return request("/v2/execution/runtimes", {}, RuntimeInfo.array()); },

@@ -13,6 +13,8 @@ export * from "./knowledge-graph.ts";
 export * from "./entities.ts";
 export * from "./job.ts";
 export * from "./job-activity.ts";
+export * from "./execution-overview.ts";
+import { ExecutionOverview, ExecutionOverviewQuery } from "./execution-overview.ts";
 import { JobActivityEvent, JobActivityPage, JobActivitySync, JobActivityAck, JobLiveView, JobAction, JobActionReceipt, JobAttention, JobActivityCapabilities } from "./job-activity.ts";
 export * from "./runtime-update.ts";
 export * from "./query.ts";
@@ -123,6 +125,8 @@ export const CONTRACTS = {
   "job-action": JobAction,
   "job-action-receipt": JobActionReceipt,
   "job-attention": JobAttention,
+  "execution-overview": ExecutionOverview,
+  "execution-overview-query": ExecutionOverviewQuery,
   "job-activity-capabilities": JobActivityCapabilities,
   "runtime-registration": RuntimeRegistration,
   "runtime-registered": RuntimeRegistered,
