@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Database } from "bun:sqlite";
-import { AssistantConversation, AssistantMessage, AssistantTurn, AssistantToolCall, AssistantMemory, AssistantMemoryCommandResult, AssistantModelRequest, ResourceRef, TrashItem, Timestamp, idOf } from "@lumio/schema";
+import { AssistantConversation, AssistantMessage, type AssistantMessagePage, AssistantTurn, AssistantToolCall, AssistantMemory, AssistantMemoryCommandResult, AssistantModelRequest, ResourceRef, TrashItem, Timestamp, idOf } from "@lumio/schema";
 import { ASSISTANT_FRAGMENT_MAX_ATTEMPTS, AssistantError, type AssistantFragment, type AssistantFragmentSource, type AssistantStore } from "@lumio/assistant";
 import { StorageError } from "./errors.ts";
 
@@ -154,6 +154,33 @@ export class SqliteAssistantStore implements AssistantStore {
   }
   messages(conversation: string): AssistantMessage[] {
     return this.db.query<{ record: string }, [string]>("SELECT record FROM assistant_messages WHERE conversation=? ORDER BY rowid").all(conversation).map((row) => AssistantMessage.parse(JSON.parse(row.record)));
+  }
+  messagePage(conversation: string, limit: number, before?: string): AssistantMessagePage | undefined {
+    const visible = "json_extract(record,'$.role') IN ('user','assistant')";
+    let boundary: number | undefined;
+    if (before) {
+      const cursor = this.db.query<{ rowid: number; content: string }, [string, string]>(`
+        SELECT rowid, json_extract(record,'$.content') AS content FROM assistant_messages
+        WHERE id=? AND conversation=? AND ${visible}`).get(before, conversation);
+      if (!cursor?.content.trim()) return undefined;
+      boundary = cursor.rowid;
+    }
+    type Message = AssistantMessagePage["messages"][number];
+    const messages: Message[] = [];
+    const rows = this.db.query<Message, [string] | [string, number]>(`
+      SELECT id, json_extract(record,'$.role') AS role, json_extract(record,'$.content') AS content
+      FROM assistant_messages WHERE conversation=? ${boundary === undefined ? "" : "AND rowid < ?"}
+        AND ${visible} ORDER BY rowid DESC`);
+    const candidates = boundary === undefined ? rows.iterate(conversation) : rows.iterate(conversation, boundary);
+    for (const row of candidates) {
+      if (!row.content.trim()) continue;
+      if (messages.length === limit) {
+        messages.reverse();
+        return { messages, next_before: messages[0]!.id };
+      }
+      messages.push(row);
+    }
+    return { messages: messages.reverse() };
   }
   putMessage(input: AssistantMessage): void {
     const value = AssistantMessage.parse(input);

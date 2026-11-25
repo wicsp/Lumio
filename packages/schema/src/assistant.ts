@@ -196,6 +196,23 @@ export const AssistantConversationDetail = z.strictObject({
   turns: z.array(AssistantTurn),
 });
 
+/** Read-only window for the main dock (ADR 0086), oldest first. */
+export const ASSISTANT_MESSAGE_PAGE_SIZE = 40;
+export const AssistantMessagePageQuery = z.strictObject({
+  limit: z.number().int().min(1).max(ASSISTANT_MESSAGE_PAGE_SIZE).optional(),
+  before: idOf("amsg").optional(),
+});
+export const AssistantMessagePage = z.strictObject({
+  messages: z.array(z.strictObject({
+    id: idOf("amsg"),
+    role: z.enum(["user", "assistant"]),
+    content: z.string().refine(text => text.trim().length > 0),
+  })).max(ASSISTANT_MESSAGE_PAGE_SIZE),
+  next_before: idOf("amsg").optional(),
+}).refine(page => page.next_before === undefined || page.next_before === page.messages[0]?.id);
+export type AssistantMessagePageQuery = z.infer<typeof AssistantMessagePageQuery>;
+export type AssistantMessagePage = z.infer<typeof AssistantMessagePage>;
+
 /** 聊天结果：新建或更新的对话、这一轮的 turn 和新增的消息。 */
 export const AssistantChatResult = z.strictObject({
   conversation: AssistantConversation,

@@ -43,7 +43,7 @@ import {
 } from "./trash.ts";
 import {
   AssistantChatRequest, AssistantChatResult, AssistantConversation, AssistantConversationDetail, AssistantEvent,
-  AssistantMemoryCommandRequest, AssistantMemoryCommandResult,
+  AssistantMemoryCommandRequest, AssistantMemoryCommandResult, AssistantMessagePage, AssistantMessagePageQuery,
   AssistantMemory, AssistantMessage, AssistantModelRequest, AssistantModelResponse, AssistantToolCall, AssistantTurn,
   AssistantConfigUpdate, AssistantConfigView,
 } from "./assistant.ts";
@@ -203,6 +203,8 @@ export const CONTRACTS = {
   "assistant-memory": AssistantMemory,
   "assistant-chat-request": AssistantChatRequest,
   "assistant-conversation-detail": AssistantConversationDetail,
+  "assistant-message-page-query": AssistantMessagePageQuery,
+  "assistant-message-page": AssistantMessagePage,
   "assistant-chat-result": AssistantChatResult,
   "assistant-model-request": AssistantModelRequest,
   "assistant-model-response": AssistantModelResponse,
