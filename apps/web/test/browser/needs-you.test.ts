@@ -163,6 +163,29 @@ test("live data merges concurrent reads, reuses fresh results and refetches afte
   expect(reads).toBe(4);
 });
 
+test.each(["snapshot", "history"])("opening the main dock preserves notices with one shared read when %s arrives first", async first => {
+  const notice = Notice.parse({ id: `ntc_${suffix}`, owner: `act_${suffix}`, source: "watchdog", event: "fixture:ready",
+    title: "Watchdog report", findings: [], level: "important", graded: { by: "rule" }, created: "2026-11-17T00:00:00Z" });
+  let reads = 0;
+  const live = new LiveData({
+    workTasks: async () => [], jobs: async () => [], proposals: async () => [],
+    notices: async () => { reads++; return { notices: [notice], unread: 1 }; }, jobAttention: async () => [],
+  }, { attention: async () => [] });
+  const messages = new ElementStub("div");
+  const dock = Object.assign(Object.create(MainDock.prototype), {
+    messages, scroller: {}, shown: new Set(), noticeCards: new Map(), streamedNotices: new Map(),
+    client: { assistantMain: async () => ({ conversation: "synthetic" }), conversation: async () => ({ messages: [] }) },
+    host: { latestNotices: () => live.latest, refreshNotices: () => { live.invalidate(); void live.get(); } },
+    renderHistory: () => messages.append(new ElementStub("div")),
+  }) as { start(): Promise<void>; notices: MainDock["notices"] };
+  if (first === "history") await dock.start();
+  dock.notices(await live.get());
+  if (first === "snapshot") await dock.start();
+  expect(reads).toBe(1);
+  expect(messages.childElementCount).toBe(2);
+  expect(messages.textContent).toContain(notice.title);
+});
+
 test("workbench refresh removes handled round and approval reminders from the dock without replacing chat", async () => {
   const otherSuffix = suffix.slice(0, -1) + "1";
   const owner = `act_${suffix}`;

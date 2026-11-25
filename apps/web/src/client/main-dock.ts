@@ -34,6 +34,7 @@ export interface DockHost {
   /** 跳转与高亮；人正在操作时跳转返回 deferred。 */
   apply(action: Extract<WorkbenchAction, { action: "navigate" | "highlight" }>, requestedAt?: number): "applied" | "deferred";
   clearHighlights(): void;
+  latestNotices(): LiveSnapshot | undefined;
   refreshNotices(): void;
   /** 面板开合改变布局。 */
   layout(open: boolean): void;
@@ -159,7 +160,9 @@ export class MainDock {
         if (this.disposed) return;
         this.renderHistory(detail.messages);
         this.conversation = main.conversation;
-        this.host.refreshNotices();
+        // 工作台的首份快照可能先于历史到达；若还在读取，applyCounts 会把它送来。
+        const snapshot = this.host.latestNotices();
+        if (snapshot) this.notices(snapshot);
       } catch (cause) {
         this.ready = undefined;
         clear(this.notice, failure(t("Couldn't open the main conversation: {0}", errorText(cause)), () => void this.start()));

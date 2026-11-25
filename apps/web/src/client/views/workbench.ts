@@ -220,6 +220,7 @@ export class WorkbenchView {
       navigate: (section, id, intent) => void this.go(section, id, intent),
       apply: (action, requestedAt) => this.applyAction(action, requestedAt),
       clearHighlights: () => this.clearHighlights(),
+      latestNotices: () => this.live.latest,
       refreshNotices: this.changed,
       layout: open => shell.classList.toggle("dock-open", open),
     });
