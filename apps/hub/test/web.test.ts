@@ -7,8 +7,9 @@ import { startHub } from "../src/server.ts";
 import { readConfig } from "../src/config.ts";
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
-const web = { files: new Map([["/", { body: "<!doctype html><title>Lumio</title>", type: "text/html; charset=utf-8" }], ["/assets/app.js", { body: "console.log('synthetic')", type: "text/javascript" }]]), csp: "default-src 'none'" };
-test("Hub serves injected files without changing API authentication or contracts; responses prohibit caching", async () => {
+const hashedAsset = "/assets/app-1234567890abcdef.js";
+const web = { files: new Map([[hashedAsset, { body: "export default 1", type: "text/javascript", immutable: true }], ["/", { body: "<!doctype html><title>Lumio</title>", type: "text/html; charset=utf-8" }], ["/assets/app.js", { body: "console.log('synthetic')", type: "text/javascript" }]]), csp: "default-src 'none'" };
+test("Hub serves injected files without changing API authentication or contracts; only fingerprinted static files permit caching", async () => {
   const state = await mkdtemp(join(tmpdir(), "lumio-web-hub-")); roots.push(state);
   const hub = await startHub({ ...readConfig({ LUMIO_STATE_DIR: state }), port: 0 }, { web, log() {} });
   const base = `http://127.0.0.1:${hub.server.port}`;
@@ -21,6 +22,15 @@ test("Hub serves injected files without changing API authentication or contracts
       expect(response.headers.get("cache-control")).toBe("no-store");
     }
     expect(await (await fetch(base + "/", { method: "HEAD" })).text()).toBe("");
+    for (const method of ["GET", "HEAD"]) {
+      const response = await fetch(base + hashedAsset, { method });
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+      expect(await response.text()).toBe(method === "HEAD" ? "" : "export default 1");
+    }
+    const rejected = await fetch(base + hashedAsset, { headers: { Origin: "https://other.synthetic" } });
+    expect(rejected.status).toBe(403);
+    expect(rejected.headers.get("cache-control")).toBe("no-store");
     const denied = await fetch(base + "/v2/work/tasks"); expect(denied.status).toBe(401); ApiError.parse(await denied.json()); expect(denied.headers.get("cache-control")).toBe("no-store");
     const tasks = await fetch(base + "/v2/work/tasks", { headers: { Authorization: `Bearer ${token}` } }); expect(tasks.status).toBe(200); WorkTask.array().parse(await tasks.json());
   } finally { await hub.stop(); }

@@ -3,7 +3,7 @@ import { VoiceIdeas } from "./voice-ideas.ts";
 import { KNOWLEDGE_ROUTES, KnowledgeAuthoring, type PaperFetch } from "./knowledge-authoring.ts";
 import { withLanguage, errorMessage, text as msg } from "./messages.ts";
 import { language, type Language } from "@lumio/platform";
-import { browserAllowed, browserDenied, webResponse, webFileResponse, type HubWeb } from "./web.ts";
+import { browserAllowed, browserDenied, webResponse, webFileResponse, type HubWeb, type HubWebFile } from "./web.ts";
 import { Pairing, handlePairing } from "./pairing.ts";
 import { Privileged, handlePrivileged } from "./privileged.ts";
 import { stat } from "node:fs/promises";
@@ -147,10 +147,9 @@ async function startHubInstance(config: HubConfig, options: {
     modules.voiceIdeas = new VoiceIdeas(config, store, modules.assistantStore, modules.glances, authoring, modules.resources);
     const speech = new SpeechSessions(modules.speech, modules.funAsr, store, options.now ?? (() => new Date()), log);
     const updateArtifacts = new UpdateArtifacts(config.stateDir, store.runtimeVersion);
-    const handle = async (request: Request, server: Bun.Server<SpeechSocketData>, lang: Language): Promise<Response | undefined> => {
+    const handle = async (request: Request, server: Bun.Server<SpeechSocketData>, lang: Language, url: URL, file: HubWebFile | undefined): Promise<Response | undefined> => {
         const start = performance.now();
         const time = new Date().toISOString();
-        const url = new URL(request.url);
         let identity: Identity | null = null;
         let status = 500;
         // Logging uses route templates, so references (or secrets in a URL) cannot leak.
@@ -173,8 +172,7 @@ async function startHubInstance(config: HubConfig, options: {
             status = 101;
             return undefined;
           }
-          const file = options.web?.files.get(url.pathname);
-          if (file && ["GET", "HEAD"].includes(request.method)) {
+          if (file) {
             status = 200;
             return webFileResponse(file, request.method, options.web!.csp, modules!.imageHosting.previewOrigins());
           }
@@ -328,8 +326,10 @@ async function startHubInstance(config: HubConfig, options: {
       websocket: speech.handlers(),
       async fetch(request, server) {
         const lang = language({ LUMIO_LANG: request.headers.get("Accept-Language") ?? undefined });
-        const response = await withLanguage(lang, () => handle(request, server, lang));
-        return response && webResponse(response, options.web?.csp);
+        const url = new URL(request.url);
+        const file = request.method === "GET" || request.method === "HEAD" ? options.web?.files.get(url.pathname) : undefined;
+        const response = await withLanguage(lang, () => handle(request, server, lang, url, file));
+        return response && webResponse(response, options.web?.csp, file?.immutable);
       },
     });
     modules.native.setPort(server.port!);
