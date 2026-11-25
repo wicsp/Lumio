@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { Notice, Proposal, WorkAttention } from "@lumio/schema";
+import { ExecutionOverview, Notice, Proposal, WorkAttention } from "@lumio/schema";
 import { attentionCard, type AttentionContext } from "../../src/client/attention-card.ts";
 import { LiveData } from "../../src/client/live-data.ts";
 import { setLang } from "../../src/client/i18n.ts";
+import { OverviewPane } from "../../src/client/panes/overview.ts";
 import { MainDock } from "../../src/client/main-dock.ts";
 import { WorkbenchView } from "../../src/client/views/workbench.ts";
 
@@ -70,6 +71,7 @@ beforeEach(() => {
 });
 afterEach(() => restore());
 
+const emptyOverview = async () => ({ activity: [], execution_count: 0, activity_live_count: 0, standalone_attention: { total: 0, items: [] } });
 const suffix = "01JABCDEFGHJKMNPQRSTVWXYZ0";
 const task = { id: `task_${suffix}`, revision: 4 };
 const longSummary = "Synthetic summary line.\n\n## Details\n\nMore synthetic detail.";
@@ -149,7 +151,7 @@ test("a checkpoint shows what was delivered together with the question it asks",
 
 test("live data merges concurrent reads, reuses fresh results and refetches after a change", async () => {
   let reads = 0, now = 1000;
-  const client = { workTasks: async () => { reads++; return []; }, jobs: async () => [], proposals: async () => [],
+  const client = { workTasks: async () => { reads++; return []; }, executionOverview: emptyOverview, proposals: async () => [],
     notices: async () => ({ notices: [] }), jobAttention: async () => [] };
   const live = new LiveData(client as never, { attention: async () => [] }, () => now);
   await Promise.all([live.get(), live.get(), live.get()]);
@@ -168,7 +170,7 @@ test.each(["snapshot", "history"])("opening the main dock preserves notices with
     title: "Watchdog report", findings: [], level: "important", graded: { by: "rule" }, created: "2026-11-17T00:00:00Z" });
   let reads = 0;
   const live = new LiveData({
-    workTasks: async () => [], jobs: async () => [], proposals: async () => [],
+    workTasks: async () => [], executionOverview: emptyOverview, proposals: async () => [],
     notices: async () => { reads++; return { notices: [notice], unread: 1 }; }, jobAttention: async () => [],
   }, { attention: async () => [] });
   const messages = new ElementStub("div");
@@ -203,7 +205,7 @@ test("workbench refresh removes handled round and approval reminders from the do
     graded: { by: "rule" }, created: round.since, ...notice }));
   let attention = [round, otherRound], proposals = [approval], offline = false;
   const live = new LiveData({
-    workTasks: async () => [], jobs: async () => [], proposals: async () => proposals,
+    workTasks: async () => [], executionOverview: emptyOverview, proposals: async () => proposals,
     notices: async () => ({ notices, unread: notices.length }), jobAttention: async () => [],
   }, { attention: async () => {
     if (offline) throw new Error("Fixture attention request failed");
@@ -245,4 +247,72 @@ test("workbench refresh removes handled round and approval reminders from the do
   attention = []; live.invalidate();
   await view.refreshCounts();
   expect(messages.children).toEqual([chat, watchdog!]);
+});
+
+test("Today renders independent sections without waiting for slow requests or replacing a focused input", async () => {
+  const pending = Promise.withResolvers<ExecutionOverview>();
+  const inbox = Promise.withResolvers<{ notices: never[] }>();
+  const calendar = Promise.withResolvers<undefined>();
+  let workReads = 0, overviewReads = 0;
+  const client = {
+    workTasks: async () => { workReads++; return []; }, workProjects: async () => [],
+    executionOverview: () => { overviewReads++; return pending.promise; },
+    proposals: async () => [], notices: () => inbox.promise, jobAttention: async () => [],
+  };
+  const hub = { attention: async () => [], personalView: () => calendar.promise };
+  const live = new LiveData(client as never, hub);
+  const owner = new ElementStub("div");
+  const pane = new OverviewPane(owner as unknown as HTMLElement, client as never, hub as never, () => {}, "Synthetic", () => {}, live);
+  const input = owner.find(node => node.tag === "input")!;
+  input.value = "unfinished question";
+  Object.defineProperty(document, "activeElement", { configurable: true, value: input });
+  const sidebar = live.get();
+  await settle();
+  expect(owner.textContent).toContain("Your to-do list is clear.");
+  expect(owner.textContent).toContain("Projects");
+  expect(owner.textContent).not.toContain("No current agent activity.");
+  pending.resolve(ExecutionOverview.parse({ activity: [], activity_live_count: 0, execution_count: 0,
+    standalone_attention: { total: 0, items: [] } }));
+  await settle();
+  expect(owner.textContent).toContain("No current agent activity.");
+  expect(owner.find(node => node.tag === "input")).toBe(input);
+  expect(input.value).toBe("unfinished question");
+  inbox.resolve({ notices: [] }); calendar.resolve(undefined);
+  await sidebar;
+  expect(workReads).toBe(1); expect(overviewReads).toBe(1);
+  pane.dispose();
+});
+
+test("Today and sidebar count every pending run and fetch older previews only on demand", async () => {
+  const id = (n: number) => "job_" + String(n).padStart(26, "0");
+  const row = (n: number) => ({ id: id(n), created: "2026-11-24T00:00:00Z", status: "failed", label: "fixture " + n, preview: "problem " + n });
+  const overview = (items: ReturnType<typeof row>[], next?: string) => ExecutionOverview.parse({
+    activity: [], activity_live_count: 7, execution_count: 29, standalone_attention: { total: 22, items, next_before: next },
+  });
+  const calls: (string | undefined)[] = [];
+  const client = {
+    workTasks: async () => [], workProjects: async () => [], proposals: async () => [],
+    notices: async () => ({ notices: [] }), jobAttention: async () => [],
+    executionOverview: async (before?: string) => {
+      calls.push(before);
+      return before ? overview([row(2), row(1)]) : overview(Array.from({ length: 20 }, (_, i) => row(22 - i)), id(3));
+    },
+  };
+  const hub = { attention: async () => [] };
+  const live = new LiveData(client as never, hub);
+  const owner = new ElementStub("div");
+  const pane = new OverviewPane(owner as unknown as HTMLElement, client as never, hub as never, () => {}, "Synthetic", () => {}, live);
+  const counts = new Map(["work", "execution", "approvals", "overview", "inbox"].map(name => [name, { textContent: "", classList: { toggle() {} } }]));
+  const view = Object.assign(Object.create(WorkbenchView.prototype), { counts, live, current: {}, applyNotices() {}, dock: { notices() {} } }) as { refreshCounts(): Promise<void> };
+  await view.refreshCounts(); await settle();
+  expect(counts.get("execution")?.textContent).toBe("29");
+  expect(counts.get("overview")?.textContent).toBe("22");
+  expect(calls).toEqual([undefined]);
+  expect(owner.find(node => node.textContent === "problem 1")).toBeUndefined();
+  const more = button(owner, "Show older runs")!;
+  more.click(); more.click(); await settle();
+  expect(calls).toEqual([undefined, id(3)]);
+  expect(owner.find(node => node.textContent === "problem 1")).toBeDefined();
+  expect(button(owner, "Show older runs")).toBeUndefined();
+  pane.dispose();
 });

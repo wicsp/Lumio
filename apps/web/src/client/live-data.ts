@@ -3,17 +3,17 @@
  *
  * 刷新规则只有一处（WorkbenchView.refresh）：
  * - 触发：页面可见时每 15 秒、回到前台或窗口重新获得焦点、收到推送、任何操作改了数据（changed）。
- * - 每次刷新先读这份快照一次，再更新计数与提醒，最后让当前模块静默刷新；隐藏的模块在切回来时刷新。
+ * - 每次刷新共享同一次读取，Today 可逐区显示，侧栏用本轮完整快照更新计数与提醒；隐藏的模块在切回来时刷新。
  * - 同时发起的读取合并成一个请求；changed 之后的读取一定在操作完成之后发起，不复用旧结果。
  * 只有「正在进行的东西」另有快速轮询：打开中的运行详情、运行中的进度徽标、处理中的 Inbox 条目。
  */
-import type { Job, JobAttention, Notice, Proposal, WorkAttention, WorkTask } from "@lumio/schema";
+import type { ExecutionOverview, JobAttention, Notice, Proposal, WorkAttention, WorkTask } from "@lumio/schema";
 import type { Client, HubExtras } from "./api.ts";
 
 export interface LiveSnapshot {
   at: number;
   tasks: PromiseSettledResult<WorkTask[]>;
-  jobs: PromiseSettledResult<Job[]>;
+  execution: PromiseSettledResult<ExecutionOverview>;
   proposals: PromiseSettledResult<Proposal[]>;
   /** undefined：旧 Hub 没有这个接口。 */
   attention: PromiseSettledResult<WorkAttention[] | undefined>;
@@ -21,11 +21,24 @@ export interface LiveSnapshot {
   jobAttention: PromiseSettledResult<JobAttention>;
 }
 
-type Source = Pick<Client, "workTasks" | "jobs" | "proposals" | "notices" | "jobAttention">;
+type Source = Pick<Client, "workTasks" | "executionOverview" | "proposals" | "notices" | "jobAttention">;
+
+export function settleRead<T>(request: Promise<T>): Promise<PromiseSettledResult<T>> {
+  return request.then(value => ({ status: "fulfilled", value }), reason => ({ status: "rejected", reason }));
+}
+
+export type AttentionSnapshot = Pick<LiveSnapshot, "execution" | "attention" | "proposals" | "jobAttention">;
+type LiveRead = {
+  execution: Promise<LiveSnapshot["execution"]>;
+  attention: Promise<AttentionSnapshot>;
+  tasks: Promise<LiveSnapshot["tasks"]>;
+  notices: Promise<LiveSnapshot["notices"]>;
+  snapshot: Promise<LiveSnapshot>;
+};
 
 export class LiveData {
   private last?: LiveSnapshot;
-  private inflight?: Promise<LiveSnapshot>;
+  private inflight?: LiveRead;
   /** 每次 invalidate 递增；在途读取开始得比它早时不能复用。 */
   private epoch = 0;
   private inflightEpoch = -1;
@@ -40,23 +53,33 @@ export class LiveData {
 
   /** maxAge 毫秒内的结果直接复用；同时进行的读取合并。 */
   get(maxAge = 0): Promise<LiveSnapshot> {
-    if (this.last && this.now() - this.last.at <= maxAge) return Promise.resolve(this.last);
-    if (this.inflight && this.inflightEpoch === this.epoch) return this.inflight;
-    const epoch = this.epoch;
-    const request = this.fetch().then(snapshot => {
-      if (epoch === this.epoch) this.last = snapshot;
-      return snapshot;
-    }).finally(() => { if (this.inflight === request) this.inflight = undefined; });
-    this.inflight = request; this.inflightEpoch = epoch;
-    return request;
+    return this.read(maxAge).snapshot;
   }
 
-  private async fetch(): Promise<LiveSnapshot> {
-    const [tasks, jobs, proposals, attention, notices, jobAttention] = await Promise.allSettled([
-      this.client.workTasks(), this.client.jobs(), this.client.proposals("pending"), this.hub.attention(),
-      this.client.notices({ unread: true, limit: 100 }).then(value => value.notices), this.client.jobAttention(),
-    ]);
-    return { at: this.now(), tasks, jobs, proposals, attention, notices, jobAttention };
+  /** Today can render work and notices independently while the sidebar waits for the complete snapshot. */
+  read(maxAge = 0): LiveRead {
+    if (this.inflight && this.inflightEpoch === this.epoch) return this.inflight;
+    if (this.last && this.now() - this.last.at <= maxAge) {
+      return {
+        tasks: Promise.resolve(this.last.tasks), notices: Promise.resolve(this.last.notices),
+        execution: Promise.resolve(this.last.execution), attention: Promise.resolve(this.last), snapshot: Promise.resolve(this.last),
+      };
+    }
+    const epoch = this.epoch;
+    const tasks = settleRead(this.client.workTasks());
+    const notices = settleRead(this.client.notices({ unread: true, limit: 100 }).then(value => value.notices));
+    const execution = settleRead(this.client.executionOverview());
+    const attention = Promise.all([execution, settleRead(this.client.proposals("pending")),
+      settleRead(this.hub.attention()), settleRead(this.client.jobAttention()),
+    ]).then(([execution, proposals, attention, jobAttention]) => ({ execution, proposals, attention, jobAttention }));
+    const snapshot = Promise.all([tasks, notices, attention]).then(([tasks, notices, attention]): LiveSnapshot => {
+      const value = { at: this.now(), tasks, notices, ...attention };
+      if (epoch === this.epoch) this.last = value;
+      return value;
+    }).finally(() => { if (this.inflightEpoch === epoch) this.inflight = undefined; });
+    this.inflightEpoch = epoch;
+    this.inflight = { tasks, notices, execution, attention, snapshot };
+    return this.inflight;
   }
 }
 

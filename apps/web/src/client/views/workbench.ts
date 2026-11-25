@@ -1,7 +1,6 @@
 import { referenceLinks } from "../reference-links.ts";
 import { resourceLinks } from "../resources.ts";
 import { drafts } from "../drafts.ts";
-import { executionGroups } from "../execution-groups.ts";
 import { turnGroup } from "../turn.ts";
 import type { Session } from "../api.ts";
 import { h, icon, toast, typing } from "../dom.ts";
@@ -127,9 +126,13 @@ export class WorkbenchView {
     if (!force && Date.now() - this.lastRefresh < 2000) return;
     this.refreshing = true; this.lastRefresh = Date.now();
     try {
-      await this.refreshCounts();
+      const counts = this.refreshCounts();
+      const pane = this.current;
+      // Today shares the in-flight snapshot; ancillary sections can refresh while it loads.
+      if (this.section === "overview" && !document.querySelector("dialog[open]")) pane?.pane.liveRefresh?.();
+      await counts;
       // 对话框打开时不刷新底下的模块：确认框指向的内容不能在人眼前变掉。
-      if (!document.querySelector("dialog[open]")) this.current?.pane.liveRefresh?.();
+      if (this.section !== "overview" && !document.querySelector("dialog[open]")) this.current?.pane.liveRefresh?.();
       void this.usage.refresh();
     } finally {
       this.refreshing = false;
@@ -255,6 +258,7 @@ export class WorkbenchView {
     window.addEventListener("lumio-refresh", this.refreshNow);
     document.addEventListener("visibilitychange", this.onVisible);
     const route = this.readRoute();
+    this.lastRefresh = Date.now();
     this.show(route.section, route.id);
     void this.refreshCounts();
   }
@@ -425,8 +429,8 @@ export class WorkbenchView {
   }
 
   private applyCounts(snapshot: LiveSnapshot): void {
-    const tasks = settled(snapshot.tasks), proposals = settled(snapshot.proposals), jobs = settled(snapshot.jobs);
-    const attention = settled(snapshot.attention), notices = settled(snapshot.notices), live = settled(snapshot.jobAttention);
+    const tasks = settled(snapshot.tasks), proposals = settled(snapshot.proposals), execution = settled(snapshot.execution);
+    const notices = settled(snapshot.notices);
     this.dock.notices(snapshot);
     if (notices) this.applyNotices(notices);
     const set = (section: Section, value: number | undefined, attention = false) => {
@@ -437,10 +441,11 @@ export class WorkbenchView {
     set("work", tasks?.filter(t => turnGroup(t) === "needs" || turnGroup(t) === "todo").length);
     set("inbox", undefined);
     set("approvals", proposals?.length, true);
-    const groups = jobs ? executionGroups(jobs, tasks, attention) : undefined;
-    set("execution", groups ? groups.live.length + groups.needs.length : undefined);
+    set("execution", execution?.execution_count);
     // 今日的数字与 Today 页「需要你处理」的卡片数一致，再加上待看的提醒（ADR 0030）；窄屏底栏只看得到这一个数。
-    set("overview", needsYouCount(snapshot) + (notices ? pendingNotices(notices).length : 0), true);
+    const complete = [snapshot.execution, snapshot.attention, snapshot.proposals, snapshot.jobAttention, snapshot.notices]
+      .every(result => result.status === "fulfilled");
+    set("overview", complete ? needsYouCount(snapshot) + pendingNotices(notices ?? []).length : undefined, true);
   }
 
   private leaveSettings(): void {
