@@ -85,7 +85,25 @@ test("browser bundle builds without server-only modules", async () => {
   const child=Bun.spawn([process.execPath,"-e",`import {buildAssets} from ${JSON.stringify(buildUrl)}; process.stdout.write(JSON.stringify(await buildAssets()));`],{stdout:"pipe",stderr:"pipe"});
   const [output,errors,code]=await Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text(),child.exited]);
   expect(code).toBe(0);if(code!==0)throw new Error(errors);
-  const assets=JSON.parse(output) as {js:string;css:string};
+  const assets=JSON.parse(output) as {js:string;css:string;chunks:Record<string,string>;preloads:string[]};
+  const files = new Map(Object.entries(assets.chunks).map(([name, body]) => ["/assets/" + name, body]));
+  files.set("/assets/app.js", assets.js);
+  for (const body of files.values()) {
+    for (const [, path] of body.matchAll(/"(\/assets\/chunk-[a-z0-9]+\.js)"/g)) expect(files.has(path!)).toBe(true);
+  }
+  // Follow static ESM imports only. Editor and formula code must stay off the initial request path.
+  const initial = new Set(["/assets/app.js"]);
+  for (const path of initial) {
+    for (const [, dependency] of files.get(path)!.matchAll(/(?:from|import)\s*"(\/assets\/chunk-[a-z0-9]+\.js)"/g)) initial.add(dependency!);
+  }
+  expect([...files.values()].some(body => body.includes("katex-error"))).toBe(true);
+  expect([...files.values()].some(body => body.includes("cm-editor"))).toBe(true);
+  expect(assets.preloads.map(name => "/assets/" + name).sort()).toEqual([...initial].filter(path => path !== "/assets/app.js").sort());
+  for (const path of initial) {
+    const body = files.get(path)!;
+    expect(body).not.toContain("katex-error");
+    expect(body).not.toContain("cm-editor");
+  }
   expect(assets.js.length).toBeGreaterThan(1000);
   expect(assets.js).not.toMatch(/from\s*["'](node:|bun:|fs["']|child_process)/);
   expect(assets.js).not.toContain("Bun.serve");

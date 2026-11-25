@@ -4,9 +4,9 @@ import { drafts } from "../drafts.ts";
 import { executionGroups } from "../execution-groups.ts";
 import { turnGroup } from "../turn.ts";
 import type { Session } from "../api.ts";
-import { h, icon, toast, typing } from "../dom.ts";
+import { h, icon, toast, typing, loading, failure } from "../dom.ts";
 import { OverviewPane } from "../panes/overview.ts";
-import { KnowledgePane } from "../panes/knowledge.ts";
+import type { KnowledgePane } from "../panes/knowledge.ts";
 import { WorkPane } from "../panes/work.ts";
 import { ExecutionPane } from "../panes/execution.ts";
 import { AssistantPane } from "../panes/assistant.ts";
@@ -338,7 +338,7 @@ export class WorkbenchView {
     let pane: Pane;
     if (section === "overview") pane = new OverviewPane(target, client, this.session.hub, navigate, this.name, changed, this.live);
     else if (section === "settings") pane = new SettingsPane(target, this.session, this.name, () => void this.signOut(), () => this.leaveSettings(), sub => void this.go("settings", sub), id, this.gamepad);
-    else if (section === "knowledge") pane = new KnowledgePane(target, client, id, () => this.dock?.pageChanged());
+    else if (section === "knowledge") return this.mountKnowledge(target, id);
     else if (section === "work") pane = new WorkPane(target, client, this.session.hub, this.workMode, id, navigate, changed,
       resetSharing => this.dock?.pageChanged(resetSharing), subject => this.readSubject(subject));
     else if (section === "execution") pane = new ExecutionPane(target, client, this.session.hub, id, navigate, changed);
@@ -348,6 +348,35 @@ export class WorkbenchView {
     else if (section === "inbox") pane = new InboxPane(target, client, navigate, changed);
     else pane = new ApprovalsPane(target, client, changed, navigate);
     return { target, pane };
+  }
+
+  private mountKnowledge(target: HTMLElement, initialId?: string): MountedPane {
+    let id = initialId;
+    let intent: string | undefined;
+    let LoadedPane: typeof KnowledgePane | undefined;
+    let disposed = false;
+    const activate = () => {
+      if (!LoadedPane || disposed || target.hidden) return;
+      target.replaceChildren();
+      const pane = new LoadedPane(target, this.session.client, id, () => this.dock?.pageChanged());
+      mounted.pane = pane;
+      if (intent) pane.intent(intent);
+    };
+    const mounted: MountedPane = { target, pane: {
+      open: next => { id = next; }, intent: next => { intent = next; },
+      resume: activate, dispose: () => { disposed = true; },
+    } };
+    target.append(loading());
+    void import("../panes/knowledge.ts").then(module => {
+      LoadedPane = module.KnowledgePane;
+      activate();
+    }, () => {
+      if (disposed) return;
+      // The page can outlive a Hub upgrade. Leave other open panes and drafts intact.
+      target.replaceChildren(failure(t("Could not load Knowledge. Reload the page to get the current version.")),
+        h("button", { type: "button", class: "btn btn-small", onclick: () => location.reload() }, t("Reload page")));
+    });
+    return mounted;
   }
 
   /** 知识与工作页使用实际加载的对象，模块内切换不会更新工作台的路由缓存。 */

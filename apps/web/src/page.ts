@@ -4,11 +4,12 @@
  * - 旧的独立 Web 服务（apiBase 为 "/hub"，并给出固定 Hub 来源）：经同源代理转发。R1-2 之后删除。
  */
 import type { WebAssets } from "./build.ts";
+import { createHash } from "node:crypto";
 import { ICON_SVG, iconPng } from "./icons.ts";
 import { SERVICE_WORKER } from "./sw.ts";
 import { SPEECH_WORKLET } from "./speech-worklet.ts";
 
-export interface WebFile { body: string | Uint8Array; type: string }
+export interface WebFile { body: string | Uint8Array; type: string; immutable?: true }
 export interface PageOptions {
   /** API 前缀：Hub 提供时为 ""；独立 Web 服务为 "/hub"。 */
   apiBase: string;
@@ -21,7 +22,7 @@ export const WEB_CSP = "default-src 'none'; script-src 'self'; style-src 'self';
 
 const escapeAttr = (value: string) => value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 
-export function renderPage(options: PageOptions): string {
+export function renderPage(options: PageOptions, script = "/assets/app.js", stylesheet = "/assets/app.css", preloads: string[] = []): string {
   if (options.apiBase !== "" && !/^\/[a-z0-9-]+$/.test(options.apiBase)) throw new Error("apiBase 只能为空或 /<名称>");
   return `<!doctype html>
 <html lang="zh-CN">
@@ -39,8 +40,9 @@ ${options.hub ? `<meta name="lumio-hub" content="${escapeAttr(options.hub)}">\n`
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
-<link rel="stylesheet" href="/assets/app.css">
-<script type="module" src="/assets/app.js"></script>
+<link rel="stylesheet" href="${escapeAttr(stylesheet)}">
+${preloads.map(name => `<link rel="modulepreload" href="/assets/${escapeAttr(name)}">`).join("\n")}
+<script type="module" src="${escapeAttr(script)}"></script>
 </head>
 <body>
 <div id="app" class="app-root"><p class="boot">正在载入 Lumio…</p></div>
@@ -70,10 +72,13 @@ export const MANIFEST = {
 
 /** 所有对外提供的文件：路径 → 内容与类型。图标在调用时生成一次。 */
 export function webFiles(assets: WebAssets, options: PageOptions): Map<string, WebFile> {
-  return new Map<string, WebFile>([
-    ["/", { body: renderPage(options), type: "text/html; charset=utf-8" }],
-    ["/assets/app.js", { body: assets.js, type: "text/javascript; charset=utf-8" }],
-    ["/assets/app.css", { body: assets.css, type: "text/css; charset=utf-8" }],
+  const fingerprint = (body: string) => createHash("sha256").update(body).digest("hex").slice(0, 16);
+  const script = `/assets/app-${fingerprint(assets.js)}.js`, stylesheet = `/assets/app-${fingerprint(assets.css)}.css`;
+  const js = { body: assets.js, type: "text/javascript; charset=utf-8" }, css = { body: assets.css, type: "text/css; charset=utf-8" };
+  const files = new Map<string, WebFile>([
+    ["/", { body: renderPage(options, script, stylesheet, assets.preloads), type: "text/html; charset=utf-8" }],
+    [script, { ...js, immutable: true }], [stylesheet, { ...css, immutable: true }],
+    ["/assets/app.js", js], ["/assets/app.css", css],
     ["/sw.js", { body: SERVICE_WORKER, type: "text/javascript; charset=utf-8" }],
     ["/assets/speech-worklet.js", { body: SPEECH_WORKLET, type: "text/javascript; charset=utf-8" }],
     ["/manifest.webmanifest", { body: JSON.stringify(MANIFEST), type: "application/manifest+json; charset=utf-8" }],
@@ -83,4 +88,8 @@ export function webFiles(assets: WebAssets, options: PageOptions): Map<string, W
     ["/assets/icon-512.png", { body: iconPng(512), type: "image/png" }],
     ["/assets/apple-touch-icon.png", { body: iconPng(180), type: "image/png" }],
   ]);
+  for (const [name, body] of Object.entries(assets.chunks ?? {})) {
+    files.set("/assets/" + name, { body, type: js.type, immutable: true });
+  }
+  return files;
 }
