@@ -1295,6 +1295,7 @@ export const ZH: Record<string, string> = {
   "Links to": "引用了",
   "Load latest": "载入最新内容",
   "Loading the latest version discards your unsaved changes. Continue?": "载入最新内容会放弃当前未保存修改，确定继续吗？",
+  "Show older runs": "查看更多运行",
   "Loading…": "载入中…",
   "Could not load Knowledge. Reload the page to get the current version.": "知识页面加载失败。刷新页面可获取当前版本。",
   "Reload page": "刷新页面",

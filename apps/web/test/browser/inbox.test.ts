@@ -45,7 +45,7 @@ test("the collection does not request or show a triage badge", async () => {
   const badge = () => ({ textContent: "stale", classList: { toggle() {} } });
   const counts = new Map(["work", "inbox", "approvals", "execution", "overview"].map(key => [key, badge()]));
   const client = {
-    workTasks: async () => [], proposals: async () => [], jobs: async () => [], notices: async () => ({ notices: [] }), jobAttention: async () => [],
+    workTasks: async () => [], proposals: async () => [], executionOverview: async () => ({ activity: [], execution_count: 0, activity_live_count: 0, standalone_attention: { total: 0, items: [] } }), notices: async () => ({ notices: [] }), jobAttention: async () => [],
     captures: async () => { calls++; return { captures: [], total: 9 }; },
   };
   const view = Object.assign(Object.create(WorkbenchView.prototype), {

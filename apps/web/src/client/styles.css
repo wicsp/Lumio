@@ -732,6 +732,7 @@ div.note-rich-preview { padding:4px 0; }
 .today-ask .icon-btn:hover { background: var(--ink-2); color: var(--paper); }
 
 .today-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 28px; margin-top: 28px; align-items: start; }
+.today-group { display: contents; }
 .today-col { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
 .today-section-head { display: flex; align-items: center; gap: 8px; margin: 0 2px 8px; }
 .today-section-head h2 { font-size: var(--fs-sm); font-weight: 600; color: var(--ink-2); }
