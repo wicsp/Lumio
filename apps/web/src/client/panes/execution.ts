@@ -233,7 +233,7 @@ export class ExecutionPane {
           if (!this.active || generation !== this.detailGeneration || request !== artifactGeneration || privateScope !== includePrivate.checked) return;
           clear(artifacts, files.length
             ? h("div", { class: "files" }, ...files.map(file => this.artifactRow(file, () => privateScope === includePrivate.checked && generation === this.detailGeneration, privateScope)))
-            : h("p", { class: "muted" }, t("No archived files yet. Results and files may arrive separately.")));
+            : h("p", { class: "muted" }, t("No archived files")));
         } catch (cause) {
           if (this.active && generation === this.detailGeneration && request === artifactGeneration) clear(artifacts, failure(errorText(cause)));
         }
@@ -264,7 +264,7 @@ export class ExecutionPane {
         job.result?.question ? h("section", { class: "question" }, h("h3", {}, t("Waiting for you")), question) : null);
       // 创建 Report section，但如果有 attention card（包含完整汇报）则隐藏以避免重复
       const reportSection = h("section", { class: "section" }, h("div", { class: "section-head" }, h("h3", {}, t("Report"))),
-        job.result?.report ? report : h("p", { class: "muted" }, live ? t("The report appears here when the run finishes.") : t("This run has no report.")));
+        job.result?.report ? report : h("p", { class: "muted" }, live ? t("Report pending") : t("This run has no report.")));
       if (task && !live) void attentionFor(this.hub, task).then(item => {
         if (!item || item.job !== job.spec.id || !this.active || generation !== this.detailGeneration) return;
         // attention card 已包含汇报，隐藏独立的 Report section

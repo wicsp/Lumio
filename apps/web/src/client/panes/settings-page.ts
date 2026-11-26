@@ -7,7 +7,7 @@
 import { imageHostingSettings } from "../image-hosting-settings.ts";
 import type { RuntimeInfo } from "@lumio/schema";
 import { errorText, type Session } from "../api.ts";
-import { clear, confirmDialog, h, icon, toast } from "../dom.ts";
+import { clear, confirmDialog, h, icon, openDialog, toast } from "../dom.ts";
 import { ago } from "../format.ts";
 import { formatTime } from "../commands.ts";
 import { helperState, installCommandBlock } from "../privileged-helper.ts";
@@ -40,6 +40,7 @@ export class SettingsPane {
   private built = new Map<SettingsSection, Built>();
   private navItems = new Map<SettingsSection, HTMLAnchorElement>();
   private shell = h("div", { class: "set-shell" });
+  private scroll = h("div", { class: "set-scroll" }, this.shell);
   private content = h("div", { class: "set-content" });
   private title = h("span", { class: "set-mobile-title" }, t("Settings"));
   private shown?: SettingsSection;
@@ -53,7 +54,7 @@ export class SettingsPane {
       h("button", { type: "button", class: "icon-btn mobile-only", title: t("Back"), "aria-label": t("Back"), onclick: () => this.goBack() }, icon("back")),
       h("h1", { class: "bar-title" }, h("span", { class: "set-desktop-title" }, t("Settings")), this.title));
     this.shell.append(this.nav(), this.content);
-    owner.append(bar, h("div", { class: "set-scroll" }, this.shell));
+    owner.append(bar, this.scroll);
     this.unbindTheme = onTheme(() => this.markTheme());
     this.open(initial ?? "");
   }
@@ -81,7 +82,7 @@ export class SettingsPane {
     let built = this.built.get(key);
     if (!built) { built = this.build(key); this.built.set(key, built); }
     clear(this.content, built.element);
-    this.content.scrollTop = 0;
+    this.scroll.scrollTop = 0;
   }
 
   private goBack(): void {
@@ -114,14 +115,14 @@ export class SettingsPane {
   private profile(): HTMLElement {
     return h("section", { class: "set-profile" },
       h("span", { class: "set-avatar", "aria-hidden": "true" }, this.name.slice(0, 1).toUpperCase()),
-      h("div", { class: "set-profile-text" }, h("p", { class: "set-name" }, this.name), h("p", { class: "set-sub" }, t("Signed in to {0}", location.host))));
+      h("p", { class: "set-name" }, this.name));
   }
 
   // ───────────── 各分类内容 ─────────────
 
   private build(key: SettingsSection): Built {
-    const page = (...children: Array<Node | null | undefined | false>) => h("div", { class: "set-page" },
-      h("h2", { class: "set-title" }, t(SETTINGS_SECTIONS.find(section => section.key === key)!.label)), ...children);
+    const title = h("h2", { class: "set-title" }, t(SETTINGS_SECTIONS.find(section => section.key === key)!.label));
+    const page = (...children: Array<Node | null | undefined | false>) => h("div", { class: "set-page" }, title, ...children);
     switch (key) {
       case "general": {
         const usageStyle = browserChoiceRow(sidebarUsageStyle);
@@ -174,15 +175,15 @@ export class SettingsPane {
           this.group(t("Inbox cards"), cards.element),
           this.group(t("Devices"), h("div", { class: "set-folds" },
             this.fold("capture.browser", "globe", t("Browser extension"), this.pairing("browser")),
-            this.fold("capture.mac", "monitor", t("Lumio Capture for Mac"), this.pairing("desktop"),
-              t("The screenshot of the front window goes to this Hub only when you press the key.")),
+            this.fold("capture.mac", "monitor", t("Lumio Capture for Mac"), this.pairing("desktop")),
             this.fold("capture.iphone", "device", t("iPhone"), this.iphoneSetup()))),
           this.group(t("Advanced"), this.fold("capture.proxy", "route", t("Capture proxy"), proxy.element))),
           dispose: () => { cards.dispose(); proxy.dispose(); } };
       }
       case "agents": {
         const agents = new AgentsSettings(this.session.client);
-        return { element: page(agents.element),
+        return { element: h("div", { class: "set-page" },
+          h("div", { class: "set-page-heading" }, title, agents.versionButton), agents.element),
           dispose: () => agents.dispose() };
       }
       case "data": {
@@ -215,13 +216,13 @@ export class SettingsPane {
    * 可折叠的卡片：标题行常显（图标、名称），展开后才显示内容。
    * 默认收起；展开状态按 key 记在当前浏览器。
    */
-  private fold(key: string, glyph: string, title: string, body: HTMLElement, note?: string): HTMLElement {
+  private fold(key: string, glyph: string, title: string, body: HTMLElement): HTMLElement {
     const details = h("details", { class: "set-fold", "data-fold": key },
       h("summary", { class: "set-row set-fold-head" },
         h("span", { class: "set-row-badge" }, icon(glyph)),
         h("span", { class: "set-label" }, title),
         icon("chevron", "icon set-fold-chevron")),
-      h("div", { class: "set-fold-body" }, body, note ? h("p", { class: "field-hint set-fold-note" }, note) : null));
+      h("div", { class: "set-fold-body" }, body));
     if (foldOpen(key, false)) details.setAttribute("open", "");
     details.addEventListener("toggle", () => rememberFold(key, details.open));
     return details;
@@ -372,25 +373,30 @@ export class SettingsPane {
     }
     if (!current()) return;
     if (!runtimes.length) { clear(rows, h("p", { class: "set-empty" }, t("No runtimes yet. Run lumio runtime add <name> to pair a machine."))); return; }
-    clear(rows, ...runtimes.flatMap(runtime => {
+    clear(rows, ...runtimes.map(runtime => {
       const name = runtime.registration.name;
       const helper = helperState(runtime.registration);
-      const remove = h("button", { type: "button", class: "btn btn-quiet btn-small set-danger", "aria-label": t("Remove runtime {0}", name),
-        onclick: () => void this.removeRuntime(name, remove) }, t("Remove"));
-      const row = h("div", { class: "set-row" },
-        h("span", { class: `connection-dot${runtime.online ? "" : " off"}` }),
-        h("span", { class: "set-label" }, name,
-          h("span", { class: "set-sub" }, runtime.registration.engines.map(engine => engine.name).join(", ") || t("No agents")),
-          h("span", { class: "set-sub" }, helper === "installed" ? t("Administrator helper: installed")
-            : helper === "missing" ? t("Administrator helper: not installed") : t("Administrator helper: unknown (update this runtime to see)"))),
-        h("span", { class: "set-value muted" }, runtime.online ? t("Online") : t("Last seen {0}", ago(runtime.last_seen))),
-        remove);
-      if (helper !== "missing") return [row];
-      // 没装助手时说明它的用途，并给出可复制的安装命令（ADR 0020）。
-      return [row, h("details", { class: "set-row helper-row" },
-        h("summary", { class: "set-sub" }, t("Install the administrator helper")),
-        h("p", { class: "field-hint" }, t("Only needed when an agent must install software or change system settings on {0}. Without it, everything else still works. To install, run this once in a terminal on {0}; it asks for that machine's password, and each request still needs your approval.", runtime.registration.name)),
-        installCommandBlock())];
+      const engines = runtime.registration.engines.map(engine => engine.name).join(", ") || t("No agents");
+      const connection = runtime.online ? t("Online") : t("Last seen {0}", ago(runtime.last_seen));
+      const install = t("Install administrator helper on {0}", name);
+      const status = helper === "installed" ? t("Administrator helper: installed")
+        : helper === "missing" ? t("Administrator helper: not installed") : t("Administrator helper: unknown (update this runtime to see)");
+      const sudo = helper === "missing"
+        ? h("button", { type: "button", class: "runtime-sudo missing", title: install,
+          "aria-label": `${status}. ${install}`, "aria-haspopup": "dialog",
+          onclick: () => openDialog(install, installCommandBlock(), []) }, "sudo", icon("close"))
+        : h("span", { class: `runtime-sudo ${helper}`, title: status, role: "img", "aria-label": status },
+          "sudo", icon(helper === "installed" ? "check" : "help"));
+      const removeLabel = t("Remove runtime {0}", name);
+      const remove = h("button", { type: "button", class: "icon-btn row-delete", title: removeLabel, "aria-label": removeLabel,
+        onclick: () => void this.removeRuntime(name, remove) }, icon("trash"));
+      return h("div", { class: "set-row runtime-row" },
+        h("div", { class: "set-label" },
+          h("div", { class: "runtime-name" },
+            h("span", { class: `connection-dot${runtime.online ? "" : " off"}`, title: connection, role: "img", "aria-label": connection }),
+            h("span", { class: "runtime-text", title: name }, name)),
+          h("span", { class: "set-sub runtime-text", title: engines }, engines)),
+        h("div", { class: "runtime-actions" }, sudo, remove));
     }));
   }
 }

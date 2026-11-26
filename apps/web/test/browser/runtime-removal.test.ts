@@ -9,10 +9,12 @@ class ElementStub extends EventTarget {
   private attrs: Record<string, string> = {};
   disabled = false;
   isConnected = true;
+  text = "";
 
   setAttribute(name: string, value: string): void { this.attrs[name] = value; }
   append(child: ElementStub | string): void {
     if (child instanceof ElementStub) this.children.push(child);
+    else this.text += child;
   }
   replaceChildren(): void {
     for (const child of this.children) child.disconnect();
@@ -33,7 +35,7 @@ class ElementStub extends EventTarget {
 }
 
 test("runtime removal confirms the named device, allows retry on failure and refreshes after success", async () => {
-  const document = { createElement: () => new ElementStub() };
+  const document = { createElement: () => new ElementStub(), createElementNS: () => new ElementStub() };
   const globals = { document, Node: ElementStub };
   const previous = Object.keys(globals).map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const);
   for (const [name, value] of Object.entries(globals)) Object.defineProperty(globalThis, name, { configurable: true, value });
@@ -42,7 +44,8 @@ test("runtime removal confirms the named device, allows retry on failure and ref
   try {
     let devices = ["server", "zzz"].map((name, index) => RuntimeInfo.parse({
       actor: `act_0000000000000000000000000${index}`, last_seen: "2026-11-17T00:00:00Z", online: name === "zzz", update: null,
-      registration: { protocol_version: 2, name, engines: [], tags: [], max_concurrent: 1, version: null, platform: null, install: null },
+      registration: { protocol_version: 2, name, engines: [], tags: [], max_concurrent: 1, version: null, platform: null, install: null,
+        features: name === "zzz" ? ["privileged_helper"] : [] },
     }));
     const removeRuntime = mock(async (name: string) => { devices = devices.filter(device => device.registration.name !== name); })
       .mockRejectedValueOnce(new Error("synthetic failure"));
@@ -54,6 +57,19 @@ test("runtime removal confirms the named device, allows retry on failure and ref
     await pane.loadRuntimes(rows);
     const label = t("Remove runtime {0}", "server");
     const button = rows.button(label)!;
+
+    const installLabel = t("Install administrator helper on {0}", "server");
+    const sudo = rows.button(t("Administrator helper: not installed") + ". " + installLabel);
+    const installed = rows.button(t("Administrator helper: installed"));
+    expect(sudo?.text).toBe("sudo");
+    expect(installed?.text).toBe("sudo");
+    const open = spyOn(dom, "openDialog").mockImplementation(() => ({} as HTMLDialogElement));
+    try {
+      installed?.click();
+      expect(open).not.toHaveBeenCalled();
+      sudo?.click();
+      expect(open).toHaveBeenCalledWith(installLabel, expect.any(ElementStub), []);
+    } finally { open.mockRestore(); }
 
     button.click();
     await Bun.sleep(0);

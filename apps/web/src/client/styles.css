@@ -352,7 +352,20 @@ textarea { line-height: 1.6; resize: vertical; }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 18%, transparent); }
 input::placeholder, textarea::placeholder { color: var(--ink-4); }
 input[type="checkbox"] { width: 15px; height: 15px; margin: 0; accent-color: var(--ink); }
-select { padding-inline-end: 24px; }
+select:where(:not([multiple], [size])) {
+  appearance: none;
+  padding-inline-end: 32px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cpolyline points='20.3333 8.6666 12 17 3.6667 8.6666' stroke='%236a6a6a' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 16px;
+}
+[data-theme="dark"] select:where(:not([multiple], [size])) {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cpolyline points='20.3333 8.6666 12 17 3.6667 8.6666' stroke='%23aeaeae' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+@media (forced-colors: active) {
+  :root select:where(:not([multiple], [size])) { appearance: auto; background-image: none; }
+}
 
 .field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .field-label { color: var(--ink-2); font-size: var(--fs-sm); font-weight: 500; }
@@ -443,7 +456,7 @@ select { padding-inline-end: 24px; }
 .row.is-selected::before { content: ""; position: absolute; inset: 8px auto 8px 0; width: 4px; border-radius: 0 8px 8px 0; background: var(--blue); }
 .row.is-cursor:not(.is-selected) { background: var(--hover); }
 .row-delete { opacity: 0; pointer-events: none; transition: opacity .12s; }
-:is(.delete-row, .convo-row, .memory-item, .trash-row):is(:hover, :focus-within) .row-delete {
+:is(.delete-row, .convo-row, .memory-item, .trash-row, .runtime-row):is(:hover, :focus-within) .row-delete {
   opacity: 1; pointer-events: auto;
 }
 .icon-btn.row-delete:hover:not(:disabled) { color: var(--red); background: var(--red-wash); }
@@ -896,7 +909,7 @@ div.note-rich-preview { padding:4px 0; }
 .detail .attn-slot .question { margin: 0; }
 
 /* ───────────── 设置（二级菜单） ───────────── */
-.set-scroll { flex: 1; min-height: 0; overflow-y: auto; background: var(--surface); }
+.set-scroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable both-edges; background: var(--surface); }
 .set-shell { display: grid; grid-template-columns: 192px minmax(0, 1fr); gap: 32px; max-width: 1120px; margin: 0 auto; padding: 24px 24px 64px; align-items: start; }
 .set-nav { position: sticky; top: 20px; display: flex; flex-direction: column; gap: 16px; }
 .set-nav-list { display: flex; flex-direction: column; gap: 4px; }
@@ -921,11 +934,13 @@ div.note-rich-preview { padding:4px 0; }
 .set-content { min-width: 0; }
 .set-page { max-width: 680px; display: flex; flex-direction: column; gap: 24px; }
 .set-title { font-size: var(--fs-xl); font-weight: 600; }
+.set-page-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.set-page-heading > .icon-btn { margin-inline-start: auto; }
+.agent-version-notices { display: grid; gap: 12px; margin: 0; padding-inline-start: 20px; }
 .set-mobile-title { display: none; }
 .set-stack { display: flex; flex-direction: column; gap: 28px; }
 .set-profile { display: flex; align-items: center; gap: 12px; padding: 12px 8px; min-width: 0; }
-.set-profile-text { min-width: 0; }
-.set-profile .set-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.set-profile .set-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .set-avatar { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: var(--ink); color: var(--paper); font-size: 17px; font-weight: 600; flex: none; }
 .set-name { font-size: var(--fs-lg); font-weight: 600; }
 .set-sub { display: block; margin-top: 4px; color: var(--ink-3); font-size: var(--fs-xs); font-weight: 400; line-height: 1.45; }
@@ -960,7 +975,6 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 .set-fold[open] > summary .set-fold-chevron { transform: rotate(-90deg); }
 .set-fold-body { background: var(--surface); }
 .set-fold-body > .set-rows > .set-row:first-child, .set-fold-body > .set-form-wrap:first-child { border-top: 0; }
-.set-fold-note { padding: 0 16px 12px; }
 .set-fold-body > :first-child:not(.set-rows) { margin-top: 0; }
 @media (prefers-reduced-motion: reduce) { .set-fold-chevron { transition: none; } }
 /* Agent 并发：名称一行，输入框带标签排在下面，窄栏也不挤掉名称。 */
@@ -1006,6 +1020,7 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
   .set-nav-signout .set-nav-icon { display: none; }
   .set-page { gap: 24px; }
   .set-title, .set-desktop-title { display: none; }
+  .set-page-heading:not(:has(.icon-btn:not([hidden]))) { display: none; }
   .set-mobile-title { display: inline; }
 }
 .set-check { color: var(--blue); }
@@ -1572,7 +1587,7 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 .native-advanced > summary { cursor: pointer; color: var(--ink-3); }
 .native-advanced > button { position: absolute; z-index: 1; bottom: calc(100% + 6px); right: 0; white-space: nowrap; background: var(--surface); box-shadow: var(--shadow-pop); }
 .native-panel .button-row, .codex-auth .button-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.native-panel select { height: 28px; max-width: 150px; min-width: 0; padding: 0 24px 0 8px; border: 0; border-radius: var(--r-md); background-color: var(--sunken); font-size: var(--fs-xs); }
+.native-panel select { height: 28px; max-width: 150px; min-width: 0; padding: 0 32px 0 8px; border: 0; border-radius: var(--r-md); background-color: var(--sunken); font-size: var(--fs-xs); }
 .native-panel pre, .native-history pre { margin: 0; padding: 8px 12px; border-radius: var(--r-md); background: var(--sunken); white-space: pre-wrap; overflow-wrap: anywhere; font: var(--fs-xs)/1.55 var(--mono); }
 .native-approval { display: flex; flex-direction: column; gap: 8px; max-height: 36vh; overflow: auto; padding: 12px 12px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--ochre-wash); }
 .native-approval > strong { color: var(--ochre); }
@@ -1588,7 +1603,7 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 .codex-auth-head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px 12px; width: 100%; }
 .codex-auth-state { font-size: var(--fs-xs); color: var(--ink-3); }
 /* 输入框底部的 Profile 选择与模型输入同样是轻量的胶囊样式 */
-.composer-foot select { height: 26px; max-width: 200px; min-width: 0; padding: 0 24px 0 8px; border: 0; border-radius: var(--r-md); background-color: var(--sunken); color: var(--ink-2); font-size: var(--fs-xs); }
+.composer-foot select { height: 26px; max-width: 200px; min-width: 0; padding: 0 32px 0 8px; border: 0; border-radius: var(--r-md); background-color: var(--sunken); color: var(--ink-2); font-size: var(--fs-xs); }
 .composer-foot select:hover { color: var(--ink); }
 .composer-foot select:disabled { opacity: .6; }
 @media (max-width: 600px) { .native-history { margin-inline: 16px; } .composer-foot { flex-wrap: wrap; } .composer-foot select { max-width: 150px; } }
@@ -1634,14 +1649,24 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
 
 /* 管理员权限助手提示（ADR 0020） */
 .helper-command { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.helper-command code { font-family: var(--mono); font-size: var(--fs-sm); background: var(--sunken); padding: 4px 8px; border-radius: var(--r-sm, 6px); user-select: all; }
+.helper-command code { min-width: 0; overflow-wrap: anywhere; font-family: var(--mono); font-size: var(--fs-sm); background: var(--sunken); padding: 4px 8px; border-radius: var(--r-sm, 6px); user-select: all; }
 .helper-notice { display: flex; flex-direction: column; gap: 8px; padding: 12px 12px; border: 1px solid var(--line-strong); border-radius: var(--r-md); background: var(--surface); }
 .helper-notice-title { display: flex; gap: 8px; align-items: flex-start; font-size: var(--fs-sm); font-weight: 600; }
 .helper-notice-title .icon { width: 14px; height: 14px; flex: none; margin-top: 4px; color: var(--ochre); }
-.set-row.helper-row { display: block; min-height: 0; padding: 0 16px 12px 32px; border-top: 0; }
-.helper-row > summary { padding: 4px 0; cursor: pointer; width: fit-content; }
-.helper-row[open] > summary { margin-bottom: 8px; }
-.helper-row > .field-hint { margin-bottom: 8px; }
+.runtime-name, .runtime-actions { display: flex; align-items: center; gap: 8px; }
+.runtime-name { font-weight: 600; padding-inline-start: 4px; }
+.runtime-name .connection-dot, .runtime-actions { flex: none; }
+.runtime-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.runtime-row .set-sub { margin-inline-start: 20px; }
+.runtime-sudo {
+  display: inline-flex; align-items: center; gap: 4px; min-height: 32px; padding: 0 8px;
+  border: 0; border-radius: var(--r-sm); background: var(--sunken); color: var(--ink-3);
+  font: 500 var(--fs-xs) var(--mono);
+}
+.runtime-sudo .icon { width: 16px; height: 16px; }
+.runtime-sudo.installed { background: var(--green-wash); color: var(--green); }
+.runtime-sudo.missing { background: var(--red-wash); color: var(--red); }
+.runtime-sudo.missing:hover { background: color-mix(in srgb, var(--red) 20%, var(--surface)); }
 
 /* G1 controller focus is independent of native mouse and keyboard focus. */
 [data-gamepad-mode] [data-pad-focus] {

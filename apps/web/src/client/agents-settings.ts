@@ -6,7 +6,7 @@ import type { AgentInfo, RuntimeInfo } from "@lumio/schema";
 import { ApiClientError } from "@lumio/api-client";
 import { errorText, type Client } from "./api.ts";
 import { formatTime } from "./commands.ts";
-import { clear, confirmDialog, failure, h, icon, toast } from "./dom.ts";
+import { clear, confirmDialog, failure, h, icon, openDialog, toast } from "./dom.ts";
 import { ago } from "./format.ts";
 import { t } from "./i18n.ts";
 
@@ -30,7 +30,11 @@ export function agentVersionNotice(engine: RuntimeEngine, runtime: string): stri
 
 export class AgentsSettings {
   readonly element = h("div", { class: "set-rows" });
-  private versionNotices = h("div", { role: "status" });
+  readonly versionButton = h("button", { type: "button", class: "icon-btn", hidden: true,
+    title: t("Version compatibility"), "aria-label": t("Version compatibility"), "aria-haspopup": "dialog",
+    onclick: () => openDialog(t("Version compatibility"), h("ul", { class: "agent-version-notices" },
+      ...this.versionNotices.map(notice => h("li", {}, notice))), []) }, icon("info"));
+  private versionNotices: string[] = [];
   private kind: AgentKind = "codex";
   private active = true;
 
@@ -56,11 +60,10 @@ export class AgentsSettings {
     try {
       const runtimes = await this.client.runtimes();
       if (!this.active) return;
-      const notices = runtimes.flatMap(({ registration }) => registration.engines
+      this.versionNotices = runtimes.flatMap(({ registration }) => registration.engines
         .map(engine => agentVersionNotice(engine, registration.name))
         .filter(notice => notice !== undefined));
-      clear(this.versionNotices, ...notices.map(notice => h("div", { class: "set-row" },
-        icon("alert"), h("span", { class: "set-label" }, notice))));
+      this.versionButton.hidden = !this.versionNotices.length;
     } catch { /* Version notices are advisory and independent of agent management. */ }
   }
 
@@ -79,11 +82,9 @@ export class AgentsSettings {
     }));
     const howto = h("div", { class: "set-row set-howto" },
       icon("terminal"),
-      h("span", { class: "set-label" }, t("Connect Codex, Claude Code or pi"),
-        h("span", { class: "set-sub" }, t("On that machine, in a terminal logged in to this Hub, run:")),
-        tabs, code),
+      h("div", { class: "set-label" }, tabs, code),
       h("button", { type: "button", class: "btn btn-small", onclick: () => void navigator.clipboard?.writeText(INSTALL[this.kind]).then(() => toast(t("Copied"))) }, icon("link"), t("Copy")));
-    clear(this.element, ...(rows.length ? rows : [h("p", { class: "set-empty" }, t("No agents connected yet."))]), howto, this.versionNotices);
+    clear(this.element, ...(rows.length ? rows : [h("p", { class: "set-empty" }, t("No agents connected yet."))]), howto);
   }
 
   private row(agent: AgentInfo): HTMLElement {
