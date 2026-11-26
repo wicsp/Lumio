@@ -56,7 +56,6 @@ export class ConnectView {
         message, retrySaved, retryVerification,
         codeForm,
         h("label", { class: "check" }, remember, t("Stay signed in on this device")),
-        h("p", { class: "field-hint" }, t("You won't need to pair again after closing the browser. Only use this on your own device.")),
         h("details", {}, h("summary", {}, t("Use an existing access token")), tokenForm)))));
     code.focus();
   }

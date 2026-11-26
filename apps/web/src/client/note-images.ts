@@ -60,27 +60,38 @@ export class NoteImages {
   readonly element: HTMLElement;
   private readonly input = h("input", { type: "file", accept: "image/png,image/jpeg,image/webp,image/gif,image/avif", multiple: true, hidden: true });
   private readonly status = h("span", { class: "field-hint", role: "status" });
+  private readonly settings = h("a", { class: "btn btn-small", href: "#settings/data", hidden: true }, t("Configure image hosting"));
   private readonly button = h("button", { type: "button", class: "btn btn-small", disabled: true }, t("Insert image"));
   private enabled = false;
   private disposed = false;
+  private settingsRequest = 0;
   private disconnect?: () => void;
 
   constructor(private readonly upload: NoteImageUpload, private readonly editor: () => EditorView) {
-    this.element = h("div", { class: "note-image-controls" }, this.button, this.input, this.status);
+    this.element = h("div", { class: "note-image-controls" }, this.button, this.input, this.settings, this.status);
     this.button.addEventListener("click", () => this.input.click());
     this.input.addEventListener("change", () => {
       const files = [...(this.input.files ?? [])];
       this.input.value = "";
       this.start(files, this.editor().state.selection.main.head);
     });
-    void upload.settings().then(settings => {
-      if (this.disposed) return;
+    void this.refreshSettings();
+  }
+
+  async refreshSettings(): Promise<void> {
+    if (this.disposed) return;
+    const request = ++this.settingsRequest;
+    try {
+      const settings = await this.upload.settings();
+      if (this.disposed || request !== this.settingsRequest) return;
       this.enabled = !!settings.destination;
       this.button.disabled = !this.enabled;
-      this.status.textContent = settings.destination ? t("Uploads to {0}", settings.destination.label) : t("Configure an upload destination in Image hosting settings.");
-    }).catch(cause => {
-      if (!this.disposed) this.status.textContent = errorText(cause);
-    });
+      this.button.hidden = !this.enabled;
+      this.settings.hidden = this.enabled;
+      this.status.textContent = "";
+    } catch (cause) {
+      if (!this.disposed && request === this.settingsRequest) this.status.textContent = errorText(cause);
+    }
   }
 
   connect(): void {

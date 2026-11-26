@@ -61,9 +61,9 @@ export const failure = (text: string, retry?: () => void) =>
   h("div", { class: "state state-error", role: "alert" }, icon("alert"), h("span", {}, text),
     retry && h("button", { type: "button", class: "btn btn-small", onclick: retry }, t("Retry")));
 
-/** 详情区的空白页：一个图标和一句引导。 */
-export const placeholder = (iconName: string, text: string) =>
-  h("div", { class: "placeholder" }, icon(iconName), h("p", {}, text));
+/** 详情区没有选中条目时的占位。 */
+export const placeholder = (iconName: string) =>
+  h("div", { class: "placeholder", "aria-hidden": "true" }, icon(iconName));
 
 // ───────────── 图标（本地路径，不加载远程资源） ─────────────
 

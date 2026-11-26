@@ -33,7 +33,7 @@ export class TrashPane {
       // 入口在设置的「数据」分类里（PR #120），返回键回到那里。
       h("header", { class: "bar" },
         h("button", { type: "button", class: "icon-btn", title: t("Back"), "aria-label": t("Back"), onclick: () => this.navigate("settings", "data") }, icon("back")),
-        h("h1", { class: "bar-title" }, t("Recently deleted"), h("span", { class: "bar-meta hide-narrow" }, t("Kept for 30 days"))),
+        h("h1", { class: "bar-title" }, t("Recently deleted")),
         h("span", { class: "bar-spacer" }),
         h("button", { type: "button", class: "icon-btn", title: t("Refresh"), "aria-label": t("Refresh"), onclick: () => void this.load() }, icon("refresh"))),
       h("div", { class: "trash-scroll" }, h("div", { class: "trash-page" }, h("div", { class: "trash-filters" }, seg), this.list)));
@@ -50,7 +50,7 @@ export class TrashPane {
       const { items } = await this.client.trash(this.kind ? { kind: this.kind } : {});
       if (!this.active || generation !== this.generation) return;
       const sorted = items.slice().sort((a, b) => b.deleted_at.localeCompare(a.deleted_at));
-      if (!sorted.length) { clear(this.list, empty(this.kind ? t("Nothing of this type was deleted in the last 30 days.") : t("Nothing deleted in the last 30 days. Deleted tasks, projects, notes and conversations stay here for 30 days."))); return; }
+      if (!sorted.length) { clear(this.list, empty(this.kind ? t("Nothing of this type was deleted in the last 30 days.") : t("Nothing deleted in the last 30 days."))); return; }
       clear(this.list, ...sorted.map(item => this.row(item)));
     } catch (cause) {
       if (this.active && generation === this.generation && !quiet) clear(this.list, failure(errorText(cause), () => this.load()));

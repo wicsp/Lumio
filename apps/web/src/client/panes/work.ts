@@ -330,7 +330,7 @@ export class WorkPane {
   private showPlaceholder(): void {
     this.split.classList.remove("has-detail");
     this.clearDock();
-    clear(this.detail, placeholder(this.mode === "tasks" ? "work" : "folder", this.mode === "tasks" ? t("Select a task to see details. Use J / K to move between tasks.") : t("Select a project to see its goal and progress.")));
+    clear(this.detail, placeholder(this.mode === "tasks" ? "work" : "folder"));
   }
 
   private clearDock(): void {
@@ -428,7 +428,7 @@ export class WorkPane {
     const form = h("form", { id: formId, class: "form-stack" },
       field(isTask ? t("Title") : t("Name"), title),
       isTask ? field(t("Project"), project) : field(t("Goal"), goal),
-      isTask ? null : field(t("Working directory"), workdir, t("Tasks in this project run here unless they set their own.")),
+      isTask ? null : field(t("Project working directory"), workdir),
       isTask ? null : field(t("Automatic Git worktrees"), autoWorktree),
       isTask ? null : field(t("Worktree base"), worktreeBase),
       isTask ? null : field(t("Project concurrency"), concurrency),

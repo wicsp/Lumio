@@ -30,7 +30,7 @@ export function referenceInput(input: HTMLTextAreaElement, client: Client, title
         if(!active||version!==generation||document.activeElement!==input)return;
         hits=result.hits;selected=0;const terms=matchTerms(trigger.query||context);
         clear(panel,...hits.map((hit,index)=>{const row=h("button",{type:"button",role:"option",id:`${panel.id}-${index}`,class:"reference-option",tabindex:"-1"},h("strong",{},highlightedText(hit.note.title,terms)),h("small",{},highlightedText(hit.snippet??"",terms)));row.addEventListener("mousedown",event=>event.preventDefault());row.addEventListener("click",()=>choose(index));return row;}));
-        if(!hits.length)panel.append(h("p",{class:"field-hint"},t("No matches. Type to search titles and content.")));
+        if(!hits.length)panel.append(h("p",{class:"field-hint"},t("No matches")));
         panel.hidden=false;input.setAttribute("aria-expanded","true");
         const rect=input.getBoundingClientRect();panel.style.width=`${Math.min(Math.max(rect.width,280),window.innerWidth-24)}px`;panel.style.left=`${Math.max(12,Math.min(rect.left,window.innerWidth-panel.offsetWidth-12))}px`;panel.style.top=`${Math.max(12,rect.bottom+panel.offsetHeight+8>window.innerHeight?rect.top-panel.offsetHeight-8:rect.bottom+8)}px`;mark();
       } catch { if(version===generation)hide(); }

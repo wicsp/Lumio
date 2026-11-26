@@ -13,7 +13,7 @@ import { loadAssistantDefault, mainProfile, saveAssistantDefault } from "./assis
 import { newRequestId } from "./commands.ts";
 import { usageDetails } from "./ai-usage.ts";
 
-type Group = (title: string, hint: string | undefined, body: HTMLElement, action?: HTMLElement) => HTMLElement;
+type Group = (title: string, body: HTMLElement, action?: HTMLElement) => HTMLElement;
 type Kind = AIConnection["kind"];
 
 export const CONNECTION_KINDS: ReadonlyArray<readonly [Kind, string]> = [
@@ -75,10 +75,10 @@ export class AISettings {
   constructor(private client: Client, group: Group) {
     this.speech = new SpeechSettings(client, kind => this.editConnection(undefined, kind), () => void this.load());
     this.element.append(
-      group(t("Default assistant model"), t("Chats that don't pick a profile use this one, including the main conversation and Lumio Capture."), this.defaultRows),
-      group(t("AI profiles"), t("Choose an API or an official Codex session. Profiles share model settings; each conversation keeps its own permissions and history."), this.profileRows, this.newProfile),
-      group(t("Connections"), t("Manage API connections, runtime sign-ins, and usage monitoring."), this.connectionRows, this.newConnection),
-      group(t("Voice input"), t("Dictate into text boxes with the mic button. Audio goes through the Hub to the speech service and isn't stored."), this.speech.element));
+      group(t("Default assistant model"), this.defaultRows),
+      group(t("AI profiles"), this.profileRows, this.newProfile),
+      group(t("Connections"), this.connectionRows, this.newConnection),
+      group(t("Voice input"), this.speech.element));
     for (const rows of [this.defaultRows, this.connectionRows, this.profileRows]) {
       clear(rows, h("p", { class: "set-empty" }, t("Loading…")));
     }
@@ -226,14 +226,12 @@ export class AISettings {
       runtime.online ? runtime.name : `${runtime.name} · ${t("Offline")}`)));
     const base = h("input", { type: "url", value: old?.base_url ?? "", placeholder: "https://…/v1", autocomplete: "off", spellcheck: "false" });
     const key = h("input", { type: "password", autocomplete: "new-password", spellcheck: "false" });
-    const jevHint = h("p", { class: "field-hint" }, t("TypeSafe Jev is for structured decisions and is unavailable in chat profiles."));
     const speechHint = h("p", { class: "field-hint" }, t("For voice input only (Beijing region). Audio and your vocabulary are sent to Alibaba Cloud."));
-    const api = h("div", { class: "form-stack" }, this.field(t("API address"), base), this.field(t("API key"), key, t("Stored only on the Hub, never shown again, and never sent to agents.")), jevHint, speechHint);
+    const api = h("div", { class: "form-stack" }, this.field(t("API address"), base), this.field(t("API key"), key, t("Stored only on the Hub, never shown again, and never sent to agents.")), speechHint);
     const authSection = h("section", { class: "codex-auth", "aria-label": t("Codex sign-in") });
-    const samplingHint = h("p", { class: "field-hint" }, t("After saving, open Usage & balance to set up sampling."));
     const native = h("div", { class: "form-stack" },
       (this.runtimes.length || old && old.host !== "hub") ? this.field(t("Runtime"), host) : h("p", { class: "notice" }, t("No runtimes yet. Run lumio runtime add <name> to pair a machine.")),
-      authSection, samplingHint);
+      authSection);
     let editableAddress = base.value;
     const sync = () => {
       const codex = kind.value === "codex-account";
@@ -243,8 +241,6 @@ export class AISettings {
       speechHint.hidden = !speech;
       api.hidden = codex || claude; native.hidden = !(codex || claude);
       authSection.hidden = !codex;
-      samplingHint.hidden = !claude;
-      jevHint.hidden = !jev;
       if (jev || speech) {
         if (!base.readOnly) editableAddress = base.value;
         // 语音首版只支持北京区域（ADR 0055 第 3 节）。
@@ -264,7 +260,7 @@ export class AISettings {
     sync();
     const message = h("div", { role: "status" });
     const save = h("button", { type: "submit", class: "btn btn-primary" });
-    const form = h("form", { class: "form-stack", autocomplete: "off" }, this.field(t("Name"), name), this.field(t("Service"), kind, old ? t("The service and location can't change after creation.") : undefined), native, api, message);
+    const form = h("form", { class: "form-stack", autocomplete: "off" }, this.field(t("Name"), name), this.field(t("Service"), kind), native, api, message);
     const dialog = openDialog(old?.name ?? t("Add connection"), form, [save]);
     save.setAttribute("form", form.id = `ai-connection-${Date.now()}`);
     let connection = old;
@@ -286,8 +282,7 @@ export class AISettings {
         h("strong", {}, t("Codex sign-in")),
         h("span", { class: "codex-auth-state", role: "status" }, view ? authLabel(view) : connection ? t("Loading…") : "")));
       if (!connection) {
-        authSection.append(h("p", { class: "field-hint" }, t("Sign in once for this connection. Each assistant chat keeps its own history and tools.")),
-          button("Sign in with Codex", () => void changeAuth("login"), true));
+        authSection.append(button("Sign in with Codex", () => void changeAuth("login"), true));
         return;
       }
       if (view?.state === "authorizing" && view.login_url && view.login_code) {
@@ -296,8 +291,7 @@ export class AISettings {
             h("a", { href: view.login_url, target: "_blank", rel: "noopener noreferrer", class: "btn btn-primary btn-small" }, t("Open official sign-in")),
             button("Cancel authorization", () => void changeAuth("cancel"))));
       } else if (view?.state === "ready") {
-        authSection.append(h("p", { class: "field-hint" }, t("New chats can use this connection.")),
-          button("Sign out of Codex", () => void changeAuth("logout")));
+        authSection.append(button("Sign out of Codex", () => void changeAuth("logout")));
       } else if (view?.state === "offline") {
         authSection.append(button("Refresh", () => void changeAuth()));
       } else if (view) {

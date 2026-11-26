@@ -8,7 +8,6 @@ export type SettingsSection = "general" | "controls" | "notifications" | "ai" | 
 export interface SettingsSectionInfo {
   key: SettingsSection;
   label: string;
-  hint: string;
   icon: string;
   /** 导航里的分组小标题（英文原文）；空字符串表示不显示标题。 */
   group: string;
@@ -16,16 +15,16 @@ export interface SettingsSectionInfo {
 
 /** 文案是英文原文，显示时再用 t() 翻译。顺序即导航顺序，同组的分类必须相邻。 */
 export const SETTINGS_SECTIONS: readonly SettingsSectionInfo[] = [
-  { key: "general", label: "General", hint: "Appearance and language", icon: "user", group: "Personal" },
-  { key: "controls", label: "Keyboard & gamepad", hint: "Shortcuts, gamepad testing and button mapping", icon: "settings", group: "Personal" },
-  { key: "notifications", label: "Notifications", hint: "When Lumio may notify you", icon: "bell", group: "Personal" },
-  { key: "ai", label: "AI models", hint: "Profiles, connections, voice input and the assistant model", icon: "assistant", group: "AI & agents" },
-  { key: "execution", label: "Execution", hint: "Live interaction and agent concurrency", icon: "execution", group: "AI & agents" },
-  { key: "devices", label: "Hub & runtimes", hint: "This Hub and the machines that run agents", icon: "device", group: "AI & agents" },
-  { key: "agents", label: "Connected agents", hint: "Agents outside Lumio that can read and edit", icon: "link", group: "AI & agents" },
-  { key: "capture", label: "Capture", hint: "Inbox cards, browser extension, Mac and iPhone", icon: "inbox", group: "Library" },
-  { key: "data", label: "Data", hint: "Image hosting and recently deleted items", icon: "trash", group: "Library" },
-  { key: "about", label: "About", hint: "Version and source code", icon: "help", group: "" },
+  { key: "general", label: "General", icon: "user", group: "Personal" },
+  { key: "controls", label: "Keyboard & gamepad", icon: "settings", group: "Personal" },
+  { key: "notifications", label: "Notifications", icon: "bell", group: "Personal" },
+  { key: "ai", label: "AI models", icon: "assistant", group: "AI & agents" },
+  { key: "execution", label: "Execution", icon: "execution", group: "AI & agents" },
+  { key: "devices", label: "Hub & runtimes", icon: "device", group: "AI & agents" },
+  { key: "agents", label: "Connected agents", icon: "link", group: "AI & agents" },
+  { key: "capture", label: "Capture", icon: "inbox", group: "Library" },
+  { key: "data", label: "Data", icon: "trash", group: "Library" },
+  { key: "about", label: "About", icon: "help", group: "" },
 ];
 
 export const DEFAULT_SETTINGS_SECTION: SettingsSection = "general";

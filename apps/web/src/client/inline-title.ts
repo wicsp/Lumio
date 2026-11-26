@@ -15,7 +15,7 @@ export class InlineTitle {
   private cancel = h("button", { type: "button", class: "btn btn-small", onclick: () => this.discard() }, t("Cancel"));
   private message = h("p", { class: "title-message", role: "alert", hidden: true });
   private form = h("form", { class: "title-form", hidden: true }, this.input,
-    h("div", { class: "button-row" }, this.save, this.cancel, h("span", { class: "field-hint" }, t("Enter to save · Esc to cancel"))), this.message);
+    h("div", { class: "button-row" }, this.save, this.cancel), this.message);
   private externalBusy = false;
   constructor(value: string, commit: (title: string) => Promise<string>) {
     this.state = new TitleEditState(value, commit);

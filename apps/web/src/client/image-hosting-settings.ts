@@ -76,7 +76,7 @@ export function imageHostingSettings(client: Pick<Client, "imageHostingSettings"
     const save = h("button", { type: "submit", class: "btn btn-small" }, t("Save"));
     const form = h("form", { class: "set-form-wrap form-stack", autocomplete: "off" },
       entry(t("Upload destination"), provider), fields,
-      entry(t("Image preview origins"), origins, t("One HTTPS origin per line. Add existing image domains here. The upload destination is added automatically.")),
+      entry(t("Image preview domains · one HTTPS origin per line"), origins),
       h("div", {}, save), status, error);
     let read: () => Pick<ImageHostingUpdate, "destination" | "credentials"> = () => ({ destination: null });
     function showFields(existing?: ImageHostingDestination) {
@@ -94,7 +94,7 @@ export function imageHostingSettings(client: Pick<Client, "imageHostingSettings"
       const label = existing?.label ?? preset.name;
       const base = () => ({ label, public_base: publicBase.value.trim(), prefix: prefix.value.trim() });
       const credentialsHint = settings.credentials_saved && existing ? t("Credentials saved. Leave blank to keep them for this destination.") : undefined;
-      fields.append(entry(t("Public image URL prefix"), publicBase, t("Use the HTTPS address that serves the image to readers.")));
+      fields.append(entry(t("Public HTTPS URL prefix"), publicBase));
       if (kind === "s3") {
         const old = existing?.kind === "s3" ? existing : undefined;
         const endpoint = text(old?.endpoint ?? "", preset.endpoint ?? "https://s3.example.com", preset.name !== "AWS S3");
@@ -130,15 +130,15 @@ export function imageHostingSettings(client: Pick<Client, "imageHostingSettings"
       if (!old && preset.endpoint && !/images\.example\.com|files\.example\.com|ACCOUNT_ID/.test(preset.endpoint)) endpoint.value = preset.endpoint;
       const method = h("select", {}, ...["POST", "PUT"].map(option =>
         h("option", { value: option, selected: option === (old?.method ?? (preset.raw ? "PUT" : "POST")) }, option)));
-      const field = text(old ? old.file_field ?? "" : preset.file ?? "");
+      const field = text(old ? old.file_field ?? "" : preset.file ?? "", t("Raw image bytes"));
       const responsePath = text(old?.response_path ? JSON.stringify(old.response_path) : old || !preset.path ? "" : JSON.stringify(preset.path), '["data","url"]');
       const headers = secret(preset.headers ?? '{"Authorization":"Bearer TOKEN"}');
       const bodyFields = secret('{"album":"123"}');
       const query = secret(preset.query ? JSON.stringify(preset.query) : '{"key":"VALUE"}');
       const clearCredentials = h("input", { type: "checkbox" });
       fields.append(entry(t("Upload endpoint"), endpoint, t("For raw PUT uploads, use {key} in the path for the generated object key.")),
-        entry(t("HTTP method"), method), entry(t("Multipart file field"), field, t("Leave blank to send raw image bytes.")),
-        entry(t("Object path prefix"), prefix), entry(t("JSON path to the image URL"), responsePath, t("Leave blank when the public URL is built from the generated object key.")),
+        entry(t("HTTP method"), method), entry(t("Multipart file field"), field),
+        entry(t("Object path prefix"), prefix), entry(t("JSON path to the image URL"), responsePath),
         h("details", {}, h("summary", {}, t("Headers, form fields and query parameters")),
           h("div", { class: "form-stack" }, entry(t("Headers as JSON"), headers, credentialsHint),
             entry(t("Extra form fields as JSON"), bodyFields), entry(t("Query parameters as JSON"), query),

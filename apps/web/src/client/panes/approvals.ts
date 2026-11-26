@@ -56,7 +56,7 @@ export class ApprovalsPane {
   private showPlaceholder(): void {
     this.detailGeneration++;
     this.split.classList.remove("has-detail");
-    clear(this.detail, placeholder("approvals", t("When an agent asks to run something that needs your permission, it shows up here. Select one to see the full command and reason.")));
+    clear(this.detail, placeholder("approvals"));
   }
 
   private async load(quiet = false): Promise<void> {

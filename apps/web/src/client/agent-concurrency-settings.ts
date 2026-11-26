@@ -96,7 +96,6 @@ export class AgentConcurrencySettings {
     const advanced = exceptions.length ? h("details", { class: "set-fold concurrency-advanced" },
       h("summary", { class: "set-row" }, h("span", { class: "set-label" }, t("Accounts and providers")), icon("chevron", "set-fold-chevron")),
       h("div", { class: "set-fold-body" },
-        h("p", { class: "field-hint concurrency-note" }, t("Use the same quota group for accounts or providers that share a limit across runtimes.")),
         h("div", { class: "set-rows" }, ...exceptions.map(form)))) : null;
     if (advanced) advanced.open = this.advancedOpen;
     clear(this.element, ...defaults.map(form), advanced);

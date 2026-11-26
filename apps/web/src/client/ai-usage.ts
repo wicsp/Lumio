@@ -211,11 +211,7 @@ function settingsDialog(connection: AIConnection, usage: AIQuotaView, client: Cl
   const form = h("form", { class: "form-stack" },
     isClaude && h("label", { class: "field" }, h("span", { class: "field-label" }, t("Claude Code usage source")), mode),
     h("label", { class: "field" }, h("span", { class: "field-label" }, monitor, " ", t("Enable monitoring"))),
-    h("p", { class: "field-hint" }, t("Leave a threshold blank to skip that alert. Enable AI usage alerts in your device’s notification settings.")),
-    ...(connection.kind === "deepseek" ? [full.element,
-      h("p", { class: "field-hint" }, t("The sidebar bar is full while the balance is at or above the monitoring threshold, and shrinks in proportion below it. Leave it blank to keep the bar full.")),
-      below.element]
-      : [percent.element]), message);
+    ...(connection.kind === "deepseek" ? [full.element, below.element] : [percent.element]), message);
   const save = h("button", { type: "button", class: "btn btn-primary", onclick: () => form.requestSubmit() }, t("Save"));
   const dialog = openDialog(t("Monitoring settings"), form, [save]);
   form.onsubmit = async event => {

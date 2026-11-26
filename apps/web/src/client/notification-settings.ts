@@ -102,14 +102,14 @@ export class NotificationSettings {
       }
     }
     if (devices.length) {
-      const test = h("button", { type: "button", class: "btn btn-small" }, icon("send"), t("Send a test"));
+      const test = h("button", { type: "button", class: "btn btn-small" }, icon("send"), t("Send to all devices"));
       test.addEventListener("click", () => void this.guard(error, async () => {
         const result = await this.client.testPush();
         if (result.delivered) toast(t("Test sent. It should arrive in a few seconds."));
         else clear(error, failure(result.error ?? t("The test couldn't be delivered to every device.")));
         void this.load();
       }));
-      rows.push(h("div", { class: "set-row" }, h("span", { class: "set-label" }, t("Test notification"), h("span", { class: "set-sub" }, t("Sends to all your devices."))), test));
+      rows.push(h("div", { class: "set-row" }, h("span", { class: "set-label" }, t("Test notification")), test));
     }
     for (const device of devices.filter(device => device.id !== mine?.id)) {
       const remove = h("button", { type: "button", class: "btn btn-small btn-quiet" }, t("Remove"));

@@ -63,8 +63,7 @@ export function glanceThumb(client: Client, id: string, label: string): HTMLElem
     frame.replaceChildren(h("img", { src, alt: label, loading: "lazy", decoding: "async" }));
     frame.disabled = false;
     frame.addEventListener("click", () => {
-      openDialog(label, h("div", { class: "glance-full" }, h("img", { src, alt: label }),
-        h("p", { class: "field-hint" }, t("Screen content captured by the desktop helper. Third-party content, read-only."))), [], { wide: true });
+      openDialog(label, h("div", { class: "glance-full" }, h("img", { src, alt: label })), [], { wide: true });
     });
   }).catch(() => {
     frame.classList.remove("is-loading");

@@ -43,20 +43,17 @@ export class KnowledgeAISettings {
     if (this.loadError) { clear(this.element, failure(this.loadError, () => void this.load())); return; }
     const byId = new Map(this.config.connections.map(connection => [connection.id, connection]));
     const profiles = this.config.profiles.filter(profile => profile.engine === "lumio" && !!byId.get(profile.connection)?.base_url);
-    const summary = this.field("knowledge.summary", t("Summary model"), profiles, byId, profiles.length
-      ? t("Writes the short card for each saved item, and the deep read when you ask. The extracted text is sent to this model's service.")
-      : t("Add an API profile first. Codex sessions can't write cards."),
-      profile => toast(profile ? t("New saves will get an AI card.") : t("AI cards are off. Saved items still go into the Inbox.")));
-    const vision = this.field("knowledge.vision", t("Screenshot model"), profiles, byId, (connection) => connection
-      ? t("Saved screenshots are sent to {0} for transcription. When you ask about a screenshot with official DeepSeek Flash, DeepSeek receives the screenshot, recognized text and your question.", connection)
-      : t("When off, screenshots stay on this Hub and Lumio uses the text recognized on your device."),
-      profile => toast(profile ? t("Screenshot vision is on.") : t("Screenshots stay on this Hub.")));
+    const summary = this.field("knowledge.summary", t("Summary model"), profiles, byId, t("Off"),
+      t("Sends extracted text to the selected service."), profile => toast(t(profile ? "New saves will get an AI card." : "AI cards are off.")));
+    const vision = this.field("knowledge.vision", t("Screenshot model"), profiles, byId, t("On-device text recognition"),
+      t("Sends saved screenshots to the selected service."), profile => toast(t(profile ? "Screenshot vision is on." : "Screenshots stay on this Hub.")));
     const vectors = this.config.profiles.filter(profile => profile.engine === "embedding" && !!byId.get(profile.connection)?.base_url);
-    const embedding = this.field("knowledge.embedding", t("Semantic search"), vectors, byId, connection => connection
-      ? t("Public note text and search queries are sent to {0} to match by meaning.", connection)
-      : t("Full-text search is active. Select an embedding profile to search by meaning."),
-      profile => toast(profile ? t("Semantic indexing will start in the background.") : t("Full-text search is active.")));
-    clear(this.element, h("div", { class: "set-form-wrap" }, summary, vision, embedding, this.newEmbeddingProfile(vectors) ?? null));
+    const embedding = this.field("knowledge.embedding", t("Semantic search"), vectors, byId, t("Full-text search"),
+      t("Enabling sends public note text and search queries to the selected service."),
+      profile => toast(t(profile ? "Semantic indexing will start in the background." : "Full-text search is active.")));
+    clear(this.element, h("div", { class: "set-form-wrap" }, summary, vision,
+      !profiles.length && h("a", { class: "btn btn-small knowledge-ai-field", href: "#settings/ai" }, t("Set up AI")),
+      embedding, this.newEmbeddingProfile(vectors)));
   }
 
   private newEmbeddingProfile(profiles: AIConfiguration["profiles"]): HTMLElement | undefined {
@@ -92,14 +89,11 @@ export class KnowledgeAISettings {
   }
 
   private field(purpose: KnowledgeAIBinding["purpose"], label: string, profiles: AIConfiguration["profiles"], byId: Map<string, AIConfiguration["connections"][number]>,
-    hint: string | ((connection: string | undefined) => string), saved: (profile: string | null) => void): HTMLElement {
+    offLabel: string, disclosure: string, saved: (profile: string | null) => void): HTMLElement {
     const bound = this.bindings.find(binding => binding.purpose === purpose);
     const message = h("div", { role: "status" });
-    const hintText = (profile: string | undefined) => typeof hint === "string" ? hint
-      : hint(profile ? byId.get(profiles.find(item => item.id === profile)?.connection ?? "")?.name : undefined);
-    const hintNode = h("span", { class: "field-hint" }, hintText(bound?.profile));
-    const select = h("select", { "aria-label": label },
-      h("option", { value: "" }, t("Off")),
+    const select = h("select", { "aria-label": label, disabled: !profiles.length && !bound },
+      h("option", { value: "" }, offLabel),
       ...profiles.map(profile => h("option", { value: profile.id }, `${profile.name} · ${byId.get(profile.connection)?.name ?? ""}`)));
     select.value = bound?.profile ?? "";
     select.addEventListener("change", () => void (async () => {
@@ -112,11 +106,10 @@ export class KnowledgeAISettings {
       } catch (cause) {
         clear(message, failure(isConflict(cause) ? t("This was changed somewhere else. Reload and try again.") : errorText(cause)));
         select.value = bound?.profile ?? "";
-        hintNode.textContent = hintText(bound?.profile);
       } finally { select.disabled = false; }
     })());
     return h("div", { class: "knowledge-ai-field" },
-      h("label", { class: "field" }, h("span", { class: "field-label" }, label), select, hintNode),
+      h("label", { class: "field" }, h("span", { class: "field-label" }, label), select, profiles.length > 0 && h("span", { class: "field-hint" }, disclosure)),
       message);
   }
 }

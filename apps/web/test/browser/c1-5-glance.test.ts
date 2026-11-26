@@ -52,14 +52,14 @@ function renderSource(client: object): ElementStub {
   return detail;
 }
 
-test("a material saved by the desktop helper names the app, window and how the passage was chosen", async () => {
+test("a material shows its desktop source without a capture-method sentence", async () => {
   const detail = renderSource({ showOriginal: async () => original({ id: glanceId, app: { name: "Safari" }, window: "Synthetic window", pointing: "point" }) });
   await flush();
   const box = detail.find(node => node.className === "material-glance")!;
   expect(box.hidden).toBe(false);
   expect(box.textContent).toContain(t("Desktop helper"));
   expect(box.textContent).toContain("Safari · Synthetic window");
-  expect(box.textContent).toContain(t("Saved the paragraph you pointed at"));
+  expect(box.textContent).not.toContain("Saved the paragraph you pointed at");
 });
 
 test("materials without a glance, or without an archived original, show no desktop origin", async () => {

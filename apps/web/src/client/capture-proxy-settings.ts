@@ -27,14 +27,13 @@ export function captureProxySettings(client: Pick<Client, "captureProxySettings"
       placeholder: custom?.proxy_origin ?? "http://127.0.0.1:7890",
     });
     const bypass = h("input", { type: "text", value: custom?.no_proxy ?? "", autocomplete: "off",
-      spellcheck: "false", maxlength: CAPTURE_PROXY_LIMITS.bypass });
-    const field = (label: string, control: HTMLElement, hint?: string) =>
-      h("label", { class: "field" }, h("span", { class: "field-label" }, label), control,
-        hint && h("span", { class: "field-hint" }, hint));
+      spellcheck: "false", placeholder: "localhost,example.com", maxlength: CAPTURE_PROXY_LIMITS.bypass });
+    const field = (label: string, control: HTMLElement) =>
+      h("label", { class: "field" }, h("span", { class: "field-label" }, label), control);
     const customFields = h("div", { class: "form-stack" },
-      field(t("Proxy address"), address, custom ? t("Current address is {0}. Leave blank to keep it.", custom.proxy_origin) : undefined),
-      field("NO_PROXY", bypass, t("Comma-separated hosts to connect to directly.")));
-    const status = h("p", { class: "field-hint", role: "status" }, saved ? t("Capture proxy saved. It applies to the next fetch.") : "");
+      field(t("Proxy address"), address),
+      field("NO_PROXY", bypass));
+    const status = h("p", { class: "field-hint", role: "status" }, saved ? t("Saved.") : "");
     const error = h("div");
     const save = h("button", { type: "submit", class: "btn btn-small" }, t("Save"));
     const form = h("form", { class: "set-form-wrap form-stack", autocomplete: "off" },

@@ -190,6 +190,7 @@ export class NoteEditor {
         return; this.callbackMuted = true; this.view.dispatch({ changes: { from: 0, to: this.view.state.doc.length, insert: text }, selection: { anchor: 0 } }); this.callbackMuted = false; this.options.outlineChanged?.(); }
     setReadOnly(locked: boolean): void { this.view.dispatch({ effects: this.lock.reconfigure(EditorState.readOnly.of(locked)) }); }
     focus(position = this.position): void { this.view.dispatch({ selection: { anchor: position }, effects: EditorView.scrollIntoView(position) }); this.view.focus(); }
+    refreshImageSettings(): void { void this.images?.refreshSettings(); }
     destroy(): void {
         this.images?.dispose();
         this.active = false; clearTimeout(this.outlineTimer); this.queryGeneration++; this.hideCard(); this.view.destroy();
