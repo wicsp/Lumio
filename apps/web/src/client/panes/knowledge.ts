@@ -420,7 +420,7 @@ export class KnowledgePane {
       try {
         const graph = await noteGraph(reference, depth, ref => this.client.links(ref, { includePrivate }));
         if (current !== generation || !dialog.open) return;
-        if (graph.nodes.length < 2) { clear(area, h("p", { class: "muted graph-empty" }, t("This note has no links yet. Link notes with [[name]] or a Markdown link."))); return; }
+        if (graph.nodes.length < 2) { clear(area, h("p", { class: "muted graph-empty" }, t("No linked notes"))); return; }
         const svg = relationGraph(graph.nodes, graph.edges, id => { dialog.close(); void this.open(id); });
         svg.setAttribute("aria-label", t("Graph of {0} notes", graph.nodes.length));
         clear(area, svg);
