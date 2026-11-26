@@ -24,6 +24,7 @@ import { captureProxySettings } from "../capture-proxy-settings.ts";
 import { IPHONE_SHORTCUTS, isIOSDevice, pairingUrl, phoneHubDefault, shortcutInstallUrl, unreachableFromPhone } from "../iphone-setup.ts";
 import { qrSvg } from "../qr-code.ts";
 import type { GamepadInput } from "../gamepad-input.ts";
+import { SECTIONS } from "../navigation.ts";
 import { GamepadSettings } from "../gamepad-settings.ts";
 import { NotificationSettings } from "../notification-settings.ts";
 import { DEFAULT_SETTINGS_SECTION, SETTINGS_SECTIONS, foldOpen, rememberFold, settingsNavGroups, settingsSection, type SettingsSection } from "../settings-sections.ts";
@@ -136,7 +137,7 @@ export class SettingsPane {
         return { element: page(
           this.group(t("Keyboard shortcuts"), h("div", { class: "set-rows" },
             this.row(t("Command menu"), h("span", { class: "set-value" }, h("kbd", {}, "⌘K"))),
-            this.row(t("Switch sections"), h("span", { class: "set-value" }, h("kbd", {}, "1"), "–", h("kbd", {}, "7"))))),
+            this.row(t("Switch sections"), h("span", { class: "set-value" }, h("kbd", {}, "1"), "–", h("kbd", {}, SECTIONS.length))))),
           gamepad && this.group(t("Gamepad"), gamepad.element)), dispose: () => gamepad?.dispose() };
       }
       case "notifications": {

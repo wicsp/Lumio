@@ -54,7 +54,7 @@ export class OverviewPane {
       this.regions.set(key, { element });
       return element;
     };
-    clear(this.body, group("header", this.header()), this.ask(),
+    clear(this.body, group("header"), this.ask(),
       h("div", { class: "today-grid" },
         h("div", { class: "today-col" }, group("needs"), group("notices"), group("tasks", loading(t("Gathering today's work…")))),
         h("div", { class: "today-col today-side" }, group("personal"), group("activity"), group("projects"))));
@@ -63,16 +63,18 @@ export class OverviewPane {
   dispose(): void { this.active = false; this.generation++; }
   liveRefresh(): void { void this.load(2000); }
 
-  private header(summary?: string): HTMLElement {
+  private header(): HTMLElement {
     const now = new Date();
     const date = new Intl.DateTimeFormat(locale(), { month: "long", day: "numeric", weekday: "long" }).format(now);
     return h("header", { class: "today-head" },
       h("div", { class: "today-head-text" },
         h("h1", { class: "today-title" }, t("Today")),
-        h("p", { class: "today-date" }, date),
-        summary && h("p", { class: "today-summary" }, summary)),
-      h("button", { type: "button", class: "avatar-btn mobile-flex", title: t("Settings"), "aria-label": t("Settings"), onclick: () => this.navigate("settings") },
-        this.name.slice(0, 1).toUpperCase()));
+        h("time", { class: "today-date", datetime: new Intl.DateTimeFormat("sv-SE", { dateStyle: "short" }).format(now) }, date)),
+      h("div", { class: "today-actions" },
+        h("button", { type: "button", class: "btn btn-primary", "aria-label": t("New task"), onclick: () => this.navigate("work", undefined, "new") },
+          icon("plus"), h("span", {}, t("New task"))),
+        h("button", { type: "button", class: "avatar-btn mobile-flex", title: t("Settings"), "aria-label": t("Settings"), onclick: () => this.navigate("settings") },
+          this.name.slice(0, 1).toUpperCase())));
   }
 
   /** Each section owns its DOM. A late response must not replace another section's input, focus or expanded cards. */
@@ -90,6 +92,7 @@ export class OverviewPane {
   private async load(maxAge = 0): Promise<void> {
     const generation = ++this.generation;
     const current = () => this.active && generation === this.generation;
+    this.draw("header", new Date().toDateString(), () => [this.header()]);
     const read = this.live.read(maxAge);
     const projects = this.projectRequest ??= settleRead(this.client.workProjects()).finally(() => { this.projectRequest = undefined; });
     const personal = this.personalRequest ??= Promise.resolve(this.hub.personalView?.()).catch(() => undefined)
@@ -152,7 +155,7 @@ export class OverviewPane {
     this.draw("tasks", [tasks, projectData.map(project => [project.id, project.title]), now.toDateString()], () => [
       focus.length || tasks.status === "rejected" ? this.section("due", t("Due today"), focus.length, () => this.navigate("work", "tasks"),
         tasks.status === "rejected" ? failure(errorText(tasks.reason)) : this.taskList(focus, projectData, "")) : null,
-      tasks.status === "fulfilled" ? this.section("todo", focus.length ? t("Your other to-dos") : t("Your to-dos"), next.length, () => this.navigate("work", "tasks"), this.taskList(next.slice(0, 6), projectData, focus.length ? t("Nothing else on your list.") : t("Your to-do list is clear."))) : null,
+      tasks.status === "fulfilled" && (next.length || !focus.length) ? this.section("todo", focus.length ? t("Your other to-dos") : t("Your to-dos"), next.length, () => this.navigate("work", "tasks"), this.taskList(next.slice(0, 6), projectData, t("Your to-do list is clear."))) : null,
       agentsWorking.length ? this.section("active", t("Agents working"), agentsWorking.length, () => this.navigate("work", "tasks"), this.taskList(agentsWorking, projectData, "")) : null,
       waiting.length ? this.section("waiting", t("Waiting on others"), waiting.length, () => this.navigate("work", "tasks"), this.taskList(waiting, projectData, "")) : null,
     ]);
@@ -161,15 +164,6 @@ export class OverviewPane {
   private renderAttention(snapshot: AttentionSnapshot, taskData: WorkTask[] | undefined): void {
     const { execution, proposals, attention, jobAttention } = snapshot;
     const overview = settled(execution);
-    const needCount = needsYouCount(snapshot);
-    const mine = taskData?.filter(task => turnGroup(task) === "todo").length ?? 0;
-    const working = taskData?.filter(task => turnGroup(task) === "agents").length ?? 0;
-    const parts = taskData ? [
-      needCount ? t(needCount === 1 ? "{0} needs you" : "{0} need you", needCount) : "",
-      t(mine === 1 ? "{0} to-do" : "{0} to-dos", mine),
-      working ? t(working === 1 ? "{0} task with agents" : "{0} tasks with agents", working) : "",
-    ].filter(Boolean) : [];
-    this.draw("header", [parts, new Date().toDateString()], () => [this.header(parts.join(t(" · ")))]);
     const standalone = overview?.standalone_attention;
     const issue = [execution, proposals, attention, jobAttention].find(result => result.status === "rejected");
     const requestTitles = settled(jobAttention)?.map(request => taskData?.find(task => task.id === request.task)?.title);
@@ -230,7 +224,7 @@ export class OverviewPane {
   private section(region: string, title: string, count: number, all: (() => void) | undefined, body: Node | null): HTMLElement {
     return h("section", { class: "today-section", "data-pad-region": region },
       h("header", { class: "today-section-head" }, h("h2", {}, title), count ? h("span", { class: "count" }, count) : null,
-        all && h("button", { type: "button", class: "text-btn", onclick: all }, t("All"))),
+        all && h("button", { type: "button", class: "today-section-link", onclick: all }, t("All"), icon("chevron"))),
       h("div", { class: "today-card" }, body));
   }
 
@@ -337,8 +331,10 @@ export class OverviewPane {
 
   /** 一行输入框：问题直接带到助手页。 */
   private ask(): HTMLElement {
-    const input = h("input", { type: "text", placeholder: t("Ask the assistant anything…"), "aria-label": t("Ask the assistant"), autocomplete: "off", enterkeyhint: "send" });
-    const form = h("form", { class: "today-ask" }, icon("assistant"), input, h("button", { type: "submit", class: "icon-btn", title: t("Ask"), "aria-label": t("Ask") }, icon("send")));
+    const input = h("input", { type: "text", placeholder: t("Ask the assistant"), "aria-label": t("Ask the assistant"), autocomplete: "off", enterkeyhint: "send" });
+    const send = h("button", { type: "submit", class: "icon-btn", title: t("Ask"), "aria-label": t("Ask"), disabled: true }, icon("send"));
+    const form = h("form", { class: "today-ask" }, icon("assistant"), input, send);
+    input.addEventListener("input", () => { send.disabled = !input.value.trim(); });
     form.addEventListener("submit", event => { event.preventDefault(); const text = input.value.trim(); if (text) this.navigate("assistant", undefined, `ask:${text}`); });
     return form;
   }
