@@ -79,8 +79,8 @@ export class MainDock {
       h("header", { class: "dock-head" }, icon("assistant"), h("span", { class: "dock-title" }, t("Assistant")), collapse),
       this.panel, this.scroller, this.notice, composer);
     this.launcher = h("button", { type: "button", class: "dock-launcher", title: t("Ask the assistant"), "aria-label": t("Ask the assistant"), onclick: () => this.setOpen(true) }, icon("assistant"));
-    // 没记住过时：桌面默认展开，窄屏默认收起（抽屉会挡住内容）。
-    let open = globalThis.matchMedia?.("(min-width: 861px)").matches ?? true;
+    // 空间足够时默认并排显示，较窄的视口按需打开抽屉。
+    let open = globalThis.matchMedia?.("(min-width: 1200px)").matches ?? true;
     try { const saved = localStorage.getItem(OPEN_KEY); if (saved !== null) open = saved === "1"; } catch { /* 用默认值 */ }
     try { this.shown = new Set(JSON.parse(sessionStorage.getItem(SHOWN_KEY) ?? "[]") as string[]); } catch { this.shown = new Set(); }
     this.setOpen(open, false);
@@ -175,7 +175,7 @@ export class MainDock {
 
   private renderHistory(messages: AssistantMessagePage["messages"], earlier?: HTMLButtonElement): void {
     clear(this.messages, ...(messages.length ? this.historyBubbles(messages)
-      : [h("p", { class: "dock-empty muted" }, t("Ask about the page you're on, or anything else. The conversation keeps going as you move between pages."))]));
+      : [h("p", { class: "dock-empty muted" }, t("Ask about what you're looking at…"))]));
     if (earlier) this.messages.prepend(earlier);
     this.scroller.scrollTop = this.scroller.scrollHeight;
   }
@@ -245,7 +245,7 @@ export class MainDock {
       : h("button", { type: "button", class: "chip-btn", title: t("Have the assistant look into this in the background and report back"),
         onclick: () => void this.explore(target) }, t("Explore for me")));
     clear(this.chip,
-      h("span", { class: "focus-label", title: t("The assistant sees this page with your next message") }, icon(pinned ? "lock" : "file"), label),
+      h("span", { class: "focus-label", title: t("The assistant sees this page with your next message") }, icon(pinned ? "lock" : "file"), h("span", { class: "focus-label-text" }, label)),
       h("button", { type: "button", class: "chip-btn", "aria-pressed": String(pinned), title: pinned ? t("Unpin") : t("Keep this as context while you move around"),
         onclick: () => { if (pinned) { this.mode = "auto"; this.pinned = undefined; } else { this.mode = "pinned"; this.pinned = this.host.focus(); } void this.renderChip(); } },
         pinned ? t("Unpin") : t("Pin")),

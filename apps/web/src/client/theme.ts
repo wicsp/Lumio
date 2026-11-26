@@ -4,7 +4,7 @@
  */
 export type ThemeChoice = "system" | "light" | "dark";
 const KEY = "lumio.web.theme";
-const COLORS = { light: "#f6f7f5", dark: "#151917" } as const;
+const COLORS = { light: "#f5f5f5", dark: "#181818" } as const;
 
 let choice: ThemeChoice = read();
 let media: MediaQueryList | undefined;

@@ -42,7 +42,7 @@ export class ApprovalsPane {
         this.selected = undefined; this.showPlaceholder(); void this.load();
       } }, STATUS[status]));
     }
-    root.append(h("header", { class: "bar" }, h("h1", { class: "bar-title" }, t("Approvals")), seg, h("span", { class: "bar-spacer" }),
+    root.append(h("header", { class: "bar approval-bar" }, h("h1", { class: "bar-title" }, t("Approvals")), seg, h("span", { class: "bar-spacer" }),
       h("button", { type: "button", class: "icon-btn", title: t("Refresh"), "aria-label": t("Refresh"), onclick: () => void this.load() }, icon("refresh"))), this.split);
     this.split.append(h("div", { class: "list-pane" }, this.list), this.detail);
     this.unbindKeys = listKeys(this.list, id => this.openById(id));

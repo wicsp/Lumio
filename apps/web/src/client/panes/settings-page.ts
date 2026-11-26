@@ -41,7 +41,7 @@ export class SettingsPane {
   private navItems = new Map<SettingsSection, HTMLAnchorElement>();
   private shell = h("div", { class: "set-shell" });
   private content = h("div", { class: "set-content" });
-  private title = h("h1", { class: "bar-title" }, t("Settings"));
+  private title = h("span", { class: "set-mobile-title" }, t("Settings"));
   private shown?: SettingsSection;
   private health?: Promise<Health>;
   private runtimeRows?: HTMLElement;
@@ -51,7 +51,7 @@ export class SettingsPane {
     private back: () => void, private navigate: (section?: SettingsSection) => void, initial?: string, private gamepad?: GamepadInput) {
     const bar = h("header", { class: "bar set-bar" },
       h("button", { type: "button", class: "icon-btn mobile-only", title: t("Back"), "aria-label": t("Back"), onclick: () => this.goBack() }, icon("back")),
-      this.title);
+      h("h1", { class: "bar-title" }, h("span", { class: "set-desktop-title" }, t("Settings")), this.title));
     this.shell.append(this.nav(), this.content);
     owner.append(bar, h("div", { class: "set-scroll" }, this.shell));
     this.unbindTheme = onTheme(() => this.markTheme());
@@ -96,7 +96,7 @@ export class SettingsPane {
       const item = h("a", { class: "set-nav-item", "data-pad-row": `settings:${section.key}`, href: `#settings/${section.key}`, "aria-current": "false",
         onclick: (event: Event) => { const click = event as MouseEvent; if (click.metaKey || click.ctrlKey || click.shiftKey) return; event.preventDefault(); this.navigate(section.key); } },
         h("span", { class: "set-nav-icon" }, icon(section.icon)),
-        h("span", { class: "set-nav-text" }, h("span", { class: "set-nav-label" }, t(section.label)), h("span", { class: "set-nav-hint" }, t(section.hint))),
+        h("span", { class: "set-nav-label" }, t(section.label)),
         icon("chevron", "icon set-nav-chevron"));
       this.navItems.set(section.key, item);
       return item;
@@ -120,14 +120,13 @@ export class SettingsPane {
   // ───────────── 各分类内容 ─────────────
 
   private build(key: SettingsSection): Built {
-    const info = SETTINGS_SECTIONS.find(s => s.key === key)!;
     const page = (...children: Array<Node | null | undefined | false>) => h("div", { class: "set-page" },
-      h("header", { class: "set-head" }, h("h2", { class: "set-title" }, t(info.label)), h("p", { class: "set-lede" }, t(info.hint))), ...children);
+      h("h2", { class: "set-title" }, t(SETTINGS_SECTIONS.find(section => section.key === key)!.label)), ...children);
     switch (key) {
       case "general": {
         const usageStyle = browserChoiceRow(sidebarUsageStyle, t("Applies when the desktop sidebar is collapsed."));
         return { element: page(
-          this.group(t("Appearance"), t("Choose how Lumio looks on this device."), h("div", {}, this.themes(), usageStyle.element)),
+          this.group(t("Appearance"), undefined, h("div", {}, this.themes(), usageStyle.element)),
           this.group(t("Language"), t("Used for menus, dates and messages from the Hub."), this.languages())),
           dispose: usageStyle.dispose };
       }
@@ -199,8 +198,7 @@ export class SettingsPane {
         void this.hubHealth().then(health => { if (this.active) version.textContent = "version" in health && health.version ? health.version : "—"; });
         return { element: page(
           h("section", { class: "set-about" },
-            h("span", { class: "set-about-mark", "aria-hidden": "true" }, "L"),
-            h("div", {}, h("p", { class: "set-name" }, "Lumio"), h("p", { class: "set-sub" }, t("Your knowledge, work and agents in one place.")))),
+            h("span", { class: "brand-mark", "aria-hidden": "true" }), h("p", { class: "set-name" }, "Lumio")),
           this.group(t("Details"), undefined, h("div", { class: "set-rows" },
             this.row(t("Hub version"), version),
             h("a", { class: "set-row set-link", href: SOURCE, target: "_blank", rel: "noopener noreferrer" },

@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { ExecutionRoutineCommandRequest, WorkCommandRequest, type ExecutionRoutine, type WorkTask } from "@lumio/schema";
 import { renderMarkdown, safeExternalUrl } from "../src/client/utils/markdown.ts";
 import { verifyArtifact, sha256Hex, formatTime, dispatchCommand, routineCreateCommand, routineUpdateCommand, safeFileName, taskDescriptionCommand, workPatchCommand } from "../src/client/commands.ts";
+import type { WebAssets } from "../src/build.ts";
+import { WEB_CSP, webFiles } from "../src/page.ts";
 
 describe("markdown", () => {
   test("escapes raw HTML", () => {
@@ -85,8 +87,8 @@ test("browser bundle builds without server-only modules", async () => {
   const child=Bun.spawn([process.execPath,"-e",`import {buildAssets} from ${JSON.stringify(buildUrl)}; process.stdout.write(JSON.stringify(await buildAssets()));`],{stdout:"pipe",stderr:"pipe"});
   const [output,errors,code]=await Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text(),child.exited]);
   expect(code).toBe(0);if(code!==0)throw new Error(errors);
-  const assets=JSON.parse(output) as {js:string;css:string;chunks:Record<string,string>;preloads:string[]};
-  const files = new Map(Object.entries(assets.chunks).map(([name, body]) => ["/assets/" + name, body]));
+  const assets = JSON.parse(output) as WebAssets;
+  const files = new Map(Object.entries(assets.chunks ?? {}).map(([name, body]) => ["/assets/" + name, body]));
   files.set("/assets/app.js", assets.js);
   for (const body of files.values()) {
     for (const [, path] of body.matchAll(/"(\/assets\/chunk-[a-z0-9]+\.js)"/g)) expect(files.has(path!)).toBe(true);
@@ -98,7 +100,7 @@ test("browser bundle builds without server-only modules", async () => {
   }
   expect([...files.values()].some(body => body.includes("katex-error"))).toBe(true);
   expect([...files.values()].some(body => body.includes("cm-editor"))).toBe(true);
-  expect(assets.preloads.map(name => "/assets/" + name).sort()).toEqual([...initial].filter(path => path !== "/assets/app.js").sort());
+  expect(assets.preloads?.map(name => "/assets/" + name).sort()).toEqual([...initial].filter(path => path !== "/assets/app.js").sort());
   for (const path of initial) {
     const body = files.get(path)!;
     expect(body).not.toContain("katex-error");
@@ -109,6 +111,14 @@ test("browser bundle builds without server-only modules", async () => {
   expect(assets.js).not.toContain("Bun.serve");
   expect(assets.css).toContain("--lumen");
   expect(assets.css).toContain(':root[data-theme="dark"]');
+  // The real build is serialized into the compiled CLI. Its stylesheet and
+  // immutable font must agree after that round trip.
+  const fontName = /url\("(geist-[a-f0-9]{16}\.woff2)"\)/.exec(assets.css)?.[1];
+  expect(fontName).toBeDefined();
+  const font = webFiles(assets, { apiBase: "" }).get("/assets/" + fontName);
+  expect(font).toMatchObject({ type: "font/woff2", immutable: true });
+  expect(Buffer.from(font!.body).subarray(0, 4).toString()).toBe("wOF2");
+  expect(WEB_CSP).toContain("font-src 'self'");
 }, 30000);
 
 test("time labels include timezone without incompatible Intl style options",()=>{expect(formatTime("2026-11-01T00:00:00+08:00","Asia/Singapore")).toContain("2026");expect(formatTime(undefined)).toBe("—");});

@@ -65,13 +65,11 @@ export class OverviewPane {
 
   private header(summary?: string): HTMLElement {
     const now = new Date();
-    const hour = now.getHours();
-    const greeting = hour < 5 ? t("Good evening, {0}", this.name) : hour < 12 ? t("Good morning, {0}", this.name) : hour < 18 ? t("Good afternoon, {0}", this.name) : t("Good evening, {0}", this.name);
     const date = new Intl.DateTimeFormat(locale(), { month: "long", day: "numeric", weekday: "long" }).format(now);
     return h("header", { class: "today-head" },
       h("div", { class: "today-head-text" },
+        h("h1", { class: "today-title" }, t("Today")),
         h("p", { class: "today-date" }, date),
-        h("h1", { class: "today-greeting" }, greeting),
         summary && h("p", { class: "today-summary" }, summary)),
       h("button", { type: "button", class: "avatar-btn mobile-flex", title: t("Settings"), "aria-label": t("Settings"), onclick: () => this.navigate("settings") },
         this.name.slice(0, 1).toUpperCase()));

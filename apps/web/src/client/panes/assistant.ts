@@ -257,7 +257,6 @@ export class AssistantPane {
     clear(this.messages, h("div", { class: "welcome" },
       h("span", { class: "brand-mark", "aria-hidden": "true" }),
       h("h2", {}, t("What would you like to think through?")),
-      h("p", {}, t("Ask about your tasks, notes and runs. The assistant can create tasks, comment and change task fields; each change shows here and can be undone. It can't dispatch, approve, or mark tasks done.")),
       h("div", { class: "suggestions" }, ...SUGGESTIONS.map(key => t(key)).map(text => h("button", { type: "button", class: "suggestion", onclick: () => { this.text.value = text; this.text.dispatchEvent(new Event("input")); this.text.focus(); } }, text)))));
   }
 
