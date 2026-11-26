@@ -2,6 +2,7 @@ import { errorText } from "./api.ts";
 import { drafts } from "./drafts.ts";
 import { t } from "./i18n.ts";
 import { matchRanges } from "./note-matches.ts";
+import { icons } from "./reicon.ts";
 /**
  * DOM 与界面基础件：动态文本一律走 textContent，不拼接 HTML。
  * 所有样式来自 styles.css（CSP 不允许内联 style 属性；需要的尺寸用 CSSOM 设置）。
@@ -66,72 +67,18 @@ export const placeholder = (iconName: string, text: string) =>
 
 // ───────────── 图标（本地路径，不加载远程资源） ─────────────
 
-const ICONS: Record<string, string> = {
-  inbox: "M4 13h4.5l1.5 2.5h4l1.5-2.5H20M4 13l2.5-8h11L20 13v6H4z",
-  search: "M21 21l-4.3-4.3M17 10.5a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0",
-  home: "M4 10.5 12 4l8 6.5V20h-5.5v-5.5h-5V20H4z",
-  knowledge: "M5 4h5a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H5zM19 4h-5a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h5z",
-  work: "M9 11.5l2.5 2.5L16 9.5M5 4h14v16H5z",
-  execution: "M4 6h16M4 12h10M4 18h6M17 14l4 3-4 3z",
-  assistant: "M20 12a8 8 0 0 1-11.6 7.1L4 20l1-4.2A8 8 0 1 1 20 12z",
-  approvals: "M12 3l8 3.5V12c0 4.4-3.4 7.7-8 9-4.6-1.3-8-4.6-8-9V6.5zM8.5 12l2.5 2.5 4.5-4.5",
-  refresh: "M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7",
-  logout: "M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10",
-  more: "M5 12h.01M12 12h.01M19 12h.01",
-  plus: "M12 5v14M5 12h14",
-  close: "M6 6l12 12M18 6 6 18",
-  check: "M5 12.5l4.5 4.5L19 7.5",
-  chevron: "M9 6l6 6-6 6",
-  down: "M6 9l6 6 6-6",
-  back: "M15 6l-6 6 6 6",
-  alert: "M12 8v5M12 16.5v.5M10.3 4.2 2.8 17.5A2 2 0 0 0 4.5 20.5h15a2 2 0 0 0 1.7-3L13.7 4.2a2 2 0 0 0-3.4 0z",
-  send: "M12 19V5M6 11l6-6 6 6",
-  stop: "M7 7h10v10H7z",
-  mic: "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5 11a7 7 0 0 0 14 0M12 18v3M9 21h6",
-  pause: "M9 6v12M15 6v12",
-  bell: "M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 20.5h4",
-  flag: "M5 21V4M5 4h11l-2 4 2 4H5",
-  undo: "M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3",
-  route: "M6 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM18 9a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM6 15V9a4 4 0 0 1 4-4h6M18 9v6a4 4 0 0 1-4 4H8",
-  play: "M7 5l12 7-12 7z",
-  download: "M12 4v11M7 10l5 5 5-5M5 20h14",
-  folder: "M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z",
-  user: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4.5 20a7.5 7.5 0 0 1 15 0",
-  bot: "M8 9h8a3 3 0 0 1 3 3v4a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3v-4a3 3 0 0 1 3-3zM12 9V5M10 14h0M14 14h0",
-  calendar: "M4 6h16v14H4zM4 10h16M8 3v5M16 3v5",
-  clock: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7.5V12l3 2",
-  copy: "M9 9h10v10H9zM5 15V5h10",
-  graph: "M7 7.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM18.5 10a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM10 21.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM9.4 5.6l6.7 1.6M7.8 7.3l1.6 9.3M17.2 9.8l-5.6 7.6",
-  link: "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1",
-  device: "M4 5h16v11H4zM9 20h6M12 16v4",
-  repeat: "M17 3l3 3-3 3M4 11V9a3 3 0 0 1 3-3h13M7 21l-3-3 3-3M20 13v2a3 3 0 0 1-3 3H4",
-  edit: "M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4",
-  trash: "M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3",
-  restore: "M4 12a8 8 0 1 0 2.3-5.6M4 4v4h4",
-  memory: "M12 3a6 6 0 0 0-3.5 10.9V17h7v-3.1A6 6 0 0 0 12 3zM9.5 21h5",
-  lock: "M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3",
-  command: "M9 6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3z",
-  file: "M6 3h8l4 4v14H6zM14 3v4h4",
-  terminal: "M4 5h16v14H4zM8 10l2.5 2L8 14M13 14h3",
-  help: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM9.6 9.4a2.5 2.5 0 1 1 3.4 2.4c-.6.3-1 .8-1 1.5v.4M12 16.8v.4",
-  settings: "M4 7h9M17 7h3M4 17h3M11 17h9M15 5v4M9 15v4",
-  external: "M14 4h6v6M20 4l-9 9M18 14v6H4V6h6",
-  sun: "M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4",
-  moon: "M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z",
-  monitor: "M3 5h18v12H3zM8 21h8M12 17v4",
-  image: "M4 5h16v14H4zM4 16l4.5-4.5 3.5 3.5 2.5-2.5L20 18M15.5 9.5h.01",
-  globe: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z",
-};
-
 export function icon(name: string, className = "icon"): SVGSVGElement {
   const ns = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(ns, "svg");
-  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("viewBox", "-2 -2 28 28");
   svg.setAttribute("aria-hidden", "true");
   svg.setAttribute("class", className);
-  const path = document.createElementNS(ns, "path");
-  path.setAttribute("d", ICONS[name] ?? "");
-  svg.append(path);
+  svg.setAttribute("fill", "none");
+  for (const [tag, attributes] of Object.hasOwn(icons, name) ? icons[name]! : []) {
+    const shape = document.createElementNS(ns, tag);
+    for (const [key, value] of Object.entries(attributes)) shape.setAttribute(key, value);
+    svg.append(shape);
+  }
   return svg;
 }
 
@@ -373,44 +320,83 @@ export function toast(text: string, kind: "ok" | "error" = "ok", action?: { labe
 
 export interface MenuItem { value: string; label: string; icon?: Node; hint?: string; selected?: boolean }
 
-/** 锚定在按钮下方的选择菜单；方向键选择、Enter 确认、Esc 关闭。 */
+let activeMenu: { anchor: HTMLElement; close: (restoreFocus?: boolean) => void } | undefined;
+
+export function dismissMenu(): void {
+  activeMenu?.close();
+}
+
+/** 锚定选择菜单。打开时优先向下，空间不足时向上。 */
 export function openMenu(anchor: HTMLElement, items: MenuItem[], onPick: (value: string) => void, options: { filter?: boolean; placeholder?: string } = {}): void {
-  document.querySelector(".menu")?.remove();
+  if (activeMenu?.anchor === anchor) { activeMenu.close(true); return; }
+  dismissMenu();
   const list = h("div", { class: "menu-list", role: "listbox" });
   const input = options.filter ? h("input", { class: "menu-filter", placeholder: options.placeholder ?? t("Filter…"), autocomplete: "off" }) : undefined;
   const menu = h("div", { class: "menu" }, input, list);
   let index = Math.max(0, items.findIndex(item => item.selected));
   let visible = items;
-  const close = () => { menu.remove(); document.removeEventListener("mousedown", outside, true); anchor.focus(); };
-  const pick = (item: MenuItem | undefined) => { if (!item) return; close(); onPick(item.value); };
+  let buttons: HTMLButtonElement[] = [];
+  const close = (restoreFocus = false) => {
+    activeMenu = undefined;
+    menu.remove();
+    document.removeEventListener("pointerdown", outside, true);
+    window.removeEventListener("resize", place);
+    anchor.setAttribute("aria-expanded", "false");
+    if (restoreFocus) anchor.focus();
+  };
+  const outside = (event: PointerEvent) => {
+    if (event.target instanceof Node && !menu.contains(event.target) && !anchor.contains(event.target)) close();
+  };
+  const pick = (item: MenuItem | undefined) => { if (item) { close(true); onPick(item.value); } };
+  const setActive = (next: number, keyboard = false) => {
+    buttons[index]?.classList.remove("is-active");
+    index = next;
+    const button = buttons[index];
+    button?.classList.add("is-active");
+    if (keyboard && button) {
+      button.scrollIntoView({ block: "nearest" });
+      if (!input) button.focus({ preventScroll: true });
+    }
+  };
   const render = () => {
     const q = input?.value.trim().toLowerCase() ?? "";
     visible = q ? items.filter(item => item.label.toLowerCase().includes(q) || item.value.toLowerCase().includes(q)) : items;
-    index = Math.min(index, Math.max(0, visible.length - 1));
-    clear(list, ...visible.map((item, i) => h("button", { type: "button", role: "option", class: `menu-item${i === index ? " is-active" : ""}`, "aria-selected": String(!!item.selected),
-      onmousemove: () => { if (index !== i) { index = i; render(); } }, onclick: () => pick(item) },
+    buttons = visible.map((item, i) => h("button", { type: "button", role: "option", class: "menu-item", tabindex: "-1", "aria-selected": String(!!item.selected),
+      onpointerenter: (event: Event) => { if ((event as PointerEvent).pointerType === "mouse") setActive(i); },
+      onclick: () => pick(item) },
       item.icon ?? h("span", { class: "menu-gap" }), h("span", { class: "menu-label" }, item.label), item.hint && h("span", { class: "menu-hint" }, item.hint),
-      item.selected && icon("check", "icon menu-check"))));
+      item.selected && icon("check", "icon menu-check")));
+    clear(list, ...buttons);
     if (!visible.length) list.append(h("p", { class: "menu-empty" }, t("No matches")));
+    setActive(Math.min(index, Math.max(0, visible.length - 1)));
   };
-  const outside = (event: MouseEvent) => { if (!menu.contains(event.target as Node) && event.target !== anchor) close(); };
+  const place = () => {
+    const gutter = 8, gap = 4;
+    const rect = anchor.getBoundingClientRect();
+    menu.style.minWidth = `${Math.min(Math.max(200, rect.width), window.innerWidth - 2 * gutter)}px`;
+    menu.style.left = `${Math.max(gutter, Math.min(rect.left, window.innerWidth - menu.offsetWidth - gutter))}px`;
+    const below = window.innerHeight - rect.bottom - gap - gutter;
+    const above = rect.top - gap - gutter;
+    const opensUp = menu.offsetHeight > below && above > below;
+    list.style.maxHeight = `${Math.max(40, Math.min(320, (opensUp ? above : below) - (input?.offsetHeight ?? 0) - 16))}px`;
+    menu.style.top = `${Math.max(gutter, opensUp ? rect.top - gap - menu.offsetHeight : rect.bottom + gap)}px`;
+  };
   menu.addEventListener("keydown", event => {
-    if (event.key === "ArrowDown") { event.preventDefault(); index = (index + 1) % Math.max(1, visible.length); render(); }
-    else if (event.key === "ArrowUp") { event.preventDefault(); index = (index - 1 + visible.length) % Math.max(1, visible.length); render(); }
+    const step = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0;
+    if (step && visible.length) { event.preventDefault(); setActive((index + step + visible.length) % visible.length, true); }
     else if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); pick(visible[index]); }
-    else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); }
+    else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(true); }
+    else if (event.key === "Tab") close(true);
   });
-  input?.addEventListener("input", () => { index = 0; render(); });
+  input?.addEventListener("input", () => { index = 0; render(); place(); });
   render();
   document.body.append(menu);
-  const rect = anchor.getBoundingClientRect();
-  const width = Math.max(200, rect.width);
-  menu.style.minWidth = `${width}px`;
-  menu.style.left = `${Math.min(rect.left, window.innerWidth - width - 8)}px`;
-  const below = rect.bottom + 4, height = menu.offsetHeight;
-  menu.style.top = `${below + height > window.innerHeight - 8 ? Math.max(8, rect.top - height - 4) : below}px`;
-  document.addEventListener("mousedown", outside, true);
-  (input ?? list.querySelector<HTMLButtonElement>(".is-active") ?? list.querySelector("button"))?.focus();
+  place();
+  activeMenu = { anchor, close };
+  anchor.setAttribute("aria-expanded", "true");
+  document.addEventListener("pointerdown", outside, true);
+  window.addEventListener("resize", place);
+  (input ?? buttons[index] ?? list).focus({ preventScroll: true });
 }
 
 /** 防抖：输入停顿后再执行。 */

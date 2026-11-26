@@ -1,7 +1,7 @@
 import type { PersonalDateTime, PersonalJournalCommand, PersonalJournalEntry, PersonalProposal, PersonalTodo } from "@lumio/schema";
 import type { HubExtras } from "../api.ts";
 import { newRequestId } from "../commands.ts";
-import { clear, h } from "../dom.ts";
+import { clear, h, icon } from "../dom.ts";
 import { locale, t } from "../i18n.ts";
 
 type View = NonNullable<Awaited<ReturnType<NonNullable<HubExtras["personalView"]>>>>;
@@ -32,7 +32,7 @@ export class PersonalPane {
   private readonly from = h("input", { type: "date", "aria-label": t("First journal date") });
   private readonly to = h("input", { type: "date", "aria-label": t("Last journal date") });
   private readonly send = h("button", { type: "submit", class: "btn btn-primary" }, t("Send"));
-  private readonly status = h("p", { role: "status", class: "muted" });
+  private readonly status = h("p", { role: "status", class: "personal-status muted" }, t("Loading…"));
   private readonly content = h("div");
   private readonly chat = h("form", { class: "personal-chat", onsubmit: event => { event.preventDefault(); void this.submit(); } },
     h("label", { for: "personal-message" }, t("Ask the personal assistant")),
@@ -43,10 +43,10 @@ export class PersonalPane {
   );
 
   constructor(private readonly root: HTMLElement, private readonly api: HubExtras) {
-    this.root.append(h("div", { class: "personal-layout" },
-      h("div", { class: "personal-title" }, h("h1", {}, t("Personal")),
-        h("button", { type: "button", class: "btn", onclick: () => void this.refresh() }, t("Refresh"))),
-      this.status, this.history, this.chat, this.content));
+    this.root.append(
+      h("header", { class: "bar" }, h("h1", { class: "bar-title" }, t("Personal")), h("span", { class: "bar-spacer" }),
+        h("button", { type: "button", class: "icon-btn", title: t("Refresh"), "aria-label": t("Refresh"), onclick: () => void this.refresh() }, icon("refresh"))),
+      h("div", { class: "personal-scroll" }, h("div", { class: "personal-layout" }, this.status, this.history, this.chat, this.content)));
     this.chat.hidden = true;
     void this.refresh();
   }
@@ -62,7 +62,7 @@ export class PersonalPane {
       const view = await this.api.personalView?.();
       if (this.disposed) return;
       this.view = view;
-      const signature = JSON.stringify(view);
+      const signature = JSON.stringify(view ?? null);
       if (signature !== this.signature) this.render();
       this.signature = signature;
     } catch {
@@ -148,7 +148,7 @@ export class PersonalPane {
     const submit = h("button", { type: "submit", class: "btn btn-primary" }, t("Save"));
     const title = kind === "entry" ? t("New entry") : kind === "correction" ? t("Correct") : t("Retract entry");
     const request = { id: newRequestId(), hash: "" };
-    const dialog = h("dialog", { "aria-label": title });
+    const dialog = h("dialog", { class: "dialog dialog-narrow", "aria-label": title });
     dialog.append(h("form", { class: "personal-journal-form", onsubmit: event => {
       event.preventDefault();
       const text = content.value.trim();
@@ -163,12 +163,12 @@ export class PersonalPane {
       request.hash = hash;
       void this.perform(submit, () => this.api.personalJournal?.({ request_id: request.id, operation }))
         .then(result => { if (result) dialog.close(); });
-    } }, h("h2", {}, title),
-      target ? h("p", { class: "muted" }, target.content) : null,
-      kind !== "retraction" ? h("label", {}, t("Date"), dateInput) : null,
-      h("label", {}, kind === "retraction" ? t("Reason") : t("Journal entry"), content),
-      h("div", { class: "personal-actions" }, submit,
-        h("button", { type: "button", class: "btn", onclick: () => dialog.close() }, t("Cancel")))));
+    } }, h("header", { class: "dialog-head" }, h("h2", {}, title)),
+      h("div", { class: "dialog-body form-stack" }, target ? h("p", { class: "muted" }, target.content) : null,
+        kind !== "retraction" ? h("label", { class: "field" }, t("Date"), dateInput) : null,
+        h("label", { class: "field" }, kind === "retraction" ? t("Reason") : t("Journal entry"), content)),
+      h("footer", { class: "dialog-foot" },
+        h("button", { type: "button", class: "btn", onclick: () => dialog.close() }, t("Cancel")), submit)));
     dialog.addEventListener("close", () => { dialog.remove(); this.journalEditor = undefined; }, { once: true });
     this.journalEditor = dialog;
     this.root.append(dialog);

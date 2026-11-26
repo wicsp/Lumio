@@ -17,8 +17,8 @@ export interface PageOptions {
   hub?: string;
 }
 
-/** 页面与资源的 CSP：只允许同源脚本、样式、连接与 service worker；图片允许 data:（图标）；禁止被嵌入。 */
-export const WEB_CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+/** 页面与资源的 CSP：脚本、样式、字体、连接与 service worker 同源，图片也允许 data:，禁止被嵌入。 */
+export const WEB_CSP = "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 
 const escapeAttr = (value: string) => value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 
@@ -31,8 +31,8 @@ export function renderPage(options: PageOptions, script = "/assets/app.js", styl
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Lumio</title>
 <meta name="lumio-api-base" content="${escapeAttr(options.apiBase)}">
-${options.hub ? `<meta name="lumio-hub" content="${escapeAttr(options.hub)}">\n` : ""}<meta name="theme-color" content="#f6f7f5" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#151917" media="(prefers-color-scheme: dark)">
+${options.hub ? `<meta name="lumio-hub" content="${escapeAttr(options.hub)}">\n` : ""}<meta name="theme-color" content="#f5f5f5" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#181818" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Lumio">
@@ -59,7 +59,7 @@ export const MANIFEST = {
   start_url: "/",
   scope: "/",
   display: "standalone",
-  background_color: "#f6f7f5",
+  background_color: "#f5f5f5",
   theme_color: "#1c2220",
   // 从其他 App 分享链接或文字到 Lumio，进入 Inbox（ADR 0057，I1-5）。支持 Web Share Target 的系统才会出现在分享菜单里。
   share_target: { action: "/", method: "GET", params: { title: "title", text: "text", url: "url" } },
@@ -91,5 +91,8 @@ export function webFiles(assets: WebAssets, options: PageOptions): Map<string, W
   for (const [name, body] of Object.entries(assets.chunks ?? {})) {
     files.set("/assets/" + name, { body, type: js.type, immutable: true });
   }
+  if (assets.font) files.set("/assets/" + assets.font.name, {
+    body: Buffer.from(assets.font.base64, "base64"), type: "font/woff2", immutable: true,
+  });
   return files;
 }

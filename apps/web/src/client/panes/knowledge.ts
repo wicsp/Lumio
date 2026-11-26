@@ -133,7 +133,7 @@ export class KnowledgePane {
       if (link) { event.preventDefault(); void this.open(this.resolveReference(link.dataset.note!)); }
     });
     root.append(
-      h("header", { class: "bar" }, h("h1", { class: "bar-title" }, t("Knowledge"), h("span", { class: "bar-meta hide-narrow" }, t("Capture papers, sources and ideas"))),
+      h("header", { class: "bar" }, h("h1", { class: "bar-title" }, t("Knowledge")),
         h("div", { class: "segmented", role: "group", "aria-label": t("Knowledge view") }, this.listButton, this.graphButton),
         h("span", { class: "bar-spacer" }),
         h("button", { type: "button", class: "btn btn-primary", onclick: () => this.intent("new") }, icon("plus"), t("New note")),

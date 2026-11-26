@@ -104,7 +104,6 @@ export class InboxPane {
       h("div", { class: "inbox-scroll" }, h("div", { class: "inbox-page" },
         h("form", { class: "inbox-capture", onsubmit: (event: Event) => { event.preventDefault(); void this.submit(); } },
           this.input, this.save),
-        h("p", { class: "field-hint inbox-hint" }, t("Your saved materials are in the knowledge base. Come here to pick something to read.")),
         this.list)));
     void this.load();
     void this.loadBindings();

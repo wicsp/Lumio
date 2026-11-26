@@ -47,9 +47,6 @@ export class ConnectView {
       try { const value = token.value.trim(); token.value = ""; await verify(value); } finally { busy(false); }
     });
     root.append(h("main", { class: "connect" },
-      h("aside", { class: "connect-art", "aria-hidden": "true" },
-        h("h2", {}, t("Your knowledge, tasks and agents on one desk.")),
-        h("p", {}, t("Lumio connects to your own Hub. Your data stays on your machine; the browser is just a window."))),
       h("section", { class: "connect-panel" }, h("div", { class: "connect-card", "aria-labelledby": "connect-title" },
         h("div", { class: "brand" }, h("span", { class: "brand-mark", "aria-hidden": "true" }), h("span", {}, "Lumio"),
           h("span", { class: "foot-tools" },
@@ -60,7 +57,6 @@ export class ConnectView {
         codeForm,
         h("label", { class: "check" }, remember, t("Stay signed in on this device")),
         h("p", { class: "field-hint" }, t("You won't need to pair again after closing the browser. Only use this on your own device.")),
-        h("div", { class: "or" }, t("or")),
         h("details", {}, h("summary", {}, t("Use an existing access token")), tokenForm)))));
     code.focus();
   }

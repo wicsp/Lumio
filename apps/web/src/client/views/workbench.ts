@@ -3,7 +3,7 @@ import { resourceLinks } from "../resources.ts";
 import { drafts } from "../drafts.ts";
 import { turnGroup } from "../turn.ts";
 import type { Session } from "../api.ts";
-import { h, icon, toast, typing, loading, failure } from "../dom.ts";
+import { h, icon, toast, typing, loading, failure, openMenu, dismissMenu } from "../dom.ts";
 import { OverviewPane } from "../panes/overview.ts";
 import type { KnowledgePane } from "../panes/knowledge.ts";
 import { WorkPane } from "../panes/work.ts";
@@ -32,7 +32,7 @@ import { LiveData, settled, type LiveSnapshot } from "../live-data.ts";
 /** 记住侧栏是否收起（只影响本设备）。 */
 const SIDEBAR_KEY = "lumio.web.sidebar-collapsed";
 
-/** short：窄屏底栏的短名；没有 short 的模块不进底栏，从今日页和提醒进入（ADR 0028）。 */
+/** 窄屏底栏直接显示有 short 的模块，其余收在「更多」。 */
 export const SECTIONS: Array<{ key: Exclude<Section, "settings" | "trash">; label: string; short?: string; icon: string; key2: string }> = [
   { key: "overview", label: "Today", short: "Today", icon: "home", key2: "1" },
   { key: "work", label: "Work", short: "Work", icon: "work", key2: "2" },
@@ -149,6 +149,7 @@ export class WorkbenchView {
   /** 侧栏底部的 AI 用量指示器。 */
   private usage: UsageIndicator;
   private account: HTMLButtonElement;
+  private mobileMenu: HTMLButtonElement;
   /** 进入设置页之前所在的位置，设置页的返回键回到这里。 */
   private beforeSettings = "#overview";
   /** 语言切换被推迟时，App 在下一次切换模块前重建界面；返回 true 表示已接管。 */
@@ -195,13 +196,24 @@ export class WorkbenchView {
       }
     });
     const nav = h("nav", { class: "nav", "aria-label": t("Main navigation") });
+    const overflowSections = SECTIONS.filter(section => !section.short);
     for (const s of SECTIONS) {
-      if (s.key === "execution") nav.append(h("p", { class: "nav-group-label" }, t("Automation")));
       const count = h("span", { class: "nav-count" });
       const button = h("button", { type: "button", class: `nav-item${s.short ? "" : " desktop-nav"}`, "aria-label": t(s.label), title: t("{0} ({1})", t(s.label), s.key2), onclick: () => this.go(s.key) },
         icon(s.icon), h("span", { class: "nav-label" }, t(s.label)), s.short && h("span", { class: "nav-short" }, t(s.short)), count);
       this.nav.set(s.key, button); this.counts.set(s.key, count); nav.append(button);
     }
+    this.mobileMenu = h("button", { type: "button", class: "nav-item mobile-nav", "aria-label": t("More"),
+      "aria-haspopup": "listbox", "aria-expanded": "false", onclick: () => openMenu(this.mobileMenu, [
+        ...overflowSections.map(section => ({ value: section.key, label: t(section.label), icon: icon(section.icon), selected: this.section === section.key })),
+        { value: "settings", label: t("Settings"), icon: icon("settings"), selected: this.section === "settings" },
+        { value: "search", label: t("Search or jump to"), icon: icon("search") },
+      ], value => {
+        if (value === "search") { this.palette.open(); return; }
+        const section = overflowSections.find(section => section.key === value);
+        void this.go(section?.key ?? "settings");
+      }) }, icon("more"), h("span", { class: "nav-short" }, t("More")));
+    nav.append(this.mobileMenu);
     this.name = humans[0] ?? t("Me");
     this.usage = new UsageIndicator(session.client, () => void this.go("settings", "ai"));
     this.account = h("button", { type: "button", class: "account", title: t("Settings"), "aria-label": t("Settings"), onclick: () => this.go("settings") },
@@ -304,10 +316,14 @@ export class WorkbenchView {
     document.title = t(t("{0} · Lumio"), label);
     for (const [key, button] of this.nav) button.setAttribute("aria-current", key === section ? "page" : "false");
     // 「最近删除」属于设置，侧栏不单独放入口；打开它时高亮账户（设置）按钮。
-    this.account.setAttribute("aria-current", section === "settings" || section === "trash" ? "page" : "false");
+    const inSettings = section === "settings" || section === "trash";
+    this.account.setAttribute("aria-current", inSettings ? "page" : "false");
+    const inOverflow = inSettings || SECTIONS.some(item => item.key === section && !item.short);
+    this.mobileMenu.setAttribute("aria-current", inOverflow ? "page" : "false");
     let mounted = this.panes.get(key);
     if (previous !== mounted) {
       document.querySelectorAll<HTMLDialogElement>("dialog").forEach(dialog => { dialog.close(); dialog.remove(); });
+      dismissMenu();
       document.querySelector(".menu")?.remove();
       if (previous) previous.target.hidden = true;
       if (previousSection === "settings" && previous) {
@@ -530,6 +546,7 @@ export class WorkbenchView {
   }
 
   dispose(): void {
+    dismissMenu();
     this.dock.dispose();
     this.observer.disconnect();
     this.dock.launcher.remove();

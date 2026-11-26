@@ -42,7 +42,7 @@ export class AgentConcurrencySettings {
       }, h("span", { class: "set-label" }, project.title,
         h("span", { class: "set-sub" }, t(project.auto_worktree ? "Automatic worktrees on" : "Automatic worktrees off"))),
         h("span", { class: "set-value" }, t("Up to {0} at once", project.max_concurrent ?? 1)),
-        icon("chevron-right", "set-row-chevron"))) : [h("p", { class: "set-empty" }, t("No open projects."))]));
+        icon("chevron", "set-row-chevron"))) : [h("p", { class: "set-empty" }, t("No open projects."))]));
     } catch (error) {
       if (this.active) clear(this.projects, failure(errorText(error), () => void this.loadProjects()));
     }
@@ -94,7 +94,7 @@ export class AgentConcurrencySettings {
         error);
     };
     const advanced = exceptions.length ? h("details", { class: "set-fold concurrency-advanced" },
-      h("summary", { class: "set-row" }, h("span", { class: "set-label" }, t("Accounts and providers")), icon("chevron-right", "set-fold-chevron")),
+      h("summary", { class: "set-row" }, h("span", { class: "set-label" }, t("Accounts and providers")), icon("chevron", "set-fold-chevron")),
       h("div", { class: "set-fold-body" },
         h("p", { class: "field-hint concurrency-note" }, t("Use the same quota group for accounts or providers that share a limit across runtimes.")),
         h("div", { class: "set-rows" }, ...exceptions.map(form)))) : null;
