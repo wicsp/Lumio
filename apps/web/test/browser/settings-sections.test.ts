@@ -5,11 +5,11 @@ import { CONNECTION_KINDS, connectionSummary, profileConnections, profileSummary
 import { ZH } from "../../src/client/i18n.ts";
 
 describe("settings sections", () => {
-  test("keys are unique, the default exists, and every label and hint is translated", () => {
+  test("keys are unique, the default exists, and every label is translated", () => {
     const keys = SETTINGS_SECTIONS.map(section => section.key);
     expect(new Set(keys).size).toBe(keys.length);
     expect(keys).toContain(DEFAULT_SETTINGS_SECTION);
-    for (const section of SETTINGS_SECTIONS) { expect(ZH[section.label]).toBeDefined(); expect(ZH[section.hint]).toBeDefined(); }
+    for (const section of SETTINGS_SECTIONS) expect(ZH[section.label]).toBeDefined();
     for (const group of settingsNavGroups()) if (group.title) expect(ZH[group.title]).toBeDefined();
   });
   test("navigation groups keep each group's sections together and in order", () => {

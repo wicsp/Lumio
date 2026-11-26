@@ -17,7 +17,7 @@ import { resourceStatusText } from "../resources.ts";
  */
 import { lumioLink, NOTE_TYPES, type NoteDetail, type LinksResult, type SearchResult } from "@lumio/schema";
 import { errorText, type Client } from "../api.ts";
-import { clear, debounce, empty, failure, h, icon, loading, openDialog, openMenu, placeholder, highlightedText, toast } from "../dom.ts";
+import { append, clear, debounce, empty, failure, h, icon, loading, openDialog, openMenu, placeholder, highlightedText, toast } from "../dom.ts";
 import { noteGraph } from "../graph/data.ts";
 import { relationGraph } from "../graph/view.ts";
 import { listKeys, markSelected } from "../list-keys.ts";
@@ -34,7 +34,6 @@ function noteImageOrigins(): ReadonlySet<string> {
 }
 
 const TYPE_LABEL: Record<string, string> = translated({ paper: "Paper", idea: "Idea", experiment: "Experiment", source: "Source", post: "Post", asset: "Asset", "ai-note": "AI", project: "Old project", task: "Old task", routine: "Old routine" });
-const POINTING = translated({ selection: "Saved the selected text", region: "Saved the area you circled", point: "Saved the paragraph you pointed at", none: "Saved the whole window" });
 const EDITABLE = new Set(["paper", "source", "idea", "experiment", "post", "ai-note"]);
 
 function editableId(note: NoteDetail["note"]): string | undefined {
@@ -201,6 +200,7 @@ export class KnowledgePane {
     if (!(await this.beforeLeave()) || !this.active) return;
     await this.read(reference);
   }
+  resume(): void { this.editor?.refreshImageSettings(); }
   liveRefresh():void{if(!this.dirty)void this.search(true);}
   private setGraphMode(graph: boolean): void {
     this.graphMode = graph;
@@ -240,7 +240,7 @@ export class KnowledgePane {
 
   private showPlaceholder(): void {
     this.split.classList.remove("has-detail");
-    clear(this.detail, placeholder("knowledge", t("Select a note to read. Links inside it open here.")));
+    clear(this.detail, placeholder("knowledge"));
   }
 
   private async search(quiet = false): Promise<void> {
@@ -322,14 +322,14 @@ export class KnowledgePane {
         sourceUrl && h("a", { href: sourceUrl, target: "_blank", rel: "noopener noreferrer nofollow", class: "btn btn-primary" }, icon("external"), t("Open original link")),
         h("button", { type: "button", class: "btn btn-small", "aria-label": t("More"), onclick: (event: Event) => openMenu(event.currentTarget as HTMLElement,
           [{ value: "original", label: t("View archived text"), icon: icon("file") }], () => void this.showOriginal(note)) }, icon("more"), t("More"))),
-      ai && h("p", { class: "ai-note-notice" }, icon("bot"), h("span", {}, model ? t("Written by AI ({0}). Your own notes embed it with a link on its own line.", model) : t("Written by AI. Your own notes embed it with a link on its own line."))),
+      ai && h("p", { class: "ai-note-notice" }, icon("bot"), h("span", {}, model ? t("Written by AI ({0})", model) : t("Written by AI"))),
       this.sources(fm.derived_from),
       body,
       links && h("footer", { class: "backlinks" }, ...linkSections(links))));
     this.detail.scrollTop = 0;
     this.outlineEntries = () => renderedOutline(this.detail, body); this.outline.refresh();
     if(editableId(note.note))void this.enableEditing(note);
-    else this.detail.querySelector("article")?.append(h("p",{class:"field-hint"},t("This note is read-only here. Check its metadata or edit it in your external editor.")));
+    else this.markReadOnly();
   }
   /**
    * 桌面小助手存的资料（ADR 0066/0067，C1-5）：原文 frontmatter 的 `glance` 记着 App、窗口与截图文件；
@@ -343,25 +343,24 @@ export class KnowledgePane {
       if (!glance || !this.active || generation !== this.generation) return;
       const label = [glance.app.name, glance.window].filter(Boolean).join(" · ");
       box.hidden = false;
-      box.append(
-        glance.screenshot ? glanceThumb(this.client, glance.id, glance.window || glance.app.name) : h("span", {}),
+      append(box,
+        glance.screenshot && glanceThumb(this.client, glance.id, glance.window || glance.app.name),
         h("div", { class: "material-glance-text" },
           h("span", { class: "pill" }, icon("monitor"), t("Desktop helper")),
-          h("span", { class: "muted", title: label }, label),
-          h("span", { class: "field-hint" }, POINTING[glance.pointing] ?? "")));
+          h("span", { class: "muted", title: label }, label)));
     }).catch(() => { /* 没有原文（手写资料）时不显示来源 */ });
     return box;
   }
 
+  private markReadOnly(): void { this.detail.querySelector(".reader-meta")?.append(h("span", { class: "muted" }, t("Read only"))); }
+
   private async showOriginal(note: NoteDetail): Promise<void> {
     const body = h("div", { class: "inbox-original markdown" }, loading());
-    const head = h("p", { class: "field-hint" });
     const generation = this.generation;
-    const dialog = openDialog(t("View archived text"), h("div", { class: "form-stack" }, head, body), [], { wide: true, cancelLabel: t("Close") });
+    const dialog = openDialog(t("View archived text"), body, [], { wide: true, cancelLabel: t("Close") });
     try {
       const original = await this.client.showOriginal(note.note.id ?? note.note.path);
       if (!this.active || generation !== this.generation || !dialog.open) return;
-      head.textContent = t("Third-party content, read-only");
       body.innerHTML = renderMarkdown(original.body);
     } catch (cause) {
       if (this.active && generation === this.generation && dialog.open) clear(body, failure(errorText(cause)));
@@ -546,7 +545,7 @@ export class KnowledgePane {
       oldBody.replaceWith(this.editor.root);const editor=this.editor;this.outlineEntries=()=>editor.outlineEntries();this.outline.refresh();article.insertBefore(this.saveStatus,this.editor.root);article.insertBefore(this.saveError,this.editor.root);article.insertBefore(this.conflict,this.editor.root);
       this.saveStatus.before(h("button",{type:"button",class:"btn btn-small mobile-only",onclick:()=>{this.split.classList.toggle("show-related");this.renderRelated();}},t("Related notes")));
       this.renderSave();this.recommend(context());if(saver.dirty)void saver.save();
-    }catch{if(this.active&&generation===this.generation)this.detail.querySelector("article")?.append(h("p",{class:"field-hint"},t("This note is read-only here. Check its metadata or edit it in your external editor.")));}
+    }catch{if(this.active&&generation===this.generation)this.markReadOnly();}
   }
   private async deleteNote(id: string): Promise<void> {
     const generation = this.generation;
@@ -595,7 +594,7 @@ export class KnowledgePane {
   }
   private renderSave():void{
     const saver=this.saver;if(!saver)return;
-    this.saveStatus.textContent=saver.saving?t("Saving…"):saver.error?t("Draft saved on this device"):saver.dirty?t("Unsaved changes"):t("Saved");
+    this.saveStatus.textContent=saver.saving?t("Saving…"):saver.error?t("Draft saved on this device"):saver.dirty?t("Unsaved changes"):"";
     if(saver.dirty&&!this.store.persistent)this.saveStatus.textContent=t("Browser storage unavailable; keep this page open until saved.");
     if(!saver.saving&&!saver.error&&!saver.dirty&&saver.base.revision!==this.linksRevision){this.linksRevision=saver.base.revision;void this.refreshLinks(saver);void this.search();}
     clear(this.saveError);if(!saver.error)return;

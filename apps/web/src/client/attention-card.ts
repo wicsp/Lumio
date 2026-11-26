@@ -226,7 +226,6 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
       h("p", { class: "attn-grant-title" }, t("{0} is asking for:", item.agent ?? t("The agent"))),
       h("ul", { class: "attn-grant-items" }, ...boxes.map(({ value, box }) => h("li", {}, h("label", { class: "check-field" }, box, h("span", {}, permissionItemLabel(value)))))),
       h("label", { class: "attn-back" }, t("For"), scope),
-      h("p", { class: "field-hint" }, t("Approving continues the same session with the new permission. Choose only what you are comfortable with.")),
       h("div", { class: "attn-composer-foot" }, refuse, approve));
     let requestId = newRequestId(), previous = "";
     form.addEventListener("submit", event => {

@@ -124,36 +124,36 @@ export class SettingsPane {
       h("h2", { class: "set-title" }, t(SETTINGS_SECTIONS.find(section => section.key === key)!.label)), ...children);
     switch (key) {
       case "general": {
-        const usageStyle = browserChoiceRow(sidebarUsageStyle, t("Applies when the desktop sidebar is collapsed."));
+        const usageStyle = browserChoiceRow(sidebarUsageStyle);
         return { element: page(
-          this.group(t("Appearance"), undefined, h("div", {}, this.themes(), usageStyle.element)),
-          this.group(t("Language"), t("Used for menus, dates and messages from the Hub."), this.languages())),
+          this.group(t("Appearance"), h("div", {}, this.themes(), usageStyle.element)),
+          this.group(t("Language"), this.languages())),
           dispose: usageStyle.dispose };
       }
       case "controls": {
         const gamepad = this.gamepad ? new GamepadSettings(this.gamepad) : undefined;
         return { element: page(
-          this.group(t("Keyboard shortcuts"), undefined, h("div", { class: "set-rows" },
+          this.group(t("Keyboard shortcuts"), h("div", { class: "set-rows" },
             this.row(t("Command menu"), h("span", { class: "set-value" }, h("kbd", {}, "⌘K"))),
             this.row(t("Switch sections"), h("span", { class: "set-value" }, h("kbd", {}, "1"), "–", h("kbd", {}, "7"))))),
-          gamepad && this.group(t("Gamepad"), undefined, gamepad.element)), dispose: () => gamepad?.dispose() };
+          gamepad && this.group(t("Gamepad"), gamepad.element)), dispose: () => gamepad?.dispose() };
       }
       case "notifications": {
         const notifications = new NotificationSettings(this.session.client);
-        return { element: page(this.group("", t("Lumio notifies you only when it's your turn to answer, review or handle a failed round, and when an agent asks for approval. Notifications show the task title only."), notifications.element)),
+        return { element: page(notifications.element),
           dispose: () => notifications.dispose() };
       }
       case "ai": {
-        const profiles = new AISettings(this.session.client, (title, hint, body, action) => this.group(title, hint, body, action));
+        const profiles = new AISettings(this.session.client, (title, body, action) => this.group(title, body, action));
         return { element: page(profiles.element), dispose: () => profiles.dispose() };
       }
       case "execution": {
         const interaction = new JobInteractionSettings(this.session.client);
         const concurrency = new AgentConcurrencySettings(this.session.client);
         return { element: page(
-          this.group(t("Agent concurrency defaults"), t("These defaults apply across runtimes. Tasks also need a slot in their project."), concurrency.element),
-          this.group(t("Project concurrency"), t("Open a project to change its limit. For parallel coding tasks in the same repository, enable automatic worktrees."), concurrency.projects),
-          this.group(t("Task execution"), t("Live interaction can use an existing Codex connection. Claude Agent SDK uses a provider API key. Interactive rounds require allowed project folders on the runtime."), interaction.element)),
+          this.group(t("Agent concurrency defaults"), concurrency.element),
+          this.group(t("Project concurrency"), concurrency.projects),
+          this.group(t("Task execution"), interaction.element)),
           dispose: () => { interaction.dispose(); concurrency.dispose(); } };
       }
       case "devices": {
@@ -163,34 +163,32 @@ export class SettingsPane {
         void this.loadHub(hubRows);
         this.runtimeRows = runtimeRows;
         void this.loadRuntimes(runtimeRows);
-        return { element: page(this.group(t("Hub"), undefined, hubRows),
-          this.group(t("Runtimes"), t("Machines that run agents for this Hub."), runtimeRows)) };
+        return { element: page(this.group(t("Hub"), hubRows),
+          this.group(t("Runtimes"), runtimeRows)) };
       }
       case "capture": {
         const cards = new KnowledgeAISettings(this.session.client);
         void this.session.client.aiConfiguration().then(config => cards.update(config), () => cards.update({ connections: [], profiles: [] }));
         const proxy = captureProxySettings(this.session.client);
         return { element: page(
-          this.group(t("Inbox cards"), t("When you save a link, AI writes a short card from the original text."), cards.element),
-          this.group(t("Devices"), t("Pair once per device. Pairing codes work once and expire."), h("div", { class: "set-folds" },
-            this.fold("capture.browser", "globe", t("Browser extension"), t("Save the page you're reading to the Inbox with one click."), this.extensionPairing()),
-            this.fold("capture.mac", "monitor", t("Lumio Capture for Mac"), t("Tap the capture key in any Mac app to save what you're pointing at; hold it to ask the assistant."), this.desktopPairing(),
+          this.group(t("Inbox cards"), cards.element),
+          this.group(t("Devices"), h("div", { class: "set-folds" },
+            this.fold("capture.browser", "globe", t("Browser extension"), this.pairing("browser")),
+            this.fold("capture.mac", "monitor", t("Lumio Capture for Mac"), this.pairing("desktop"),
               t("The screenshot of the front window goes to this Hub only when you press the key.")),
-            this.fold("capture.iphone", "device", t("iPhone"), t("Double-tap the back to save what's on screen; press the Action Button to ask the assistant."), this.iphoneSetup(),
-              t("Works with any computer that shows this page.")))),
-          this.group(t("Advanced"), undefined, this.fold("capture.proxy", "route", t("Capture proxy"), t("Use an HTTP or HTTPS proxy reachable from the Hub to fetch Inbox links."), proxy.element))),
+            this.fold("capture.iphone", "device", t("iPhone"), this.iphoneSetup()))),
+          this.group(t("Advanced"), this.fold("capture.proxy", "route", t("Capture proxy"), proxy.element))),
           dispose: () => { cards.dispose(); proxy.dispose(); } };
       }
       case "agents": {
         const agents = new AgentsSettings(this.session.client);
-        return { element: page(this.group("", t("Agents outside Lumio that can read your tasks and notes and make small changes. They can't mark tasks done, delegate, approve, or read private notes."), agents.element)),
+        return { element: page(agents.element),
           dispose: () => agents.dispose() };
       }
       case "data": {
         const images = imageHostingSettings(this.session.client);
-        return { element: page(this.group(t("Image hosting"), t("Upload note images to your storage and show images from approved HTTPS origins."), images.element),
-          this.group(t("Recently deleted"), t("Deleted tasks, projects, notes and conversations stay here for 30 days."), h("div", { class: "set-rows" },
-            h("a", { class: "set-row set-link", href: "#trash" }, icon("trash", "icon set-row-icon"), h("span", { class: "set-label" }, t("Open Recently deleted")), icon("chevron"))))),
+        return { element: page(this.group(t("Image hosting"), images.element),
+          h("a", { class: "set-row set-link", href: "#trash" }, icon("trash", "icon set-row-icon"), h("span", { class: "set-label" }, t("Recently deleted")), icon("chevron"))),
           dispose: images.dispose };
       }
       case "about": {
@@ -199,7 +197,7 @@ export class SettingsPane {
         return { element: page(
           h("section", { class: "set-about" },
             h("span", { class: "brand-mark", "aria-hidden": "true" }), h("p", { class: "set-name" }, "Lumio")),
-          this.group(t("Details"), undefined, h("div", { class: "set-rows" },
+          this.group(t("Details"), h("div", { class: "set-rows" },
             this.row(t("Hub version"), version),
             h("a", { class: "set-row set-link", href: SOURCE, target: "_blank", rel: "noopener noreferrer" },
               h("span", { class: "set-label" }, t("Source code")), h("span", { class: "set-value" }, "github.com/wicsp/Lumio"), icon("external"))))) };
@@ -207,39 +205,26 @@ export class SettingsPane {
     }
   }
 
-  private group(title: string, hint: string | undefined, body: HTMLElement, action?: HTMLElement): HTMLElement {
+  private group(title: string, body: HTMLElement, action?: HTMLElement): HTMLElement {
     return h("section", { class: "set-group" },
-      (title || action) && h("div", { class: "set-group-head" }, title && h("h3", { class: "set-group-title" }, title), action),
-      h("div", { class: "set-card" }, body),
-      hint && h("p", { class: "set-hint" }, hint));
+      h("div", { class: "set-group-head" }, h("h3", { class: "set-group-title" }, title), action),
+      h("div", { class: "set-card" }, body));
   }
 
   /**
-   * 可折叠的卡片：标题行常显（图标、名称、一句说明），展开后才显示内容。
+   * 可折叠的卡片：标题行常显（图标、名称），展开后才显示内容。
    * 默认收起；展开状态按 key 记在当前浏览器。
    */
-  private fold(key: string, glyph: string, title: string, sub: string, body: HTMLElement, note?: string, open = false): HTMLElement {
+  private fold(key: string, glyph: string, title: string, body: HTMLElement, note?: string): HTMLElement {
     const details = h("details", { class: "set-fold", "data-fold": key },
       h("summary", { class: "set-row set-fold-head" },
         h("span", { class: "set-row-badge" }, icon(glyph)),
-        h("span", { class: "set-label" }, title, h("span", { class: "set-sub" }, sub)),
+        h("span", { class: "set-label" }, title),
         icon("chevron", "icon set-fold-chevron")),
       h("div", { class: "set-fold-body" }, body, note ? h("p", { class: "field-hint set-fold-note" }, note) : null));
-    if (foldOpen(key, open)) details.setAttribute("open", "");
+    if (foldOpen(key, false)) details.setAttribute("open", "");
     details.addEventListener("toggle", () => rememberFold(key, details.open));
     return details;
-  }
-
-  /** 给浏览器插件生成一次性配对码：插件设置页填 Hub 地址和配对码，换取自己的 human 令牌（ADR 0057）。 */
-  private extensionPairing(): HTMLElement {
-    return this.pairing("browser", t("Pair a browser"), t("Install the Lumio extension from apps/chrome-ext, then create a code here."),
-      t("Enter both in the extension's settings. The code works once, until {0}."));
-  }
-
-  /** 桌面小助手沿用同一套配对码（ADR 0066 第 7 节，C1-5）：菜单栏「配对…」里填 Hub 地址和配对码。 */
-  private desktopPairing(): HTMLElement {
-    return this.pairing("desktop", t("Pair a Mac"), t("Install Lumio Capture (apps/desktop), then create a code here."),
-      t("In the menu bar, choose Lumio → 配对… and enter both. The code works once, until {0}."));
   }
 
   /**
@@ -275,24 +260,21 @@ export class SettingsPane {
         };
         address.addEventListener("input", draw);
         draw();
-        const hint = onPhone ? t("Tap after adding Lumio 收藏. The link works once, until {0}.") : t("Scan with the iPhone camera after adding Lumio 收藏. The code works once, until {0}.");
         clear(result,
           h("div", { class: "set-row set-row-stack" }, h("span", { class: "set-label" }, t("Hub address the iPhone can reach")), address),
           warning, code,
-          h("p", { class: "field-hint" }, hint.replace("{0}", formatTime(invite.expires))));
+          this.row(t("Expires"), h("time", { class: "set-value", datetime: invite.expires }, formatTime(invite.expires))));
       } catch (error) {
         clear(result, h("p", { class: "field-hint inbox-error" }, errorText(error)));
       } finally { button.disabled = false; }
     })());
     return h("div", { class: "set-rows" },
-      h("div", { class: "set-row set-row-stack" }, h("span", { class: "set-label" }, t("1. Add the shortcuts"),
-        h("span", { class: "set-sub" }, onPhone ? t("Tap each one, open the download and tap Add Shortcut.") : t("Scan each code with the iPhone camera and tap Add Shortcut."))), installs),
-      h("div", { class: "set-row" }, h("span", { class: "set-label" }, t("2. Pair"),
-        h("span", { class: "set-sub" }, onPhone ? t("Create a link here and tap it. No typing.") : t("Create a code here, then scan it. No typing on the phone."))), button),
-      h("p", { class: "field-hint" }, t("Pairing syncs the current Lumio language for dictation and shortcut messages. Pair again after changing it.")), result);
+      h("div", { class: "set-row set-row-stack" }, h("span", { class: "set-label" }, t("Install shortcuts")), installs),
+      h("div", { class: "set-row" }, h("span", { class: "set-label" }, t("Pair this iPhone")), button),
+      result);
   }
 
-  private pairing(kind: "browser" | "desktop", label: string, sub: string, hint: string): HTMLElement {
+  private pairing(kind: "browser" | "desktop"): HTMLElement {
     const result = h("div", { class: "set-pairing", role: "status" });
     const button = h("button", { type: "button", class: "btn btn-small" }, t("Create pairing code"));
     button.addEventListener("click", () => void (async () => {
@@ -302,13 +284,13 @@ export class SettingsPane {
         clear(result,
           this.row(t("Hub address"), h("span", { class: "set-value mono" }, invite.hub_url)),
           this.row(t("Pairing code"), h("span", { class: "set-value mono set-code" }, invite.code)),
-          h("p", { class: "field-hint" }, hint.replace("{0}", formatTime(invite.expires))));
+          this.row(t("Expires"), h("time", { class: "set-value", datetime: invite.expires }, formatTime(invite.expires))));
       } catch (error) {
         clear(result, h("p", { class: "field-hint inbox-error" }, errorText(error)));
       } finally { button.disabled = false; }
     })());
     return h("div", { class: "set-rows" },
-      h("div", { class: "set-row" }, h("span", { class: "set-label" }, label, h("span", { class: "set-sub" }, sub)), button),
+      h("div", { class: "set-actions" }, button),
       result);
   }
 

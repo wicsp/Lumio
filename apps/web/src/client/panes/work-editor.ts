@@ -881,7 +881,7 @@ export class WorkEditor {
       };
       this.reply = kind => { this.applyAttention(kind, true); text.focus(); };
     }
-    const form = h("form", { class: "composer", "data-pad-input": "discussion" }, text, h("div", { class: "composer-foot" }, h("span", { class: "hint" }, t("⌘↵ to post · Markdown supported")), speechButton(text), onward, submit));
+    const form = h("form", { class: "composer", "data-pad-input": "discussion" }, text, h("div", { class: "composer-foot" }, speechButton(text), onward, submit));
     text.addEventListener("keydown", event => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); form.requestSubmit(); } });
     let requestId = newRequestId(), previous = "";
     onward?.addEventListener("click", async () => {

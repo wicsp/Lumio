@@ -110,7 +110,7 @@ export class ExecutionPane {
 
   private showPlaceholder(): void {
     this.split.classList.remove("has-detail");
-    clear(this.detail, placeholder(this.mode === "jobs" ? "execution" : "repeat", this.mode === "jobs" ? t("Select a run to see its report, logs and files.") : t("Select a routine to see its schedule and last result.")));
+    clear(this.detail, placeholder(this.mode === "jobs" ? "execution" : "repeat"));
   }
 
   private refresh(): void {

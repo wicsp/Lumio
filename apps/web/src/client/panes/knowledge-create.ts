@@ -46,22 +46,23 @@ export class KnowledgeCreate {
     const draft = this.state.fields.get(this.kind) ?? {};
     const input = (name: string, type = "text", required = false) => h("input", { type, name, required, value: draft[name] ?? "", autocomplete: "off", ...(name === "title" ? { maxlength: 500 } : {}), ...(type === "number" ? { min: 1000, max: 9999, step: 1 } : {}) });
     const status = () => field(t("Reading status"), select("status", [["to-read", t("To read")], ["reading", t("Reading")], ["read", t("Read")]], draft.status ?? "to-read"));
-    const title = field(t("Title"), input("title", "text", this.kind !== "idea"),
-      this.kind === "idea" ? t("Optional. The first line becomes the title when left blank.") : undefined);
-    const tags = field(t("Tags"), input("tags"), t("Separate tags with commas."));
+    const title = field(t("Title"), input("title", "text", this.kind !== "idea"));
+    const tagsInput = input("tags"); tagsInput.placeholder = t("tag1, tag2");
+    const tags = field(t("Tags"), tagsInput);
     if (this.kind === "paper") {
       const source = input("paper_input"); source.placeholder = t("arXiv ID, DOI or paper link");
       const importButton = h("button", { type: "button", class: "btn", "data-import": true, onclick: () => void this.importPaper() }, icon("download"), t("Import metadata"));
       const bibtex = h("textarea", { name: "bibtex", rows: 4 }); bibtex.value = draft.bibtex ?? "";
+      const authors = input("authors", "text", true); authors.placeholder = t("Author 1, Author 2");
       clear(this.importNotice);
       clear(this.fields, input("firstAuthorFamily", "hidden"),
-        field(t("Import a paper"), h("div", { class: "note-import" }, source, importButton), t("Import fills empty fields only. You can also enter everything manually.")), this.importNotice,
-        title, field(t("Authors"), input("authors", "text", true), t("Separate author names with commas.")), field(t("Year"), input("year", "number", true)),
+        field(t("Import a paper"), h("div", { class: "note-import" }, source, importButton)), this.importNotice,
+        title, field(t("Authors"), authors), field(t("Year"), input("year", "number", true)),
         h("details", { class: "note-optional" }, h("summary", {}, t("Optional fields")), h("div", { class: "form-stack" },
           tags, status(), field(t("Venue"), input("venue")), field(t("DOI"), input("doi")), field(t("arXiv ID"), input("arxiv")),
-          field(t("Source URL"), input("url", "url")), field(t("BibTeX"), bibtex, t("Appended to the note with its generated citation key.")))));
+          field(t("Source URL"), input("url", "url")), field(t("BibTeX"), bibtex))));
     } else if (this.kind === "idea") clear(this.fields, title, tags);
-    else clear(this.fields, title, field(this.kind === "video" ? t("Video link") : t("Page link"), input("url", "url"), t("Optional; you can add it later in your editor.")),
+    else clear(this.fields, title, field(this.kind === "video" ? t("Video link") : t("Page link"), input("url", "url")),
       h("details", { class: "note-optional" }, h("summary", {}, t("Optional fields")), h("div", { class: "form-stack" },
         field(t("Author or creator"), input("author")), field(t("Site or platform"), input("site")), tags, status())));
   }

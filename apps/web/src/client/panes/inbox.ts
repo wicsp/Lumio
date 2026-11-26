@@ -251,7 +251,7 @@ export class InboxPane {
     if (capture.state === "queued" || capture.state === "extracting") return h("span", { class: "pill pill-blue" }, icon("refresh", "icon spin"), capture.state === "queued" ? t("Waiting") : t("Extracting"));
     if (capture.state === "failed") return h("span", { class: "pill pill-red" }, t("Failed"));
     if (capture.card === "pending") return h("span", { class: "pill pill-blue" }, icon("refresh", "icon spin"), t("Writing card"));
-    return h("span", { class: "pill" }, t("Saved"));
+    return null;
   }
 
   private fillBody(body: HTMLElement, capture: Capture): void {
@@ -261,11 +261,7 @@ export class InboxPane {
       return;
     }
     if (capture.state !== "ready") return;
-    if (capture.card === "none") {
-      body.append(h("p", { class: "field-hint" }, this.summaryConfigured === false
-        ? t("No AI card: choose a summary model in Settings → AI models.")
-        : t("No AI card yet.")));
-    } else if (capture.card === "failed") {
+    if (capture.card === "failed") {
       body.append(h("p", { class: "inbox-error" }, icon("alert"), h("span", {}, t("The AI couldn't write a card."))));
     } else if ((capture.card === "ready" || capture.card === "deep") && capture.ai_note) {
       const card = h("div", { class: "inbox-card markdown" }, h("p", { class: "muted" }, t("Loading…")));
@@ -362,7 +358,7 @@ export class InboxPane {
       void command({ op: "retry", content: { format: "text", body } })(event);
     });
     const dialog = openDialog(t("Paste the text"), h("div", { class: "form-stack" },
-      h("p", { class: "field-hint" }, t("Copy the article from your browser and paste it here. Lumio saves it as the original.")), area), [go], { wide: true });
+      area), [go], { wide: true });
     area.focus();
   }
 
