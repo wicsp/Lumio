@@ -11,7 +11,7 @@ import { ExecutionPane } from "../panes/execution.ts";
 import { AssistantPane } from "../panes/assistant.ts";
 import { ApprovalsPane } from "../panes/approvals.ts";
 import { CommandPalette } from "./palette.ts";
-import type { Navigate, Pane, Section } from "../navigation.ts";
+import { SECTIONS, type Navigate, type Pane, type Section } from "../navigation.ts";
 import { t } from "../i18n.ts";
 import { SettingsPane } from "../panes/settings-page.ts";
 import { TrashPane } from "../panes/trash.ts";
@@ -31,18 +31,6 @@ import { LiveData, settled, type LiveSnapshot } from "../live-data.ts";
 
 /** 记住侧栏是否收起（只影响本设备）。 */
 const SIDEBAR_KEY = "lumio.web.sidebar-collapsed";
-
-/** 窄屏底栏直接显示有 short 的模块，其余收在「更多」。 */
-export const SECTIONS: Array<{ key: Exclude<Section, "settings" | "trash">; label: string; short?: string; icon: string; key2: string }> = [
-  { key: "overview", label: "Today", short: "Today", icon: "home", key2: "1" },
-  { key: "work", label: "Work", short: "Work", icon: "work", key2: "2" },
-  { key: "knowledge", label: "Knowledge", short: "Knowledge", icon: "knowledge", key2: "3" },
-  { key: "inbox", label: "Inbox", short: "Inbox", icon: "inbox", key2: "4" },
-  { key: "execution", label: "Execution", icon: "execution", key2: "5" },
-  { key: "assistant", label: "Assistant", short: "Assistant", icon: "assistant", key2: "6" },
-  { key: "personal", label: "Personal", short: "Personal", icon: "calendar", key2: "8" },
-  { key: "approvals", label: "Approvals", icon: "approvals", key2: "7" },
-];
 
 type PaneKey = Section | "projects";
 type MountedPane = { target: HTMLElement; pane: Pane };
@@ -200,26 +188,28 @@ export class WorkbenchView {
     for (const s of SECTIONS) {
       const count = h("span", { class: "nav-count" });
       const button = h("button", { type: "button", class: `nav-item${s.short ? "" : " desktop-nav"}`, "aria-label": t(s.label), title: t("{0} ({1})", t(s.label), s.key2), onclick: () => this.go(s.key) },
-        icon(s.icon), h("span", { class: "nav-label" }, t(s.label)), s.short && h("span", { class: "nav-short" }, t(s.short)), count);
+        h("span", { class: "nav-glyph" }, icon(s.icon)), h("span", { class: "nav-label" }, t(s.label)),
+        s.short && h("span", { class: "nav-short" }, t(s.short)), count);
       this.nav.set(s.key, button); this.counts.set(s.key, count); nav.append(button);
     }
     this.mobileMenu = h("button", { type: "button", class: "nav-item mobile-nav", "aria-label": t("More"),
       "aria-haspopup": "listbox", "aria-expanded": "false", onclick: () => openMenu(this.mobileMenu, [
         ...overflowSections.map(section => ({ value: section.key, label: t(section.label), icon: icon(section.icon), selected: this.section === section.key })),
+        { value: "assistant-panel", label: t("Assistant panel"), icon: icon("assistant") },
         { value: "settings", label: t("Settings"), icon: icon("settings"), selected: this.section === "settings" },
         { value: "search", label: t("Search or jump to"), icon: icon("search") },
       ], value => {
         if (value === "search") { this.palette.open(); return; }
+        if (value === "assistant-panel") { this.dock.setOpen(true); return; }
         const section = overflowSections.find(section => section.key === value);
         void this.go(section?.key ?? "settings");
-      }) }, icon("more"), h("span", { class: "nav-short" }, t("More")));
+      }) }, h("span", { class: "nav-glyph" }, icon("more")), h("span", { class: "nav-short" }, t("More")));
     nav.append(this.mobileMenu);
     this.name = humans[0] ?? t("Me");
     this.usage = new UsageIndicator(session.client, () => void this.go("settings", "ai"));
     this.account = h("button", { type: "button", class: "account", title: t("Settings"), "aria-label": t("Settings"), onclick: () => this.go("settings") },
       h("span", { class: "who-avatar", "aria-hidden": "true" }, this.name.slice(0, 1).toUpperCase()),
-      h("span", { class: "account-text" }, h("span", { class: "who-name" }, this.name),
-        h("span", { class: "account-sub" }, h("span", { class: "connection-dot" }), t("Connected to Hub"))),
+      h("span", { class: "account-text" }, h("span", { class: "who-name" }, this.name)),
       icon("settings"));
     // 收起侧栏后，左上角只剩 Lumio 图标，点它展开；展开时图标只是标志，收起按钮在右侧。
     const toggle = h("button", { type: "button", class: "icon-btn sidebar-toggle", "aria-controls": "main-sidebar", "aria-expanded": "true", title: t("Collapse sidebar"), "aria-label": t("Collapse sidebar") }, icon("chevron"));
@@ -237,7 +227,11 @@ export class WorkbenchView {
       clearHighlights: () => this.clearHighlights(),
       latestNotices: () => this.live.latest,
       refreshNotices: this.changed,
-      layout: open => shell.classList.toggle("dock-open", open),
+      layout: open => {
+        const wasOpen = shell.classList.contains("dock-open");
+        shell.classList.toggle("dock-open", open);
+        if (!open && wasOpen && this.mobileMenu.getClientRects().length) this.mobileMenu.focus({ preventScroll: true });
+      },
     });
     shell.append(this.dock.element);
     for (const type of ["input", "keydown", "pointerdown", "wheel"]) this.main.addEventListener(type, this.onActivity, { passive: true });

@@ -3,6 +3,18 @@ import type { ResourceRef } from "@lumio/schema";
 export type Section = "overview" | "personal" | "inbox" | "knowledge" | "work" | "execution" | "assistant" | "approvals" | "settings" | "trash";
 export type Navigate = (section: Section, id?: string, intent?: string) => void;
 
+/** 窄屏底栏直接显示有 short 的模块，其余收在「更多」。 */
+export const SECTIONS: readonly { key: Exclude<Section, "settings" | "trash">; label: string; short?: string; icon: string; key2: string }[] = [
+  { key: "overview", label: "Today", short: "Today", icon: "home", key2: "1" },
+  { key: "work", label: "Work", short: "Work", icon: "work", key2: "2" },
+  { key: "knowledge", label: "Knowledge", short: "Knowledge", icon: "knowledge", key2: "3" },
+  { key: "inbox", label: "Inbox", short: "Inbox", icon: "inbox", key2: "4" },
+  { key: "execution", label: "Execution", icon: "execution", key2: "5" },
+  { key: "assistant", label: "Assistant", short: "Assistant", icon: "assistant", key2: "6" },
+  { key: "personal", label: "Personal", short: "Personal", icon: "calendar", key2: "8" },
+  { key: "approvals", label: "Approvals", icon: "approvals", key2: "7" },
+];
+
 export interface Pane {
   /** 当前已加载的主对象；由模块内导航更新，不依赖工作台 URL。 */
   readonly focus?: ResourceRef;
