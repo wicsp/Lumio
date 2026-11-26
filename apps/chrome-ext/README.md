@@ -45,3 +45,7 @@
 - YouTube 的字幕接口有时需要页面额外的令牌，直接下载会拿到空内容；这时会改读页面上已展开的「显示文字记录」面板。都取不到时只存简介。
 - 浏览器里打开的 PDF 读不到内容，只送链接；需要登录才能下载的 PDF 暂不支持。
 - 需要 Hub 接受插件来源的请求，并在没有公网地址时也能生成配对码（任务 I1-7a）。
+
+## 界面素材
+
+页面随扩展打包 [Geist Sans Variable 1.9.2](https://github.com/vercel/geist-font/releases/tag/v1.9.2) 和 [Reicon 1.2.5](https://github.com/dqev/reicon) Outline 图标。字体授权在 `static/fonts/Geist-OFL.txt`，图标授权在 `static/icons/Reicon-MIT.txt`。Reicon 上游注明部分基础图标使用了 480 Design 的 [Solar Icons](https://www.figma.com/community/file/1166831539721848736)（[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)）和 Zappicon 的元素。

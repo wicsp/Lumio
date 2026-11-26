@@ -3,6 +3,7 @@ import { normalizeHub } from "./page.ts";
 import { clearConnection, failureText, h, hubClient, hubPattern, loadConnection, saveConnection, t } from "./shared.ts";
 import { hasDesktopPageAccess, isBridgeSecret, loadDesktopSecret, requestDesktopPageAccess, saveDesktopSecret } from "./desktop-bridge.ts";
 
+document.documentElement.lang = chrome.i18n.getUILanguage();
 const root = document.getElementById("root")!;
 
 async function desktopSettings() {
@@ -50,11 +51,12 @@ async function desktopSettings() {
 async function render(): Promise<void> {
   const connection = await loadConnection();
   const desktop = await desktopSettings();
-  const usage = h("section", {}, h("h2", {}, t("How to use")),
+  const usage = h("details", { class: "usage" }, h("summary", {}, t("How to use")),
     h("p", { class: "hint" }, t("Click the Lumio button, or press Alt+Shift+S, on the page you're reading. Right-click a link to save just the link.")));
+  const title = h("h1", { class: "brand" }, h("img", { src: "icons/32.png", alt: "", width: "24", height: "24" }), "Lumio");
   if (connection) {
-    root.replaceChildren(h("h1", {}, "Lumio"),
-      h("section", {}, h("p", { class: "lead ok" }, t("Connected to {0}", connection.hub)),
+    root.replaceChildren(title,
+      h("section", {}, h("h2", {}, t("Connected to {0}", connection.hub)),
         h("button", { type: "button", class: "btn", onclick: async () => { await clearConnection(); void render(); } }, t("Disconnect"))),
       usage, desktop);
     return;
@@ -85,7 +87,7 @@ async function render(): Promise<void> {
       } finally { submit.disabled = false; }
     });
   });
-  root.replaceChildren(h("h1", {}, "Lumio"), h("section", {}, h("h2", {}, t("Connect this browser to Lumio")), form), usage, desktop);
+  root.replaceChildren(title, h("section", {}, h("h2", {}, t("Connect this browser to Lumio")), form), usage, desktop);
 }
 
 void render();

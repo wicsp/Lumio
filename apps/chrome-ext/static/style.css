@@ -1,33 +1,79 @@
-:root { color-scheme: light dark; --ink: #1c2220; --ink-3: #6b736f; --line: #e3e6e3; --bg: #fbfbfa; --accent: #1c2220; --ok: #2f7d4f; --red: #b3261e; --spot: #f2c94c;
-  font: 13px/1.5 -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", sans-serif; }
-@media (prefers-color-scheme: dark) { :root { --ink: #e8ebe9; --ink-3: #9aa29e; --line: #2c3330; --bg: #161a19; --accent: #e8ebe9; --ok: #6cc28f; --red: #f2867c; } }
+@font-face {
+  font-family: Geist;
+  src: url("fonts/Geist-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: light dark;
+  --ink: #181818;
+  --muted: #6a6a6a;
+  --line: #c9c9c9;
+  --bg: #fff;
+  --hover: #efefef;
+  --accent: #345d90;
+  --on-accent: #fff;
+  --error: #9a3f3c;
+  font: 400 14px/1.5 Geist, -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #f1f1f1;
+    --muted: #aeaeae;
+    --line: #505050;
+    --bg: #202020;
+    --hover: #2c2c2c;
+    --accent: #a4bde4;
+    --on-accent: #181818;
+    --error: #e6a5a1;
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--ink); }
-body.popup { width: 340px; }
-body.popup main { padding: 14px 16px 12px; display: flex; flex-direction: column; gap: 8px; }
-body.options main { max-width: 520px; margin: 40px auto; padding: 0 20px; }
-header { display: flex; flex-direction: column; gap: 2px; }
-.title { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-weight: 600; }
-.host, .hint { color: var(--ink-3); font-size: 12px; }
-p { margin: 0; }
-.lead { font-weight: 600; }
-.ok { color: var(--ok); }
-.error { color: var(--red); }
-.status { display: flex; gap: 6px; align-items: center; min-height: 20px; color: var(--ink-3); }
-.status:empty { display: none; }
-.actions { display: flex; gap: 6px; }
-.actions:empty { display: none; }
-footer { display: flex; justify-content: space-between; padding-top: 8px; border-top: 1px solid var(--line); font-size: 12px; }
-a, .link { color: var(--ink-3); background: none; border: 0; padding: 0; font: inherit; cursor: pointer; text-decoration: none; }
-a:hover, .link:hover { color: var(--ink); text-decoration: underline; }
-.btn { height: 28px; padding: 0 12px; border: 1px solid var(--line); border-radius: 7px; background: transparent; color: var(--ink); font: inherit; cursor: pointer; }
-.btn:hover:not(:disabled) { border-color: var(--ink-3); }
-.btn:disabled { opacity: .5; cursor: default; }
-.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); font-weight: 600; }
-.spinner { width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--ink-3); border-radius: 50%; animation: spin .8s linear infinite; }
+h1, h2, p { margin: 0; }
+h1, h2 { font-size: 18px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button, input { font: inherit; }
+
+body.popup { width: 360px; max-width: 100vw; }
+.popup main { display: flex; flex-direction: column; align-items: stretch; gap: 12px; padding: 20px; min-width: 0; }
+.popup header { display: grid; gap: 4px; }
+.title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.lead { font-weight: 500; }
+.host, .hint, .status { color: var(--muted); overflow-wrap: anywhere; }
+.error { color: var(--error); }
+.status { display: flex; align-items: center; gap: 8px; }
+:is(.status, .hint, .actions):empty { display: none; }
+.actions, footer { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+footer { justify-content: space-between; padding-top: 4px; }
+a, .link { padding: 4px 0; border: 0; background: transparent; color: var(--accent); font: inherit; cursor: pointer; text-decoration: none; }
+a:hover, .link:hover { text-decoration: underline; }
+.open-in-lumio { display: inline-flex; align-items: center; gap: 4px; }
+.open-in-lumio::after { content: ""; width: 24px; height: 24px; background: currentColor; mask: url("icons/external.svg") center / contain no-repeat; }
+
+.btn {
+  min-height: 36px; padding: 4px 12px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--bg); color: var(--ink); font-weight: 500; cursor: pointer;
+}
+.btn:hover:not(:disabled) { background: var(--hover); }
+.btn:disabled { opacity: .55; cursor: default; }
+.btn.primary { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
+.btn.primary:hover:not(:disabled) { border-color: transparent; background: color-mix(in srgb, var(--accent) 88%, var(--ink)); }
+.spinner { width: 16px; height: 16px; flex: none; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-h1 { font-size: 20px; } h2 { font-size: 15px; margin: 24px 0 8px; }
-form { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
-label { margin-top: 6px; font-weight: 600; }
-input { width: 100%; box-sizing: border-box; height: 32px; padding: 0 10px; border: 1px solid var(--line); border-radius: 7px; background: transparent; color: var(--ink); font: inherit; }
-form .btn { margin-top: 8px; }
-section { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+
+.options main { display: grid; gap: 32px; max-width: 560px; margin: 0 auto; padding: 40px 24px 64px; }
+.brand { display: flex; align-items: center; gap: 8px; }
+.options section, .options form { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-width: 0; }
+.options section { gap: 12px; }
+.options form { width: 100%; }
+label { font-weight: 500; }
+form > label:not(:first-child) { margin-top: 8px; }
+input { width: 100%; min-height: 40px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); }
+.options form .btn { margin-top: 4px; }
+.usage summary { cursor: pointer; color: var(--accent); }
+.usage .hint { margin-top: 8px; }
