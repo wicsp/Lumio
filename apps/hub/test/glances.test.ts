@@ -1,11 +1,12 @@
 import { expect, test } from "bun:test";
-import { randomUUID, createHash } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PNG } from "pngjs";
 import { encode } from "jpeg-js";
-import { AIConnection, AIProfile, AssistantEvent, AssistantMain, AssistantChatResult, AssistantChatRequest, Capture, CaptureCreateResult, GLANCE_LIMITS, Glance, GlanceCreate, KnowledgeOriginal, KnowledgeCreateResult, SearchResult, NoteDetail, AssistantModelRequest, AssistantToolCall, ExecutionTarget, Proposal, WorkCommandResult, WorkTask, WorkTaskDetail, toolName, type AssistantModelResponse } from "@lumio/schema";
+import { newId } from "@lumio/foundation";
+import { AIConnection, AIProfile, AssistantEvent, AssistantMain, AssistantChatResult, AssistantChatRequest, Capture, CaptureCreateResult, GLANCE_LIMITS, Glance, GlanceCreate, KnowledgeOriginal, KnowledgeCreateResult, SearchResult, NoteDetail, AssistantModelRequest, AssistantToolCall, ExecutionTarget, JobResult, Proposal, RuntimeAck, RuntimeRegistered, RuntimeSync, StoredArtifact, WorkCommandResult, WorkTask, WorkTaskDetail, toolName, type AssistantModelResponse } from "@lumio/schema";
 import { backupBusiness, verifyBusinessBackup } from "@lumio/storage";
 import type { AssistantModel } from "@lumio/assistant";
 import { ChatCompletionsModel } from "../src/assistant-model.ts";
@@ -31,20 +32,20 @@ test("pointing uses selected text, closed trajectories, and a contiguous paragra
   expect(pointGlance(meta({ selection_text: "Chosen text" }))).toMatchObject({ method: "selection", text: "Chosen text", blocks: [] });
 });
 
-async function fixture(action: (f: Awaited<ReturnType<typeof setup>>) => Promise<void>, model?: Parameters<typeof setup>[1]) {
+async function fixture(action: (f: Awaited<ReturnType<typeof setup>>) => Promise<void>, model?: Parameters<typeof setup>[1], env?: NodeJS.ProcessEnv) {
   const root = await mkdtemp(join(tmpdir(), "lumio-glance-"));
   try {
-    const f = await setup(root, model);
+    const f = await setup(root, model, env);
     try { await action(f); } finally { await f.hub.stop(); }
   } finally { await rm(root, { recursive: true, force: true }); }
 }
 
-async function setup(root: string, model?: AssistantModel | ((input: AssistantModelRequest) => AssistantModelResponse | Promise<AssistantModelResponse>)) {
+async function setup(root: string, model?: AssistantModel | ((input: AssistantModelRequest) => AssistantModelResponse | Promise<AssistantModelResponse>), env?: NodeJS.ProcessEnv) {
   const vault = join(root, "vault"), state = join(root, "state");
   await mkdir(vault);
   let now = new Date(at);
   const config = readConfig({ HOME: root, LUMIO_VAULT: vault, LUMIO_STATE_DIR: state, LUMIO_HUB_LISTEN: "127.0.0.1:0",
-    LUMIO_GLANCE_RETENTION_DAYS: "1", LUMIO_LANG: "zh" });
+    LUMIO_GLANCE_RETENTION_DAYS: "1", LUMIO_LANG: "zh", ...env });
   const assistantModel = typeof model === "function" ? { complete: async (input: AssistantModelRequest) => model(input) } : model;
   const hub = await startHub(config, { now: () => now, log() {}, assistantModel });
   const token = (role: "human" | "agent" | "runtime", name: string) => {
@@ -80,6 +81,43 @@ async function setup(root: string, model?: AssistantModel | ((input: AssistantMo
   return { hub, root, state, vault, owner, other, agent, runtime, request, upload, save, ready,
     advance: () => { now = new Date(now.getTime() + 2 * 86_400_000); } };
 }
+
+const transcriptionCommand = "/synthetic/bilibili-transcribe";
+test("desktop Bilibili saves archive the transcription with the screenshot", () => fixture(async f => {
+  const video = "https://www.bilibili.com/video/BV1xx411c7mD";
+  const html = await readFile(new URL("../../../fixtures/i1-inbox/article.html", import.meta.url), "utf8");
+  const glance = Glance.parse(await (await f.upload(meta({ url: video + "?p=2", page: { format: "html", title: "Synthetic video page" } }), png, f.owner, html)).json());
+  const runtime = (path: string, body: unknown) => f.request(`/v1/runtime/${path}`, "POST", body, f.runtime);
+  RuntimeRegistered.parse(await (await runtime("register", { protocol_version: 2, name: "transcriber", engines: [], tags: [], max_concurrent: 1 })).json());
+  const saved = CaptureCreateResult.parse(await (await f.request("/v2/inbox/captures", "POST", { request_id: randomUUID(), channel: "desktop", glance: glance.id })).json());
+  let jobs: RuntimeSync["jobs"] = [];
+  for (let i = 0; i < 100 && !jobs.length; i++) {
+    jobs = RuntimeSync.parse(await (await runtime("sync", { running: [], queued: [], outbox: 0 })).json()).jobs;
+    if (!jobs.length) await Bun.sleep(15);
+  }
+  expect(jobs).toHaveLength(1);
+  const job = jobs[0]!;
+  expect(job.run).toEqual({ kind: "command", argv: [transcriptionCommand, video + "?p=2"] });
+  RuntimeAck.parse(await (await runtime("ack", { accepted: [job.id] })).json());
+  expect((await runtime("results", JobResult.parse({ job: job.id, lease: job.lease, status: "done", finished: at }))).status).toBe(200);
+
+  const archive = await readFile(new URL("../../../fixtures/i1-inbox/bilibili-transcript.txt", import.meta.url), "utf8");
+  const id = newId("art", new Date(at), randomBytes);
+  const artifact = StoredArtifact.parse({ id, owner: { module: "execution", id: job.id }, key: `${id}.bin`,
+    media_type: "text/plain", size: Buffer.byteLength(archive), sha256: createHash("sha256").update(archive).digest("hex"),
+    status: "staged", private: false, created: at });
+  const path = "/v2/execution/artifacts";
+  expect(StoredArtifact.parse(await (await f.request(path, "POST", artifact, f.runtime)).json()).status).toBe("staged");
+  const upload = await fetch(new URL(`${path}/${id}`, f.hub.server.url), {
+    method: "PUT", headers: { Authorization: `Bearer ${f.runtime}`, "Content-Type": "application/octet-stream" }, body: archive,
+  });
+  expect(StoredArtifact.parse(await upload.json()).status).toBe("ready");
+  const capture = await f.ready(saved.capture.id);
+  expect(capture).toMatchObject({ state: "ready", kind: "video", glance: glance.id });
+  const original = KnowledgeOriginal.parse(await (await f.request(`/v2/knowledge/originals?ref=${capture.entity!.id}`)).json());
+  expect(original.frontmatter).toMatchObject({ extractor: "bilibili-asr@1", glance: { id: glance.id, screenshot: glance.image!.file } });
+  expect(original.body).toContain("**00:00:12** 第二句 &lt;字幕&gt;");
+}, undefined, { LUMIO_BILIBILI_TRANSCRIPTION_RUNTIME: "transcriber", LUMIO_BILIBILI_TRANSCRIPTION_COMMAND: transcriptionCommand }));
 
 test("a local browser page and screenshot save as one capture using the same archive text as Save to Lumio", () => fixture(async f => {
   const url = "http://127.0.0.1:12345/synthetic";

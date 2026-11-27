@@ -369,17 +369,19 @@ export class Inbox {
     if (value.capture.channel === "extension") return bilibiliDescription(value.input.content);
   }
 
-  private async queueTranscription(value: StoredCapture) {
+  private async queueTranscription(value: StoredCapture, glance?: Glance) {
     const { capture } = value;
     const config = this.config.bilibiliTranscription;
-    if (!config || capture.kind !== "video" || !capture.url || capture.glance) return false;
+    const desktopSave = glance && capture.channel === "desktop" && !glance.used_by.message;
+    if (!config || !capture.url || (glance ? !desktopSave : capture.kind !== "video")) return false;
     if (value.input.content && this.extensionVideoDescription(value) === undefined) return false;
     const url = await bilibiliJobUrl(capture.url, this.stopping.signal, this.options.network ?? this.proxy.network());
     if (!url) return false;
     this.hub.db.transaction(() => {
       const job = startBilibiliJob(this.hub, config, url, this.now());
       value.transcriptionJob = job.spec.id;
-      this.state.put(value);
+      if (capture.kind === "video") this.state.put(value);
+      else this.update(value, { kind: "video" });
       this.hub.audit(this.hub.recoveryIdentity(capture.owner), "inbox.extract", "allow", undefined, `transcription:${job.spec.id}`);
     })();
     return true;
@@ -397,8 +399,8 @@ export class Inbox {
     const capture = transcription ? value.capture : this.update(value, { state: "extracting" });
     try {
       const glance = capture.glance && capture.kind !== "paper" ? this.glances.get(capture.glance, capture.owner) : undefined;
-      if (!value.plan && !transcription && await this.queueTranscription(value)) return;
-      const extracted = value.plan ? undefined : transcription ?? (glance ? await this.glanceOriginal(glance, capture)
+      if (!value.plan && !transcription && await this.queueTranscription(value, glance)) return;
+      const extracted = value.plan ? undefined : transcription ?? (glance && !value.input.content ? await this.glanceOriginal(glance, capture)
         : await extractCapture(capture.url, capture.kind!, capture.title, value.input.content,
           this.stopping.signal, this.options.network ?? this.proxy.network()));
       await this.exclusive(async () => {

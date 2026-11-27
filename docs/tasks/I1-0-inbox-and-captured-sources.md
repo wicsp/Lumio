@@ -84,4 +84,4 @@ I1-4 另读 `docs/design/execution.md`，I1-5、I1-7 另读 `docs/design/web.md`
 
 ## I1-4 B 站语音转写
 
-普通 B 站 BV、AV 视频和 b23.tv 分享链接可由执行器使用本地 Whisper 或 Groq 转写。插件已有字幕仍直接入库，旧插件送来的简介会与带时间戳的转写一起保存。Hub 通过已有 command Job 和托管日志接收字幕，中途重启后继续等待该 Job。启用方法见[日常部署](../local-deployment.md#在收藏夹为-b-站视频补字幕i1-4)。
+普通 B 站 BV、AV 视频和 b23.tv 分享链接可由执行器使用本地 Whisper 或 Groq 转写。插件已有字幕仍直接入库，旧插件送来的简介会与带时间戳的转写一起保存。启用转写后，桌面小助手直接收藏 B 站播放页的所见也会进入转写流程，带时间戳的字幕作为原文，截图随资料保存。Hub 通过已有 command Job 和托管日志接收字幕，中途重启后继续等待该 Job。启用方法见[日常部署](../local-deployment.md#在收藏夹为-b-站视频补字幕i1-4)。
