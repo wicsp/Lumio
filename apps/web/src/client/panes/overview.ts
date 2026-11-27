@@ -10,7 +10,7 @@ import { errorText, type Client, type HubExtras } from "../api.ts";
 import { attentionCard } from "../attention-card.ts";
 import { formatTime, newRequestId } from "../commands.ts";
 import { quickDelegateActions } from "../delegate.ts";
-import { clear, failure, h, icon, loading, statusIcon, toast } from "../dom.ts";
+import { clear, failure, h, icon, loading, select, statusIcon, toast } from "../dom.ts";
 import { ago, dueLabel } from "../format.ts";
 import { JOB_LABELS } from "../labels.ts";
 import type { Navigate } from "../navigation.ts";
@@ -26,7 +26,7 @@ type Personal = Awaited<ReturnType<NonNullable<HubExtras["personalView"]>>>;
 type Region = "header" | "tasks" | "needs" | "notices" | "personal" | "activity" | "projects";
 
 const LIVE = ["queued", "assigned", "running"];
-const DAY = 86_400_000;
+
 
 function overviewTitle(run: ExecutionOverviewItem, tasks: WorkTask[]): string {
   if (run.task) return tasks.find(task => task.id === run.task)?.title ?? t("Task round {0}", run.round ?? "");
@@ -43,6 +43,7 @@ export class OverviewPane {
   private projectRequest?: Promise<PromiseSettledResult<WorkProject[]>>;
   private personalRequest?: Promise<Personal>;
   /** 「需要你处理」里展开了完整汇报的卡片（按轮次），刷新后保持展开。 */
+  private decisionFilter = "";
   private expanded = new Set<string>();
   private live: LiveData;
 
@@ -54,10 +55,10 @@ export class OverviewPane {
       this.regions.set(key, { element });
       return element;
     };
-    clear(this.body, group("header"), this.ask(),
+    clear(this.body, group("header"),
       h("div", { class: "today-grid" },
-        h("div", { class: "today-col" }, group("needs"), group("notices"), group("tasks", loading(t("Gathering today's work…")))),
-        h("div", { class: "today-col today-side" }, group("personal"), group("activity"), group("projects"))));
+        h("div", { class: "today-col" }, group("needs"), group("tasks", loading(t("Gathering today's work…"))), group("notices")),
+        h("div", { class: "today-col today-side" }, group("personal"), group("activity"), this.ask(), group("projects"))));
     void this.load();
   }
   dispose(): void { this.active = false; this.generation++; }
@@ -71,6 +72,7 @@ export class OverviewPane {
         h("h1", { class: "today-title" }, t("Today")),
         h("time", { class: "today-date", datetime: new Intl.DateTimeFormat("sv-SE", { dateStyle: "short" }).format(now) }, date)),
       h("div", { class: "today-actions" },
+        h("button", { type: "button", class: "btn btn-small", title: t("Save source"), "aria-label": t("Save source"), onclick: () => this.navigate("inbox", undefined, "capture") }, icon("inbox"), h("span", {}, t("Save source"))),
         h("button", { type: "button", class: "btn btn-primary", "aria-label": t("New task"), onclick: () => this.navigate("work", undefined, "new") },
           icon("plus"), h("span", {}, t("New task"))),
         h("button", { type: "button", class: "avatar-btn mobile-flex", title: t("Settings"), "aria-label": t("Settings"), onclick: () => this.navigate("settings") },
@@ -144,20 +146,16 @@ export class OverviewPane {
   private renderTasks(tasks: LiveSnapshot["tasks"], projectData: WorkProject[]): void {
     const taskData = settled(tasks);
     const now = new Date();
-    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() + DAY;
+    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
     const mine = taskData?.filter(task => turnGroup(task) === "todo") ?? [];
     const dueSoon = (task: WorkTask) => !!task.due && new Date(task.due).getTime() < endOfToday;
     // 今天：今天到期或已逾期的待办；没有的话，最近交回给你的排在前面。
     const focus = mine.filter(dueSoon).sort(byFocus);
     const next = mine.filter(task => !focus.includes(task)).sort(byDue);
-    const agentsWorking = taskData?.filter(task => turnGroup(task) === "agents") ?? [];
-    const waiting = taskData?.filter(task => turnGroup(task) === "external") ?? [];
     this.draw("tasks", [tasks, projectData.map(project => [project.id, project.title]), now.toDateString()], () => [
-      focus.length || tasks.status === "rejected" ? this.section("due", t("Due today"), focus.length, () => this.navigate("work", "tasks"),
+      focus.length || tasks.status === "rejected" ? this.section("due", t("Due or overdue"), focus.length, () => this.navigate("work", "tasks"),
         tasks.status === "rejected" ? failure(errorText(tasks.reason)) : this.taskList(focus, projectData, "")) : null,
-      tasks.status === "fulfilled" && (next.length || !focus.length) ? this.section("todo", focus.length ? t("Your other to-dos") : t("Your to-dos"), next.length, () => this.navigate("work", "tasks"), this.taskList(next.slice(0, 6), projectData, t("Your to-do list is clear."))) : null,
-      agentsWorking.length ? this.section("active", t("Agents working"), agentsWorking.length, () => this.navigate("work", "tasks"), this.taskList(agentsWorking, projectData, "")) : null,
-      waiting.length ? this.section("waiting", t("Waiting on others"), waiting.length, () => this.navigate("work", "tasks"), this.taskList(waiting, projectData, "")) : null,
+      tasks.status === "fulfilled" && (next.length || !focus.length) ? this.section("todo", t("Ready to start"), next.length, () => this.navigate("work", "tasks"), this.taskList(next.slice(0, 6), projectData, t("Your to-do list is clear."))) : null,
     ]);
   }
 
@@ -178,7 +176,7 @@ export class OverviewPane {
     const activity = overview?.activity ?? [];
     this.draw("activity", [execution.status, overview?.activity_live_count, activity, activity.map(job => overviewTitle(job, tasks))], () => [
       this.section("runs", t("Agent activity"), overview?.activity_live_count ?? 0, () => this.navigate("execution"),
-        execution.status === "rejected" ? failure(errorText(execution.reason)) : this.runs(activity, tasks)),
+        execution.status === "rejected" ? failure(errorText(execution.reason)) : this.runs(activity.slice(0, 1), tasks)),
     ]);
   }
 
@@ -190,8 +188,8 @@ export class OverviewPane {
     const personalEvents = personal.events.filter(({ schedule }) => schedule.kind === "all_day"
       ? schedule.start <= personalToday && personalToday < schedule.end
       : dateOf(schedule.start, personal.timezone) <= personalToday && personalToday <= dateOf(new Date(Date.parse(schedule.end) - 1).toISOString(), personal.timezone));
-    const personalTodos = personal.todos.filter(todo => todo.status === "open" && (!todo.due ||
-      (todo.due.kind === "date" ? todo.due.date : dateOf(todo.due.at, personal.timezone)) <= personalToday));
+    const personalTodos = personal.todos.filter(todo => todo.status === "open" && todo.due &&
+      (todo.due.kind === "date" ? todo.due.date : dateOf(todo.due.at, personal.timezone)) <= personalToday);
     return this.section("personal", t("Personal"), personalEvents.length + personalTodos.length, () => this.navigate("personal"),
       h("div", { class: "today-personal", "data-private-personal": "true" },
         !personal.sync_ok ? h("p", { class: "today-empty" }, t("Calendar sync is pending or unavailable.")) : null,
@@ -270,7 +268,23 @@ export class OverviewPane {
     ];
     const count = cards.length + (standalone ? standalone.total - standalone.items.length : 0);
     if (!count && !error) return null;
+    const kinds: string[] = [
+      ...liveRequests.map(request => request.kind === "approval" ? "approval" : "question"),
+      ...rounds.map(item => item.kind),
+      ...(approvals ?? []).map(() => "approval"),
+      ...(standalone?.items ?? []).map(item => item.status === "waiting_for_human" ? "question" : "failed"),
+    ];
     const list = h("div", { class: "needs" }, ...cards);
+    const noMatch = h("p", { class: "muted", hidden: true }, t("No matching decisions in the loaded items."));
+    const filter = select("decision-filter", [["", t("All decisions")], ["question", t("Waiting for your answer")],
+      ["review", t("Ready for your review")], ["approval", t("Waiting for your approval")], ["failed", t("Run failed")]], this.decisionFilter);
+    filter.setAttribute("aria-label", t("Filter decisions"));
+    const applyFilter = () => {
+      cards.forEach((card, i) => { card.hidden = !!this.decisionFilter && kinds[i] !== this.decisionFilter; });
+      noMatch.hidden = !this.decisionFilter || cards.some(card => !card.hidden);
+    };
+    filter.addEventListener("change", () => { this.decisionFilter = filter.value; applyFilter(); });
+    applyFilter();
     let before = standalone?.next_before;
     const more = h("button", { type: "button", class: "text-btn", onclick: async () => {
       if (!before || more.disabled) return;
@@ -278,15 +292,20 @@ export class OverviewPane {
       try {
         const page = (await this.client.executionOverview(before)).standalone_attention;
         if (!this.active || !this.body.contains(more)) return;
-        list.append(...page.items.map(item => this.standaloneCard(item)));
+        for (const item of page.items) {
+          const card = this.standaloneCard(item);
+          cards.push(card); kinds.push(item.status === "waiting_for_human" ? "question" : "failed"); list.append(card);
+        }
+        applyFilter();
         before = page.next_before;
         if (!before) more.remove();
       } catch (cause) { toast(errorText(cause), "error"); }
       finally { more.disabled = false; }
     } }, t("Show older runs"));
     return h("section", { class: "today-section", "data-pad-region": "needs" },
-      h("header", { class: "today-section-head" }, h("h2", {}, t("Needs you")), h("span", { class: "count attention" }, count)),
-      error ? failure(errorText(error)) : null, list, before ? more : null);
+      h("header", { class: "today-section-head" }, h("h2", {}, t("Needs you")), h("span", { class: "count attention" }, count),
+        (count > 8 || this.decisionFilter) ? filter : null),
+      error ? failure(errorText(error)) : null, list, noMatch, before ? more : null);
   }
 
   private standaloneCard(item: ExecutionOverviewItem): HTMLElement {

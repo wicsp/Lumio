@@ -1,3 +1,4 @@
+import { observeAction } from "./usage-observations.ts";
 /**
  * 「需要你处理」的一张卡片（ADR 0030、0032）：等你回答 / 等你验收 / 执行失败 / 交接计划的检查点。
  * 今日、任务页和执行详情共用。每个操作都先读任务的当前版本再提交，冲突时说明而不覆盖。
@@ -8,7 +9,7 @@
  * 汇报：Today 先显示开头几行，「展开完整汇报」就地读出全文，操作按钮始终紧跟在汇报下面；
  * 任务详情直接显示全文，决定按钮放进详情底部固定的栏里，与讨论输入框在一起，滚到哪里都能决定。
  */
-import type { Job, WorkAttention } from "@lumio/schema";
+import type { Job, WorkAttention, WorkTask } from "@lumio/schema";
 import { errorText, isConflict, type Client, type HubExtras } from "./api.ts";
 import { answerCommand, engineTargets, formatTime, grantCommand, itemsPermission, newRequestId, permissionItemLabel, permissionItems, type PermissionItem } from "./commands.ts";
 import type { StagePermissions } from "@lumio/schema";
@@ -44,6 +45,12 @@ const KIND: Record<WorkAttention["kind"], { label: string; glyph: string; tone: 
   failed: { label: "Run failed", glyph: "alert", tone: "red" },
 };
 
+export function matchesDecision(item: WorkAttention, task: WorkTask): boolean {
+  const reason = item.kind === "question" ? "answer" : item.kind;
+  return task.outcome === "open" && task.turn.holder === "human" && task.turn.reason === reason
+    && task.turn.job === item.job && task.turn.round === item.round && task.turn.stage === item.stage && task.turn.since === item.since;
+}
+
 /** where：today 显示任务标题；task 在任务页里，不重复标题；job 在执行详情里。 */
 export function attentionCard(item: WorkAttention, ctx: AttentionContext, where: "today" | "task" | "job" = "today"): HTMLElement {
   const kind = KIND[item.kind];
@@ -62,17 +69,23 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
     busy = true; card.classList.add("is-busy"); docked?.bar.classList.add("is-busy"); clear(error);
     try {
       const done = await work();
+      observeAction(card, `decision-${item.kind}`, "succeeded");
       clear(card, h("p", { class: "attn-done" }, icon("check"), done));
       card.classList.add("is-done");
       if (docked) clear(docked.bar);
       ctx.changed();
     } catch (cause) {
+      observeAction(card, `decision-${item.kind}`, "failed");
       clear(error, failure(isConflict(cause) ? t("This task changed since this card was shown. Refresh and try again.") : errorText(cause)));
     } finally { busy = false; card.classList.remove("is-busy"); docked?.bar.classList.remove("is-busy"); }
   };
   /** 交给讨论输入框写字（只在任务详情里）。 */
   const reply = docked ? () => docked.reply(item.kind) : undefined;
-  const currentTask = async () => (await ctx.client.workTask(item.task)).task;
+  const currentTask = async () => {
+    const { task } = await ctx.client.workTask(item.task);
+    if (!matchesDecision(item, task)) throw new Error(t("This task changed since this card was shown. Refresh and try again."));
+    return task;
+  };
 
   // 回答框：等你回答时直接显示；验收与失败时点按钮后展开。
   const composer = (button: string, required: boolean, placeholder: string) => {
@@ -127,7 +140,7 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
     const end = stage === "end";
     const go = h("button", { type: "button", class: "btn btn-primary btn-small", "data-pad-action": "primary" }, icon("play"), t("Continue"));
     go.addEventListener("click", () => decide("continue", t("Continuing with the next step.")));
-    const finish = h("button", { type: "button", class: `btn btn-small${end ? " btn-primary" : ""}`, "data-pad-action": end ? "primary" : "finish" }, icon("check"), t("Mark done"));
+    const finish = h("button", { type: "button", class: `btn btn-small${end ? " btn-primary" : ""}`, "data-pad-action": end ? "primary" : "finish" }, icon("check"), t("Accept and complete task"));
     finish.addEventListener("click", () => decide("finish", t("Task marked done.")));
     const hold = h("button", { type: "button", class: "btn btn-quiet btn-small", "data-pad-action": "hold" }, icon("pause"), t("Put on hold"));
     hold.addEventListener("click", () => decide("hold", t("Put on hold.")));
@@ -177,7 +190,7 @@ export function attentionCard(item: WorkAttention, ctx: AttentionContext, where:
     body = report || item.prompt ? h("div", { class: "attn-body" }, report, item.prompt ? question(item.prompt) : null) : null;
     if (item.kind === "review" && (item.prompt || item.stage === "end")) checkpoint(item.stage!);
     else if (item.kind === "review") {
-      const done = h("button", { type: "button", class: "btn btn-primary btn-small", "data-pad-action": "primary" }, icon("check"), t("Mark done"));
+      const done = h("button", { type: "button", class: "btn btn-primary btn-small", "data-pad-action": "primary" }, icon("check"), t("Accept and complete task"));
       done.addEventListener("click", () => void run(async () => {
         await ctx.client.workCommand(finishCommand(await currentTask(), "done"));
         return t("Task marked done.");

@@ -1,3 +1,6 @@
+import { sourceTaskIntent } from "../source-task.ts";
+import { observeAction } from "../usage-observations.ts";
+import type { Navigate } from "../navigation.ts";
 import { KnowledgeGraphView } from "../graph/knowledge.ts";
 import { NoteEditor } from "../note-editor.ts";
 import { NoteImageQueue } from "../note-image-queue.ts";
@@ -91,6 +94,23 @@ export class KnowledgePane {
   private active = true;
   private currentPath = "";
   private selected?: string;
+  private returnPoint?: { id: string; position: number };
+  private restorePoint?: { id: string; position: number };
+  private async followReference(reference: string): Promise<void> {
+    const id = this.displayed?.note.id;
+    if (!this.editor || !id || reference === id) { await this.open(reference); return; }
+    if (!(await this.beforeLeave()) || !this.active) return;
+    this.returnPoint = { id, position: this.editor.position };
+    await this.read(reference);
+  }
+
+  private async returnToWriting(): Promise<void> {
+    const point = this.returnPoint;
+    if (!point || !(await this.beforeLeave()) || !this.active) return;
+    this.restorePoint = point;
+    this.returnPoint = undefined;
+    await this.read(point.id);
+  }
   private displayed?: NoteDetail;
   private creator?: KnowledgeCreate;
   private editor?: NoteEditor;
@@ -119,21 +139,25 @@ export class KnowledgePane {
     event.returnValue = "";
   };
 
-  constructor(root: HTMLElement, private client: Client, initialReference?: string, private focusChanged?: () => void) {
+  constructor(root: HTMLElement, private client: Client, initialReference?: string, private focusChanged?: () => void, private navigate?: Navigate) {
     this.listButton.addEventListener("click", () => this.setGraphMode(false));
     this.graphButton.addEventListener("click", () => this.setGraphMode(true));
     this.filterHost.append(h("label", { class: "search-box" }, icon("search"), this.query), this.typeButton, this.privateButton);
     this.graphView = new KnowledgeGraphView(this.graphHost, this.client, reference => void this.open(reference));
     this.typeButton.addEventListener("click", () => this.pickType());
     this.privateButton.addEventListener("click", () => this.togglePrivate());
-    this.query.addEventListener("input", debounce(() => void this.search(), 220));
+    this.query.addEventListener("input", debounce(() => {
+      if (!this.includePrivate && this.query.value.trim()) observeAction(this.query, "search", "opened");
+      void this.search();
+    }, 220));
     this.detail.addEventListener("click", event => {
       const link = (event.target as Element).closest<HTMLElement>("[data-note]");
       if (link) { event.preventDefault(); void this.open(this.resolveReference(link.dataset.note!)); }
     });
     root.append(
       h("header", { class: "bar" }, h("h1", { class: "bar-title" }, t("Knowledge")),
-        h("div", { class: "segmented", role: "group", "aria-label": t("Knowledge view") }, this.listButton, this.graphButton),
+        h("div", { class: "segmented", role: "group", "aria-label": t("Knowledge view") }, this.listButton, this.graphButton,
+          this.navigate && h("button", { type: "button", onclick: () => this.navigate?.("inbox") }, t("Saved sources"))),
         h("span", { class: "bar-spacer" }),
         h("button", { type: "button", class: "btn btn-primary", onclick: () => this.intent("new") }, icon("plus"), t("New note")),
         h("button", { type: "button", class: "icon-btn", title: t("Refresh"), "aria-label": t("Refresh"), onclick: () => { void this.search(); if (this.selected) void this.open(this.selected, true); } }, icon("refresh"))),
@@ -198,6 +222,7 @@ export class KnowledgePane {
   async open(reference: string, reload = false): Promise<void> {
     if (!reload && reference === this.selected && this.detail.querySelector(".reader")) return;
     if (!(await this.beforeLeave()) || !this.active) return;
+    this.returnPoint = this.restorePoint = undefined;
     await this.read(reference);
   }
   resume(): void { this.editor?.refreshImageSettings(); }
@@ -230,6 +255,7 @@ export class KnowledgePane {
   private async togglePrivate(): Promise<void> {
     if (!(await this.beforeLeave()) || !this.active) return;
     this.clearWriter();
+    this.returnPoint = this.restorePoint = undefined;
     this.includePrivate = !this.includePrivate;
     this.renderFilters();
     // 关闭私密时：作废所有在途请求，清空列表与正文。
@@ -267,8 +293,12 @@ export class KnowledgePane {
 
   private row(hit: SearchResult["hits"][number], terms: string[]): HTMLElement {
     const id = hit.note.id ?? hit.note.path;
-    const row = h("div", { class: "row", "data-id": id, role: "button", tabindex: "0", onclick: () => void this.open(id),
-      onkeydown: (event: Event) => { if ((event as KeyboardEvent).key === "Enter") void this.open(id); } },
+    const openResult = () => {
+      if (!this.includePrivate) observeAction(this.results, "open-result", "opened");
+      void this.open(id);
+    };
+    const row = h("div", { class: "row", "data-id": id, role: "button", tabindex: "0", onclick: openResult,
+      onkeydown: (event: Event) => { if ((event as KeyboardEvent).key === "Enter") openResult(); } },
       h("span", { class: "type-tag" }, TYPE_LABEL[hit.note.type] ?? hit.note.type),
       h("span", { class: "row-main" }, h("span", { class: "row-title" }, highlightedText(hit.note.title, terms)), hit.snippet && h("span", { class: "row-sub" }, highlightedText(hit.snippet, terms))));
     const deletable = editableId(hit.note);
@@ -314,11 +344,13 @@ export class KnowledgePane {
       h("div", { class: "detail-crumbs", tabindex: "-1", "data-pad-selection": this.selected ?? note.note.id ?? note.note.path }, h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": t("Back to list"), "data-pad-back": true, onclick: async () => { if (!(await this.beforeLeave())) return; this.clearWriter(); this.selected = undefined; markSelected(this.results, undefined); this.showPlaceholder(); } }, icon("back")),
         note.note.id && h("div", { class: "detail-actions" },
           h("button", { type: "button", class: "icon-btn", title: t("Copy ID"), "aria-label": t("Copy ID"), onclick: () => void this.copyId(note.note.id!) }, icon("link")))),
+      this.returnPoint && this.returnPoint.id !== note.note.id && h("button", { type: "button", class: "text-btn", onclick: () => void this.returnToWriting() }, icon("back"), t("Return to writing")),
       h("h1", { class: "reader-title" }, note.note.title),
       h("div", { class: "reader-meta" }, h("span", { class: "pill" }, kindLabel), attribution && h("span", {}, attribution), note.note.citekey && h("span", { class: "pill" }, note.note.citekey),
         h("button", { type: "button", class: "btn btn-small", title: t("Show how this note links to others"), onclick: () => this.openGraph(note.note.id ?? note.note.path, note.note.title) }, icon("graph"), t("Graph"))),
       note.note.type === "source" && this.glanceOrigin(note),
       material && h("div", { class: "material-actions" },
+        this.navigate && note.note.id && !note.note.path.startsWith("life/") && h("button", { type: "button", class: "btn btn-small", onclick: () => this.navigate?.("work", "tasks", sourceTaskIntent([{ module: "knowledge", id: note.note.id!, label: note.note.title.slice(0, 200) }])) }, t("Create task from source")),
         sourceUrl && h("a", { href: sourceUrl, target: "_blank", rel: "noopener noreferrer nofollow", class: "btn btn-primary" }, icon("external"), t("Open original link")),
         h("button", { type: "button", class: "btn btn-small", "aria-label": t("More"), onclick: (event: Event) => openMenu(event.currentTarget as HTMLElement,
           [{ value: "original", label: t("View archived text"), icon: icon("file") }], () => void this.showOriginal(note)) }, icon("more"), t("More"))),
@@ -521,7 +553,7 @@ export class KnowledgePane {
       this.editor=new NoteEditor({value:saver.body, imageOrigins:this.imageOrigins, imageUpload:{
         settings:()=>this.client.imageHostingSettings(), queue: session.images,
       },change:(text,position,composing)=>{this.saver!.change(title.value,text);clearTimeout(this.saveTimer);if(!composing&&!this.saver!.error)this.saveTimer=setTimeout(()=>void this.saver?.save(),800);this.recommend(writingContext(title.value,text,position));},context:()=>this.recommend(context()),
-        referenceContext:position=>writingContext(title.value,this.editor!.value,position),references:(query,position)=>this.client.noteReferences({source_id:note.note.id!,query,context:writingContext(title.value,this.editor!.value,position)}),open:ref=>void this.open(this.resolveReference(ref)),embed:(id,label,edit)=>aiNoteCard(this.client,id,label,{open:target=>void this.open(target),edit}),save:()=>{clearTimeout(this.saveTimer);if(!this.saver?.error)void this.saver?.save();},outlineChanged:()=>this.outline.refresh()});
+        referenceContext:position=>writingContext(title.value,this.editor!.value,position),references:(query,position)=>this.client.noteReferences({source_id:note.note.id!,query,context:writingContext(title.value,this.editor!.value,position)}),open:ref=>void this.followReference(this.resolveReference(ref)),embed:(id,label,edit)=>aiNoteCard(this.client,id,label,{open:target=>void this.open(target),edit}),save:()=>{clearTimeout(this.saveTimer);if(!this.saver?.error)void this.saver?.save();},outlineChanged:()=>this.outline.refresh()});
       const titleChanged = (composing: boolean) => {
         if (!composing && /[\r\n]/.test(title.value)) title.value = title.value.replace(/[\r\n]+/g, " ");
         fitTitle();
@@ -545,6 +577,12 @@ export class KnowledgePane {
       oldBody.replaceWith(this.editor.root);const editor=this.editor;this.outlineEntries=()=>editor.outlineEntries();this.outline.refresh();article.insertBefore(this.saveStatus,this.editor.root);article.insertBefore(this.saveError,this.editor.root);article.insertBefore(this.conflict,this.editor.root);
       this.saveStatus.before(h("button",{type:"button",class:"btn btn-small mobile-only",onclick:()=>{this.split.classList.toggle("show-related");this.renderRelated();}},t("Related notes")));
       this.renderSave();this.recommend(context());if(saver.dirty)void saver.save();
+      if (this.restorePoint?.id === note.note.id && this.restorePoint) {
+        const position = Math.min(this.restorePoint.position, editor.value.length);
+        this.restorePoint = undefined;
+        editor.focus(position);
+        observeAction(editor.root, "return-to-writing", "succeeded");
+      }
     }catch{if(this.active&&generation===this.generation)this.markReadOnly();}
   }
   private async deleteNote(id: string): Promise<void> {

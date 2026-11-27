@@ -1,15 +1,18 @@
+import { sourceTaskIntent } from "../source-task.ts";
+import { artifactRow } from "../artifact-row.ts";
+import { observeAction } from "../usage-observations.ts";
 /**
  * 执行：运行记录（Job）、例行任务（Routine）与设备。
  * 运行列表每 5 秒静默刷新；正在运行的详情状态变化时自动更新。
  * 产物下载前核对大小与 SHA-256；取消要确认，不自动重跑。
  */
-import { JOB_STATUSES, type Job, type StoredArtifact, type ExecutionRoutineInfo, type RuntimeInfo, type WorkTask } from "@lumio/schema";
+import { JOB_STATUSES, type Job, type ExecutionRoutineInfo, type RuntimeInfo, type WorkTask } from "@lumio/schema";
 import { errorText, type Client, type HubExtras } from "../api.ts";
 import { executionGroups, type ExecutionGroup } from "../execution-groups.ts";
 import { attentionCard, attentionFor } from "../attention-card.ts";
-import { formatTime, safeFileName, verifyArtifact, routineStatusCommand } from "../commands.ts";
+import { formatTime, routineStatusCommand } from "../commands.ts";
 import { clear, empty, failure, h, icon, loading, openDialog, openMenu, placeholder, statusIcon, toast } from "../dom.ts";
-import { ago, bytes, jobSubtitle, jobTitle } from "../format.ts";
+import { ago, jobSubtitle, jobTitle } from "../format.ts";
 import { JOB_LABELS } from "../labels.ts";
 import { listKeys, markSelected } from "../list-keys.ts";
 import { renderMarkdown } from "../utils/markdown.ts";
@@ -219,6 +222,7 @@ export class ExecutionPane {
       const job = await this.client.job(id);
       if (!this.active || generation !== this.detailGeneration) return;
       this.currentJob = job;
+      if (!quiet) observeAction(this.root, "run-history", "opened");
       const report = h("div", { class: "markdown" });
       report.innerHTML = renderMarkdown(job.result?.report ?? "");
       const artifacts = h("div", {});
@@ -232,7 +236,7 @@ export class ExecutionPane {
           const files = await this.client.jobArtifacts(id, { includePrivate: privateScope });
           if (!this.active || generation !== this.detailGeneration || request !== artifactGeneration || privateScope !== includePrivate.checked) return;
           clear(artifacts, files.length
-            ? h("div", { class: "files" }, ...files.map(file => this.artifactRow(file, () => privateScope === includePrivate.checked && generation === this.detailGeneration, privateScope)))
+            ? h("div", { class: "files" }, ...files.map(file => artifactRow(this.client, file, () => this.active && privateScope === includePrivate.checked && generation === this.detailGeneration, privateScope)))
             : h("p", { class: "muted" }, t("No archived files")));
         } catch (cause) {
           if (this.active && generation === this.detailGeneration && request === artifactGeneration) clear(artifacts, failure(errorText(cause)));
@@ -256,6 +260,7 @@ export class ExecutionPane {
       const live = LIVE.includes(job.status);
       const cancelling = this.cancellationRequested.has(id) && live;
       const task = job.spec.source?.task;
+      const routine = job.spec.source?.routine;
       // 这一轮还在等你（ADR 0030）：直接在这里回答、验收或标为已查看；旧轮次只显示原来的问题。
       // 注意：如果有 attention card，它会显示完整的汇报和操作，不需要重复显示 question
       const question = h("div", { class: "markdown" });
@@ -278,6 +283,8 @@ export class ExecutionPane {
           h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": t("Back to list"), "data-pad-back": true, onclick: () => { this.selected = undefined; markSelected(this.list, undefined); this.showPlaceholder(); } }, icon("back")),
           task ? h("button", { type: "button", onclick: () => this.navigate("work", task) }, icon("work"), t("View task")) : h("span", {}, job.spec.source?.routine ? t("Routine") : t("Standalone run")),
           h("div", { class: "detail-actions" },
+            routine && job.result && h("button", { type: "button", class: "btn btn-small",
+              onclick: () => this.navigate("work", "tasks", sourceTaskIntent([{ module: "execution", id: routine }, { module: "execution", id: job.spec.id, label: jobTitle(job, this.taskTitles).slice(0, 200) }])) }, t("Follow up on this run")),
             live && h("button", { type: "button", class: "btn btn-small", disabled: cancelling, onclick: () => this.cancel(job) }, icon("stop"), cancelling ? t("Cancelling…") : t("Cancel run")))),
         h("div", { class: "detail-head" },
           h("h2", { class: "inline-title" }, h("span", { class: "button-row" }, statusIcon(job.status), jobTitle(job, this.taskTitles))),
@@ -296,31 +303,6 @@ export class ExecutionPane {
     } catch (cause) {
       if (this.active && generation === this.detailGeneration) clear(this.detail, failure(errorText(cause)));
     }
-  }
-
-  private artifactRow(file: StoredArtifact, current: () => boolean, includePrivate: boolean): HTMLElement {
-    const message = h("span", { role: "status", class: "muted" });
-    const label = file.media_type.includes("jsonl") ? t("Run transcript") : file.media_type === "text/plain" ? t("Run log") : safeFileName(file.key);
-    const button = h("button", { type: "button", class: "btn btn-small", disabled: file.status !== "ready", onclick: async () => {
-      button.disabled = true; message.textContent = t("Downloading and verifying…");
-      try {
-        const response = await this.client.artifactContent(file.id, { includePrivate });
-        const data = await response.arrayBuffer();
-        if (!this.active || !current()) return;
-        if (!await verifyArtifact(data, file)) throw new Error("FILE_INTEGRITY");
-        if (!this.active || !current()) return;
-        const url = URL.createObjectURL(new Blob([data], { type: file.media_type }));
-        h("a", { href: url, download: safeFileName(file.key) }).click();
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-        message.textContent = "";
-        toast(t("Verified — download started"));
-      } catch (cause) {
-        message.textContent = cause instanceof Error && cause.message === "FILE_INTEGRITY" ? t("File verification failed; not saved") : errorText(cause);
-      } finally { button.disabled = false; }
-    } }, icon("download"), t("Download"));
-    return h("div", { class: "file" }, icon("file"),
-      h("span", { class: "row-main" }, h("span", { class: "row-title" }, label), h("span", { class: "row-sub" }, t("{0}, {1}", file.status === "ready" ? t("Archived") : t("Delivering"), bytes(file.size)))),
-      message, button);
   }
 
   private cancel(job: Job): void {

@@ -1,3 +1,5 @@
+import { taskSources } from "../source-task.ts";
+import { observeAction } from "../usage-observations.ts";
 /**
  * 项目与任务（ADR 0026、0032）：任务按「轮到谁」分组，项目按状态分组；右侧详情。
  * 列表上可直接交回、完成、取消（带 revision）；新建在对话框里完成，新建不会委派。
@@ -69,7 +71,8 @@ export class WorkPane {
         h("h1", { class: "bar-title" }, t("Work")),
         h("div", { class: "segmented", role: "group", "aria-label": t("View") },
           h("button", { type: "button", "data-pad-row": "work:tasks", "aria-pressed": String(mode === "tasks"), onclick: () => navigate("work", "tasks") }, t("Tasks")),
-          h("button", { type: "button", "data-pad-row": "work:projects", "aria-pressed": String(mode === "projects"), onclick: () => navigate("work", "projects") }, t("Projects"))),
+          h("button", { type: "button", "data-pad-row": "work:projects", "aria-pressed": String(mode === "projects"), onclick: () => navigate("work", "projects") }, t("Projects")),
+          h("button", { type: "button", onclick: () => navigate("execution") }, t("Runs and routines"))),
         h("span", { class: "bar-spacer" }),
         h("button", { type: "button", class: "icon-btn", title: t("Refresh"), "aria-label": t("Refresh"), onclick: (event: Event) => { spin(event); void this.load(); if (this.selected) void this.open(this.selected, true); } }, icon("refresh")),
         h("button", { type: "button", class: "btn btn-primary", title: t("New (C)"), onclick: () => this.create() }, icon("plus"), h("span", { class: "hide-narrow" }, t("New")))),
@@ -128,6 +131,10 @@ export class WorkPane {
   canLeave(): boolean { return this.editor?.canLeave() ?? true; }
   intent(name: string): void {
     if (name === "new" || name === "new-project") this.create();
+    if (name.startsWith("new-from:")) {
+      const refs = taskSources(name);
+      if (refs.length) this.create("tasks", undefined, undefined, refs);
+    }
     if (name.startsWith("delegate:")) void this.delegateFromList(name.slice("delegate:".length));
   }
 
@@ -409,7 +416,7 @@ export class WorkPane {
 
   /** kind 缺省跟随当前视图；从项目页新建任务时带 preset，创建后回到该项目。 */
   /** parent：从任务详情新建子任务时预填父任务，创建后回到父任务。 */
-  private create(kind: Mode = this.mode, preset?: string, parent?: string): void {
+  private create(kind: Mode = this.mode, preset?: string, parent?: string, sources: ResourceRef[] = []): void {
     const isTask = kind === "tasks";
     const title = h("input", { name: "title", required: true, placeholder: isTask ? t("What needs to get done?") : t("Project name"), autocomplete: "off" });
     const description = autosize(h("textarea", { name: "description", rows: "4", placeholder: isTask ? t("Background, approach or definition of done (optional, Markdown)") : t("Project background (optional, Markdown)") }));
@@ -435,9 +442,18 @@ export class WorkPane {
       field(t("Description"), description), error);
     const save = h("button", { type: "submit", form: formId, class: "btn btn-primary" }, isTask ? t("Create task") : t("Create project"), h("kbd", {}, "⌘↵"));
     const parentTitle = parent ? this.tasks.find(task => task.id === parent)?.title ?? parent : undefined;
+    if (sources.length) form.prepend(h("p", { class: "muted" }, t("Source: {0}", sources.map(ref => ref.label ?? ref.id).join(" · "))));
     if (parentTitle) form.prepend(h("p", { class: "muted" }, t("Subtask of “{0}”", parentTitle)));
-    const dialog = openDialog(parent ? t("New subtask") : isTask ? t("New task") : t("New project"), form, [save], { draftKey: `new-${isTask ? "task" : "project"}:${preset ?? ""}:${parent ?? ""}` });
+    const dialog = openDialog(parent ? t("New subtask") : isTask ? t("New task") : t("New project"), form, [save], { draftKey: `new-${isTask ? "task" : "project"}:${preset ?? ""}:${parent ?? ""}${sources.map(ref => ":" + ref.id).join("")}` });
     form.addEventListener("keydown", event => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); form.requestSubmit(); } });
+    if (isTask && !this.projects.length) {
+      void this.client.workProjects().then(items => {
+        if (!dialog.open) return;
+        for (const item of items) if (item.status !== "done" && !Array.from(project.options).some(option => option.value === item.id)) {
+          project.add(new Option(item.title, item.id));
+        }
+      }).catch(() => { /* The task can still be saved without a project. */ });
+    }
     let pending = false, prior = dialog.dataset.previous ?? "", requestId = dialog.dataset.requestId ?? newRequestId();
     form.addEventListener("submit", async event => {
       event.preventDefault();
@@ -449,12 +465,13 @@ export class WorkPane {
       prior = key; dialog.dataset.previous = prior; dialog.dataset.requestId = requestId;
       try {
         const request = isTask
-          ? taskCreateCommand({ title: title.value, description: description.value, project: project.value || undefined, parent }, requestId)
+          ? taskCreateCommand({ title: title.value, description: description.value, project: project.value || undefined, parent, references: sources }, requestId)
           : projectCreateCommand({ title: title.value, description: description.value, goal: goal.value, workdir: workdir.value,
             auto_worktree: autoWorktree.checked, worktree_base: worktreeBase.value,
             max_concurrent: concurrency.value ? Number(concurrency.value) : undefined }, requestId);
         const result = await this.client.workCommand(request);
         if (!this.active) return;
+        if (sources.length) observeAction(this.root, sources[0]?.module === "execution" ? "routine-followup" : "task-from-source", "succeeded");
         dialog.dataset.dirty = "false"; dialog.close();
         toast(isTask ? t("Task created") : t("Project created"));
         this.changed();

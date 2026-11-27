@@ -8,7 +8,7 @@ export class DraftStore {
     const owner = Symbol(key); this.owners.set(key, owner);
     return { read: <T>() => this.read<T>(key), write: value => this.owners.get(key) === owner ? this.write(key, value) : true, remove: () => { if (this.owners.get(key) === owner) this.remove(key); } };
   }
-  constructor(private scope: string, private storage?: DraftStorage) {}
+  constructor(readonly scope: string, private storage?: DraftStorage) {}
   private key(key: string): string { return `lumio.draft.v1:${this.scope}:${key}`; }
   read<T>(key: string): T | undefined {
     try {

@@ -1963,7 +1963,7 @@ body:has(.dock-launcher:not([hidden])) .pane:not([hidden]) .thread-dock:not([hid
 @media (max-width: 400px) {
   .nav-short { overflow: hidden; max-width: 100%; text-overflow: ellipsis; white-space: nowrap; }
 }
-@media (max-width: 360px) {
+@media (max-width: 520px) {
   .today-actions > .btn { width: 44px; padding: 0; }
   .today-actions > .btn > span { display: none; }
 }
@@ -1972,3 +1972,14 @@ body:has(.dock-launcher:not([hidden])) .pane:not([hidden]) .thread-dock:not([hid
   .approval-bar .segmented button { flex: 1; padding-inline: 4px; }
   .personal-layout { padding: 16px; }
 }
+
+.project-materials { margin-block: 24px; }
+.project-materials summary { cursor: pointer; font-weight: 600; }
+.project-materials section { margin-block: 16px; }
+.project-materials h4 { margin: 0 0 4px; }
+.project-materials a { display: block; width: fit-content; max-width: 100%; overflow-wrap: anywhere; }
+.today-actions, .pane-knowledge .bar, .pane-work .bar { flex-wrap: wrap; }
+.today-side .today-ask { margin-top: 0; }
+
+.today-section-head select[name="decision-filter"] { width: auto; max-width: 50%; margin-left: auto; }
+.needs > [hidden] { display: none; }

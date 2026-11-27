@@ -8,9 +8,9 @@ export const SECTIONS: readonly { key: Exclude<Section, "settings" | "trash">; l
   { key: "overview", label: "Today", short: "Today", icon: "home", key2: "1" },
   { key: "work", label: "Work", short: "Work", icon: "work", key2: "2" },
   { key: "knowledge", label: "Knowledge", short: "Knowledge", icon: "knowledge", key2: "3" },
-  { key: "inbox", label: "Inbox", short: "Inbox", icon: "inbox", key2: "4" },
+  { key: "inbox", label: "Saved sources", icon: "inbox", key2: "4" },
   { key: "execution", label: "Execution", icon: "execution", key2: "5" },
-  { key: "assistant", label: "Assistant", short: "Assistant", icon: "assistant", key2: "6" },
+  { key: "assistant", label: "Assistant", icon: "assistant", key2: "6" },
   { key: "personal", label: "Personal", short: "Personal", icon: "calendar", key2: "8" },
   { key: "approvals", label: "Approvals", icon: "approvals", key2: "7" },
 ];

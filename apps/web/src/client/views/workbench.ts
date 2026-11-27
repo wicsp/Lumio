@@ -1,3 +1,4 @@
+import { UsageObservations } from "../usage-observations.ts";
 import { referenceLinks } from "../reference-links.ts";
 import { resourceLinks } from "../resources.ts";
 import { drafts } from "../drafts.ts";
@@ -25,7 +26,7 @@ import { UsageIndicator } from "../usage-indicator.ts";
 import { MainDock } from "../main-dock.ts";
 import { canNavigateNow, navigateRoute, type FocusInput } from "../workbench-assist.ts";
 import type { Notice, WorkbenchAction } from "@lumio/schema";
-import { needsYouCount, pendingNotices } from "../panes/overview.ts";
+import { needsYouCount } from "../panes/overview.ts";
 import { newRequestId } from "../commands.ts";
 import { LiveData, settled, type LiveSnapshot } from "../live-data.ts";
 
@@ -57,6 +58,7 @@ export class WorkbenchView {
   private disposeResourceLinks: () => void;
   /** Today、计数与提醒共用的实时数据（见 live-data.ts 的刷新规则）。 */
   private live: LiveData;
+  private observations = new UsageObservations(drafts().scope);
   /** 主对话面板（ADR 0060，A1-5）。 */
   private dock: MainDock;
   /** 人最近一次在页面上输入、滚动、点击或按键的时间；助手替人跳转前要先空闲一会儿。 */
@@ -143,6 +145,18 @@ export class WorkbenchView {
   /** 语言切换被推迟时，App 在下一次切换模块前重建界面；返回 true 表示已接管。 */
   constructor(root: HTMLElement, private session: Session, humans: string[], private logout: () => void, private beforeShow: () => boolean = () => false) {
     this.live = new LiveData(session.client, session.hub);
+    this.main.addEventListener("focusin", event => {
+      if (this.section !== "overview" || !(event.target instanceof Element)) return;
+      const region = event.target.closest('[data-pad-region="needs"]');
+      if (region && !(event.relatedTarget instanceof Node && region.contains(event.relatedTarget))) {
+        this.observations.record("decision-focus", "opened");
+      }
+    });
+    this.main.addEventListener("lumio-observation", event => {
+      if (!(event.target instanceof HTMLElement) || !this.current?.target.contains(event.target)) return;
+      const { action, outcome } = (event as CustomEvent).detail;
+      this.observations.record(action, outcome);
+    });
     this.disposeReferenceLinks = referenceLinks(this.main, session.client, ref => this.go("knowledge",ref));
     this.disposeResourceLinks = resourceLinks(this.main, session.client, (section, id, intent) => void this.go(section, id, intent));
     this.palette = new CommandPalette(session.client, (section, id, intent) => this.go(section, id, intent));
@@ -185,14 +199,14 @@ export class WorkbenchView {
     });
     const nav = h("nav", { class: "nav", "aria-label": t("Main navigation") });
     const overflowSections = SECTIONS.filter(section => !section.short);
-    for (const s of SECTIONS) {
+    for (const s of SECTIONS.filter(item => item.short)) {
       const count = h("span", { class: "nav-count" });
       const button = h("button", { type: "button", class: `nav-item${s.short ? "" : " desktop-nav"}`, "aria-label": t(s.label), title: t("{0} ({1})", t(s.label), s.key2), onclick: () => this.go(s.key) },
         h("span", { class: "nav-glyph" }, icon(s.icon)), h("span", { class: "nav-label" }, t(s.label)),
         s.short && h("span", { class: "nav-short" }, t(s.short)), count);
       this.nav.set(s.key, button); this.counts.set(s.key, count); nav.append(button);
     }
-    this.mobileMenu = h("button", { type: "button", class: "nav-item mobile-nav", "aria-label": t("More"),
+    this.mobileMenu = h("button", { type: "button", class: "nav-item more-navigation", "aria-label": t("More"),
       "aria-haspopup": "listbox", "aria-expanded": "false", onclick: () => openMenu(this.mobileMenu, [
         ...overflowSections.map(section => ({ value: section.key, label: t(section.label), icon: icon(section.icon), selected: this.section === section.key })),
         { value: "assistant-panel", label: t("Assistant panel"), icon: icon("assistant") },
@@ -203,7 +217,7 @@ export class WorkbenchView {
         if (value === "assistant-panel") { this.dock.setOpen(true); return; }
         const section = overflowSections.find(section => section.key === value);
         void this.go(section?.key ?? "settings");
-      }) }, h("span", { class: "nav-glyph" }, icon("more")), h("span", { class: "nav-short" }, t("More")));
+      }) }, h("span", { class: "nav-glyph" }, icon("more")), h("span", { class: "nav-label" }, t("More")), h("span", { class: "nav-short" }, t("More")));
     nav.append(this.mobileMenu);
     this.name = humans[0] ?? t("Me");
     this.usage = new UsageIndicator(session.client, () => void this.go("settings", "ai"));
@@ -294,6 +308,7 @@ export class WorkbenchView {
   private show(section: Section, id?: string, intent?: string): void {
     if (!this.dirty && this.beforeShow()) return;
     if (section === "settings" && this.section !== "settings" && this.section !== "trash") this.beforeSettings = this.currentHash || "#overview";
+    if (!this.current || this.section !== section) this.observations.enter(section);
     const previous = this.current;
     const previousSection = this.section;
     if (this.currentHash && !this.returning) this.visited = [...this.visited.filter(hash => hash !== this.currentHash), this.currentHash].slice(-30);
@@ -351,7 +366,7 @@ export class WorkbenchView {
     const changed = this.changed;
     let pane: Pane;
     if (section === "overview") pane = new OverviewPane(target, client, this.session.hub, navigate, this.name, changed, this.live);
-    else if (section === "settings") pane = new SettingsPane(target, this.session, this.name, () => void this.signOut(), () => this.leaveSettings(), sub => void this.go("settings", sub), id, this.gamepad);
+    else if (section === "settings") pane = new SettingsPane(target, this.session, this.name, () => void this.signOut(), () => this.leaveSettings(), sub => void this.go("settings", sub), id, this.gamepad, this.observations);
     else if (section === "knowledge") return this.mountKnowledge(target, id);
     else if (section === "work") pane = new WorkPane(target, client, this.session.hub, this.workMode, id, navigate, changed,
       resetSharing => this.dock?.pageChanged(resetSharing), subject => this.readSubject(subject));
@@ -372,7 +387,7 @@ export class WorkbenchView {
     const activate = () => {
       if (!LoadedPane || disposed || target.hidden) return;
       target.replaceChildren();
-      const pane = new LoadedPane(target, this.session.client, id, () => this.dock?.pageChanged());
+      const pane = new LoadedPane(target, this.session.client, id, () => this.dock?.pageChanged(), (s, i, n) => void this.go(s, i, n));
       mounted.pane = pane;
       if (intent) pane.intent(intent);
     };
@@ -473,7 +488,8 @@ export class WorkbenchView {
     this.dock.notices(snapshot);
     if (notices) this.applyNotices(notices);
     const set = (section: Section, value: number | undefined, attention = false) => {
-      const el = this.counts.get(section)!;
+      const el = this.counts.get(section);
+      if (!el) return;
       el.textContent = value ? String(value) : "";
       el.classList.toggle("attention", attention && !!value);
     };
@@ -481,10 +497,10 @@ export class WorkbenchView {
     set("inbox", undefined);
     set("approvals", proposals?.length, true);
     set("execution", execution?.execution_count);
-    // 今日的数字与 Today 页「需要你处理」的卡片数一致，再加上待看的提醒（ADR 0030）；窄屏底栏只看得到这一个数。
-    const complete = [snapshot.execution, snapshot.attention, snapshot.proposals, snapshot.jobAttention, snapshot.notices]
+    // Only actionable decisions belong in the Today badge.
+    const complete = [snapshot.execution, snapshot.attention, snapshot.proposals, snapshot.jobAttention]
       .every(result => result.status === "fulfilled");
-    set("overview", complete ? needsYouCount(snapshot) + pendingNotices(notices ?? []).length : undefined, true);
+    set("overview", complete ? needsYouCount(snapshot) : undefined, true);
   }
 
   private leaveSettings(): void {
@@ -541,6 +557,7 @@ export class WorkbenchView {
 
   dispose(): void {
     dismissMenu();
+    this.observations.close();
     this.dock.dispose();
     this.observer.disconnect();
     this.dock.launcher.remove();

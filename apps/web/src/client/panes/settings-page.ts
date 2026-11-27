@@ -1,3 +1,5 @@
+import { observationSettings } from "../observation-settings.ts";
+import type { UsageObservations } from "../usage-observations.ts";
 /**
  * 设置页（ADR 0028）：二级菜单。桌面左侧是分类，右侧是当前分类的内容；
  * 窄屏先显示分类列表，点进分类后用返回键回到列表。地址是 `#settings/<分类>`。
@@ -31,7 +33,7 @@ import { DEFAULT_SETTINGS_SECTION, SETTINGS_SECTIONS, foldOpen, rememberFold, se
 
 const SOURCE = "https://github.com/wicsp/Lumio";
 
-interface Built { element: HTMLElement; dispose?: () => void }
+interface Built { element: HTMLElement; refresh?: () => void; dispose?: () => void }
 type Health = { ok: boolean; version?: string } | { error: unknown };
 
 export class SettingsPane {
@@ -50,7 +52,7 @@ export class SettingsPane {
   private runtimeLoad = 0;
 
   constructor(owner: HTMLElement, private session: Session, private name: string, private logout: () => void,
-    private back: () => void, private navigate: (section?: SettingsSection) => void, initial?: string, private gamepad?: GamepadInput) {
+    private back: () => void, private navigate: (section?: SettingsSection) => void, initial?: string, private gamepad?: GamepadInput, private observations?: UsageObservations) {
     const bar = h("header", { class: "bar set-bar" },
       h("button", { type: "button", class: "icon-btn mobile-only", title: t("Back"), "aria-label": t("Back"), onclick: () => this.goBack() }, icon("back")),
       h("h1", { class: "bar-title" }, h("span", { class: "set-desktop-title" }, t("Settings")), this.title));
@@ -73,7 +75,7 @@ export class SettingsPane {
     const key = picked ?? DEFAULT_SETTINGS_SECTION;
     for (const [section, item] of this.navItems) item.setAttribute("aria-current", section === picked || (!picked && section === key) ? "page" : "false");
     this.title.textContent = picked ? t(SETTINGS_SECTIONS.find(s => s.key === picked)!.label) : t("Settings");
-    if (key === this.shown) return;
+    if (key === this.shown) { this.built.get(key)?.refresh?.(); return; }
     if (this.shown === "devices") {
       this.runtimeRows = undefined;
       this.built.get("devices")?.dispose?.();
@@ -82,6 +84,7 @@ export class SettingsPane {
     this.shown = key;
     let built = this.built.get(key);
     if (!built) { built = this.build(key); this.built.set(key, built); }
+    built.refresh?.();
     clear(this.content, built.element);
     this.scroll.scrollTop = 0;
   }
@@ -189,7 +192,8 @@ export class SettingsPane {
       }
       case "data": {
         const images = imageHostingSettings(this.session.client);
-        return { element: page(this.group(t("Image hosting"), images.element),
+        const usage = this.observations && observationSettings(this.observations);
+        return { refresh: usage?.refresh, element: page(...(usage ? [this.group(t("Usage observations"), usage.element)] : []), this.group(t("Image hosting"), images.element),
           h("a", { class: "set-row set-link", href: "#trash" }, icon("trash", "icon set-row-icon"), h("span", { class: "set-label" }, t("Recently deleted")), icon("chevron"))),
           dispose: images.dispose };
       }
