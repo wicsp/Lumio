@@ -1,15 +1,16 @@
 import { expect, test } from "bun:test";
-import { randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { parseFrontmatter } from "@lumio/knowledge";
+import { newId } from "@lumio/foundation";
 import {
   AIConnection, AIProfile, AiNote, Capture, CaptureCreate, CaptureCreateResult, CaptureList, KnowledgeAIBinding,
   KnowledgeOriginal, NoteDetail, NoticeList, ORIGINAL_CAPABILITY_NAME, Paper, SearchResult, SecurityReviewResult, Source, TrashListResult, TrashRestoreResult,
-  type AssistantModelRequest, type CaptureCommand,
+  JobResult, RuntimeAck, RuntimeRegistered, RuntimeSync, StoredArtifact, type AssistantModelRequest, type CaptureCommand,
 } from "@lumio/schema";
 import { readConfig } from "../src/config.ts";
 import { captureNetwork, fetchCapture, isPublicAddress, type CaptureNetwork } from "../src/inbox-fetch.ts";
@@ -23,7 +24,7 @@ function response(body: string, status = 200, headers: Record<string, string> = 
   return { status, header: (name: string) => headers[name], close() {}, body: (async function* () { yield enc.encode(body); })() };
 }
 
-async function fixture(language = "Chinese") {
+async function fixture(language = "Chinese", env: NodeJS.ProcessEnv = {}) {
   const root = await mkdtemp(join(tmpdir(), "lumio-inbox-")), vault = join(root, "vault");
   await mkdir(vault);
   const requests: string[] = [], calls: AssistantModelRequest[] = [];
@@ -37,13 +38,15 @@ async function fixture(language = "Chinese") {
       if (url.hostname === "arxiv.org" && url.pathname.startsWith("/html/")) return response(await readFixture("arxiv.html"));
       if (url.hostname === "arxiv.org" && url.pathname.startsWith("/bibtex/")) return response(await readFixture("arxiv.bib"), 200, { "content-type": "text/plain" });
       if (url.hostname === "redirect.example") return response("", 302, { location: "http://[::ffff:127.0.0.1]/internal" });
+      if (url.hostname === "b23.tv") return response("", 302, { location: url.pathname === "/public"
+        ? "https://www.bilibili.com/video/BV1xx411c7mD/?p=2&utm_source=share" : "https://unrelated.example/private" });
       if (url.hostname === "locked.example") return response("", 401);
       return response(webpage);
     },
   };
-  const hub = await startHub(readConfig({
+  const boot = () => startHub(readConfig({
     HOME: root, LUMIO_STATE_DIR: join(root, "state"), LUMIO_VAULT: vault, LUMIO_HUB_LISTEN: "127.0.0.1:0",
-    LUMIO_CAPTURE_CARD_INPUT_TOKENS: "140", LUMIO_CAPTURE_SUMMARY_LANGUAGE: language,
+    LUMIO_CAPTURE_CARD_INPUT_TOKENS: "140", LUMIO_CAPTURE_SUMMARY_LANGUAGE: language, ...env,
   }), { log() {}, inbox: { network, model() {
     return { settings: { model: "synthetic-summary" }, model: { async complete(input) {
       calls.push(input);
@@ -52,6 +55,7 @@ async function fixture(language = "Chinese") {
       return { content: JSON.stringify({ body: `Synthetic ${depth} result.`, tags: ["basalt"] }), tool_calls: [] };
     } } };
   } } });
+  let hub = await boot();
   const credential = (name: string, role: "human" | "agent" | "runtime" = "human") => {
     const actor = hub.store.createActor(name, role);
     return { actor, token: hub.store.createToken(name, name) };
@@ -69,7 +73,7 @@ async function fixture(language = "Chinese") {
   };
   const get = async (id: string) => Capture.parse(await (await api(`${captures}/${id}`)).json());
   const wait = async (id: string, complete = (value: Capture) => (value.state === "ready" || value.state === "failed") && value.card !== "pending") => {
-    for (let i = 0; i < 150; i++) {
+    for (let i = 0; i < 350; i++) {
       const value = await get(id);
       if (complete(value)) return value;
       await Bun.sleep(15);
@@ -93,7 +97,8 @@ async function fixture(language = "Chinese") {
     return api("/v2/ai/knowledge-bindings", "PUT", { request_id: randomUUID(), purpose, profile: profile.id });
   };
   const note = async (id: string) => NoteDetail.parse(await (await api(`/v2/knowledge/notes/${id}`)).json());
-  return { hub, owner, agent, other, runtime, api, create, get, wait, command, original, bind, note, requests, calls, vault,
+  return { get hub() { return hub; }, owner, agent, other, runtime, api, create, get, wait, command, original, bind, note, requests, calls, vault,
+    async restart() { await hub.stop(); hub = await boot(); },
     replacePage(body: string) { webpage = body; },
     modelAttemptsTool() { failure = true; },
     async close() { await hub.stop(); await rm(root, { recursive: true, force: true }); },
@@ -421,5 +426,75 @@ test("removing a capture hides its unread notice until the capture is restored",
     const restore = await f.api(`/v2/trash/${removed.entity!.id}/restore`, "POST", { request_id: randomUUID() });
     expect(restore.status).toBe(200);
     expect(await notices()).toEqual(before);
+  } finally { await f.close(); }
+});
+
+const biliUrl = "https://www.bilibili.com/video/BV1xx411c7mD";
+const transcriptionEnv = { LUMIO_BILIBILI_TRANSCRIPTION_RUNTIME: "transcriber", LUMIO_BILIBILI_TRANSCRIPTION_COMMAND: "/synthetic/bilibili-transcribe" };
+
+test("Bilibili uses existing subtitles and archives local transcriptions across Hub restart", async () => {
+  const f = await fixture("Chinese", transcriptionEnv);
+  try {
+    const runtime = (path: string, body: unknown) => f.api(`/v1/runtime/${path}`, "POST", body, f.runtime.token);
+    RuntimeRegistered.parse(await (await runtime("register", {
+      protocol_version: 2, name: "transcriber", engines: [], tags: [], max_concurrent: 1,
+    })).json());
+    const sync = async () => RuntimeSync.parse(await (await runtime("sync", { running: [], queued: [], outbox: 0 })).json());
+    const native = await f.create(biliUrl, {
+      channel: "extension", content: { format: "markdown", body: "## 字幕（自动生成）\n\n平台字幕" },
+    });
+    expect((await f.wait(native.capture.id)).state).toBe("ready");
+    expect((await sync()).jobs).toHaveLength(0);
+
+    const blocked = await f.create("https://b23.tv/blocked");
+    expect(await f.wait(blocked.capture.id)).toMatchObject({ state: "failed", error: { code: "blocked" } });
+    const fallback = await f.create("https://b23.tv/public", {
+      channel: "extension", content: { format: "markdown", body: "## 简介\n\n合成说明\n\n（没有取到字幕）" },
+    });
+    await f.wait(fallback.capture.id, value => value.state === "extracting");
+    expect(await f.create("https://b23.tv/public")).toMatchObject({ duplicate: "existing", capture: { id: fallback.capture.id } });
+    const jobs = (await sync()).jobs;
+    expect(jobs).toHaveLength(1);
+    const job = jobs[0]!;
+    expect(job.run).toEqual({ kind: "command", argv: [transcriptionEnv.LUMIO_BILIBILI_TRANSCRIPTION_COMMAND, biliUrl + "?p=2"] });
+    RuntimeAck.parse(await (await runtime("ack", { accepted: [job.id] })).json());
+    const result = JobResult.parse({ job: job.id, lease: job.lease, status: "done", finished: new Date().toISOString() });
+    expect((await runtime("results", result)).status).toBe(200);
+
+    await f.restart();
+    expect((await f.get(fallback.capture.id)).state).toBe("extracting");
+    const transcript = await readFixture("bilibili-transcript.txt");
+    const id = newId("art", new Date(), randomBytes);
+    const file = StoredArtifact.parse({
+      id, owner: { module: "execution", id: job.id }, key: `${id}.bin`, media_type: "text/plain",
+      size: Buffer.byteLength(transcript), sha256: createHash("sha256").update(transcript).digest("hex"),
+      status: "staged", private: false, created: new Date().toISOString(),
+    });
+    const path = "/v2/execution/artifacts";
+    expect(StoredArtifact.parse(await (await f.api(path, "POST", file, f.runtime.token)).json()).status).toBe("staged");
+    const upload = await fetch(new URL(`${path}/${file.id}`, f.hub.server.url), {
+      method: "PUT", headers: { Authorization: `Bearer ${f.runtime.token}`, "Content-Type": "application/octet-stream" }, body: transcript,
+    });
+    expect(StoredArtifact.parse(await upload.json()).status).toBe("ready");
+    const capture = await f.wait(fallback.capture.id);
+    expect(capture).toMatchObject({ state: "ready", kind: "video", title: "合成视频 P2" });
+    const original = await f.original(capture.entity!.id!);
+    expect(original.frontmatter.extractor).toBe("bilibili-asr@1");
+    expect(original.body).toMatch(/## 简介\n\n合成说明\n\n## (?:字幕（语音转写）|Subtitles \(speech transcription\))/);
+    expect(original.body).toContain("**00:00:12** 第二句 &lt;字幕&gt;");
+    expect(f.requests).toEqual(["https://b23.tv/blocked", "https://b23.tv/public", biliUrl + "/?p=2&utm_source=share"]);
+  } finally { await f.close(); }
+});
+
+test("Bilibili link failures can be retried with pasted text without dispatching a command", async () => {
+  const f = await fixture("Chinese", transcriptionEnv);
+  try {
+    const created = await f.create(biliUrl);
+    const failed = await f.wait(created.capture.id);
+    expect(failed).toMatchObject({ state: "failed", error: { code: "runtime_unavailable" } });
+    expect((await f.command(failed, { op: "retry", content: { format: "text", body: "手动字幕" } })).status).toBe(200);
+    const ready = await f.wait(created.capture.id);
+    expect(ready).toMatchObject({ state: "ready", attempt: 2 });
+    expect((await f.original(ready.entity!.id!)).body.trim()).toBe("手动字幕");
   } finally { await f.close(); }
 });

@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { readFile, mkdir, writeFile, rename, rm } from "node:fs/promises";
 import { CAPTURE_LIMITS, GLANCE_LIMITS, DECISION_GATE_DEFAULTS, EXPLORATION_DEFAULTS, RuntimeName } from "@lumio/schema";
 import { homedir, hostname } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { modelConfiguration } from "./assistant-model.ts";
 import { HubError } from "./errors.ts";
 import { personalConfig } from "./personal.ts";
@@ -57,8 +57,19 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env) {
   if (!Number.isSafeInteger(glanceRetentionDays) || glanceRetentionDays < 1 || glanceRetentionDays > 3650) {
     throw new HubError("INVALID", { key: "glance.invalid_retention", args: [] });
   }
+  const transcriptionRuntime = env.LUMIO_BILIBILI_TRANSCRIPTION_RUNTIME;
+  const transcriptionCommand = env.LUMIO_BILIBILI_TRANSCRIPTION_COMMAND;
+  let bilibiliTranscription: { runtime: string; command: string } | undefined;
+  if (transcriptionRuntime || transcriptionCommand) {
+    const runtime = RuntimeName.safeParse(transcriptionRuntime);
+    if (!runtime.success || !transcriptionCommand || !isAbsolute(transcriptionCommand)) {
+      throw new HubError("INVALID", { key: "inbox.bilibili_config", args: [] });
+    }
+    bilibiliTranscription = { runtime: runtime.data, command: transcriptionCommand };
+  }
   return {
     glanceRetentionDays, captureCardInputTokens, captureSummaryLanguage, decisionGateTimeoutMs, decisionGateMinConfidence,
+    bilibiliTranscription,
     watchdogIntervalMinutes, explorationMaxTokens, explorationMaxMs: explorationMaxMinutes * 60_000,
     approvalSummaryProfile: env.LUMIO_APPROVAL_SUMMARY_PROFILE?.trim() || undefined,
     assistantModel: env.LUMIO_ASSISTANT_MANAGED === "1" ? undefined : modelConfiguration(env),
