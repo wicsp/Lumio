@@ -1,3 +1,5 @@
+import { artifactRow } from "../artifact-row.ts";
+import { observeAction } from "../usage-observations.ts";
 /**
  * 任务 / 项目详情。
  * - 属性：点一下就改，立即带 revision 保存；冲突时不覆盖，提示载入最新内容。
@@ -117,8 +119,9 @@ export class WorkEditor {
         rec.type === "task" && !rec.plan && this.planButton(rec),
         isTask && (this.delegateButton = h("button", { type: "button", class: "btn btn-primary btn-small", "data-pad-action": "delegate", onclick: () => void this.dispatch() }, icon("play"), t("Delegate")))));
 
+    const references = h("div", {});
     const attention = h("div", { class: "attn-slot" });
-    const detail = h("div", { class: "detail" }, crumbs, h("div", { class: "detail-head", "data-pad-row": rec.id + ":detail", tabindex: "-1" }, this.title, this.updated), attention, this.note, this.props,
+    const detail = h("div", { class: "detail" }, crumbs, h("div", { class: "detail-head", "data-pad-row": rec.id + ":detail", tabindex: "-1" }, this.title, this.updated), attention, references, this.note, this.props,
       h("div", { class: "divider" }), this.bodyHost, this.saveStatus);
     root.append(detail);
     this.renderMeta();
@@ -139,18 +142,34 @@ export class WorkEditor {
         const bar = h("div", { class: "attn-bar", role: "group", "aria-label": t("Needs you") });
         const docked = this.reply ? { bar, reply: this.reply } : undefined;
         attention.append(attentionCard(item, { client, hub, navigate: hooks.navigate, changed: () => { hooks.changed(); hooks.reload(); }, docked }, "task"));
+        if (item.kind === "review") {
+          const files = h("div", {});
+          const showFiles = h("button", { type: "button", class: "btn btn-small", onclick: async () => {
+            showFiles.disabled = true;
+            observeAction(showFiles, "evidence-list", "opened");
+            try {
+              const items = await client.jobArtifacts(item.job);
+              if (!this.active) return;
+              clear(files, ...(items.length ? items.map(file => artifactRow(client, file, () => this.active && !root.closest("[hidden]"), false))
+                : [h("p", { class: "muted" }, t("No files delivered for this round."))]));
+            } catch (cause) { if (this.active) clear(files, failure(errorText(cause))); }
+            finally { showFiles.disabled = false; }
+          } }, icon("file"), t("Files from round {0}", item.round));
+          attention.append(showFiles, files);
+        }
         if (docked && bar.childNodes.length) this.dock.prepend(bar);
         this.applyAttention(item.kind, !!docked);
       };
       if (attention_ !== undefined) show(attention_ ?? undefined);
       else void attentionFor(hub, input.task.id).then(show).catch(() => { /* 旧 Hub：没有这个接口 */ });
-      if (input.task.references.length) detail.append(h("section", { class: "section" },
+      if (input.task.references.length) references.append(h("section", { class: "section" },
         h("div", { class: "section-head" }, h("h3", {}, t("References")), h("span", { class: "count" }, input.task.references.length)),
         h("ul", {}, ...input.task.references.map(ref => {
           const label = ref.label ?? ref.id;
           return h("li", {}, ref.module === "knowledge"
             ? h("a", { href: lumioLink(ref.id), class: "resource-link", "data-resource": ref.id }, label)
-            : label);
+            : ref.module === "execution" && ref.id.startsWith("job_")
+              ? h("button", { type: "button", class: "text-btn", onclick: () => hooks.navigate("execution", ref.id) }, label) : label);
         }))));
     } else detail.append(this.projectTasks(input));
   }
@@ -596,6 +615,7 @@ export class WorkEditor {
       }
       if (!tasks.length) { clear(body, h("p", { class: "muted" }, t("No tasks in this project yet."))); return; }
       const groups = groupTasksByTurn(tasks);
+      const materials = tasks.filter(task => task.references.some(ref => ref.module === "knowledge"));
       clear(body, ...groups.map(([group, list]) => h("div", { class: "project-task-group" },
         h("p", { class: "project-task-head" }, turnIcon(group), TURN_GROUP_LABELS[group], h("span", { class: "count" }, list.length)),
         h("div", { class: "runs" }, ...list.map(task => {
@@ -609,6 +629,10 @@ export class WorkEditor {
           });
           return delegation ? h("div", { class: "task-action-row" }, row, delegation) : row;
         })))));
+      if (materials.length) body.append(h("details", { class: "project-materials" },
+        h("summary", {}, t("Sources used by these tasks")),
+        ...materials.map(task => h("section", {}, h("h4", {}, task.title), ...task.references.filter(ref => ref.module === "knowledge")
+          .map(ref => h("a", { href: lumioLink(ref.id), class: "resource-link", "data-resource": ref.id }, ref.label ?? ref.id))))));
     };
     const load = async () => {
       if (!this.active) return;
@@ -869,11 +893,13 @@ export class WorkEditor {
     const submit = h("button", { type: "submit", class: "btn btn-primary btn-small" }, t("Comment"));
     // 评论并交给 agent 继续：评论与委派在同一事务（ADR 0030）；继续的是计划当前步骤或上一轮的 agent。
     const next = continueTarget(input);
+    let attentionKind: WorkAttention["kind"] | undefined;
     const onward = next ? h("button", { type: "button", class: "btn btn-small", "data-pad-action": "continue", title: t("Post the comment and delegate the next round in one step") }, icon("play"), t("Comment and continue with {0}", next)) : null;
     if (onward && next) {
       // 「需要你处理」时这里就是回答 / 意见 / 带修改重试的地方：主按钮换成「交给 … 继续」。
       this.applyAttention = (kind, docked) => {
         if (!docked) return;
+        attentionKind = kind;
         onward.classList.add("btn-primary"); submit.classList.remove("btn-primary");
         clear(onward, icon(kind === "failed" ? "refresh" : "play"), kind === "question" ? t("Answer and continue with {0}", next)
           : kind === "failed" ? t("Retry with {0}", next) : t("Send feedback to {0} and continue", next));
@@ -892,6 +918,7 @@ export class WorkEditor {
       previous = `continue\n${text.value}`;
       try {
         await this.client.workCommand(answerCommand(this.record, undefined, text.value, requestId));
+        if (attentionKind) observeAction(form, `decision-${attentionKind}`, "succeeded");
         text.value = ""; captureComment(); this.commentDraft = undefined;
         toast(t("Dispatched to {0}", next!));
         this.hooks.changed(); this.hooks.reload();

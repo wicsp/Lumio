@@ -74,7 +74,7 @@ afterEach(() => restore());
 
 const emptyOverview = async () => ({ activity: [], execution_count: 0, activity_live_count: 0, standalone_attention: { total: 0, items: [] } });
 const suffix = "01JABCDEFGHJKMNPQRSTVWXYZ0";
-const task = { id: `task_${suffix}`, revision: 4 };
+const task = { id: `task_${suffix}`, revision: 4, outcome: "open", turn: { holder: "human", reason: "failed", round: 2, job: `job_${suffix}`, since: "2026-11-17T00:00:00Z" } };
 const longSummary = "Synthetic summary line.\n\n## Details\n\nMore synthetic detail.";
 const item = (patch: Record<string, unknown> = {}) => WorkAttention.parse({ task: task.id, job: `job_${suffix}`, title: "Synthetic task",
   kind: "review", round: 2, since: "2026-11-17T00:00:00Z", agent: "codex@fixture", summary: longSummary, ...patch });
@@ -120,7 +120,7 @@ test("Today shows the opening of a long report and expands the full report in pl
   const { ctx } = context({ expanded });
   const card = attentionCard(item(), ctx, "today") as unknown as ElementStub;
   expect(card.find(node => node.innerHTML.includes("Synthetic summary line."))).toBeDefined();
-  expect(button(card, "Mark done")).toBeDefined();
+  expect(button(card, "Accept and complete task")).toBeDefined();
   button(card, "Read full report")!.click();
   await settle();
   expect(card.find(node => node.innerHTML.includes("SYNTHETIC FULL REPORT"))).toBeDefined();
@@ -147,8 +147,8 @@ test("in task detail the full report is in the card and the decisions are in the
   const card = attentionCard(item(), ctx, "task") as unknown as ElementStub;
   await settle();
   expect(card.find(node => node.innerHTML.includes("SYNTHETIC FULL REPORT"))).toBeDefined();
-  expect(button(card, "Mark done")).toBeUndefined();
-  expect(button(bar, "Mark done")).toBeDefined();
+  expect(button(card, "Accept and complete task")).toBeUndefined();
+  expect(button(bar, "Accept and complete task")).toBeDefined();
   expect(bar.textContent).toContain("Ready for your review");
   button(bar, "Add feedback and continue")!.click();
   expect(replies).toEqual(["review"]);

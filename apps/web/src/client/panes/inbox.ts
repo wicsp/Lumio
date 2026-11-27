@@ -1,3 +1,5 @@
+import { sourceTaskIntent } from "../source-task.ts";
+import { observeAction } from "../usage-observations.ts";
 /**
  * Inbox（ADR 0065，I2-3）：收藏夹。粘贴链接或正文存下来，资料即进入知识库；
  * 失败的置顶，其余按保存时间排列，不要求分拣。
@@ -98,7 +100,7 @@ export class InboxPane {
     this.save.addEventListener("click", () => void this.submit());
     root.append(
       h("header", { class: "bar" },
-        h("h1", { class: "bar-title" }, t("Inbox"), this.meta),
+        h("h1", { class: "bar-title" }, t("Saved sources"), this.meta),
         h("span", { class: "bar-spacer" }),
         h("button", { type: "button", class: "icon-btn", title: t("Refresh"), "aria-label": t("Refresh"), onclick: () => void this.load() }, icon("refresh"))),
       h("div", { class: "inbox-scroll" }, h("div", { class: "inbox-page" },
@@ -141,6 +143,7 @@ export class InboxPane {
     try {
       const result = await this.client.capture(request);
       if (!this.active) return true;
+      observeAction(this.input, "capture", "succeeded");
       if (result.duplicate === "existing") toast(t("Already saved. It's in the list."), "ok", result.capture.entity?.id ? { label: t("Open"), run: () => this.openEntity(result.capture) } : undefined);
       else if (result.duplicate === "discarded") {
         if (result.capture.entity?.id) toast(t("You discarded this before. Restore it from Recently deleted if you want it back."), "ok", { label: t("Open Recently deleted"), run: () => this.navigate("trash") });
@@ -150,7 +153,7 @@ export class InboxPane {
       this.changed();
       return true;
     } catch (cause) {
-      if (this.active) toast(errorText(cause), "error");
+      if (this.active) { observeAction(this.input, "capture", "failed"); toast(errorText(cause), "error"); }
       return false;
     } finally {
       this.save.disabled = this.input.disabled = false;
@@ -338,6 +341,9 @@ export class InboxPane {
       }
     }
     if (capture.entity) bar.append(h("button", { type: "button", class: "btn btn-small", onclick: () => this.openEntity(capture) }, icon("file"), t("Open in knowledge base")));
+    const source = capture.entity?.id;
+    if (source && !capture.entity?.path?.startsWith("life/")) bar.append(h("button", { type: "button", class: "btn btn-small",
+      onclick: () => this.navigate("work", "tasks", sourceTaskIntent([{ module: "knowledge", id: source, label: capture.entity?.title?.slice(0, 200) }])) }, t("Create task from source")));
     const url = capture.url && safeExternalUrl(capture.url);
     if (url) bar.append(h("a", { href: url, target: "_blank", rel: "noopener noreferrer nofollow", class: "btn btn-small" }, icon("external"), t("Open original link")));
     if (capture.state === "ready" || capture.state === "failed") {

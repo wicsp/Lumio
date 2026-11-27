@@ -80,7 +80,7 @@ export class MainDock {
       this.panel, this.scroller, this.notice, composer);
     this.launcher = h("button", { type: "button", class: "dock-launcher", title: t("Ask the assistant"), "aria-label": t("Ask the assistant"), onclick: () => this.setOpen(true) }, icon("assistant"));
     // 空间足够时默认并排显示，较窄的视口按需打开抽屉。
-    let open = globalThis.matchMedia?.("(min-width: 1200px)").matches ?? true;
+    let open = false;
     try { const saved = localStorage.getItem(OPEN_KEY); if (saved !== null) open = saved === "1"; } catch { /* 用默认值 */ }
     try { this.shown = new Set(JSON.parse(sessionStorage.getItem(SHOWN_KEY) ?? "[]") as string[]); } catch { this.shown = new Set(); }
     this.setOpen(open, false);

@@ -1,3 +1,4 @@
+import { observeAction } from "./usage-observations.ts";
 import { markdownImageAt } from "./utils/markdown-images.ts";
 import { NoteImages, type NoteImageUpload } from "./note-images.ts";
 import { Compartment, EditorState, Prec, StateField, type Range } from "@codemirror/state";
@@ -210,6 +211,7 @@ export class NoteEditor {
             return;
         const result = insertReference(this.value, trigger, hit.insert_text, asFootnote);
         this.view.dispatch({ changes: result.changes, selection: { anchor: result.cursor }, annotations: pickedCompletion.of(completion), userEvent: "input.complete" });
+        observeAction(this.view.dom, "insert-reference", "succeeded");
         closeCompletion(this.view);
         this.view.focus();
     }
@@ -309,6 +311,7 @@ export class NoteEditor {
         else this.showReference(label, anchor);
     }
     private showReference(label: string, anchor?: HTMLElement): void {
+        observeAction(this.view.dom, "source-preview", "opened");
         clearTimeout(this.hideCardTimer); this.hideCardTimer = undefined;
         this.referenceAnchor = anchor;
         const model = footnotes(this.value), def = model.definitions.find(d => d.label === label);
