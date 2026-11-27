@@ -81,7 +81,7 @@ export function collectionCaptures(captures: readonly Capture[]): Capture[] {
 }
 
 export class InboxPane {
-  private input = autosize(h("textarea", { rows: "1", class: "inbox-input", "aria-label": t("Link or text to save"), placeholder: t("Paste a link, or text to save…") }));
+  private input = autosize(h("textarea", { rows: "1", class: "inbox-input", "aria-label": t("Link or text to save"), placeholder: t("Link or text…") }));
   private save = h("button", { type: "button", class: "btn btn-primary" }, t("Save"));
   private list = h("div", { class: "inbox-list" });
   private meta = h("span", { class: "bar-meta" });

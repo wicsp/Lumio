@@ -5,7 +5,7 @@
 import type { Job, Proposal } from "@lumio/schema";
 import { approvalSummaryCard } from "../approval-summary.ts";
 import { errorText, type Client } from "../api.ts";
-import { clear, empty, failure, h, icon, loading, placeholder, toast } from "../dom.ts";
+import { clear, empty, failure, h, icon, loading, placeholder, select, toast } from "../dom.ts";
 import { JOB_LABELS } from "../labels.ts";
 import { listKeys, markSelected } from "../list-keys.ts";
 import type { Navigate } from "../navigation.ts";
@@ -35,14 +35,26 @@ export class ApprovalsPane {
   private unbindKeys: () => void;
 
   constructor(root: HTMLElement, private client: Client, private changed: () => void, private navigate: Navigate) {
+    const statuses = ["pending", "accepted", "rejected", "withdrawn"] as const;
     const seg = h("div", { class: "segmented", role: "group", "aria-label": t("Approval status") });
-    for (const status of ["pending", "accepted", "rejected", "withdrawn"] as const) {
-      seg.append(h("button", { type: "button", "aria-pressed": String(status === this.status), onclick: (event: Event) => {
-        this.status = status; seg.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(b === event.currentTarget)));
-        this.selected = undefined; this.showPlaceholder(); void this.load();
-      } }, STATUS[status]));
-    }
-    root.append(h("header", { class: "bar approval-bar" }, h("h1", { class: "bar-title" }, t("Approvals")), seg, h("span", { class: "bar-spacer" }),
+    const filter = select("approval-status", statuses.map(status => [status, STATUS[status]]), this.status);
+    filter.className = "approval-filter";
+    filter.setAttribute("aria-label", t("Approval status"));
+    const setStatus = (status: Proposal["status"]) => {
+      this.status = status;
+      filter.value = status;
+      for (const button of seg.querySelectorAll("button")) button.setAttribute("aria-pressed", String(button.value === status));
+      this.selected = undefined;
+      this.showPlaceholder();
+      void this.load();
+    };
+    filter.addEventListener("change", () => {
+      const status = statuses.find(value => value === filter.value);
+      if (status) setStatus(status);
+    });
+    for (const status of statuses) seg.append(h("button", { type: "button", value: status, "aria-pressed": String(status === this.status),
+      onclick: () => setStatus(status) }, STATUS[status]));
+    root.append(h("header", { class: "bar approval-bar" }, h("h1", { class: "bar-title" }, t("Approvals")), seg, filter, h("span", { class: "bar-spacer" }),
       h("button", { type: "button", class: "icon-btn", title: t("Refresh"), "aria-label": t("Refresh"), onclick: () => void this.load() }, icon("refresh"))), this.split);
     this.split.append(h("div", { class: "list-pane" }, this.list), this.detail);
     this.unbindKeys = listKeys(this.list, id => this.openById(id));

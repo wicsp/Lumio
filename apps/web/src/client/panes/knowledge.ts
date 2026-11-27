@@ -84,7 +84,7 @@ export class KnowledgePane {
   private detail = h("section", { class: "detail-pane", "aria-live": "polite" });
   private outlineEntries: () => RailEntry[] = () => [];
   private outline = new SideRail(this.detail, () => this.outlineEntries(), t("Article outline"), "outline");
-  private query = h("input", { type: "search", name: "q", placeholder: t("Title, text, author, citekey"), autocomplete: "off" });
+  private query = h("input", { type: "search", name: "q", "aria-label": t("Search notes"), placeholder: t("Search notes"), autocomplete: "off" });
   private type = "";
   private includePrivate = false;
   private typeButton = h("button", { type: "button", class: "filter-btn" });
@@ -157,9 +157,11 @@ export class KnowledgePane {
     root.append(
       h("header", { class: "bar" }, h("h1", { class: "bar-title" }, t("Knowledge")),
         h("div", { class: "segmented", role: "group", "aria-label": t("Knowledge view") }, this.listButton, this.graphButton,
-          this.navigate && h("button", { type: "button", onclick: () => this.navigate?.("inbox") }, t("Saved sources"))),
+          this.navigate && h("button", { type: "button", "aria-label": t("Saved sources"), onclick: () => this.navigate?.("inbox") },
+            h("span", { class: "full-label" }, t("Saved sources")), h("span", { class: "compact-label" }, t("Saved")))),
         h("span", { class: "bar-spacer" }),
-        h("button", { type: "button", class: "btn btn-primary", onclick: () => this.intent("new") }, icon("plus"), t("New note")),
+        h("button", { type: "button", class: "btn btn-primary bar-create", "aria-label": t("New note"), title: t("New note"), onclick: () => this.intent("new") },
+          icon("plus"), h("span", { class: "full-label" }, t("New note"))),
         h("button", { type: "button", class: "icon-btn", title: t("Refresh"), "aria-label": t("Refresh"), onclick: () => { void this.search(); if (this.selected) void this.open(this.selected, true); } }, icon("refresh"))),
       this.split);
     this.listPane.append(this.filterHost, this.results, this.related);
@@ -238,7 +240,7 @@ export class KnowledgePane {
   }
 
   private renderFilters(): void {
-    clear(this.typeButton, icon("down"), this.type ? TYPE_LABEL[this.type] ?? this.type : t("All types"));
+    clear(this.typeButton, icon("down"), h("span", { class: "filter-label" }, this.type ? TYPE_LABEL[this.type] ?? this.type : t("All types")));
     this.typeButton.classList.toggle("is-set", !!this.type);
     clear(this.privateButton, icon("lock"), this.includePrivate ? t("Incl. private") : t("Private"));
     this.privateButton.classList.toggle("is-set", this.includePrivate);
