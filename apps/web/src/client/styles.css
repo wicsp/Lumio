@@ -1270,14 +1270,14 @@ button.set-row:hover, a.set-row:hover { background: var(--hover); text-decoratio
   :root { --bar-h: 48px; }
   .shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
   .sidebar {
-    order: 2; flex-direction: row; justify-content: space-around; padding: 0 4px max(4px, env(safe-area-inset-bottom)); background: var(--surface);
+    order: 2; flex-direction: row; justify-content: space-around; padding: 0 4px env(safe-area-inset-bottom); background: var(--surface);
     border-right: 0; border-top: 1px solid var(--line); overflow: visible;
   }
   [data-keyboard-open] .shell > .sidebar { display: none; }
   .sidebar > :not(.nav) { display: none; }
   .nav { flex-direction: row; justify-content: space-around; width: 100%; gap: 0; }
   .mobile-nav { display: flex; }
-  .nav-item { position: relative; flex: 1; flex-direction: column; justify-content: center; gap: 0; min-width: 0; min-height: 48px; padding: 0; font-size: 11px; text-align: center; }
+  .nav-item { position: relative; flex: 1; flex-direction: column; justify-content: flex-end; gap: 0; min-width: 0; min-height: 44px; padding: 0; font-size: 11px; text-align: center; }
   .nav-item[aria-current="page"], .nav-item:hover { background: none; }
   .nav-glyph { width: 36px; height: 24px; border-radius: 12px; transition: background-color .16s var(--ease); }
   .nav-item[aria-current="page"] .nav-glyph { background: var(--blue-wash); }

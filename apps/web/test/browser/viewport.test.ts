@@ -3,7 +3,7 @@ import { preventPageZoom, trackViewport } from "../../src/client/viewport.ts";
 
 function browser(coarse = true) {
   const viewport = Object.assign(new EventTarget(), { width: 390, height: 844, offsetTop: 0, scale: 1 });
-  const doc = Object.assign(new EventTarget(), { activeElement: null as Element | null });
+  const doc = Object.assign(new EventTarget(), { activeElement: null as Element | null, body: null as Element | null });
   const properties = new Map<string, string>();
   const attributes = new Set<string>();
   const writes: string[] = [];
@@ -22,6 +22,7 @@ function browser(coarse = true) {
   const host = {
     visualViewport: viewport,
     matchMedia: () => ({ matches: coarse }),
+    getComputedStyle: (element: { overflowY: string }) => ({ overflowY: element.overflowY }),
     requestAnimationFrame: (callback: FrameRequestCallback) => { frames.set(++nextFrame, callback); return nextFrame; },
     cancelAnimationFrame: (id: number) => frames.delete(id),
   } as unknown as Window;
@@ -37,7 +38,7 @@ function browser(coarse = true) {
     doc.dispatchEvent(new Event(element ? "focusin" : "focusout"));
     flush();
   };
-  return { host, root: root as unknown as HTMLElement, layout: root, viewport, properties, writes, attributes, frames, flush, focus, resize };
+  return { host, root: root as unknown as HTMLElement, doc, layout: root, viewport, properties, writes, attributes, frames, flush, focus, resize };
 }
 
 function field({ tagName = "TEXTAREA", type = "text", editable = false, writable = true, inputMode = null as string | null } = {}) {
@@ -45,6 +46,20 @@ function field({ tagName = "TEXTAREA", type = "text", editable = false, writable
 }
 
 const keyboardAttribute = "data-keyboard-open";
+
+function scrollPane(height: number, top: () => number, parentElement: HTMLElement | null = null, overflowY = "auto") {
+  return {
+    parentElement, overflowY, clientTop: 0, clientHeight: height, scrollHeight: 1000, scrollTop: 0,
+    getBoundingClientRect: () => ({ top: top() }),
+  };
+}
+
+function positionedField(pane: ReturnType<typeof scrollPane>, top: () => number, doc: object) {
+  return Object.assign(field(), {
+    parentElement: pane, ownerDocument: doc,
+    getBoundingClientRect: () => ({ top: top(), bottom: top() + 40, height: 40 }),
+  });
+}
 
 describe("visible app viewport", () => {
   test("keyboard opening, panning and closing keep the frame within the visible area", () => {
@@ -78,6 +93,79 @@ describe("visible app viewport", () => {
     expect(b.attributes.has(keyboardAttribute)).toBe(false);
     b.resize(745);
     expect(b.attributes.has(keyboardAttribute)).toBe(false);
+    stop();
+  });
+
+  test("keyboard opening scrolls a covered field into view without moving the document", () => {
+    const b = browser();
+    const body = scrollPane(844, () => 0);
+    b.doc.body = body as unknown as Element;
+    const pane = scrollPane(380, () => 48, body as unknown as HTMLElement);
+    const input = positionedField(pane, () => 620 - pane.scrollTop, b.doc);
+    const stop = trackViewport(b.host, b.root);
+    b.focus(input);
+    expect(pane.scrollTop).toBe(0);
+    b.resize(390);
+    expect(pane.scrollTop).toBe(278);
+    expect(body.scrollTop).toBe(0);
+    expect(b.doc.activeElement).toBe(input);
+
+    // Duplicate viewport events and keyboard dismissal leave manual scrolling alone.
+    pane.scrollTop = 100;
+    b.resize(390);
+    b.resize(844);
+    expect(pane.scrollTop).toBe(100);
+    stop();
+  });
+
+  test("changing focus with the keyboard visible only scrolls if the next field is clipped", () => {
+    const b = browser();
+    const pane = scrollPane(380, () => 48);
+    const stop = trackViewport(b.host, b.root);
+    b.focus(positionedField(pane, () => 300 - pane.scrollTop, b.doc));
+    b.resize(390, 80);
+    expect(pane.scrollTop).toBe(0);
+    b.focus(positionedField(pane, () => 460 - pane.scrollTop, b.doc));
+    expect(pane.scrollTop).toBe(80);
+    b.focus(positionedField(pane, () => 140 - pane.scrollTop, b.doc));
+    expect(pane.scrollTop).toBe(52);
+    stop();
+  });
+
+  test("nested panes reveal a field in an initially offscreen inner pane", () => {
+    const b = browser();
+    const outer = scrollPane(390, () => 0);
+    const inner = scrollPane(160, () => 500 - outer.scrollTop, outer as unknown as HTMLElement);
+    const input = positionedField(inner, () => 700 - outer.scrollTop - inner.scrollTop, b.doc);
+    const stop = trackViewport(b.host, b.root);
+    b.focus(input);
+    b.resize(390);
+    expect(inner.scrollTop).toBe(88);
+    expect(outer.scrollTop).toBe(270);
+    expect(input.getBoundingClientRect().bottom).toBe(382);
+    stop();
+  });
+
+  test("a tall contenteditable field uses the caret position when opening the keyboard", () => {
+    const b = browser();
+    const pane = scrollPane(390, () => 0);
+    const caretNode = {};
+    const doc = Object.assign(b.doc, {
+      getSelection: () => ({
+        isCollapsed: true, rangeCount: 1, focusNode: caretNode,
+        getRangeAt: () => ({ getBoundingClientRect: () => ({
+          top: 550 - pane.scrollTop, bottom: 568 - pane.scrollTop, height: 18,
+        }) }),
+      }),
+    });
+    const editor = Object.assign(field({ tagName: "DIV", editable: true, writable: false }), {
+      parentElement: pane, ownerDocument: doc, contains: (node: object) => node === caretNode,
+      getBoundingClientRect: () => ({ top: 20 - pane.scrollTop, bottom: 680 - pane.scrollTop, height: 660 }),
+    });
+    const stop = trackViewport(b.host, b.root);
+    b.focus(editor);
+    b.resize(390);
+    expect(pane.scrollTop).toBe(186);
     stop();
   });
 
