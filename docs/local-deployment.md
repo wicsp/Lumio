@@ -85,7 +85,9 @@ curl --noproxy '*' -fsS http://127.0.0.1:7420/health
 
 浏览器插件取到的 B 站字幕（含平台的 AI 字幕）直接入库。启用下面的配置后，插件只取到简介时，或在收藏夹粘贴 B 站视频链接时，Hub 把转写交给指定执行器。支持普通 BV、AV 视频与指向这些视频的 b23.tv 分享链接。多 P 视频按链接的 `p` 处理，未指定时取第一 P。
 
-1. 在执行器的服务账号下安装 [yt-dlp](https://github.com/yt-dlp/yt-dlp#installation)、[FFmpeg](https://ffmpeg.org/download.html) 和 [whisper.cpp](https://github.com/ggml-org/whisper.cpp#quick-start)。确认服务的 PATH 能运行 `yt-dlp`、`ffmpeg` 和 `whisper-cli`，并准备一个支持中文的多语言 Whisper 模型。脚本默认读取 `~/.local/share/whisper/ggml-large-v3-turbo.bin`，可用执行器环境变量 `WHISPER_CPP_MODEL` 指定其他模型。
+1. 在执行器的服务账号下安装 [yt-dlp](https://github.com/yt-dlp/yt-dlp#installation) 和 [FFmpeg](https://ffmpeg.org/download.html)，并选择转写方式。
+   - **Groq 转写**。确保服务的 PATH 能运行 `curl`、`ffprobe` 和 `python3`。通过密钥管理注入 Groq API Key 到执行器账号独享的 `0600` 文件 `~/.config/lumio/credentials/bilibili-groq`，文件只含密钥。也可用环境变量 `BILIBILI_GROQ_API_KEY_FILE` 指向受保护的凭据文件。执行器将音轨上传到 Groq `whisper-large-v3-turbo`，大于 25 MB 的音轨会先压缩。Groq 返回限流等错误时收藏会失败，可从收藏夹重试。
+   - **本地转写**。未配置 Groq 凭据时，在执行器上安装 [whisper.cpp](https://github.com/ggml-org/whisper.cpp#quick-start)，确认服务的 PATH 能运行 `whisper-cli`，并准备一个支持中文的多语言 Whisper 模型。脚本默认读取 `~/.local/share/whisper/ggml-large-v3-turbo.bin`，可用执行器环境变量 `WHISPER_CPP_MODEL` 指定其他模型。
 2. 将 [bilibili-transcribe.sh](../apps/hub/scripts/bilibili-transcribe.sh) 安装到执行器上的固定绝对路径，并设为可执行。把其路径追加到执行器 `LUMIO_RUNTIME_ALLOWED_COMMANDS` 的绝对路径列表，保留原有条目。等执行器空闲后载入服务配置。执行器沿用自身代理环境。需要登录且有权访问的视频可在执行器设置 `BILIBILI_COOKIES_FILE`，指向该服务账号持有的私有 Netscape 格式 Cookie 文件。
 3. 在 Hub 服务环境中设置下面两个值，改成实际登记的执行器名和它机器上的脚本绝对路径。通过该环境的正常服务配置流程载入。
 
@@ -94,4 +96,4 @@ LUMIO_BILIBILI_TRANSCRIPTION_RUNTIME=macsp
 LUMIO_BILIBILI_TRANSCRIPTION_COMMAND=/absolute/path/bilibili-transcribe.sh
 ```
 
-收藏会显示处理中，关闭页面后仍会继续。已安装的插件可能仍提示只取到了简介，可到收藏夹看转写进度。完成后在资料页的「查看存档文本」里查看带时间戳的字幕。失败可在收藏夹重试或粘贴字幕。初版单次处理一 P，音轨上限为两小时和 128 MiB。临时音频留在执行器，脚本退出时清理。Job 归档和资料原文包含字幕文本。已绑定资料摘要模型时，原文仍按现有摘要设置处理。
+收藏会显示处理中，关闭页面后仍会继续。已安装的插件可能仍提示只取到了简介，可到收藏夹看转写进度。完成后在资料页的「查看存档文本」里查看带时间戳的字幕。失败可在收藏夹重试或粘贴字幕。单次处理一 P，下载上限为两小时和 128 MiB。脚本退出时清理临时音频。Job 归档和资料原文包含字幕文本。已绑定资料摘要模型时，原文仍按现有摘要设置处理。
