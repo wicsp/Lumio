@@ -54,14 +54,11 @@ export function initialNoteCursor(body: string): number {
 export function aiNoteCard(client: Client, id: string, label: string, options: EmbedOptions): HTMLElement {
   const title = h("span", { class: "ai-embed-title" }, label || t("AI note"));
   const body = h("div", { class: "ai-embed-body markdown", hidden: true });
-  const toggle = h("button", { type: "button", class: "btn btn-small", "aria-expanded": "false" }, icon("down"), t("Show"));
+  const toggle = h("button", { type: "button", class: "ai-embed-toggle", "aria-expanded": "false" }, icon("chevron"), title);
   const card = h("div", { class: "ai-embed", "data-ai-note": id },
     h("div", { class: "ai-embed-head" },
-      h("span", { class: "pill ai-pill", title: t("Written by AI") }, t("AI")),
-      title,
-      h("span", { class: "bar-spacer" }),
       toggle,
-      h("button", { type: "button", class: "btn btn-small", onclick: () => options.open(id) }, t("Open")),
+      h("button", { type: "button", class: "icon-btn", title: t("Open"), "aria-label": t("Open"), onclick: () => options.open(id) }, icon("external")),
       options.edit && h("button", { type: "button", class: "icon-btn", title: t("Edit link"), "aria-label": t("Edit link"), onclick: () => options.edit!() }, icon("edit"))),
     body);
   let expanded = false;
@@ -79,7 +76,6 @@ export function aiNoteCard(client: Client, id: string, label: string, options: E
     expanded = !expanded;
     body.hidden = !expanded;
     toggle.setAttribute("aria-expanded", String(expanded));
-    clear(toggle, icon("down"), expanded ? t("Hide") : t("Show"));
     if (expanded) void show();
   });
   // 链接只写了 ID 时，先补上标题。

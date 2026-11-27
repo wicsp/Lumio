@@ -58,23 +58,16 @@ class LocalImagePreview extends WidgetType {
 
 export class NoteImages {
   readonly element: HTMLElement;
-  private readonly input = h("input", { type: "file", accept: "image/png,image/jpeg,image/webp,image/gif,image/avif", multiple: true, hidden: true });
   private readonly status = h("span", { class: "field-hint", role: "status" });
   private readonly settings = h("a", { class: "btn btn-small", href: "#settings/data", hidden: true }, t("Configure image hosting"));
-  private readonly button = h("button", { type: "button", class: "btn btn-small", disabled: true }, t("Insert image"));
   private enabled = false;
+  private settingsError?: string;
   private disposed = false;
   private settingsRequest = 0;
   private disconnect?: () => void;
 
   constructor(private readonly upload: NoteImageUpload, private readonly editor: () => EditorView) {
-    this.element = h("div", { class: "note-image-controls" }, this.button, this.input, this.settings, this.status);
-    this.button.addEventListener("click", () => this.input.click());
-    this.input.addEventListener("change", () => {
-      const files = [...(this.input.files ?? [])];
-      this.input.value = "";
-      this.start(files, this.editor().state.selection.main.head);
-    });
+    this.element = h("div", { class: "note-image-controls" }, this.settings, this.status);
     void this.refreshSettings();
   }
 
@@ -85,12 +78,14 @@ export class NoteImages {
       const settings = await this.upload.settings();
       if (this.disposed || request !== this.settingsRequest) return;
       this.enabled = !!settings.destination;
-      this.button.disabled = !this.enabled;
-      this.button.hidden = !this.enabled;
-      this.settings.hidden = this.enabled;
+      this.settingsError = undefined;
+      if (this.enabled) this.settings.hidden = true;
       this.status.textContent = "";
     } catch (cause) {
-      if (!this.disposed && request === this.settingsRequest) this.status.textContent = errorText(cause);
+      if (!this.disposed && request === this.settingsRequest) {
+        this.settingsError = errorText(cause);
+        if (!this.settings.hidden) this.status.textContent = this.settingsError;
+      }
     }
   }
 
@@ -139,9 +134,14 @@ export class NoteImages {
 
   private start(inputs: File[], position: number): boolean {
     const files = inputs.filter(file => file.type.startsWith("image/") || /\.(?:png|jpe?g|gif|webp|avif)$/i.test(file.name));
-    if (!files.length || !this.enabled || this.disposed) return false;
+    if (!files.length || this.disposed) return false;
     const view = this.editor();
     if (view.state.readOnly) return false;
+    if (!this.enabled) {
+      this.settings.hidden = false;
+      this.status.textContent = this.settingsError ?? "";
+      return false;
+    }
     if (files.some(file => !file.size || file.size > IMAGE_UPLOAD_MAX_BYTES)) {
       this.status.textContent = t("Each image must be between 1 byte and 10 MiB.");
       return true;
