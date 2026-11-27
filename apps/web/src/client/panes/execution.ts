@@ -33,7 +33,8 @@ export class ExecutionPane {
   private detail = h("section", { class: "detail-pane", "aria-live": "polite" });
   private statusFilter = "";
   private statusButton = h("button", { type: "button", class: "filter-btn" });
-  private createButton = h("button", { type: "button", class: "btn btn-primary", hidden: true, onclick: () => this.newRoutine() }, icon("plus"), h("span", { class: "hide-narrow" }, t("New routine")));
+  private createButton = h("button", { type: "button", class: "btn btn-primary bar-create", hidden: true, "aria-label": t("New routine"), title: t("New routine"), onclick: () => this.newRoutine() },
+    icon("plus"), h("span", { class: "full-label" }, t("New routine")));
   private segments = new Map<Mode, HTMLButtonElement>();
   private listGeneration = 0;
   private detailGeneration = 0;

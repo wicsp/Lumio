@@ -72,14 +72,15 @@ export class WorkPane {
         h("div", { class: "segmented", role: "group", "aria-label": t("View") },
           h("button", { type: "button", "data-pad-row": "work:tasks", "aria-pressed": String(mode === "tasks"), onclick: () => navigate("work", "tasks") }, t("Tasks")),
           h("button", { type: "button", "data-pad-row": "work:projects", "aria-pressed": String(mode === "projects"), onclick: () => navigate("work", "projects") }, t("Projects")),
-          h("button", { type: "button", onclick: () => navigate("execution") }, t("Runs and routines"))),
+          h("button", { type: "button", "aria-label": t("Runs and routines"), onclick: () => navigate("execution") },
+            h("span", { class: "full-label" }, t("Runs and routines")), h("span", { class: "compact-label" }, t("Runs")))),
         h("span", { class: "bar-spacer" }),
         h("button", { type: "button", class: "icon-btn", title: t("Refresh"), "aria-label": t("Refresh"), onclick: (event: Event) => { spin(event); void this.load(); if (this.selected) void this.open(this.selected, true); } }, icon("refresh")),
-        h("button", { type: "button", class: "btn btn-primary", title: t("New (C)"), onclick: () => this.create() }, icon("plus"), h("span", { class: "hide-narrow" }, t("New")))),
+        h("button", { type: "button", class: "btn btn-primary bar-create", "aria-label": t("New"), title: t("New (C)"), onclick: () => this.create() }, icon("plus"), h("span", { class: "full-label" }, t("New")))),
       this.split);
     this.split.append(
       h("div", { class: "list-pane" },
-        h("div", { class: "list-tools" }, h("label", { class: "search-box" }, icon("search"), this.query), this.statusButton, this.projectButton, this.tagButton),
+        h("div", { class: mode === "tasks" ? "list-tools task-filters" : "list-tools" }, h("label", { class: "search-box" }, icon("search"), this.query), this.statusButton, this.projectButton, this.tagButton),
         this.list),
       this.detailLayout);
     this.renderFilters();
@@ -150,17 +151,23 @@ export class WorkPane {
   // ───────────── 列表 ─────────────
 
   private renderFilters(): void {
-    const label = this.mode === "tasks" ? TURN_GROUP_LABELS[this.statusFilter as TurnGroup] : PROJECT_LABELS[this.statusFilter];
+    const statusName = this.mode === "tasks" ? t("Turn") : t("Status");
+    const statusValue = this.mode === "tasks" ? TURN_GROUP_LABELS[this.statusFilter as TurnGroup] : PROJECT_LABELS[this.statusFilter];
     const glyph = this.mode === "tasks" ? turnIcon(this.statusFilter as TurnGroup) : statusIcon(this.statusFilter);
-    clear(this.statusButton, this.statusFilter ? glyph : icon("down"), this.statusFilter ? label! : this.mode === "tasks" ? t("Turn") : t("Status"));
-    this.statusButton.classList.toggle("is-set", !!this.statusFilter);
-    this.projectButton.hidden = this.mode !== "tasks";
     const project = this.projects.find(p => p.id === this.projectFilter);
-    clear(this.projectButton, icon("folder"), project?.title ?? t("Projects"));
-    this.projectButton.classList.toggle("is-set", !!project);
-    this.tagButton.hidden = this.mode !== "tasks";
-    clear(this.tagButton, icon("flag"), this.tagFilter ? `#${this.tagFilter}` : t("Tags"));
-    this.tagButton.classList.toggle("is-set", !!this.tagFilter);
+    const filters = [
+      { button: this.statusButton, name: statusName, value: statusValue, glyph: this.statusFilter ? glyph : icon("clock") },
+      { button: this.projectButton, name: t("Projects"), value: project?.title, glyph: icon("folder") },
+      { button: this.tagButton, name: t("Tags"), value: this.tagFilter ? `#${this.tagFilter}` : undefined, glyph: icon("flag") },
+    ];
+    for (const { button, name, value, glyph } of filters) {
+      const label = value ? t("{0}: {1}", name, value) : name;
+      button.setAttribute("aria-label", label);
+      button.title = label;
+      button.classList.toggle("is-set", !!value);
+      clear(button, glyph, h("span", { class: "filter-label" }, value || name));
+    }
+    this.projectButton.hidden = this.tagButton.hidden = this.mode !== "tasks";
   }
 
   /** 按标签筛选（ADR 0039）：候选来自已载入的任务，标签主要由 AI 维护，人只需要挑。 */

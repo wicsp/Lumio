@@ -928,15 +928,22 @@ export class WorkEditor {
     // 评论并交给 agent 继续：评论与委派在同一事务（ADR 0030）；继续的是计划当前步骤或上一轮的 agent。
     const next = continueTarget(input);
     let attentionKind: WorkAttention["kind"] | undefined;
-    const onward = next ? h("button", { type: "button", class: "btn btn-small", "data-pad-action": "continue", title: t("Post the comment and delegate the next round in one step") }, icon("play"), t("Comment and continue with {0}", next)) : null;
+    const onward = next ? h("button", { type: "button", class: "btn btn-small discussion-onward", "data-pad-action": "continue" }) : null;
     if (onward && next) {
+      const setOnwardLabel = (glyph: string, full: string, short: string) => {
+        onward.title = full;
+        onward.setAttribute("aria-label", full);
+        clear(onward, icon(glyph), h("span", { class: "full-label" }, full), h("span", { class: "compact-label" }, short));
+      };
+      setOnwardLabel("play", t("Comment and continue with {0}", next), t("Post & continue"));
       // 「需要你处理」时这里就是回答 / 意见 / 带修改重试的地方：主按钮换成「交给 … 继续」。
       this.applyAttention = (kind, docked) => {
         if (!docked) return;
         attentionKind = kind;
         onward.classList.add("btn-primary"); submit.classList.remove("btn-primary");
-        clear(onward, icon(kind === "failed" ? "refresh" : "play"), kind === "question" ? t("Answer and continue with {0}", next)
-          : kind === "failed" ? t("Retry with {0}", next) : t("Send feedback to {0} and continue", next));
+        setOnwardLabel(kind === "failed" ? "refresh" : "play", kind === "question" ? t("Answer and continue with {0}", next)
+          : kind === "failed" ? t("Retry with {0}", next) : t("Send feedback to {0} and continue", next),
+          kind === "failed" ? t("Retry") : t("Reply & continue"));
         text.placeholder = kind === "question" ? t("Your answer for {0}…", next) : kind === "failed" ? t("What should change this time?") : t("What should {0} change in the next round?", next);
       };
       this.reply = kind => { this.applyAttention(kind, true); text.focus(); };
