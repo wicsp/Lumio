@@ -139,7 +139,7 @@ async function startHubInstance(config: HubConfig, options: {
     modules.glances = new Glances(config, store, modules.artifacts, action => watch.exclusive(action), () => server.port!, now);
     const inbox = modules.inbox = new Inbox(config, store, modules.ai, () => modules!.trash,
       action => watch.exclusive(action), now, (path, message) => watch.issue(path, message), inboxProxy, options.inbox,
-      capture => modules!.notices.capture(capture), modules.glances);
+      capture => modules!.notices.capture(capture), modules.glances, modules.artifacts);
     modules.trash = new Trash(config, store, modules, action => watch.exclusive(action), now, (path, message) => watch.issue(path, message), inbox);
     await modules.trash.sweep();
     modules.trash.start();

@@ -93,6 +93,8 @@ export const en = {
   "inbox.summary_unconfigured": "Configure a summary profile before generating an AI note.",
   "inbox.worker_failed": "The capture worker stopped after a storage error.",
   "inbox.invalid_config": "Invalid capture summary language or input token limit.",
+  "inbox.bilibili_asr_heading": "Subtitles (speech transcription)",
+  "inbox.bilibili_config": "Configure both a Bilibili transcription Runtime name and an absolute command path.",
   "ai.unknown": "Execution outcome is unknown. Review before continuing.",
   "ai.unavailable": "AI backend is unavailable.",
   "ai.invalid": "Check the AI connection, profile, and model settings.",
@@ -1088,6 +1090,8 @@ export const zh: typeof en = {
   "inbox.summary_unconfigured": "请先绑定摘要 Profile，再生成 AI 笔记。",
   "inbox.worker_failed": "捕获处理因存储错误停止。",
   "inbox.invalid_config": "捕获摘要的语言或输入 token 上限无效。",
+  "inbox.bilibili_asr_heading": "字幕（语音转写）",
+  "inbox.bilibili_config": "请同时配置 B 站转写执行器名称和转写命令的绝对路径。",
   "ai.unknown": "执行结果未知，请核查后继续。",
   "ai.unavailable": "AI 后端不可用。",
   "ai.invalid": "请检查 AI 连接、Profile 和模型设置。",
@@ -1993,6 +1997,9 @@ ${String(p0)}${String(p1)}`,
   "Could not read forwarding status": "无法读取转发状态",
   "Run tailscale serve status to check": "运行 tailscale serve status 检查",
 };
+
+/** Fixed Markdown labels recognized in captures from the existing browser extension. */
+export const bilibiliExtensionText = { missing: "（没有取到字幕）", descriptionPrefix: "## 简介\n\n" };
 
 export function text(key: string, ...args: unknown[]): string {
   return renderMessage((locale.getStore() ?? language()) === "zh" ? zh : en, { key, args });

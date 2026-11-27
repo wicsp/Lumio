@@ -11,6 +11,7 @@ export interface StoredCapture {
   glanceReason?: string;
   input: CaptureCreate;
   plan?: CapturePlan;
+  transcriptionJob?: string;
   cardId?: string;
   summary?: "card" | "deep";
   ownsEntity?: boolean;
@@ -88,6 +89,12 @@ export class InboxStore {
       `SELECT record FROM inbox_captures WHERE ${state}='queued' OR (${state}='ready' AND ${card}='pending') ORDER BY created,id LIMIT 1`,
     ).get();
     return row ? read(row) : undefined;
+  }
+
+  pendingTranscriptions() {
+    return this.db.query<{ record: string }, []>(
+      `SELECT record FROM inbox_captures WHERE ${state}='extracting' AND json_extract(record,'$.transcriptionJob') IS NOT NULL ORDER BY created,id`,
+    ).all().map(read);
   }
 
   interrupted() {

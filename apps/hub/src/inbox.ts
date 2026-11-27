@@ -4,14 +4,16 @@ import {
   KnowledgeAIBinding, KnowledgeAIBindingUpdate, KnowledgeAiNoteCreateArgs, type CaptureError, type NoteRef, type Glance, type CaptureGlanceToolArgs, type CaptureGlanceToolResult,
 } from "@lumio/schema";
 import { CoreError, newId } from "@lumio/foundation";
-import { noteById, readKnowledgeDocument, showOriginal, type NoteTrashMove } from "@lumio/storage";
+import { noteById, readKnowledgeDocument, showOriginal, type NoteTrashMove, type SqliteArtifacts } from "@lumio/storage";
 import type { AIConfigurationService } from "./ai-config.ts";
 import type { HubConfig } from "./config.ts";
 import { Glances, windowText } from "./glances.ts";
 import { HubError } from "./errors.ts";
 import { captureKind, extractCapture, normalizeCaptureUrl, type Extracted } from "./inbox-extract.ts";
+import { bilibiliDescription, bilibiliJobUrl, readBilibiliJob, startBilibiliJob } from "./inbox-bilibili.ts";
 import { CaptureFailure, type CaptureNetwork } from "./inbox-fetch.ts";
 import { InboxFiles } from "./inbox-files.ts";
+import { Jobs } from "./jobs.ts";
 import type { InboxProxySettings } from "./inbox-proxy-settings.ts";
 import { inboxConflict, inboxMissing, InboxStore, type StoredCapture } from "./inbox-store.ts";
 import { captureCardTitle, summarizeOriginal, type SummaryModel } from "./inbox-summary.ts";
@@ -50,13 +52,14 @@ export class Inbox {
   private readonly files: InboxFiles;
   private readonly stopping = new AbortController();
   private worker?: Promise<void>;
+  private transcriptionPoll?: ReturnType<typeof setTimeout>;
   private readonly indexOptions: { stateDir: string };
 
   constructor(private readonly config: HubConfig, private readonly hub: HubStore, private readonly ai: AIConfigurationService,
     private readonly trash: () => Trash, private readonly exclusive: <T>(action: () => Promise<T>) => Promise<T>,
     private readonly now: () => Date, private readonly issue: (path: string, message: string) => void, private readonly proxy: InboxProxySettings,
     private readonly options: InboxOptions = {},
-    private readonly onReady: (capture: Capture) => void, private readonly glances: Glances) {
+    private readonly onReady: (capture: Capture) => void, private readonly glances: Glances, private readonly artifacts: SqliteArtifacts) {
     this.state = new InboxStore(hub.db);
     ai.knowledgeProfileInUse = (profile, nextEngine) => this.state.profileInUse(profile, nextEngine);
     this.files = new InboxFiles(config, issue);
@@ -66,6 +69,7 @@ export class Inbox {
   start() {
     for (const value of this.state.interrupted()) {
       const { capture } = value;
+      if (value.transcriptionJob) continue;
       if (capture.state === "extracting") this.update(value, { state: "failed", error: this.error("extract_failed") });
       else this.update(value, { card: "failed", error: this.error("summary_failed") });
     }
@@ -74,6 +78,7 @@ export class Inbox {
 
   async stop() {
     this.stopping.abort();
+    clearTimeout(this.transcriptionPoll);
     await this.worker;
     await this.proxy.drain();
   }
@@ -331,22 +336,71 @@ export class Inbox {
   private schedule() {
     if (this.worker || !this.config.vault || this.stopping.signal.aborted) return;
     this.worker = Promise.resolve().then(async () => {
+      await this.resumeTranscriptions();
       while (!this.stopping.signal.aborted) {
         const value = this.state.next();
         if (!value) break;
         if (value.capture.state === "queued") await this.process(value);
         else await this.summarize(value);
       }
-    }).catch(() => this.issue("inbox", msg("inbox.worker_failed"))).finally(() => { this.worker = undefined; });
+    }).catch(() => this.issue("inbox", msg("inbox.worker_failed"))).finally(() => {
+      this.worker = undefined;
+      if (!this.stopping.signal.aborted && !this.transcriptionPoll && this.state.pendingTranscriptions().length) {
+        this.transcriptionPoll = setTimeout(() => {
+          this.transcriptionPoll = undefined;
+          this.schedule();
+        }, 1500);
+      }
+    });
   }
 
-  private async process(value: StoredCapture) {
-    const capture = this.update(value, { state: "extracting" });
+  private async resumeTranscriptions() {
+    const jobs = new Jobs(this.hub);
+    for (const value of this.state.pendingTranscriptions()) {
+      if (this.stopping.signal.aborted) return;
+      try {
+        const extracted = await readBilibiliJob(jobs, this.artifacts, value.transcriptionJob!, value.capture, this.now(), this.extensionVideoDescription(value));
+        if (extracted && !this.stopping.signal.aborted) await this.process(value, extracted);
+      } catch (cause) { this.failExtraction(value.capture, cause); }
+    }
+  }
+
+  private extensionVideoDescription(value: StoredCapture) {
+    if (value.capture.channel === "extension") return bilibiliDescription(value.input.content);
+  }
+
+  private async queueTranscription(value: StoredCapture) {
+    const { capture } = value;
+    const config = this.config.bilibiliTranscription;
+    if (!config || capture.kind !== "video" || !capture.url || capture.glance) return false;
+    if (value.input.content && this.extensionVideoDescription(value) === undefined) return false;
+    const url = await bilibiliJobUrl(capture.url, this.stopping.signal, this.options.network ?? this.proxy.network());
+    if (!url) return false;
+    this.hub.db.transaction(() => {
+      const job = startBilibiliJob(this.hub, config, url, this.now());
+      value.transcriptionJob = job.spec.id;
+      this.state.put(value);
+      this.hub.audit(this.hub.recoveryIdentity(capture.owner), "inbox.extract", "allow", undefined, `transcription:${job.spec.id}`);
+    })();
+    return true;
+  }
+
+  private failExtraction(capture: Capture, cause: unknown) {
+    const error = cause instanceof CaptureFailure ? cause.description() : this.error("extract_failed");
+    const value = this.state.get(capture.id, capture.owner);
+    value.transcriptionJob = undefined;
+    this.update(value, { state: "failed", error });
+    this.hub.audit(this.hub.recoveryIdentity(capture.owner), "inbox.extract", "allow", undefined, error.code);
+  }
+
+  private async process(value: StoredCapture, transcription?: Extracted) {
+    const capture = transcription ? value.capture : this.update(value, { state: "extracting" });
     try {
       const glance = capture.glance && capture.kind !== "paper" ? this.glances.get(capture.glance, capture.owner) : undefined;
-      const extracted = value.plan ? undefined : glance ? await this.glanceOriginal(glance, capture)
+      if (!value.plan && !transcription && await this.queueTranscription(value)) return;
+      const extracted = value.plan ? undefined : transcription ?? (glance ? await this.glanceOriginal(glance, capture)
         : await extractCapture(capture.url, capture.kind!, capture.title, value.input.content,
-          this.stopping.signal, this.options.network ?? this.proxy.network());
+          this.stopping.signal, this.options.network ?? this.proxy.network()));
       await this.exclusive(async () => {
         if (!value.plan) {
           const now = this.now();
@@ -370,6 +424,7 @@ export class Inbox {
         value.summary = "card";
         this.hub.db.transaction(() => {
           value.plan = undefined;
+          value.transcriptionJob = undefined;
           const ready = this.update(value, {
             state: "ready", entity: plan.entity, title: plan.entity.title, original: plan.original, error: undefined,
             card: createCard ? "pending" : capture.ai_note ? capture.card : "none",
@@ -382,11 +437,7 @@ export class Inbox {
           this.onReady(ready);
         })();
       });
-    } catch (cause) {
-      const error = cause instanceof CaptureFailure ? cause.description() : this.error("extract_failed");
-      this.update(this.state.get(capture.id, capture.owner), { state: "failed", error });
-      this.hub.audit(this.hub.recoveryIdentity(capture.owner), "inbox.extract", "allow", undefined, error.code);
-    }
+    } catch (cause) { this.failExtraction(capture, cause); }
   }
 
   private async summarize(value: StoredCapture) {
