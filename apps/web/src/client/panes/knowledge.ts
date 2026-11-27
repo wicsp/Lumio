@@ -20,7 +20,7 @@ import { resourceStatusText } from "../resources.ts";
  */
 import { lumioLink, NOTE_TYPES, type NoteDetail, type LinksResult, type SearchResult } from "@lumio/schema";
 import { errorText, type Client } from "../api.ts";
-import { append, clear, debounce, empty, failure, h, icon, loading, openDialog, openMenu, placeholder, highlightedText, toast } from "../dom.ts";
+import { append, clear, debounce, empty, failure, h, icon, loading, openDialog, openMenu, placeholder, highlightedText, toast, type MenuItem } from "../dom.ts";
 import { noteGraph } from "../graph/data.ts";
 import { relationGraph } from "../graph/view.ts";
 import { listKeys, markSelected } from "../list-keys.ts";
@@ -54,14 +54,14 @@ function linkSections(links: LinksResult): HTMLElement[] {
   const taskRows = (links.work_incoming ?? []).map(({ task }) => h("li", {},
     h("a", { href: lumioLink(task.id), class: "resource-link", "data-resource": task.id }, task.title),
     h("span", { class: "muted" }, ` · ${t("Task reference")}`)));
-  const section = (title: string, rows: HTMLLIElement[]) => h("section", {}, h("h3", {}, t("{0} ({1})", title, rows.length)),
-    rows.length ? h("ul", {}, ...rows) : h("p", { class: "muted" }, t("None")));
+  const section = (title: string, rows: HTMLLIElement[]) => rows.length
+    ? h("section", {}, h("h3", {}, t("{0} ({1})", title, rows.length)), h("ul", {}, ...rows)) : undefined;
   const ai = links.note.type === "ai-note";
   return [
     section(t("Links to"), noteRows(ai ? links.ai_outgoing ?? [] : links.outgoing)),
     section(t("Linked from"), [...noteRows(links.incoming), ...taskRows]),
     ...(links.ai_incoming ? [section(t("Mentioned in AI notes"), noteRows(links.ai_incoming))] : []),
-  ];
+  ].filter(item => item !== undefined);
 }
 
 interface NoteWritingSession {
@@ -340,46 +340,68 @@ export class KnowledgePane {
     hydrateAiEmbeds(body, this.client, { open: id => void this.open(id) });
     const ai = note.note.type === "ai-note";
     const model = ai && typeof fm.model === "string" ? fm.model : "";
-    clear(this.detail, h("article", { class: "reader" },
-      h("div", { class: "detail-crumbs", tabindex: "-1", "data-pad-selection": this.selected ?? note.note.id ?? note.note.path }, h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": t("Back to list"), "data-pad-back": true, onclick: async () => { if (!(await this.beforeLeave())) return; this.clearWriter(); this.selected = undefined; markSelected(this.results, undefined); this.showPlaceholder(); } }, icon("back")),
-        note.note.id && h("div", { class: "detail-actions" },
-          h("button", { type: "button", class: "icon-btn", title: t("Copy ID"), "aria-label": t("Copy ID"), onclick: () => void this.copyId(note.note.id!) }, icon("link")))),
-      this.returnPoint && this.returnPoint.id !== note.note.id && h("button", { type: "button", class: "text-btn", onclick: () => void this.returnToWriting() }, icon("back"), t("Return to writing")),
-      h("h1", { class: "reader-title" }, note.note.title),
-      h("div", { class: "reader-meta" }, h("span", { class: "pill" }, kindLabel), attribution && h("span", {}, attribution), note.note.citekey && h("span", { class: "pill" }, note.note.citekey),
-        h("button", { type: "button", class: "btn btn-small", title: t("Show how this note links to others"), onclick: () => this.openGraph(note.note.id ?? note.note.path, note.note.title) }, icon("graph"), t("Graph"))),
-      note.note.type === "source" && this.glanceOrigin(note),
-      material && h("div", { class: "material-actions" },
-        this.navigate && note.note.id && !note.note.path.startsWith("life/") && h("button", { type: "button", class: "btn btn-small", onclick: () => this.navigate?.("work", "tasks", sourceTaskIntent([{ module: "knowledge", id: note.note.id!, label: note.note.title.slice(0, 200) }])) }, t("Create task from source")),
-        sourceUrl && h("a", { href: sourceUrl, target: "_blank", rel: "noopener noreferrer nofollow", class: "btn btn-primary" }, icon("external"), t("Open original link")),
-        h("button", { type: "button", class: "btn btn-small", "aria-label": t("More"), onclick: (event: Event) => openMenu(event.currentTarget as HTMLElement,
-          [{ value: "original", label: t("View archived text"), icon: icon("file") }], () => void this.showOriginal(note)) }, icon("more"), t("More"))),
-      ai && h("p", { class: "ai-note-notice" }, icon("bot"), h("span", {}, model ? t("Written by AI ({0})", model) : t("Written by AI"))),
-      this.sources(fm.derived_from),
-      body,
-      links && h("footer", { class: "backlinks" }, ...linkSections(links))));
+    const byline = attribution ? h("span", {}, attribution) : undefined;
+    const back = h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": t("Back to list"), "data-pad-back": true, onclick: async () => {
+      if (!(await this.beforeLeave())) return;
+      this.clearWriter(); this.selected = undefined; markSelected(this.results, undefined); this.showPlaceholder();
+    } }, icon("back"));
+    clear(this.detail, h("article", { class: "reader object-detail" },
+      h("header", { class: "object-header" },
+        h("div", { class: "object-title", tabindex: "-1", "data-pad-selection": this.selected ?? note.note.id ?? note.note.path },
+          back, h("h1", { class: "reader-title" }, note.note.title)),
+        h("div", { class: "object-actions" },
+          this.returnPoint && this.returnPoint.id !== note.note.id && h("button", { type: "button", class: "btn btn-small", onclick: () => void this.returnToWriting() }, icon("back"), t("Return to writing")),
+          material && sourceUrl && h("a", { href: sourceUrl, target: "_blank", rel: "noopener noreferrer nofollow", class: "btn btn-primary btn-small" }, icon("external"), t("Open original link")),
+          note.note.id && h("button", { type: "button", class: "icon-btn", title: t("Copy ID"), "aria-label": t("Copy ID"), onclick: () => void this.copyId(note.note.id!) }, icon("link")),
+          h("button", { type: "button", class: "icon-btn", title: t("More"), "aria-label": t("More"), "aria-haspopup": "listbox", "aria-expanded": "false",
+            onclick: (event: Event) => this.noteActions(event.currentTarget as HTMLButtonElement, note, material) }, icon("more")))),
+      h("div", { class: "reader-properties" },
+        h("div", { class: "reader-meta" },
+          h("span", {}, ai ? (model ? t("Written by AI ({0})", model) : t("Written by AI")) : kindLabel),
+          byline, note.note.citekey && h("span", {}, note.note.citekey)),
+        note.note.type === "source" && this.glanceOrigin(note, byline)),
+      h("div", { class: "reader-content" }, body),
+      h("footer", { class: "reader-references" }, this.sources(fm.derived_from),
+        h("div", { class: "backlinks" }, ...(links ? linkSections(links) : [])))));
     this.detail.scrollTop = 0;
     this.outlineEntries = () => renderedOutline(this.detail, body); this.outline.refresh();
     if(editableId(note.note))void this.enableEditing(note);
     else this.markReadOnly();
   }
+
+  private noteActions(anchor: HTMLButtonElement, note: NoteDetail, material: boolean): void {
+    const id = note.note.id;
+    const items: Array<MenuItem & { run(): void }> = [
+      { value: "graph", label: t("Graph"), icon: icon("graph"), run: () => this.openGraph(id ?? note.note.path, note.note.title) },
+    ];
+    if (material && this.navigate && id && !note.note.path.startsWith("life/"))
+      items.push({ value: "task", label: t("Create task from source"), icon: icon("plus"),
+        run: () => this.navigate?.("work", "tasks", sourceTaskIntent([{ module: "knowledge", id, label: note.note.title.slice(0, 200) }])) });
+    if (material) items.push({ value: "original", label: t("View archived text"), icon: icon("file"), run: () => void this.showOriginal(note) });
+    if (this.editor && matchMedia("(max-width: 860px)").matches)
+      items.push({ value: "related", label: t("Related notes"), icon: icon("knowledge"), run: () => {
+        this.split.classList.toggle("show-related"); this.renderRelated();
+      } });
+    openMenu(anchor, items, value => items.find(item => item.value === value)?.run());
+  }
   /**
    * 桌面小助手存的资料（ADR 0066/0067，C1-5）：原文 frontmatter 的 `glance` 记着 App、窗口与截图文件；
    * 标出来源并附截图缩略图。没有原文或不是所见生成的资料时什么都不显示。
    */
-  private glanceOrigin(note: NoteDetail): HTMLElement {
+  private glanceOrigin(note: NoteDetail, byline?: HTMLElement): HTMLElement {
     const box = h("div", { class: "material-glance", hidden: true });
     const generation = this.generation;
     void Promise.resolve().then(() => this.client.showOriginal(note.note.id ?? note.note.path)).then(original => {
       const glance = original.frontmatter.glance;
       if (!glance || !this.active || generation !== this.generation) return;
-      const label = [glance.app.name, glance.window].filter(Boolean).join(" · ");
+      const label = [...new Set([glance.app.name, glance.window].map(value => value?.trim()).filter(Boolean))].join(" · ");
+      if (byline && byline.textContent === label) byline.hidden = true;
       box.hidden = false;
       append(box,
         glance.screenshot && glanceThumb(this.client, glance.id, glance.window || glance.app.name),
         h("div", { class: "material-glance-text" },
-          h("span", { class: "pill" }, icon("monitor"), t("Desktop helper")),
-          h("span", { class: "muted", title: label }, label)));
+          h("span", {}, icon("monitor"), t("Desktop helper")),
+          label && h("span", { class: "muted", title: label }, label)));
     }).catch(() => { /* 没有原文（手写资料）时不显示来源 */ });
     return box;
   }
@@ -527,7 +549,8 @@ export class KnowledgePane {
     const generation=this.generation;
     try{
       const doc=await this.client.knowledgeDocument(note.note.id!);if(!this.active||generation!==this.generation)return;
-      const article=this.detail.querySelector("article")!;const oldBody=article.querySelector(".markdown")!;const oldTitle=article.querySelector("h1")!;
+      const article=this.detail.querySelector("article")!;const content=article.querySelector(".reader-content")!;
+      const oldBody=content.querySelector(".markdown")!;const oldTitle=article.querySelector("h1")!;
       const title = h("textarea", { class: "reader-title note-title", rows: 1, maxlength: 500, "aria-label": t("Title") });
       title.value = doc.document.note.title;
       oldTitle.replaceWith(title);
@@ -574,8 +597,9 @@ export class KnowledgePane {
         }
       });
       fitTitle();
-      oldBody.replaceWith(this.editor.root);const editor=this.editor;this.outlineEntries=()=>editor.outlineEntries();this.outline.refresh();article.insertBefore(this.saveStatus,this.editor.root);article.insertBefore(this.saveError,this.editor.root);article.insertBefore(this.conflict,this.editor.root);
-      this.saveStatus.before(h("button",{type:"button",class:"btn btn-small mobile-only",onclick:()=>{this.split.classList.toggle("show-related");this.renderRelated();}},t("Related notes")));
+      oldBody.replaceWith(this.editor.root);
+      const editor=this.editor;this.outlineEntries=()=>editor.outlineEntries();this.outline.refresh();
+      editor.root.before(h("div", { class: "reader-save" }, this.saveStatus, this.saveError, this.conflict));
       this.renderSave();this.recommend(context());if(saver.dirty)void saver.save();
       if (this.restorePoint?.id === note.note.id && this.restorePoint) {
         const position = Math.min(this.restorePoint.position, editor.value.length);
@@ -642,8 +666,8 @@ export class KnowledgePane {
   }
   private async refreshLinks(saver:NoteSave):Promise<void>{
     try{const links=await this.client.links(saver.base.document.note.id!);if(this.saver!==saver)return;
-      let footer=this.detail.querySelector<HTMLElement>(".backlinks");if(!footer){footer=h("footer",{class:"backlinks"});this.detail.querySelector("article")?.append(footer);}
-      clear(footer, ...linkSections(links));
+      const footer=this.detail.querySelector<HTMLElement>(".backlinks");
+      if(footer)clear(footer, ...linkSections(links));
     }catch{/* A saved document remains saved if the derived links cannot refresh. */}
   }
   private async compareNote():Promise<void>{

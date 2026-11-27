@@ -118,7 +118,7 @@ test("an unavailable clipboard shows an error instead of claiming success", asyn
 });
 
 
-test("material pages expose a safe prominent source link and an archive menu in either language", () => {
+test("note details group controls after the title and only material pages show a safe source link", () => {
   for (const language of ["en", "zh"] as const) for (const type of ["paper", "source", "idea"] as const) {
     setLang(language, false);
     const detail = new ElementStub("section");
@@ -129,10 +129,17 @@ test("material pages expose a safe prominent source link and an archive menu in 
       pane.render(NoteDetail.parse({ note: { type, title: "Material", path: "library/papers/material.md" }, frontmatter: { url }, body: "Synthetic body" }), undefined);
       const link = detail.find(node => node.tag === "a" && node.textContent === t("Open original link"));
       const more = detail.find(node => node.attrs["aria-label"] === t("More"));
-      if (type === "idea") { expect(link).toBeUndefined(); expect(more).toBeUndefined(); }
+      const article = detail.querySelector("article")!;
+      const header = article.querySelector("header")!;
+      const actions = header.find(node => node.className === "object-actions")!;
+      expect(article.children).toHaveLength(4);
+      expect(header.children[0]).toBe(header.find(node => node.className === "object-title"));
+      expect(actions.children).toContain(more!);
+      expect(more?.tag).toBe("button");
+      if (type === "idea") expect(link).toBeUndefined();
       else {
-        expect(more?.tag).toBe("button");
         if (url.startsWith("https:")) {
+          expect(actions.children).toContain(link!);
           expect(link?.attrs).toMatchObject({ href: url, target: "_blank", rel: "noopener noreferrer nofollow" });
           expect(link?.className).toContain("btn-primary");
         } else expect(link).toBeUndefined();

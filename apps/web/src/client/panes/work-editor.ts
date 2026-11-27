@@ -60,12 +60,12 @@ export class WorkEditor {
   private saveStatus = h("div", { class: "note-save-status work-save-status", role: "status", hidden: true });
   private note = h("div", { class: "conflict", role: "alert" });
   private props = h("div", { class: "props" });
+  private extraProps = h("div", { class: "property-groups" });
   private bodyHost = h("div", {});
   private commentDraft?: HTMLTextAreaElement;
   private messageNav?: MessageRail;
   private busy = false;
   private active = true;
-  private showAdvanced = false;
   private updated = h("p", { class: "detail-sub" });
   /** 其他任务（不含回收站）：显示前置 / 父任务 / 子任务的标题，挑选候选（ADR 0039）。 */
   private allTasks: WorkTask[] = [];
@@ -109,20 +109,26 @@ export class WorkEditor {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void this.flush(); }
     });
     const rec = this.record;
-    const project = rec.type === "task" && rec.project ? projects.find(p => p.id === rec.project) : undefined;
-    this.showAdvanced = rec.type === "task" && !!(rec.workdir || rec.model || rec.timeout_minutes || project?.workdir);
-    const crumbs = h("div", { class: "detail-crumbs" },
-      h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": t("Back to list"), "data-pad-back": true, onclick: () => hooks.back() }, icon("back")),
-      isTask ? (project ? h("button", { type: "button", onclick: () => hooks.openProject(project.id) }, icon("folder"), project.title) : h("span", {}, t("No project"))) : h("span", {}, t("Projects")),
-      h("div", { class: "detail-actions" },
-        h("button", { type: "button", class: "icon-btn", title: t("Copy ID"), "aria-label": t("Copy ID"), onclick: () => void navigator.clipboard?.writeText(this.record.id).then(() => toast(t("ID copied"))) }, icon("link")),
-        rec.type === "task" && !rec.plan && this.planButton(rec),
-        isTask && (this.delegateButton = h("button", { type: "button", class: "btn btn-primary btn-small", "data-pad-action": "delegate", onclick: () => void this.dispatch() }, icon("play"), t("Delegate")))));
-
     const references = h("div", {});
     const attention = h("div", { class: "attn-slot" });
-    const detail = h("div", { class: "detail" }, crumbs, h("div", { class: "detail-head", "data-pad-row": rec.id + ":detail", tabindex: "-1" }, this.title, this.updated), attention, references, this.note, this.props,
-      h("div", { class: "divider" }), this.bodyHost, this.saveStatus);
+    const back = h("button", { type: "button", class: "icon-btn mobile-only", "aria-label": t("Back to list"), "data-pad-back": true, onclick: () => hooks.back() }, icon("back"));
+    const actions = h("div", { class: "object-actions" },
+      isTask && (this.delegateButton = h("button", { type: "button", class: "btn btn-primary btn-small", "data-pad-action": "delegate", onclick: () => void this.dispatch() }, icon("play"), t("Delegate"))),
+      !isTask && hooks.newTask && h("button", { type: "button", class: "btn btn-primary btn-small", onclick: () => hooks.newTask?.(rec.id) }, icon("plus"), t("New task")),
+      !isTask && h("button", { type: "button", class: "icon-btn", title: t("Copy ID"), "aria-label": t("Copy ID"), onclick: () => void this.copyId() }, icon("link")),
+      isTask && h("button", { type: "button", class: "icon-btn", title: t("More"), "aria-label": t("More"), "aria-haspopup": "listbox", "aria-expanded": "false",
+        onclick: (event: Event) => this.taskActions(event.currentTarget as HTMLButtonElement) }, icon("more")));
+    const followup = h("div", { class: "work-followup" });
+    const detail = h("div", { class: "detail object-detail" },
+      h("header", { class: "object-header" },
+        h("div", { class: "object-title", "data-pad-row": rec.id + ":detail", tabindex: "-1" }, back, this.title),
+        actions, attention),
+      h("div", { class: "object-properties" }, this.props,
+        h("details", { class: "object-disclosure" },
+          h("summary", {}, icon("chevron"), t("More properties")), this.extraProps)),
+      h("div", { class: "work-content" },
+        h("div", {}, this.note, this.bodyHost, this.saveStatus), references),
+      followup);
     root.append(detail);
     this.renderMeta();
     this.renderProps();
@@ -130,12 +136,12 @@ export class WorkEditor {
     this.saved();
     if (this.writer.dirty) void this.flush();
     if ("task" in input) {
-      if (input.task.plan) detail.append(this.planSection(input.task));
+      if (input.task.plan) followup.append(this.planSection(input.task));
       this.detailInput = input;
-      detail.append(this.relations);
+      followup.append(this.relations);
       this.renderRelations();
       void this.refreshRelatedTasks();
-      detail.append(this.timeline(input));
+      followup.append(this.timeline(input));
       // 这个任务需要你处理时（ADR 0030）：标题下面显示完整的汇报或问题，决定按钮固定在底部，和讨论输入框在一起。
       const show = (item: WorkAttention | undefined) => {
         if (!item || !this.active) return;
@@ -171,7 +177,29 @@ export class WorkEditor {
             : ref.module === "execution" && ref.id.startsWith("job_")
               ? h("button", { type: "button", class: "text-btn", onclick: () => hooks.navigate("execution", ref.id) }, label) : label);
         }))));
-    } else detail.append(this.projectTasks(input));
+    } else followup.append(this.projectTasks(input));
+  }
+
+  private taskActions(anchor: HTMLButtonElement): void {
+    const task = this.record;
+    if (task.type !== "task") return;
+    const items: MenuItem[] = [{ value: "copy", label: t("Copy ID"), icon: icon("link") }];
+    const project = this.projects.find(item => item.id === task.project);
+    if (project) items.push({ value: "project", label: t("Open project"), icon: icon("folder") });
+    if (!task.plan && task.outcome === "open" && task.turn.reason !== "working")
+      items.push({ value: "plan", label: t("Add a plan"), icon: icon("plus") });
+    openMenu(anchor, items, value => {
+      if (value === "copy") void this.copyId();
+      else if (value === "project" && project) this.hooks.openProject(project.id);
+      else if (value === "plan") void this.editPlan();
+    });
+  }
+
+  private async copyId(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(this.record.id);
+      toast(t("ID copied"));
+    } catch { toast(t("Couldn't copy ID. Check clipboard permissions and try again."), "error"); }
   }
 
   dispose(): void { this.canLeave(); this.active = false; this.titleResize?.disconnect(); clearTimeout(this.timer); this.disposeBodyReferences?.(); this.disposeReferences?.(); this.messageNav?.dispose(); }
@@ -232,65 +260,69 @@ export class WorkEditor {
 
   private renderProps(): void {
     const r = this.record;
-    const rows: Node[] = [];
-    const row = (label: string, iconName: string, value: Node) => rows.push(h("div", { class: "prop-label" }, icon(iconName), label), h("div", { class: "prop-value" }, value));
-    if (r.type === "task") {
-      // 轮到谁（ADR 0032）：一句话说明；点开是可做的交接与结局操作。
-      const turnBtn = h("button", { type: "button", class: "prop-btn", title: t("Who has the task now") }, turnIcon(turnGroup(r)), h("span", {}, turnText(r)));
-      turnBtn.addEventListener("click", () => this.pickTurn(turnBtn));
-      row(t("Turn"), "clock", turnBtn);
-      const jobs = r.turn.reason === "working" ? (r.turn.parallel?.map(branch => ({ job: branch.job, agent: branch.agent }))
-        ?? (r.turn.job ? [{ job: r.turn.job, agent: r.turn.holder }] : [])) : [];
-      for (const { job, agent } of jobs) row(t("Current round"), "execution",
-        h("button", { type: "button", class: "prop-btn", onclick: () => this.hooks.navigate("execution", job) },
-          icon("execution"), h("span", {}, agent, " · ", jobActivityBadge(this.client, job, t("View run")))));
-    } else {
-      const statusBtn = h("button", { type: "button", class: "prop-btn" }, statusIcon(r.status), h("span", {}, PROJECT_LABELS[r.status] ?? r.status));
-      statusBtn.addEventListener("click", () => openMenu(statusBtn,
-        PROJECT_STATUSES.map(s => ({ value: s, label: PROJECT_LABELS[s]!, icon: statusIcon(s), selected: s === r.status })),
-        value => void this.patch({ status: value }, statusBtn, t("Status changed to “{0}”", PROJECT_LABELS[value]))));
-      row(t("Status"), "clock", statusBtn);
-    }
+    const primary: HTMLElement[] = [];
+    const row = (label: string, iconName: string, value: Node) =>
+      h("div", { class: "prop-row", role: "group", "aria-label": label },
+        h("div", { class: "prop-label" }, icon(iconName), label), h("div", { class: "prop-value" }, value));
+    const group = (title: string, ...fields: HTMLElement[]) =>
+      h("section", { class: "property-group" }, h("h3", {}, title), h("div", { class: "props" }, ...fields));
+    const tags = row(t("Tags"), "flag", this.tagControl(r));
 
     if (r.type === "task") {
+      const turn = h("button", { type: "button", class: "prop-btn", title: t("Who has the task now"),
+        onclick: () => this.pickTurn(turn) }, turnIcon(turnGroup(r)), h("span", {}, turnText(r)));
+      const jobs = r.turn.reason === "working" ? (r.turn.parallel?.map(branch => ({ job: branch.job, agent: branch.agent }))
+        ?? (r.turn.job ? [{ job: r.turn.job, agent: r.turn.holder }] : [])) : [];
+      const rounds = jobs.length ? h("div", { class: "property-rounds" }, ...jobs.map(({ job, agent }) =>
+        h("button", { type: "button", class: "prop-btn", onclick: () => this.hooks.navigate("execution", job) },
+          icon("execution"), h("span", {}, agent, " · ", jobActivityBadge(this.client, job, t("View run")))))) : null;
+      primary.push(row(t("Turn"), "clock", h("div", {}, turn, rounds)));
+
       const project = this.projects.find(p => p.id === r.project);
       const projectBtn = h("button", { type: "button", class: `prop-btn${project ? "" : " placeholder-value"}` }, icon("folder"), h("span", {}, project?.title ?? t("None")));
       projectBtn.addEventListener("click", () => openMenu(projectBtn,
         [{ value: "", label: t("No project"), selected: !r.project }, ...this.projects.map(p => ({ value: p.id, label: p.title, icon: icon("folder"), selected: p.id === r.project }))],
         value => void this.patch({ project: value || null }, projectBtn, t("Project updated")), { filter: this.projects.length > 6, placeholder: t("Find a project") }));
-      row(t("Project"), "folder", projectBtn);
-      // 下一次委派给谁：Hub 推导（ADR 0044）；换人在委派时选，之后一直沿用。
-      if (r.outcome === "open") row(t("Next delegation"), "bot", h("span", { class: `prop-text${r.next_target ? "" : " placeholder-value"}`, title: t("Delegating without choosing goes to the plan step, then whoever did the last round, then the project's default agent.") },
-        r.next_target ? nextTargetText(r.next_target) : t("Choose when delegating")));
-      row(t("Due"), "calendar", this.dateInput("due", r.due));
+      primary.push(row(t("Project"), "folder", projectBtn), row(t("Due"), "calendar", this.dateInput("due", r.due)));
 
-      if (this.showAdvanced) {
-        // 没有自己的目录时，委派那一刻用项目的工作目录（ADR 0033）。
-        const inherited = this.projects.find(p => p.id === r.project)?.workdir;
-        row(t("Working directory"), "terminal", this.textInput("workdir", r.workdir, inherited ? t("From project: {0}", inherited) : t("~ (runtime's home directory)")));
-        row(t("Model"), "bot", this.textInput("model", r.model, t("Use the engine's default model")));
-        row(t("Time limit"), "clock", this.textInput("timeout_minutes", r.timeout_minutes?.toString(), t("120 minutes"), "number"));
-      } else rows.push(h("button", { type: "button", class: "text-btn advanced-toggle", onclick: () => { this.showAdvanced = true; this.renderProps(); } }, t("+ Run settings (working directory, model, time limit)")));
+      // Without an override, delegation inherits the project's working directory.
+      const inherited = project?.workdir;
+      const target = r.outcome === "open" ? row(t("Next delegation"), "bot", h("span", { class: "prop-text" },
+        r.next_target ? nextTargetText(r.next_target) : t("Choose when delegating"))) : null;
+      clear(this.extraProps,
+        group(t("Run settings"),
+          ...(target ? [target] : []),
+          row(t("Working directory"), "terminal", this.textInput("workdir", r.workdir, inherited ? t("From project: {0}", inherited) : t("~ (runtime's home directory)"))),
+          row(t("Model"), "bot", this.textInput("model", r.model, t("Use the engine's default model"))),
+          row(t("Time limit"), "clock", this.textInput("timeout_minutes", r.timeout_minutes?.toString(), t("120 minutes"), "number"))),
+        group(t("Task relationships"),
+          row(t("Parent task"), "route", this.parentControl(r)), row(t("Prerequisites"), "link", this.prerequisiteControl(r)), tags),
+        this.updated);
     } else {
-      row(t("Goal"), "check", this.textInput("goal", r.goal, t("What should this phase achieve?")));
-      row(t("Due"), "calendar", this.dateInput("deadline", r.deadline));
-      row(t("Working directory"), "terminal", this.textInput("workdir", r.workdir, t("~ (runtime's home directory)")));
+      const status = h("button", { type: "button", class: "prop-btn" }, statusIcon(r.status), h("span", {}, PROJECT_LABELS[r.status] ?? r.status));
+      status.addEventListener("click", () => openMenu(status,
+        PROJECT_STATUSES.map(s => ({ value: s, label: PROJECT_LABELS[s]!, icon: statusIcon(s), selected: s === r.status })),
+        value => void this.patch({ status: value }, status, t("Status changed to “{0}”", PROJECT_LABELS[value]))));
+      primary.push(row(t("Status"), "clock", status),
+        row(t("Goal"), "check", this.textInput("goal", r.goal, t("What should this phase achieve?"), "textarea")),
+        row(t("Due"), "calendar", this.dateInput("deadline", r.deadline)));
+
       const worktree = h("input", { type: "checkbox", "aria-label": t("Automatic Git worktrees") });
       worktree.checked = r.auto_worktree ?? false;
       worktree.addEventListener("change", () => void this.patch({ auto_worktree: worktree.checked }, worktree, t("Project settings saved")));
-      row(t("Automatic Git worktrees"), "folder", worktree);
-      row(t("Worktree base"), "route", this.textInput("worktree_base", r.worktree_base, "origin/main"));
-      row(t("Project concurrency"), "clock", this.textInput("max_concurrent", r.max_concurrent?.toString(), "1", "number"));
-      row(t("Default agent"), "bot", this.defaultTargetControl(r));
-      row(t("Default plan"), "route", this.defaultPlanControl(r));
-      row(t("Repository"), "link", this.textInput("repo", r.repo, t("URL or path, for reference")));
+      clear(this.extraProps,
+        group(t("Run settings"),
+          row(t("Default agent"), "bot", this.defaultTargetControl(r)),
+          row(t("Default plan"), "route", this.defaultPlanControl(r)),
+          row(t("Project concurrency"), "clock", this.textInput("max_concurrent", r.max_concurrent?.toString(), "1", "number"))),
+        group(t("Repository and worktrees"),
+          row(t("Repository"), "link", this.textInput("repo", r.repo, t("URL or path, for reference"))),
+          row(t("Working directory"), "terminal", this.textInput("workdir", r.workdir, t("~ (runtime's home directory)"))),
+          row(t("Automatic Git worktrees"), "folder", worktree),
+          row(t("Worktree base"), "route", this.textInput("worktree_base", r.worktree_base, "origin/main"))),
+        h("div", { class: "props" }, tags), this.updated);
     }
-    if (r.type === "task") {
-      row(t("Parent task"), "route", this.parentControl(r));
-      row(t("Prerequisites"), "link", this.prerequisiteControl(r));
-    }
-    row(t("Tags"), "flag", this.tagControl(r));
-    clear(this.props, ...rows);
+    clear(this.props, ...primary);
     this.updateDelegate();
   }
 
@@ -435,12 +467,14 @@ export class WorkEditor {
       h("div", { class: "section-head" }, h("h3", {}, t("Subtasks")),
         progress.total ? h("span", { class: "count", title: t("{0} of {1} done", progress.done, progress.total) }, `${progress.done}/${progress.total}`) : null,
         h("div", { class: "detail-actions" }, add)),
-      input.children.length ? h("div", { class: "runs" }, ...input.children.map(item)) : h("p", { class: "muted" }, t("No subtasks. Split a large task into smaller ones here."))));
+      input.children.length ? h("div", { class: "runs" }, ...input.children.map(item)) : h("p", { class: "muted" }, t("No subtasks"))));
     clear(this.relations, ...sections);
   }
 
-  private textInput(key: string, value: string | undefined, placeholder: string, type = "text"): HTMLInputElement {
-    const input = h("input", { class: "prop-input", name: `prop-${key}`, type, placeholder, autocomplete: "off", ...(type === "number" ? { min: "1", step: "1" } : {}) });
+  private textInput(key: string, value: string | undefined, placeholder: string, type: "text" | "number" | "textarea" = "text"): HTMLInputElement | HTMLTextAreaElement {
+    const attrs = { class: "prop-input", name: `prop-${key}`, placeholder, autocomplete: "off" };
+    const input = type === "textarea" ? h("textarea", { ...attrs, rows: 2 }) :
+      h("input", { ...attrs, type, ...(type === "number" ? { min: "1", step: "1" } : {}) });
     input.value = key in this.writer.properties ? String(this.writer.properties[key] ?? "") : value ?? "";
     const commit = () => {
       const raw = input.value.trim();
@@ -454,8 +488,9 @@ export class WorkEditor {
     input.addEventListener("compositionend", commit);
     input.addEventListener("blur", () => { commit(); void this.flush(); });
     input.addEventListener("keydown", event => {
-      if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); input.blur(); }
-      if (event.key === "Escape") input.blur();
+      const key = event as KeyboardEvent;
+      if (key.key === "Enter" && !key.isComposing) { event.preventDefault(); input.blur(); }
+      if (key.key === "Escape") input.blur();
     });
     return input;
   }
@@ -599,7 +634,6 @@ export class WorkEditor {
 
   private projectTasks(project: WorkProject): HTMLElement {
     const body = h("div", {}, h("p", { class: "muted" }, t("Loading…")));
-    const add = h("button", { type: "button", class: "btn btn-small", onclick: () => this.hooks.newTask?.(project.id) }, icon("plus"), t("New task in this project"));
     // 列表 / 依赖图（ADR 0039，T1-5）：选择保存在本浏览器。
     const VIEW_KEY = "lumio.web.project-task-view";
     let view = (() => { try { return localStorage.getItem(VIEW_KEY) === "graph" ? "graph" : "list"; } catch { return "list"; } })();
@@ -653,7 +687,7 @@ export class WorkEditor {
     void load();
     render();
     return h("section", { class: "section" }, h("div", { class: "section-head" }, h("h3", {}, t("Tasks")),
-      h("div", { class: "detail-actions" }, h("div", { class: "segmented segmented-small", role: "group", "aria-label": t("View") }, listBtn, graphBtn), add)), body);
+      h("div", { class: "detail-actions" }, h("div", { class: "segmented segmented-small", role: "group", "aria-label": t("View") }, listBtn, graphBtn))), body);
   }
 
   /** 项目依赖图：未完成任务自左向右按依赖分层，可开工的高亮；项目外未完成的前置以虚线标出。 */
