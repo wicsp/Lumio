@@ -315,13 +315,13 @@ export class BusinessModules {
     const originalWorkspace = priorJobs.find(job => job.spec.worktree);
     let worktree: import("@lumio/schema").JobSpec["worktree"];
     if (project?.auto_worktree) {
-      if (!project.workdir || !project.worktree_base || task.workdir && task.workdir !== project.workdir) {
+      if (!project.workdir || task.workdir && task.workdir !== project.workdir) {
         throw new PlanDispatchUnavailable({ key: "jobs.worktree_configuration", args: [] });
       }
       if (!runtime.registration.features?.includes("project_worktree")) {
         throw new PlanDispatchUnavailable({ key: "jobs.worktree_unsupported", args: [] });
       }
-      worktree = { project: project.id, task: task.id, base: project.worktree_base,
+      worktree = { project: project.id, task: task.id, base: project.worktree_base ?? "origin/main",
         ...(priorJobs.some(job => job.spec.worktree && job.result?.workspace) ? { reuse: true } : {}) };
     }
     if (originalWorkspace && (!worktree || originalWorkspace.spec.runtime !== runtime.actor

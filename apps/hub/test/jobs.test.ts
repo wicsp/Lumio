@@ -318,7 +318,7 @@ test("project admission survives retries and limits jobs across runtimes", async
   };
   const read = async (operation: unknown) => WorkCommandResult.parse(await (await command(operation)).json());
   const project = await read({ op: "work.project.create", args: {
-    title: "Synthetic project", workdir: "/synthetic/project", worktree_base: "origin/main",
+    title: "Synthetic project", workdir: "/synthetic/project", worktree_base: "release/fixture",
   } });
   if (project.kind !== "project") throw new Error("Expected a project");
   const tasks: WorkTask[] = [];
@@ -362,7 +362,7 @@ test("project admission survives retries and limits jobs across runtimes", async
   expect(rejected.task.turn).toMatchObject({ holder: "human", reason: "failed" });
   const managed = await dispatch(rejected.task, "codex@server");
   if (managed.kind !== "job") throw new Error("Expected a job");
-  expect(managed.job.spec.worktree).toMatchObject({ project: project.project.id, task: added.task.id, base: "origin/main" });
+  expect(managed.job.spec.worktree).toMatchObject({ project: project.project.id, task: added.task.id, base: "release/fixture" });
   expect((await sync(runtime, PROJECT_WORKTREE_FEATURE)).jobs).toEqual([]);
   const cancel = await request(`/v2/execution/jobs/${remaining.id}/cancel`, human, {});
   expect(cancel.status).toBe(200);
@@ -573,7 +573,7 @@ async function activityRuntime(reuse = false) {
   return project;
 }
 
-test("a real Runtime executes and continues tasks in separate project worktrees", async () => {
+test("a real Runtime uses the default base to execute and continue tasks in separate project worktrees", async () => {
   const repository = join(temp, "repository"), bin = join(temp, "bin");
   await mkdir(repository); await mkdir(bin);
   const env = { HOME: temp, PATH: `${bin}:/usr/bin:/bin` };
@@ -585,6 +585,7 @@ test("a real Runtime executes and continues tasks in separate project worktrees"
   await writeFile(join(repository, "source.txt"), "original");
   git("add", "source.txt");
   git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-m", "fixture: initial");
+  git("update-ref", "refs/remotes/origin/main", "HEAD");
   await writeFile(join(bin, "codex"), `#!${process.execPath}
 import { appendFileSync, writeFileSync } from "node:fs";
 if (process.argv[2] === "--version") console.log("codex-cli 0.166.0");
@@ -601,7 +602,7 @@ else {
     return WorkCommandResult.parse(value);
   };
   const project = await command({ op: "work.project.create", args: {
-    title: "Managed project", workdir: repository, worktree_base: "main", auto_worktree: true, max_concurrent: 2,
+    title: "Managed project", workdir: repository, auto_worktree: true, max_concurrent: 2,
   } });
   if (project.kind !== "project") throw new Error("Expected a project");
   const task = async (title: string) => {
@@ -616,6 +617,7 @@ else {
   };
   const firstTask = await task("First task"), secondTask = await task("Second task");
   const first = await dispatch(firstTask), second = await dispatch(secondTask);
+  expect(first.spec.worktree?.base).toBe("origin/main");
   const complete = async (job: Job) => {
     await eventually(async () => !!(await get(job.spec.id)).result);
     const result = (await get(job.spec.id)).result!;
